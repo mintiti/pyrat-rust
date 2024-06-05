@@ -94,8 +94,8 @@ impl Maze {
         while nb_cheeses_remaining > 0 {
             let tile: &(u8, u8) = available_tiles.choose(&mut rand::thread_rng()).unwrap();
             let symmetric_tile: (u8, u8) = (2 * middle_x - tile.0, 2 * middle_y - tile.1);
-            maze.cheeses[to_node_index(tile.0.into(), tile.1.into(), &maze).expect("Tile number was incorrect").into()] = 1;
-            maze.cheeses[to_node_index(symmetric_tile.0.into(), tile.1.into(), &maze).expect("Tile number was incorrect").into()] = 1;
+            maze.cheeses[to_node_index(tile.0.into(), tile.1.into(), &maze).unwrap()] = 1;
+            maze.cheeses[to_node_index(symmetric_tile.0.into(), tile.1.into(), &maze).unwrap()] = 1;
             nb_cheeses_remaining -= 2;
             available_tiles.remove(available_tiles.iter().position(|element| (element.0 == tile.0) && (element.1 == tile.1)).expect("Tile not found"));
             available_tiles.remove(available_tiles.iter().position(|element| (element.0 == symmetric_tile.0) && (element.1 == symmetric_tile.1)).expect("Tile not found"));
@@ -124,7 +124,7 @@ fn maybe_add_up(index: usize, maze: &mut Maze) {
 
 fn maybe_add_right(index: usize, maze: &mut Maze) {
     if let Some(neighbour_index) = index.checked_add(1) {
-        if (neighbour_index < maze.nodes.len()) && (neighbour_index % maze.max_x.into() != 0) {
+        if (neighbour_index < maze.nodes.len()) && (neighbour_index % maze.max_x as usize != 0) {
             maze.nodes[index].neighbour_right.index = u8::try_from(neighbour_index).unwrap();
         }
     } else {
@@ -144,17 +144,17 @@ fn maybe_add_down(index: usize, maze: &mut Maze) {
 
 fn maybe_add_left(index: usize, maze: &mut Maze) {
     if let Some(neighbour_index) = index.checked_add_signed(-1) {
-        if (neighbour_index >= 0) && (index % maze.max_x.into() != 0) {
+        if (neighbour_index >= 0) && (index % maze.max_x as usize != 0) {
             maze.nodes[index].neighbour_left.index = u8::try_from(neighbour_index).unwrap();
         }
     }
 }
 
-pub fn to_node_index(x: u32, y: u32, board: &Maze) -> Option<u32> {
+pub fn to_node_index(x: u32, y: u32, board: &Maze) -> Option<usize> {
     if (x > (board.max_x.into())) | (y > (board.max_y.into())) {
         return None;
     }
-    return Some((x + y * (board.max_x as u32)).into());
+    return Some((x as usize + y as usize * (board.max_x as usize)).into());
 }
 
 pub enum Move {
