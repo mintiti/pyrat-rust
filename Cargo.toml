@@ -1,11 +1,21 @@
 [package]
-name = "pyrat"
+name = "pyrat-rust"
 version = "0.1.0"
 edition = "2021"
+authors = ["Minh Tri Truong"]
+description = "A Rust implementation of the PyRat game"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "pyrat"       # This is what other crates will use to import your library
+path = "src/lib.rs"
 
 [dependencies]
-petgraph = "0.6.4"
-itertools = { version = "0.12.0", features = [] }
-rand = "0.8.5"
+
+[dev-dependencies]
+criterion = "0.5"  # For benchmarking
+pretty_assertions = "1.4"  # For better test output
+
+[[bench]]
+name = "performance"
+harness = false  # Needed for criterion

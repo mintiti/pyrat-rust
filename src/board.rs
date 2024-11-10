@@ -1,192 +1,256 @@
-use std::convert::TryFrom;
+use std::collections::HashMap;
+use crate::{Coordinates, Direction};
 
-use itertools::Itertools;
-use rand::seq::SliceRandom;
-
-#[derive(Debug)]
-pub struct Player<'node> {
-    pub node: &'node Node,
-    pub score: f64,
-    pub stuck: u8,
+/// Pre-computed valid moves lookup table with packed storage
+pub struct MoveTable {
+    // Each byte stores moves for two positions
+    // Bits 0-3: moves for position 2n
+    // Bits 4-7: moves for position 2n+1
+    valid_moves: Vec<u8>,
+    width: u8,
 }
 
-#[derive(Debug)]
-pub struct Board<'node> {
-    pub players: Vec<Player<'node>>,
-    pub maze: Maze,
-}
+impl MoveTable {
+    pub fn new(width: u8, height: u8, walls: &HashMap<Coordinates, Vec<Coordinates>>) -> Self {
+        let size = (width as usize * height as usize + 1) / 2;
+        let mut valid_moves = vec![0u8; size];
 
-#[derive(Debug)]
-struct NeighbourData {
-    index: u8,
-    distance: u8,
-    // 16 bits
-}
+        // Precompute all valid moves for each position
+        for y in 0..height {
+            for x in 0..width {
+                let pos = Coordinates::new(x, y);
+                let mut moves = 0u8;
 
-#[derive(Debug)]
-struct Node {
-    neighbour_up: NeighbourData,
-    neighbour_right: NeighbourData,
-    neighbour_down: NeighbourData,
-    neighbour_left: NeighbourData,
-    // 16*4 = 64 bits
-}
+                // Check each direction with correct bounds for our coordinate system
+                if y < height - 1 && !has_wall(walls, pos, Direction::Up) {  // Up is towards height-1
+                    moves |= 1;
+                }
+                if x < width - 1 && !has_wall(walls, pos, Direction::Right) {
+                    moves |= 2;
+                }
+                if y > 0 && !has_wall(walls, pos, Direction::Down) {  // Down is towards 0
+                    moves |= 4;
+                }
+                if x > 0 && !has_wall(walls, pos, Direction::Left) {
+                    moves |= 8;
+                }
 
-#[derive(Debug)]
-struct Maze {
-    nodes: Vec<Node>,
-    pub(crate) cheeses: Vec<u8>,
-    pub(crate) max_x: u8,
-    pub(crate) max_y: u8,
-}
-
-impl Maze {
-    fn fully_connected(max_x: u8, max_y: u8, nb_cheese: u32) -> Maze {
-        let nb_tiles: usize = max_x as usize * max_y as usize;
-        if nb_tiles < nb_cheese as usize {
-            panic!("Number of cheeses {} is greater than the number of tiles in the maze {} !", nb_cheese, nb_tiles)
-        }
-        let mut maze: Maze = Maze {
-            nodes: Vec::with_capacity(nb_tiles),
-            cheeses: Vec::with_capacity(nb_tiles),
-            max_x,
-            max_y,
-        };
-        let mut nb_cheeses_remaining: u32 = nb_cheese;
-        let mut available_tiles: Vec<(u8, u8)> = (0..max_x).cartesian_product(0..max_y).collect();
-        // Initialize the nodes and cheeses
-        // The nodes are originally only linked to themselves.
-        for i in 0..nb_tiles {
-            maze.nodes[i] = Node {
-                neighbour_up: NeighbourData {
-                    index: i.try_into().unwrap(),
-                    distance: 1,
-                },
-                neighbour_left: NeighbourData {
-                    index: i.try_into().unwrap(),
-                    distance: 1,
-                },
-                neighbour_right: NeighbourData {
-                    index: i.try_into().unwrap(),
-                    distance: 1,
-                },
-                neighbour_down: NeighbourData {
-                    index: i.try_into().unwrap(),
-                    distance: 1,
-                },
-            };
-            maze.cheeses[i] = 0;
-        }
-
-        if nb_cheese % 2 == 1 {
-            // Place one cheese in the center of the maze
-            if (max_x % 2 != 1) | (max_y % 2 != 1) {
-                panic!("The number cheeses is uneven, and one of the dimensions of the maze is even. We cannot create a symmetric maze")
-            } else {
-                // put one cheese at the center of everything
-                maze.cheeses[nb_tiles / 2] = 1;
-                available_tiles.remove(available_tiles.iter().position(|tile| (tile.0 == max_x / 2) && (tile.1 == max_y / 2)).expect("Tile not found"));
-                nb_cheeses_remaining -= 1;
+                // Pack moves into the correct half-byte
+                let idx = pos.to_index(width);
+                let byte_idx = idx / 2;
+                if idx % 2 == 0 {
+                    // Even index - use lower 4 bits
+                    valid_moves[byte_idx] |= moves;
+                } else {
+                    // Odd index - use upper 4 bits
+                    valid_moves[byte_idx] |= moves << 4;
+                }
             }
         }
-        let middle_x: u8 = max_x / 2;
-        let middle_y: u8 = max_y / 2;
-        while nb_cheeses_remaining > 0 {
-            let tile: &(u8, u8) = available_tiles.choose(&mut rand::thread_rng()).unwrap();
-            let symmetric_tile: (u8, u8) = (2 * middle_x - tile.0, 2 * middle_y - tile.1);
-            maze.cheeses[to_node_index(tile.0.into(), tile.1.into(), &maze).unwrap()] = 1;
-            maze.cheeses[to_node_index(symmetric_tile.0.into(), tile.1.into(), &maze).unwrap()] = 1;
-            nb_cheeses_remaining -= 2;
-            available_tiles.remove(available_tiles.iter().position(|element| (element.0 == tile.0) && (element.1 == tile.1)).expect("Tile not found"));
-            available_tiles.remove(available_tiles.iter().position(|element| (element.0 == symmetric_tile.0) && (element.1 == symmetric_tile.1)).expect("Tile not found"));
-        }
 
-        // Fully connect the neighbours
-        for i in 0..maze.nodes.len() {
-            maybe_add_up(i, &mut maze);
-            maybe_add_right(i, &mut maze);
-            maybe_add_down(i, &mut maze);
-            maybe_add_left(i, &mut maze);
-        }
-        return maze;
-    }
-}
-
-fn maybe_add_up(index: usize, maze: &mut Maze) {
-    if let Some(neighbour_index) = index.checked_add(maze.max_x.into()) {
-        if neighbour_index < maze.nodes.len() {
-            maze.nodes[index].neighbour_up.index = u8::try_from(neighbour_index).unwrap();
-        }
-    } else {
-        panic!("Overflow occured")
-    }
-}
-
-fn maybe_add_right(index: usize, maze: &mut Maze) {
-    if let Some(neighbour_index) = index.checked_add(1) {
-        if (neighbour_index < maze.nodes.len()) && (neighbour_index % maze.max_x as usize != 0) {
-            maze.nodes[index].neighbour_right.index = u8::try_from(neighbour_index).unwrap();
-        }
-    } else {
-        panic!("Overflow occured")
-    }
-}
-
-fn maybe_add_down(index: usize, maze: &mut Maze) {
-    if let Some(neighbour_index) = index.checked_add_signed(-(maze.max_x as isize)) {
-        if neighbour_index >= 0 {
-            maze.nodes[index].neighbour_down.index = u8::try_from(neighbour_index).unwrap();
-        }
-    } else {
-        panic!("Overflow occured")
-    }
-}
-
-fn maybe_add_left(index: usize, maze: &mut Maze) {
-    if let Some(neighbour_index) = index.checked_add_signed(-1) {
-        if (neighbour_index >= 0) && (index % maze.max_x as usize != 0) {
-            maze.nodes[index].neighbour_left.index = u8::try_from(neighbour_index).unwrap();
+        Self {
+            valid_moves,
+            width,
         }
     }
-}
 
-pub fn to_node_index(x: u32, y: u32, board: &Maze) -> Option<usize> {
-    if (x > (board.max_x.into())) | (y > (board.max_y.into())) {
-        return None;
-    }
-    return Some((x as usize + y as usize * (board.max_x as usize)).into());
-}
+    /// Check if a move is valid for a given position
+    #[inline(always)]
+    pub fn is_move_valid(&self, pos: Coordinates, direction: Direction) -> bool {
+        let idx = pos.to_index(self.width);
+        let byte_idx = idx / 2;
+        let moves = self.valid_moves[byte_idx];
 
-pub enum Move {
-    Up,
-    Right,
-    Down,
-    Left,
-}
-
-
-impl<'node> Board<'node> {
-    pub fn new(max_x: u8, max_y: u8, nb_cheese: u32) -> Self {
-        // Initialize a new board
-        let mut board: Board = Board {
-            players: Vec::with_capacity(2),
-            maze: Maze::fully_connected(max_x, max_y, nb_cheese),
+        // Extract the correct 4 bits based on whether index is even or odd
+        let position_moves = if idx % 2 == 0 {
+            moves & 0x0F
+        } else {
+            moves >> 4
         };
-        board.players.push(Player {
-            node: &board.maze.nodes[0],
-            score: 0.0,
-            stuck: 0,
-        });
-        board.players.push(Player {
-            node: &board.maze.nodes.last().unwrap(),
-            score: 0.0,
-            stuck: 0,
-        });
-        return board;
+
+        position_moves & (1 << direction as u8) != 0
+    }
+
+    /// Bulk check of all valid moves for a position
+    /// Returns a bitmask of valid moves
+    #[inline(always)]
+    pub fn get_valid_moves(&self, pos: Coordinates) -> u8 {
+        let idx = pos.to_index(self.width);
+        let byte_idx = idx / 2;
+        let moves = self.valid_moves[byte_idx];
+
+        if idx % 2 == 0 {
+            moves & 0x0F
+        } else {
+            moves >> 4
+        }
     }
 }
 
+/// Check if there's a wall between two adjacent positions
+#[inline(always)]
+fn has_wall(walls: &HashMap<Coordinates, Vec<Coordinates>>, from: Coordinates, direction: Direction) -> bool {
+    // First check if the position has any walls at all
+    if let Some(blocked_cells) = walls.get(&from) {
+        // Then check if the destination in that direction is blocked
+        let to = direction.apply_to(from);
+            if blocked_cells.contains(&to) {
+                return true;
+            }
+            // Also check from the other direction
+            if let Some(blocked_from) = walls.get(&to) {
+                return blocked_from.contains(&from);
+            }
 
+    }
+    false
+}
 
+#[cfg(test)]
+mod tests {
+    use super::*;
 
+    /// Creates walls in a 2x2 maze with a vertical wall in the middle:
+    /// ```text
+    ///  0,1  |  1,1
+    ///       |
+    ///  0,0  |  1,0
+    /// ```
+    fn create_vertical_wall() -> HashMap<Coordinates, Vec<Coordinates>> {
+        let mut walls = HashMap::new();
 
+        // Vertical wall between (0,0) and (1,0), and between (0,1) and (1,1)
+        walls.insert(Coordinates::new(0, 0), vec![Coordinates::new(1, 0)]);
+        walls.insert(Coordinates::new(1, 0), vec![Coordinates::new(0, 0)]);
+        walls.insert(Coordinates::new(0, 1), vec![Coordinates::new(1, 1)]);
+        walls.insert(Coordinates::new(1, 1), vec![Coordinates::new(0, 1)]);
+
+        walls
+    }
+
+    /// Creates walls in a 2x2 maze with a horizontal wall in the middle:
+    /// ```text
+    ///  0,1   1,1
+    ///  -------
+    ///  0,0   1,0
+    /// ```
+    fn create_horizontal_wall() -> HashMap<Coordinates, Vec<Coordinates>> {
+        let mut walls = HashMap::new();
+
+        // Horizontal wall between (0,0) and (0,1), and between (1,0) and (1,1)
+        walls.insert(Coordinates::new(0, 0), vec![Coordinates::new(0, 1)]);
+        walls.insert(Coordinates::new(0, 1), vec![Coordinates::new(0, 0)]);
+        walls.insert(Coordinates::new(1, 0), vec![Coordinates::new(1, 1)]);
+        walls.insert(Coordinates::new(1, 1), vec![Coordinates::new(1, 0)]);
+
+        walls
+    }
+
+    #[test]
+    fn test_empty_2x2() {
+        let width = 2;
+        let height = 2;
+        let walls = HashMap::new();  // No walls
+        let move_table = MoveTable::new(width, height, &walls);
+
+        // Test all positions in empty 2x2 grid
+        // Bottom-left (0,0)
+        assert!(move_table.is_move_valid(Coordinates::new(0, 0), Direction::Up));
+        assert!(move_table.is_move_valid(Coordinates::new(0, 0), Direction::Right));
+        assert!(!move_table.is_move_valid(Coordinates::new(0, 0), Direction::Down));  // Grid boundary
+        assert!(!move_table.is_move_valid(Coordinates::new(0, 0), Direction::Left));  // Grid boundary
+
+        // Bottom-right (1,0)
+        assert!(move_table.is_move_valid(Coordinates::new(1, 0), Direction::Up));
+        assert!(!move_table.is_move_valid(Coordinates::new(1, 0), Direction::Right)); // Grid boundary
+        assert!(!move_table.is_move_valid(Coordinates::new(1, 0), Direction::Down));  // Grid boundary
+        assert!(move_table.is_move_valid(Coordinates::new(1, 0), Direction::Left));
+
+        // Top-left (0,1)
+        assert!(!move_table.is_move_valid(Coordinates::new(0, 1), Direction::Up));    // Grid boundary
+        assert!(move_table.is_move_valid(Coordinates::new(0, 1), Direction::Right));
+        assert!(move_table.is_move_valid(Coordinates::new(0, 1), Direction::Down));
+        assert!(!move_table.is_move_valid(Coordinates::new(0, 1), Direction::Left));  // Grid boundary
+
+        // Top-right (1,1)
+        assert!(!move_table.is_move_valid(Coordinates::new(1, 1), Direction::Up));    // Grid boundary
+        assert!(!move_table.is_move_valid(Coordinates::new(1, 1), Direction::Right)); // Grid boundary
+        assert!(move_table.is_move_valid(Coordinates::new(1, 1), Direction::Down));
+        assert!(move_table.is_move_valid(Coordinates::new(1, 1), Direction::Left));
+    }
+
+    #[test]
+    fn test_vertical_wall() {
+        let width = 2;
+        let height = 2;
+        let walls = create_vertical_wall();
+        let move_table = MoveTable::new(width, height, &walls);
+
+        // Test positions with vertical wall in middle
+        // Bottom-left (0,0)
+        assert!(move_table.is_move_valid(Coordinates::new(0, 0), Direction::Up));
+        assert!(!move_table.is_move_valid(Coordinates::new(0, 0), Direction::Right)); // Wall
+        assert!(!move_table.is_move_valid(Coordinates::new(0, 0), Direction::Down));  // Grid boundary
+        assert!(!move_table.is_move_valid(Coordinates::new(0, 0), Direction::Left));  // Grid boundary
+
+        // Bottom-right (1,0)
+        assert!(move_table.is_move_valid(Coordinates::new(1, 0), Direction::Up));
+        assert!(!move_table.is_move_valid(Coordinates::new(1, 0), Direction::Right)); // Grid boundary
+        assert!(!move_table.is_move_valid(Coordinates::new(1, 0), Direction::Down));  // Grid boundary
+        assert!(!move_table.is_move_valid(Coordinates::new(1, 0), Direction::Left));  // Wall
+
+        // Verify wall blocks both directions
+        assert!(!move_table.is_move_valid(Coordinates::new(0, 0), Direction::Right));
+        assert!(!move_table.is_move_valid(Coordinates::new(1, 0), Direction::Left));
+    }
+
+    #[test]
+    fn test_horizontal_wall() {
+        let width = 2;
+        let height = 2;
+        let walls = create_horizontal_wall();
+        let move_table = MoveTable::new(width, height, &walls);
+
+        // Test positions with horizontal wall in middle
+        // Bottom-left (0,0)
+        assert!(!move_table.is_move_valid(Coordinates::new(0, 0), Direction::Up));    // Wall
+        assert!(move_table.is_move_valid(Coordinates::new(0, 0), Direction::Right));
+        assert!(!move_table.is_move_valid(Coordinates::new(0, 0), Direction::Down));  // Grid boundary
+        assert!(!move_table.is_move_valid(Coordinates::new(0, 0), Direction::Left));  // Grid boundary
+
+        // Top-left (0,1)
+        assert!(!move_table.is_move_valid(Coordinates::new(0, 1), Direction::Up));    // Grid boundary
+        assert!(move_table.is_move_valid(Coordinates::new(0, 1), Direction::Right));
+        assert!(!move_table.is_move_valid(Coordinates::new(0, 1), Direction::Down));  // Wall
+        assert!(!move_table.is_move_valid(Coordinates::new(0, 1), Direction::Left));  // Grid boundary
+
+        // Verify wall blocks both directions
+        assert!(!move_table.is_move_valid(Coordinates::new(0, 0), Direction::Up));
+        assert!(!move_table.is_move_valid(Coordinates::new(0, 1), Direction::Down));
+    }
+
+    #[test]
+    fn test_intersecting_walls() {
+        let width = 2;
+        let height = 2;
+        let mut walls = HashMap::new();
+
+        // Add horizontal and vertical walls making a T shape
+        // Vertical wall between (0,0) and (1,0)
+        walls.insert(Coordinates::new(0, 0), vec![Coordinates::new(1, 0)]);
+        walls.insert(Coordinates::new(1, 0), vec![Coordinates::new(0, 0)]);
+
+        // Horizontal wall between (0,0) and (0,1)
+        walls.insert(Coordinates::new(0, 0), vec![Coordinates::new(0, 1)]);
+        walls.insert(Coordinates::new(0, 1), vec![Coordinates::new(0, 0)]);
+
+        let move_table = MoveTable::new(width, height, &walls);
+
+        // Check bottom-left corner (0,0) - should be blocked in two directions
+        let pos = Coordinates::new(0, 0);
+        assert!(!move_table.is_move_valid(pos, Direction::Right)); // Wall
+        assert!(!move_table.is_move_valid(pos, Direction::Up));    // Wall
+        assert!(!move_table.is_move_valid(pos, Direction::Left));  // Grid boundary
+        assert!(!move_table.is_move_valid(pos, Direction::Down));  // Grid boundary
+    }
+}
