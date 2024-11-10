@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use crate::{Coordinates, Direction};
 
 /// Pre-computed valid moves lookup table with packed storage
+#[derive(Clone)]
 pub struct MoveTable {
     // Each byte stores moves for two positions
     // Bits 0-3: moves for position 2n

@@ -23,19 +23,112 @@ impl PlayerState {
     }
 }
 
+#[derive(Clone)]
 pub struct GameState {
     width: u8,
     height: u8,
     move_table: MoveTable,
     player1: PlayerState,
     player2: PlayerState,
-    mud: HashMap<(Coordinates, Coordinates), u8>,
-    cheese: CheeseBoard,
+    pub mud: HashMap<(Coordinates, Coordinates), u8>,
+    pub cheese: CheeseBoard,
     turn: u16,
     max_turns: u16,
 }
 
+
 impl GameState {
+    /// Creates a new game state with the given dimensions and walls
+    ///
+    /// # Arguments
+    /// * `width` - Width of the game board
+    /// * `height` - Height of the game board
+    /// * `walls` - HashMap containing wall positions. Each key-value pair represents walls from a position
+    /// * `max_turns` - Maximum number of turns before the game ends
+    pub fn new(width: u8, height: u8, walls: HashMap<Coordinates, Vec<Coordinates>>, max_turns: u16) -> Self {
+        // Create move table for efficient move validation
+        let move_table = MoveTable::new(width, height, &walls);
+
+        // Initialize players at opposite corners
+        let player1 = PlayerState {
+            current_pos: Coordinates::new(0, 0),  // Bottom left
+            target_pos: Coordinates::new(0, 0),
+            mud_timer: 0,
+            score: 0.0,
+            misses: 0,
+        };
+
+        let player2 = PlayerState {
+            current_pos: Coordinates::new(width - 1, height - 1),  // Top right
+            target_pos: Coordinates::new(width - 1, height - 1),
+            mud_timer: 0,
+            score: 0.0,
+            misses: 0,
+        };
+
+        Self {
+            width,
+            height,
+            move_table,
+            player1,
+            player2,
+            mud: HashMap::new(),  // Start with no mud
+            cheese: CheeseBoard::new(width, height),
+            turn: 0,
+            max_turns,
+        }
+    }
+
+    /// Creates a new game state with customized player positions
+    /// Useful for testing and specific scenarios
+    pub fn new_with_positions(
+        width: u8,
+        height: u8,
+        walls: HashMap<Coordinates, Vec<Coordinates>>,
+        max_turns: u16,
+        player1_pos: Coordinates,
+        player2_pos: Coordinates,
+    ) -> Self {
+        let mut game = Self::new(width, height, walls, max_turns);
+        game.player1.current_pos = player1_pos;
+        game.player1.target_pos = player1_pos;
+        game.player2.current_pos = player2_pos;
+        game.player2.target_pos = player2_pos;
+        game
+    }
+
+    /// Creates a new game state with the given configuration
+    /// Useful when you want to specify everything at once
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_config(
+        width: u8,
+        height: u8,
+        walls: HashMap<Coordinates, Vec<Coordinates>>,
+        mud: HashMap<(Coordinates, Coordinates), u8>,
+        cheese_positions: &[Coordinates],
+        player1_pos: Coordinates,
+        player2_pos: Coordinates,
+        max_turns: u16,
+    ) -> Self {
+        let mut game = Self::new_with_positions(
+            width,
+            height,
+            walls,
+            max_turns,
+            player1_pos,
+            player2_pos,
+        );
+
+        // Add mud
+        game.mud = mud;
+
+        // Add cheese
+        for &pos in cheese_positions {
+            game.cheese.place_cheese(pos);
+        }
+
+        game
+    }
     /// Process a single game turn
     pub fn process_turn(&mut self, p1_move: Direction, p2_move: Direction) -> TurnResult {
         // Process player movements
@@ -203,6 +296,90 @@ impl std::fmt::Debug for GameState {
 mod tests {
     use super::*;
     use std::collections::HashMap;
+
+    #[test]
+    fn test_new_game_state() {
+        let width = 10;
+        let height = 10;
+        let game = GameState::new(width, height, HashMap::new(), 300);
+
+        // Check dimensions
+        assert_eq!(game.width, width);
+        assert_eq!(game.height, height);
+
+        // Check player positions
+        assert_eq!(game.player1.current_pos, Coordinates::new(0, 0));
+        assert_eq!(game.player2.current_pos, Coordinates::new(width - 1, height - 1));
+
+        // Check initial state
+        assert_eq!(game.turn, 0);
+        assert_eq!(game.max_turns, 300);
+        assert_eq!(game.player1.score, 0.0);
+        assert_eq!(game.player2.score, 0.0);
+        assert_eq!(game.cheese.total_cheese(), 0);
+        assert!(game.mud.is_empty());
+    }
+
+    #[test]
+    fn test_new_with_positions() {
+        let p1_pos = Coordinates::new(1, 1);
+        let p2_pos = Coordinates::new(2, 2);
+        let game = GameState::new_with_positions(
+            3, 3,
+            HashMap::new(),
+            300,
+            p1_pos,
+            p2_pos,
+        );
+
+        assert_eq!(game.player1.current_pos, p1_pos);
+        assert_eq!(game.player1.target_pos, p1_pos);
+        assert_eq!(game.player2.current_pos, p2_pos);
+        assert_eq!(game.player2.target_pos, p2_pos);
+    }
+
+    #[test]
+    fn test_new_with_config() {
+        let width = 3;
+        let height = 3;
+        let mut walls = HashMap::new();
+        walls.insert(
+            Coordinates::new(0, 0),
+            vec![Coordinates::new(1, 0)]
+        );
+
+        let mut mud = HashMap::new();
+        mud.insert(
+            (Coordinates::new(1, 1), Coordinates::new(1, 2)),
+            2
+        );
+
+        let cheese_positions = vec![
+            Coordinates::new(1, 1),
+            Coordinates::new(2, 2),
+        ];
+
+        let game = GameState::new_with_config(
+            width,
+            height,
+            walls,
+            mud,
+            &cheese_positions,
+            Coordinates::new(0, 0),
+            Coordinates::new(2, 2),
+            300,
+        );
+
+        // Check everything was configured correctly
+        assert_eq!(game.width, width);
+        assert_eq!(game.height, height);
+        assert_eq!(game.cheese.total_cheese(), 2);
+        assert!(game.mud.contains_key(&(
+            Coordinates::new(1, 1),
+            Coordinates::new(1, 2)
+        )));
+        assert_eq!(game.mud.len(), 1);
+    }
 
     // Helper function to create a simple 3x3 game state for testing
     fn create_test_game(player1_pos: Coordinates, player2_pos: Coordinates) -> GameState {
