@@ -5,6 +5,7 @@ pub mod types;
 pub mod board;
 pub mod game;
 pub mod cheese_board;
+mod maze_generation;
 
 // Re-export commonly used items
 pub use types::{Coordinates, Direction};

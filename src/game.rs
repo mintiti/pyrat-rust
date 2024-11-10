@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use crate::{CheeseBoard, Coordinates, Direction, MoveTable};
+use crate::maze_generation::{CheeseConfig, CheeseGenerator, MazeConfig, MazeGenerator};
 
 /// Stores the state of a player including their movement status
 #[derive(Clone)]
@@ -38,6 +39,10 @@ pub struct GameState {
 
 
 impl GameState {
+    /// Default PyRat dimensions and cheese count
+    pub const DEFAULT_WIDTH: u8 = 21;
+    pub const DEFAULT_HEIGHT: u8 = 15;
+    pub const DEFAULT_CHEESE_COUNT: u16 = 41;
     /// Creates a new game state with the given dimensions and walls
     ///
     /// # Arguments
@@ -128,6 +133,126 @@ impl GameState {
         }
 
         game
+    }
+
+    /// Creates a new randomized game state with the given configuration
+    pub fn new_random(
+        width: u8,
+        height: u8,
+        maze_config: MazeConfig,
+        cheese_config: CheeseConfig,
+    ) -> Self {
+        // Validate dimensions match
+        assert_eq!(width, maze_config.width, "Width mismatch in configurations");
+        assert_eq!(height, maze_config.height, "Height mismatch in configurations");
+
+        // Create default player positions (opposite corners)
+        let player1_pos = Coordinates::new(0, 0);  // Bottom left
+        let player2_pos = Coordinates::new(width - 1, height - 1);  // Top right
+
+        // Generate maze layout
+        let mut maze_gen = MazeGenerator::new(maze_config.clone());
+        let (walls, mud) = maze_gen.generate();
+
+        // Generate cheese positions
+        let mut cheese_gen = CheeseGenerator::new(
+            cheese_config,
+            width,
+            height,
+            maze_config.seed, // Use same seed for reproducibility
+        );
+        let cheese_positions = cheese_gen.generate(player1_pos, player2_pos);
+
+        // Create cheese board and place cheese
+        let mut cheese_board = CheeseBoard::new(width, height);
+        for pos in cheese_positions {
+            cheese_board.place_cheese(pos);
+        }
+
+        // Create initial game state
+        Self {
+            width,
+            height,
+            move_table: MoveTable::new(width, height, &walls),
+            player1: PlayerState {
+                current_pos: player1_pos,
+                target_pos: player1_pos,
+                mud_timer: 0,
+                score: 0.0,
+                misses: 0,
+            },
+            player2: PlayerState {
+                current_pos: player2_pos,
+                target_pos: player2_pos,
+                mud_timer: 0,
+                score: 0.0,
+                misses: 0,
+            },
+            mud,
+            cheese: cheese_board,
+            turn: 0,
+            max_turns: 300, // Default from Python implementation
+        }
+    }
+
+    /// Creates a new randomized symmetric game state with PyRat defaults
+    pub fn new_symmetric(
+        width: Option<u8>,
+        height: Option<u8>,
+        cheese_count: Option<u16>,
+        seed: Option<u64>,
+    ) -> Self {
+        let width = width.unwrap_or(Self::DEFAULT_WIDTH);
+        let height = height.unwrap_or(Self::DEFAULT_HEIGHT);
+        let cheese_count = cheese_count.unwrap_or(Self::DEFAULT_CHEESE_COUNT);
+
+        let maze_config = MazeConfig {
+            width,
+            height,
+            target_density: 0.7,    // Common default
+            connected: true,         // Always want connected mazes
+            symmetry: true,          // Symmetric maze
+            mud_density: 0.1,        // 10% mud probability
+            mud_range: 3,            // Mud values 2-3
+            seed,
+        };
+
+        let cheese_config = CheeseConfig {
+            count: cheese_count,
+            symmetry: true,          // Symmetric cheese placement
+        };
+
+        Self::new_random(width, height, maze_config, cheese_config)
+    }
+
+    /// Creates a new randomized asymmetric game state with PyRat defaults
+    pub fn new_asymmetric(
+        width: Option<u8>,
+        height: Option<u8>,
+        cheese_count: Option<u16>,
+        seed: Option<u64>,
+    ) -> Self {
+        let width = width.unwrap_or(Self::DEFAULT_WIDTH);
+        let height = height.unwrap_or(Self::DEFAULT_HEIGHT);
+        let cheese_count = cheese_count.unwrap_or(Self::DEFAULT_CHEESE_COUNT);
+
+        let maze_config = MazeConfig {
+            width,
+            height,
+            target_density: 0.7,    // Common default
+            connected: true,         // Always want connected mazes
+            symmetry: false,         // Asymmetric maze
+            mud_density: 0.1,        // 10% mud probability
+            mud_range: 3,            // Mud values 2-3
+            seed,
+        };
+
+        let cheese_config = CheeseConfig {
+            count: cheese_count,
+            symmetry: false,         // Asymmetric cheese placement
+        };
+
+        Self::new_random(width, height, maze_config, cheese_config)
     }
     /// Process a single game turn
     pub fn process_turn(&mut self, p1_move: Direction, p2_move: Direction) -> TurnResult {
@@ -379,6 +504,82 @@ mod tests {
             Coordinates::new(1, 2)
         )));
         assert_eq!(game.mud.len(), 1);
+    }
+    #[test]
+    fn test_new_random_basic() {
+        let width = 8;
+        let height = 8;
+        let maze_config = MazeConfig {
+            width,
+            height,
+            target_density: 0.7,
+            connected: true,
+            symmetry: false,
+            mud_density: 0.1,
+            mud_range: 3,
+            seed: Some(42),
+        };
+
+        let cheese_config = CheeseConfig {
+            count: 10,
+            symmetry: false,
+        };
+
+        let game = GameState::new_random(width, height, maze_config, cheese_config);
+
+        // Check basic properties
+        assert_eq!(game.width, width);
+        assert_eq!(game.height, height);
+        assert_eq!(game.cheese.total_cheese(), 10);
+        assert_eq!(game.player1.current_pos, Coordinates::new(0, 0));
+        assert_eq!(game.player2.current_pos, Coordinates::new(width - 1, height - 1));
+    }
+
+    #[test]
+    fn test_new_symmetric() {
+        let game = GameState::new_symmetric(Some(11), Some(11), Some(15), Some(42));
+
+        // Verify symmetry
+        let center_x = game.width / 2;
+        let center_y = game.height / 2;
+
+        // Check if cheese placement is symmetric
+        let cheese_positions = game.cheese.get_all_cheese_positions();
+        for pos in &cheese_positions {
+            let symmetric_pos = Coordinates::new(
+                game.width - 1 - pos.x,
+                game.height - 1 - pos.y
+            );
+            if *pos != symmetric_pos { // Ignore center piece if it exists
+                assert!(
+                    cheese_positions.contains(&symmetric_pos),
+                    "Missing symmetric cheese piece for {:?}", pos
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_new_asymmetric() {
+        let game = GameState::new_asymmetric(Some(8), Some(8), Some(10), Some(42));
+
+        // Basic structure tests
+        assert_eq!(game.width, 8);
+        assert_eq!(game.height, 8);
+        assert_eq!(game.cheese.total_cheese(), 10);
+    }
+
+    #[test]
+    fn test_reproducibility() {
+        let seed = Some(42);
+        let game1 = GameState::new_symmetric(Some(8), Some(8), Some(10), seed);
+        let game2 = GameState::new_symmetric(Some(8), Some(8), Some(10), seed);
+
+        // Games should be identical with same seed
+        assert_eq!(
+            game1.cheese.get_all_cheese_positions(),
+            game2.cheese.get_all_cheese_positions()
+        );
     }
 
     // Helper function to create a simple 3x3 game state for testing
