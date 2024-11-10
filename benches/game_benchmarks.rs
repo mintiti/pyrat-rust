@@ -1,7 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
 use pyrat::{GameState, Coordinates, Direction};
 use std::collections::HashMap;
-use rand::Rng;
+use rand::{random, Rng};
 
 /// Creates a benchmark game state with random walls, cheese, and mud
 fn create_benchmark_game(size: u8, cheese_count: u16, mud_count: usize) -> GameState {
@@ -154,17 +154,21 @@ fn bench_full_game(c: &mut Criterion) {
     let mut group = c.benchmark_group("full_game");
     group.sample_size(20); // Reduce sample size as full games take longer
 
-    for size in [8u8, 16, 32,200].iter() {
+    for &size in [8u8, 16, 32, 200].iter() {
         group.bench_with_input(
             BenchmarkId::from_parameter(size),
-            size,
+            &size,
             |b, &size| {
                 b.iter_with_setup(
-                    || create_benchmark_game(
-                        size,
-                        (size as u16 * size as u16) / 4,
-                        (size as usize * size as usize) / 8
-                    ),
+                    || {
+                        // Create symmetric game with size × size dimensions
+                        GameState::new_symmetric(
+                            Some(size),
+                            Some(size),
+                            Some((size as u16 * size as u16) / 4), // Use 25% of cells for cheese
+                            Some(random::<u64>()) // New random seed each time
+                        )
+                    },
                     |mut game| {
                         while !black_box(game.process_turn(
                             unsafe { std::mem::transmute(rand::random::<u8>() % 5) },
