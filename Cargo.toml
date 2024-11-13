@@ -18,6 +18,11 @@ rand = "0.8"
 criterion = "0.5"  # For benchmarking
 pretty_assertions = "1.4"  # For better test output
 
+[profile.release]
+codegen-units = 1
+lto = "fat"
+
+
 [[bench]]
 name = "game_benchmarks"
 harness = false
