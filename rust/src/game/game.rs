@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use crate::{CheeseBoard, Coordinates, Direction, MoveTable};
-use crate::maze_generation::{CheeseConfig, CheeseGenerator, MazeConfig, MazeGenerator};
+use crate::game::maze_generation::{CheeseConfig, CheeseGenerator, MazeConfig, MazeGenerator};
 
 /// Stores the state of a player including their movement status
 #[derive(Clone)]
@@ -25,7 +25,7 @@ impl PlayerState {
 }
 /// Records what happened in a move for unmake purposes
 #[derive(Clone)]
-struct MoveUndo {
+pub struct MoveUndo {
     // Player 1 state
     p1_pos: Coordinates,
     p1_target: Coordinates,
@@ -468,14 +468,6 @@ impl GameState {
         // Move must be valid at this point
         (true, move_dir.apply_to(player.current_pos))
     }
-    #[inline]
-    fn compute_destination(&self, pos: Coordinates, move_dir: Direction) -> Coordinates {
-        if move_dir == Direction::Stay || !self.move_table.is_move_valid(pos, move_dir) {
-            pos
-        } else {
-            move_dir.apply_to(pos)
-        }
-    }
 
     #[inline]
     fn process_cheese_collection(&mut self) -> Vec<Coordinates> {
@@ -528,6 +520,58 @@ impl GameState {
 
         // 3. Maximum turns reached
         self.turn >= self.max_turns
+    }
+
+    /// Get the width of the game board
+    #[inline]
+    pub fn width(&self) -> u8 {
+        self.width
+    }
+
+    /// Get the height of the game board
+    #[inline]
+    pub fn height(&self) -> u8 {
+        self.height
+    }
+
+    /// Get player 1's current position
+    #[inline]
+    pub fn player1_position(&self) -> Coordinates {
+        self.player1.current_pos
+    }
+
+    /// Get player 2's current position
+    #[inline]
+    pub fn player2_position(&self) -> Coordinates {
+        self.player2.current_pos
+    }
+
+    /// Get player 1's current score
+    #[inline]
+    pub fn player1_score(&self) -> f32 {
+        self.player1.score
+    }
+
+    /// Get player 2's current score
+    #[inline]
+    pub fn player2_score(&self) -> f32 {
+        self.player2.score
+    }
+
+    /// Get all current cheese positions
+    pub fn cheese_positions(&self) -> Vec<Coordinates> {
+        self.cheese.get_all_cheese_positions()
+    }
+
+    /// Get the total number of cheese pieces at start
+    #[inline]
+    pub fn total_cheese(&self) -> u16 {
+        self.cheese.total_cheese()
+    }
+
+    /// Get all mud positions and their values
+    pub fn mud_positions(&self) -> &HashMap<(Coordinates, Coordinates), u8> {
+        &self.mud
     }
 }
 

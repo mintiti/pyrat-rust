@@ -16,13 +16,6 @@ pub struct MazeConfig {
     pub seed: Option<u64>,    // Optional seed for reproducibility
 }
 
-/// Represents a passage between two cells, with optional mud value
-#[derive(Debug, Clone)]
-struct Passage {
-    from: Coordinates,
-    to: Coordinates,
-    mud: Option<u8>,
-}
 
 /// Generates a complete maze with all components
 pub struct MazeGenerator {
@@ -318,29 +311,6 @@ impl MazeGenerator {
             pos.x == self.config.width - 1 ||
             pos.y == self.config.height - 1
     }
-
-    /// Gets all unconnected neighbors for a cell
-    fn get_unconnected_neighbors(&self, pos: Coordinates, connected: &[Vec<bool>]) -> Vec<Coordinates> {
-        let mut neighbors = Vec::new();
-        let directions = [(0, 1), (1, 0), (0, -1), (-1, 0)];
-
-        for (dx, dy) in directions.iter() {
-            let new_x = pos.x as i32 + dx;
-            let new_y = pos.y as i32 + dy;
-
-            if new_x >= 0 && new_x < self.config.width as i32 &&
-                new_y >= 0 && new_y < self.config.height as i32 {
-                let new_x = new_x as u8;
-                let new_y = new_y as u8;
-                if !connected[new_x as usize][new_y as usize] {
-                    neighbors.push(Coordinates::new(new_x, new_y));
-                }
-            }
-        }
-
-        neighbors
-    }
-
 
     /// Gets all valid neighboring cells
     fn get_valid_neighbors(&self, pos: Coordinates) -> Vec<Coordinates> {
