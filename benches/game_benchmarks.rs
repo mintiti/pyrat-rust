@@ -3,6 +3,17 @@ use pyrat::{GameState, Coordinates, Direction};
 use std::collections::HashMap;
 use rand::{random, Rng};
 
+// Helper function to generate random moves
+fn generate_random_moves(count: usize) -> Vec<(Direction, Direction)> {
+    let mut rng = rand::thread_rng();
+    let mut moves = Vec::with_capacity(count);
+    for _ in 0..count {
+        let p1_move = unsafe { std::mem::transmute(rng.gen_range(0..5u8)) };
+        let p2_move = unsafe { std::mem::transmute(rng.gen_range(0..5u8)) };
+        moves.push((p1_move, p2_move));
+    }
+    moves
+}
 /// Creates a benchmark game state with random walls, cheese, and mud
 fn create_benchmark_game(size: u8, cheese_count: u16, mud_count: usize) -> GameState {
     let mut rng = rand::thread_rng();
@@ -57,7 +68,7 @@ fn create_benchmark_game(size: u8, cheese_count: u16, mud_count: usize) -> GameS
 fn bench_game_creation(c: &mut Criterion) {
     let mut group = c.benchmark_group("game_creation");
 
-    for size in [8u8, 16, 32, 64].iter() {
+    for size in [8u8, 16, 32, 64,200].iter() {
         group.bench_with_input(
             BenchmarkId::from_parameter(size),
             size,
@@ -79,7 +90,7 @@ fn bench_move_processing(c: &mut Criterion) {
     let mut group = c.benchmark_group("move_processing");
     group.sample_size(50); // Increase sample size for more stable results
 
-    for size in [8u8, 16, 32].iter() {
+    for size in [8u8, 16, 32,64,200].iter() {
         group.bench_with_input(
             BenchmarkId::new("random_moves", size),
             size,
@@ -108,7 +119,7 @@ fn bench_move_processing(c: &mut Criterion) {
 fn bench_cheese_collection(c: &mut Criterion) {
     let mut group = c.benchmark_group("cheese_collection");
 
-    for size in [8u8, 16, 32].iter() {
+    for size in [8u8, 16, 32,64,200].iter() {
         group.bench_with_input(
             BenchmarkId::from_parameter(size),
             size,
@@ -152,9 +163,9 @@ fn bench_cheese_collection(c: &mut Criterion) {
 
 fn bench_full_game(c: &mut Criterion) {
     let mut group = c.benchmark_group("full_game");
-    group.sample_size(20); // Reduce sample size as full games take longer
+    group.sample_size(100); // Reduce sample size as full games take longer
 
-    for &size in [8u8, 16, 32, 200].iter() {
+    for &size in [8u8, 16, 32,64, 200].iter() {
         group.bench_with_input(
             BenchmarkId::from_parameter(size),
             &size,
@@ -185,7 +196,7 @@ fn bench_full_game(c: &mut Criterion) {
 fn bench_mud_movement(c: &mut Criterion) {
     let mut group = c.benchmark_group("mud_movement");
 
-    for size in [8u8, 16, 32].iter() {
+    for size in [8u8, 16, 32,64,200].iter() {
         group.bench_with_input(
             BenchmarkId::from_parameter(size),
             size,
@@ -217,11 +228,11 @@ criterion_group!(
     name = benches;
     config = Criterion::default()
         .warm_up_time(std::time::Duration::from_secs(1))
-        .measurement_time(std::time::Duration::from_secs(3));
+        .measurement_time(std::time::Duration::from_secs(5));
     targets = bench_game_creation,
               bench_move_processing,
               bench_cheese_collection,
               bench_mud_movement,
-              bench_full_game
+              bench_full_game,
 );
 criterion_main!(benches);

@@ -29,6 +29,7 @@ impl CheeseBoard {
         (self.bits[word_idx] & (1u64 << bit_idx)) != 0
     }
 
+    /// Places a new cheese piece, returning true if successful
     #[inline]
     pub fn place_cheese(&mut self, pos: Coordinates) -> bool {
         let idx = pos.to_index(self.width);
@@ -43,6 +44,25 @@ impl CheeseBoard {
 
         self.bits[word_idx] |= mask;
         self.initial_cheese_count += 1;
+        self.remaining_cheese_count += 1;
+        true
+    }
+
+    /// Special method for restoring cheese during unmake operations
+    /// This only affects remaining_cheese_count, not initial_cheese_count
+    #[inline]
+    pub fn restore_cheese(&mut self, pos: Coordinates) -> bool {
+        let idx = pos.to_index(self.width);
+        let word_idx = idx / 64;
+        let bit_idx = idx % 64;
+        let mask = 1u64 << bit_idx;
+
+        // Check if cheese already exists
+        if (self.bits[word_idx] & mask) != 0 {
+            return false;
+        }
+
+        self.bits[word_idx] |= mask;
         self.remaining_cheese_count += 1;
         true
     }
@@ -182,6 +202,80 @@ mod tests {
         assert!(!board.take_cheese(pos));
         assert_eq!(board.total_cheese(), 1);
         assert_eq!(board.remaining_cheese(), 0);
+    }
+    #[test]
+    fn test_cheese_restore() {
+        let mut board = CheeseBoard::new(3, 3);
+        let pos = Coordinates::new(1, 1);
+
+        // Initial placement
+        assert!(board.place_cheese(pos));
+        assert_eq!(board.total_cheese(), 1);
+        assert_eq!(board.remaining_cheese(), 1);
+
+        // Take cheese
+        assert!(board.take_cheese(pos));
+        assert_eq!(board.total_cheese(), 1);  // Total unchanged
+        assert_eq!(board.remaining_cheese(), 0);
+
+        // Restore cheese
+        assert!(board.restore_cheese(pos));
+        assert_eq!(board.total_cheese(), 1);  // Total should still be unchanged
+        assert_eq!(board.remaining_cheese(), 1);  // Remaining should be restored
+
+        // Try to restore again (should fail)
+        assert!(!board.restore_cheese(pos));
+        assert_eq!(board.total_cheese(), 1);
+        assert_eq!(board.remaining_cheese(), 1);
+    }
+    #[test]
+    fn test_multiple_cheese_operations() {
+        let mut board = CheeseBoard::new(3, 3);
+        let pos1 = Coordinates::new(0, 0);
+        let pos2 = Coordinates::new(1, 1);
+
+        // Place two cheese pieces
+        assert!(board.place_cheese(pos1));
+        assert!(board.place_cheese(pos2));
+        assert_eq!(board.total_cheese(), 2);
+        assert_eq!(board.remaining_cheese(), 2);
+
+        // Take both pieces
+        assert!(board.take_cheese(pos1));
+        assert!(board.take_cheese(pos2));
+        assert_eq!(board.total_cheese(), 2);
+        assert_eq!(board.remaining_cheese(), 0);
+
+        // Restore in reverse order
+        assert!(board.restore_cheese(pos2));
+        assert_eq!(board.total_cheese(), 2);
+        assert_eq!(board.remaining_cheese(), 1);
+
+        assert!(board.restore_cheese(pos1));
+        assert_eq!(board.total_cheese(), 2);
+        assert_eq!(board.remaining_cheese(), 2);
+    }
+
+    #[test]
+    fn test_cheese_board_clear() {
+        let mut board = CheeseBoard::new(3, 3);
+        let pos = Coordinates::new(1, 1);
+
+        // Place and verify
+        assert!(board.place_cheese(pos));
+        assert_eq!(board.total_cheese(), 1);
+        assert_eq!(board.remaining_cheese(), 1);
+
+        // Clear and verify
+        board.clear();
+        assert_eq!(board.total_cheese(), 0);
+        assert_eq!(board.remaining_cheese(), 0);
+        assert!(!board.has_cheese(pos));
+
+        // Should be able to place cheese again
+        assert!(board.place_cheese(pos));
+        assert_eq!(board.total_cheese(), 1);
+        assert_eq!(board.remaining_cheese(), 1);
     }
 
     #[test]
