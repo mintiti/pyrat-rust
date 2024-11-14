@@ -7,22 +7,31 @@ description = "A Rust implementation of the PyRat game"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
-name = "pyrat"       # This is what other crates will use to import your library
+name = "pyrat"
 path = "src/lib.rs"
 
 [dependencies]
-criterion = { version = "0.5", features = ["html_reports"] }
 rand = "0.8"
+flame = { version = "0.2.2", optional = true }
 
 [dev-dependencies]
-criterion = "0.5"  # For benchmarking
-pretty_assertions = "1.4"  # For better test output
+criterion = { version = "0.5", features = ["html_reports"] }
+pretty_assertions = "1.4"
 
 [profile.release]
+debug = true
 codegen-units = 1
 lto = "fat"
 
+[profile.bench]
+debug = true  # Also keep debug info for bench profile
 
+# Just keep the bench target, remove the bin target
 [[bench]]
-name = "game_benchmarks"
+name = "profile"
+path = "benches/bin/profile.rs"
 harness = false
+
+[features]
+default = []
+flame = ["dep:flame"]  # Changed from flame_it to flame
