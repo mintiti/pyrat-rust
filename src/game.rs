@@ -20,10 +20,54 @@ impl PlayerState {
 
     #[inline(always)]
     fn can_collect_cheese(&self) -> bool {
-        !self.is_in_mud() || self.mud_timer == 1  // Can collect on last mud turn
+        !self.is_in_mud()  // Can collect on last mud turn
     }
 }
+/// Records what happened in a move for unmake purposes
+#[derive(Clone)]
+struct MoveUndo {
+    // Player 1 state
+    p1_pos: Coordinates,
+    p1_target: Coordinates,
+    p1_mud: u8,
+    p1_score: f32,
+    p1_misses: u16,
 
+    // Player 2 state
+    p2_pos: Coordinates,
+    p2_target: Coordinates,
+    p2_mud: u8,
+    p2_score: f32,
+    p2_misses: u16,
+
+    // Cheese collected this move
+    collected_cheese: Vec<Coordinates>,
+
+    turn: u16,
+}
+
+impl MoveUndo {
+    #[inline(always)]
+    fn new(game: &GameState) -> Self {
+        Self {
+            p1_pos: game.player1.current_pos,
+            p1_target: game.player1.target_pos,
+            p1_mud: game.player1.mud_timer,
+            p1_score: game.player1.score,
+            p1_misses: game.player1.misses,
+
+            p2_pos: game.player2.current_pos,
+            p2_target: game.player2.target_pos,
+            p2_mud: game.player2.mud_timer,
+            p2_score: game.player2.score,
+            p2_misses: game.player2.misses,
+
+            collected_cheese: Vec::with_capacity(2),
+
+            turn: game.turn,
+        }
+    }
+}
 #[derive(Clone)]
 pub struct GameState {
     width: u8,
@@ -259,8 +303,8 @@ impl GameState {
         // Process player movements
         let (p1_moved, p2_moved) = self.process_moves(p1_move, p2_move);
 
-        // Process cheese collection and scoring
-        let cheese_collected = self.process_cheese_collection();
+        // Process cheese collection
+        let collected_cheese = self.process_cheese_collection();
 
         // Update turn counter
         self.turn += 1;
@@ -271,61 +315,140 @@ impl GameState {
         TurnResult {
             p1_moved,
             p2_moved,
-            cheese_collected,
             game_over,
             p1_score: self.player1.score,
             p2_score: self.player2.score,
+            collected_cheese,
         }
+    }
+
+    /// Process a move and create undo information
+    #[inline]
+    pub fn make_move(&mut self, p1_move: Direction, p2_move: Direction) -> MoveUndo {
+        // Save initial state
+        let undo = MoveUndo {
+            p1_pos: self.player1.current_pos,
+            p1_target: self.player1.target_pos,
+            p1_mud: self.player1.mud_timer,
+            p1_score: self.player1.score,
+            p1_misses: self.player1.misses,
+
+            p2_pos: self.player2.current_pos,
+            p2_target: self.player2.target_pos,
+            p2_mud: self.player2.mud_timer,
+            p2_score: self.player2.score,
+            p2_misses: self.player2.misses,
+
+            collected_cheese: Vec::with_capacity(2),
+            turn: self.turn,
+        };
+
+        // Process turn and save collected cheese
+        let result = self.process_turn(p1_move, p2_move);
+
+        MoveUndo {
+            collected_cheese: result.collected_cheese,
+            ..undo
+        }
+    }
+
+    /// Unmake a move using the saved undo information
+    #[inline]
+    pub fn unmake_move(&mut self, undo: MoveUndo) {
+        // Restore any collected cheese
+        for pos in undo.collected_cheese {
+            self.cheese.restore_cheese(pos);
+        }
+
+        // Restore player states
+        self.player1.current_pos = undo.p1_pos;
+        self.player1.target_pos = undo.p1_target;
+        self.player1.mud_timer = undo.p1_mud;
+        self.player1.score = undo.p1_score;
+        self.player1.misses = undo.p1_misses;
+
+        self.player2.current_pos = undo.p2_pos;
+        self.player2.target_pos = undo.p2_target;
+        self.player2.mud_timer = undo.p2_mud;
+        self.player2.score = undo.p2_score;
+        self.player2.misses = undo.p2_misses;
+
+        self.turn = undo.turn;
     }
 
     #[inline]
     fn process_moves(&mut self, p1_move: Direction, p2_move: Direction) -> (bool, bool) {
+        // Store initial positions BEFORE any updates
+        let p1_start_pos = self.player1.current_pos;
+        let p2_start_pos = self.player2.current_pos;
+
+        // Compute next positions first - this handles Stay and wall collisions
         let (p1_moved, p1_new_pos) = self.compute_player_move(&self.player1, p1_move);
         let (p2_moved, p2_new_pos) = self.compute_player_move(&self.player2, p2_move);
 
-        // Update player states with new positions and mud status
-        if p1_moved {
-            let mud_time = self.mud.get(&(self.player1.current_pos, p1_new_pos))
-                .copied()
-                .unwrap_or(0);
-            if mud_time > 0 {
-                self.player1.mud_timer = mud_time;
-                self.player1.target_pos = p1_new_pos;
-            } else {
-                self.player1.current_pos = p1_new_pos;
-                self.player1.target_pos = p1_new_pos;
-            }
-        } else if self.player1.is_in_mud() {
+        // Update Player 1
+        if self.player1.mud_timer > 0 {
+            // In mud - decrement timer and possibly complete move
             self.player1.mud_timer -= 1;
+            // Mud just ended - complete the move initiated previously
             if self.player1.mud_timer == 0 {
                 self.player1.current_pos = self.player1.target_pos;
             }
-        } else {
-            self.player1.misses += 1;
+        } else if p1_moved {
+            // Not in mud - check new position
+            let mud_time = self.mud.get(&(self.player1.current_pos, p1_new_pos))
+                .copied()
+                .unwrap_or(0);
+            self.player1.mud_timer = mud_time;
+            if mud_time > 1 {
+                // Enter mud
+                self.player1.target_pos = p1_new_pos;
+            } else {
+                // Move immediately (no mud or mud=1)
+                self.player1.current_pos = p1_new_pos;
+                self.player1.target_pos = p1_new_pos;
+            }
         }
 
-        // Same for player 2
-        if p2_moved {
+        // Update Player 2 (same logic)
+        if self.player2.mud_timer > 0 {
+            self.player2.mud_timer -= 1;
+            if self.player2.mud_timer == 0 {
+                self.player2.current_pos = self.player2.target_pos;
+            }
+        } else if p2_moved {
             let mud_time = self.mud.get(&(self.player2.current_pos, p2_new_pos))
                 .copied()
                 .unwrap_or(0);
-            if mud_time > 0 {
-                self.player2.mud_timer = mud_time;
+
+            self.player2.mud_timer = mud_time;
+            if mud_time > 1 {
                 self.player2.target_pos = p2_new_pos;
             } else {
                 self.player2.current_pos = p2_new_pos;
                 self.player2.target_pos = p2_new_pos;
             }
-        } else if self.player2.is_in_mud() {
-            self.player2.mud_timer -= 1;
-            if self.player2.mud_timer == 0 {
-                self.player2.current_pos = self.player2.target_pos;
-            }
-        } else {
+        }
+
+        // Process any remaining movement
+        if self.player1.mud_timer == 0 && self.player1.current_pos != self.player1.target_pos {
+            self.player1.current_pos = self.player1.target_pos;
+        }
+        if self.player2.mud_timer == 0 && self.player2.current_pos != self.player2.target_pos {
+            self.player2.current_pos = self.player2.target_pos;
+        }
+
+        // Increment misses if position didn't change
+        let p1_has_moved = self.player1.current_pos != p1_start_pos;
+        let p2_has_moved = self.player2.current_pos != p2_start_pos;
+        if !p1_has_moved {
+            self.player1.misses += 1;
+        }
+        if !p2_has_moved {
             self.player2.misses += 1;
         }
 
-        (p1_moved, p2_moved)
+        (p1_has_moved, p2_has_moved)
     }
 
     #[inline]
@@ -345,39 +468,47 @@ impl GameState {
         // Move must be valid at this point
         (true, move_dir.apply_to(player.current_pos))
     }
+    #[inline]
+    fn compute_destination(&self, pos: Coordinates, move_dir: Direction) -> Coordinates {
+        if move_dir == Direction::Stay || !self.move_table.is_move_valid(pos, move_dir) {
+            pos
+        } else {
+            move_dir.apply_to(pos)
+        }
+    }
 
     #[inline]
-    fn process_cheese_collection(&mut self) -> bool {
-        let mut cheese_collected = false;
+    fn process_cheese_collection(&mut self) -> Vec<Coordinates> {
+        let mut collected = Vec::with_capacity(2);
 
-        // Check for simultaneous cheese collection
+        // Check for simultaneous collection first
         if self.player1.can_collect_cheese() &&
             self.player2.can_collect_cheese() &&
             self.player1.current_pos == self.player2.current_pos {
             if self.cheese.take_cheese(self.player1.current_pos) {
                 self.player1.score += 0.5;
                 self.player2.score += 0.5;
-                cheese_collected = true;
+                collected.push(self.player1.current_pos);
             }
-            return cheese_collected;
+            return collected;
         }
 
-        // Individual cheese collection
+        // Individual collections
         if self.player1.can_collect_cheese() {
             if self.cheese.take_cheese(self.player1.current_pos) {
                 self.player1.score += 1.0;
-                cheese_collected = true;
+                collected.push(self.player1.current_pos);
             }
         }
 
         if self.player2.can_collect_cheese() {
             if self.cheese.take_cheese(self.player2.current_pos) {
                 self.player2.score += 1.0;
-                cheese_collected = true;
+                collected.push(self.player2.current_pos);
             }
         }
 
-        cheese_collected
+        collected
     }
 
     fn check_game_over(&self) -> bool {
@@ -403,10 +534,10 @@ impl GameState {
 pub struct TurnResult {
     pub p1_moved: bool,
     pub p2_moved: bool,
-    pub cheese_collected: bool,
     pub game_over: bool,
     pub p1_score: f32,
     pub p2_score: f32,
+    pub collected_cheese: Vec<Coordinates>,  // Collected this turn
 }
 
 // Implement Debug for nicer error messages and testing
@@ -470,13 +601,13 @@ mod tests {
         let mut walls = HashMap::new();
         walls.insert(
             Coordinates::new(0, 0),
-            vec![Coordinates::new(1, 0)]
+            vec![Coordinates::new(1, 0)],
         );
 
         let mut mud = HashMap::new();
         mud.insert(
             (Coordinates::new(1, 1), Coordinates::new(1, 2)),
-            2
+            2,
         );
 
         let cheese_positions = vec![
@@ -548,7 +679,7 @@ mod tests {
         for pos in &cheese_positions {
             let symmetric_pos = Coordinates::new(
                 game.width - 1 - pos.x,
-                game.height - 1 - pos.y
+                game.height - 1 - pos.y,
             );
             if *pos != symmetric_pos { // Ignore center piece if it exists
                 assert!(
@@ -633,7 +764,7 @@ mod tests {
         fn test_basic_movement() {
             let mut game = create_test_game(
                 Coordinates::new(0, 0),
-                Coordinates::new(2, 2)
+                Coordinates::new(2, 2),
             );
 
             let result = game.process_turn(Direction::Right, Direction::Left);
@@ -648,7 +779,7 @@ mod tests {
         fn test_boundary_movement() {
             let mut game = create_test_game(
                 Coordinates::new(0, 0),
-                Coordinates::new(2, 2)
+                Coordinates::new(2, 2),
             );
 
             let result = game.process_turn(Direction::Left, Direction::Right);
@@ -663,7 +794,7 @@ mod tests {
         fn test_stay_command() {
             let mut game = create_test_game(
                 Coordinates::new(1, 1),
-                Coordinates::new(1, 2)
+                Coordinates::new(1, 2),
             );
 
             let result = game.process_turn(Direction::Stay, Direction::Stay);
@@ -687,13 +818,12 @@ mod tests {
             let mut game = create_game_with_mud(
                 start_pos,
                 Coordinates::new(0, 0),
-                &[((start_pos, target_pos), mud_timer)]
+                &[((start_pos, target_pos), mud_timer)],
             );
 
             // Initial move into mud
             let result = game.process_turn(Direction::Up, Direction::Stay);
-            assert!(result.p1_moved);
-            assert_eq!(game.player1.mud_timer, mud_timer);
+            assert!(!result.p1_moved);
             assert_eq!(game.player1.current_pos, start_pos);
             assert_eq!(game.player1.target_pos, target_pos);
 
@@ -701,10 +831,13 @@ mod tests {
             let result = game.process_turn(Direction::Right, Direction::Stay);
             assert!(!result.p1_moved);
             assert_eq!(game.player1.mud_timer, 1);
+            assert_eq!(game.player1.current_pos, start_pos);
+            assert_eq!(game.player1.target_pos, target_pos);
+
 
             // Final mud turn - should complete movement
             let result = game.process_turn(Direction::Left, Direction::Stay);
-            assert!(!result.p1_moved);
+            assert!(result.p1_moved);
             assert_eq!(game.player1.mud_timer, 0);
             assert_eq!(game.player1.current_pos, target_pos);
         }
@@ -717,14 +850,15 @@ mod tests {
         fn test_basic_cheese_collection() {
             let mut game = create_test_game(
                 Coordinates::new(0, 0),
-                Coordinates::new(2, 2)
+                Coordinates::new(2, 2),
             );
 
             game.cheese.place_cheese(Coordinates::new(1, 0));
 
             let result = game.process_turn(Direction::Right, Direction::Stay);
 
-            assert!(result.cheese_collected);
+            assert_eq!(result.collected_cheese.len(),1);
+            assert!(result.collected_cheese.contains(&Coordinates::new(1, 0)));
             assert_eq!(game.player1.score, 1.0);
             assert_eq!(game.player2.score, 0.0);
             assert_eq!(game.cheese.remaining_cheese(), 0);
@@ -734,14 +868,15 @@ mod tests {
         fn test_simultaneous_cheese_collection() {
             let mut game = create_test_game(
                 Coordinates::new(0, 1),
-                Coordinates::new(2, 1)
+                Coordinates::new(2, 1),
             );
 
             game.cheese.place_cheese(Coordinates::new(1, 1));
 
             let result = game.process_turn(Direction::Right, Direction::Left);
 
-            assert!(result.cheese_collected);
+            assert_eq!(result.collected_cheese.len(), 1);
+            assert!(result.collected_cheese.contains(&Coordinates::new(1, 1)));
             assert_eq!(game.player1.score, 0.5);
             assert_eq!(game.player2.score, 0.5);
             assert_eq!(game.cheese.remaining_cheese(), 0);
@@ -755,7 +890,7 @@ mod tests {
         fn test_max_turns() {
             let mut game = create_test_game(
                 Coordinates::new(0, 0),
-                Coordinates::new(2, 2)
+                Coordinates::new(2, 2),
             );
             game.max_turns = 2;
 
@@ -774,7 +909,7 @@ mod tests {
         fn test_win_by_score() {
             let mut game = create_test_game(
                 Coordinates::new(0, 0),  // Player 1 starts bottom left
-                Coordinates::new(2, 2)   // Player 2 starts top right
+                Coordinates::new(2, 2),   // Player 2 starts top right
             );
 
             // Place 3 cheese pieces in a vertical line
@@ -784,13 +919,15 @@ mod tests {
 
             // Move to and collect first cheese at (1,0)
             let result = game.process_turn(Direction::Right, Direction::Stay);
-            assert!(result.cheese_collected);
+            assert_eq!(result.collected_cheese.len(),1);
+            assert!(result.collected_cheese.contains(&Coordinates::new(1, 0)));
             assert_eq!(game.player1.score, 1.0);
             assert_eq!(game.player1.current_pos, Coordinates::new(1, 0));
 
             // Move up and collect second cheese at (1,1)
             let result = game.process_turn(Direction::Up, Direction::Stay);
-            assert!(result.cheese_collected);
+            assert_eq!(result.collected_cheese.len(), 1);
+            assert!(result.collected_cheese.contains(&Coordinates::new(1, 1)));
             assert_eq!(game.player1.score, 2.0);  // Should now have 2 points
             assert!(result.game_over);  // Game should end as player1 has more than half the cheese
             assert_eq!(game.player1.current_pos, Coordinates::new(1, 1));
@@ -800,7 +937,7 @@ mod tests {
         fn test_win_score_calculation() {
             let mut game = create_test_game(
                 Coordinates::new(0, 0),
-                Coordinates::new(2, 2)
+                Coordinates::new(2, 2),
             );
 
             // Place 5 cheese pieces - need 3 to win
@@ -830,7 +967,7 @@ mod tests {
         fn test_all_cheese_collected() {
             let mut game = create_test_game(
                 Coordinates::new(0, 1),
-                Coordinates::new(2, 1)
+                Coordinates::new(2, 1),
             );
 
             // Place single cheese in middle
@@ -844,5 +981,366 @@ mod tests {
             assert_eq!(game.player2.score, 0.5);
             assert_eq!(game.cheese.remaining_cheese(), 0);
         }
+    }
+}
+#[cfg(test)]
+mod make_unmake_tests {
+    use super::*;
+
+    /// Helper to create a game with walls in specific positions
+    fn create_game_with_walls() -> GameState {
+        let mut walls = HashMap::new();
+        // Create a vertical wall in the middle
+        walls.insert(
+            Coordinates::new(1, 0),
+            vec![Coordinates::new(1, 1)],
+        );
+        walls.insert(
+            Coordinates::new(1, 1),
+            vec![Coordinates::new(1, 0)],
+        );
+        GameState::new(3, 3, walls, 300)
+    }
+
+    /// Helper to create a game with mud in specific positions
+    fn create_game_with_mud() -> GameState {
+        let mut game = GameState::new(3, 3, HashMap::new(), 300);
+        game.mud.insert(
+            (Coordinates::new(0, 0), Coordinates::new(0, 1)),
+            2,  // 2 turns of mud
+        );
+        game
+    }
+
+    #[test]
+    fn test_make_unmake_wall_collision() {
+        let mut game = create_test_game_with_walls();
+        let initial_state = game.clone();
+
+        // Player 1 tries to move into wall
+        // Starting at (0,0), trying to move right into wall at x=1
+        let undo = game.make_move(Direction::Right, Direction::Stay);
+
+        // Position should not change due to wall
+        assert_eq!(game.player1.current_pos, initial_state.player1.current_pos,
+                   "Player shouldn't move through wall");
+        assert_eq!(game.player1.misses, initial_state.player1.misses + 1,
+                   "Miss count should increment on wall collision");
+
+        // Unmake move
+        game.unmake_move(undo);
+
+        // Everything should be exactly as it was
+        assert_eq!(game.player1.current_pos, initial_state.player1.current_pos,
+                   "Position not restored after wall unmake");
+        assert_eq!(game.player1.misses, initial_state.player1.misses,
+                   "Misses not restored after wall unmake");
+    }
+
+    #[test]
+    fn test_make_unmake_mud_movement() {
+        let mut game = create_game_with_mud();
+        let initial_state = game.clone();
+
+        // Move into mud
+        let undo1 = game.make_move(Direction::Up, Direction::Stay);
+
+        // Check mud state
+        assert_eq!(game.player1.mud_timer, 2);
+        assert_eq!(game.player1.current_pos, initial_state.player1.current_pos);
+        assert_eq!(game.player1.target_pos, Coordinates::new(0, 1));
+
+        // Try to move while in mud (should be ignored)
+        let undo2 = game.make_move(Direction::Right, Direction::Stay);
+
+        // Check still in mud, timer decreased
+        assert_eq!(game.player1.mud_timer, 1);
+        assert_eq!(game.player1.current_pos, initial_state.player1.current_pos);
+        assert_eq!(game.player1.target_pos, Coordinates::new(0, 1));
+
+        // Unmake moves in reverse order
+        game.unmake_move(undo2);
+        game.unmake_move(undo1);
+
+        // Verify back to initial state
+        assert_eq!(game.player1.mud_timer, initial_state.player1.mud_timer);
+        assert_eq!(game.player1.current_pos, initial_state.player1.current_pos);
+        assert_eq!(game.player1.target_pos, initial_state.player1.target_pos);
+    }
+
+
+    #[test]
+    fn test_make_unmake_cheese_collection_in_mud() {
+        let mut game = create_test_game_with_mud();
+
+        // Place cheese at mud exit
+        let cheese_pos = Coordinates::new(0, 1);
+        game.cheese.place_cheese(cheese_pos);
+        let initial_total = game.cheese.total_cheese();
+        let initial_remaining = game.cheese.remaining_cheese();
+
+        // Print initial state
+        println!("Initial state - total: {}, remaining: {}", initial_total, initial_remaining);
+
+        // Enter mud
+        let undo1 = game.make_move(Direction::Up, Direction::Stay);
+        println!("After mud enter - remaining: {}", game.cheese.remaining_cheese());
+        assert_eq!(game.cheese.remaining_cheese(), initial_remaining,
+                   "Cheese shouldn't be collected while entering mud");
+
+        // Wait in mud
+        let undo2 = game.make_move(Direction::Stay, Direction::Stay);
+        println!("During mud - remaining: {}", game.cheese.remaining_cheese());
+        assert_eq!(game.cheese.remaining_cheese(), initial_remaining,
+                   "Cheese shouldn't be collected while in mud");
+
+        // Exit mud and collect
+        let undo3 = game.make_move(Direction::Stay, Direction::Stay);
+        println!("After collection - remaining: {}", game.cheese.remaining_cheese());
+        assert_eq!(game.cheese.remaining_cheese(), initial_remaining - 1,
+                   "Cheese should be collected when exiting mud");
+
+        // Unmake moves in reverse order
+        game.unmake_move(undo3);
+        println!("After unmake 3 - remaining: {}", game.cheese.remaining_cheese());
+        game.unmake_move(undo2);
+        println!("After unmake 2 - remaining: {}", game.cheese.remaining_cheese());
+        game.unmake_move(undo1);
+        println!("After unmake 1 - remaining: {}", game.cheese.remaining_cheese());
+
+        assert_eq!(game.cheese.remaining_cheese(), initial_remaining,
+                   "Remaining cheese not restored after unmake");
+        assert_eq!(game.cheese.total_cheese(), initial_total,
+                   "Total cheese changed during make/unmake");
+    }
+    #[test]
+    fn test_make_unmake_simultaneous_mud_movement() {
+        let mut game = GameState::new(3, 3, HashMap::new(), 300);
+
+        // Add mud for both players
+        game.mud.insert((Coordinates::new(0, 0), Coordinates::new(0, 1)), 2);
+        game.mud.insert((Coordinates::new(2, 2), Coordinates::new(2, 1)), 3);
+
+        let initial_state = game.clone();
+
+        // Both players move into mud
+        let undo1 = game.make_move(Direction::Up, Direction::Down);
+
+        // Verify different mud timers
+        assert_eq!(game.player1.mud_timer, 2);
+        assert_eq!(game.player2.mud_timer, 3);
+
+        // One more move
+        let undo2 = game.make_move(Direction::Right, Direction::Left);
+
+        // Verify timers decreased independently
+        assert_eq!(game.player1.mud_timer, 1);
+        assert_eq!(game.player2.mud_timer, 2);
+
+        // Unmake moves
+        game.unmake_move(undo2);
+        game.unmake_move(undo1);
+
+        // Verify restored to initial state
+        assert_eq!(game.player1.mud_timer, initial_state.player1.mud_timer);
+        assert_eq!(game.player2.mud_timer, initial_state.player2.mud_timer);
+        assert_eq!(game.player1.current_pos, initial_state.player1.current_pos);
+        assert_eq!(game.player2.current_pos, initial_state.player2.current_pos);
+    }
+
+    #[test]
+    fn test_make_unmake_boundary_collision() {
+        let mut game = GameState::new(3, 3, HashMap::new(), 300);
+        let initial_state = game.clone();
+
+        // Try to move outside board boundaries
+        let moves = [
+            (Direction::Left, "left boundary"),   // Try move left from (0,0)
+            (Direction::Down, "bottom boundary"), // Try move down from (0,0)
+        ];
+
+        for (direction, description) in moves.iter() {
+            let undo = game.make_move(*direction, Direction::Stay);
+
+            // Verify collision behavior
+            assert_eq!(
+                game.player1.current_pos,
+                initial_state.player1.current_pos,
+                "Position changed on {} collision", description
+            );
+            assert_eq!(
+                game.player1.misses,
+                initial_state.player1.misses + 1,
+                "Misses not incremented on {} collision", description
+            );
+
+            // Unmake move
+            game.unmake_move(undo);
+
+            // Verify restoration
+            assert_eq!(
+                game.player1.current_pos,
+                initial_state.player1.current_pos,
+                "Position not restored after {} collision", description
+            );
+            assert_eq!(
+                game.player1.misses,
+                initial_state.player1.misses,
+                "Misses not restored after {} collision", description
+            );
+        }
+    }
+
+    #[test]
+    fn test_make_unmake_complex_sequence() {
+        let mut game = GameState::new(3, 3, HashMap::new(), 300);
+
+        // Place cheese pieces
+        game.cheese.place_cheese(Coordinates::new(1, 2));
+        game.cheese.place_cheese(Coordinates::new(2, 2));
+
+        // Add mud
+        game.mud.insert((Coordinates::new(1, 1), Coordinates::new(1, 2)), 2);
+
+        let initial_state = game.clone();
+        let mut undo_stack = Vec::new();
+
+        // Record initial positions
+        let initial_p1_pos = game.player1.current_pos;  // (0,0)
+        let initial_p2_pos = game.player2.current_pos;  // (2,2)
+
+        // Better sequence of moves that stays within the grid
+        let moves = [
+            (Direction::Right, Direction::Left),  // P1: 0,0 -> 1,0  | P2: 2,2 -> 1,2
+            (Direction::Up, Direction::Down),     // P1: 1,0 -> 1,1  | P2: 1,2 -> 1,1
+            (Direction::Stay, Direction::Left),   // P1: in mud      | P2: 1,1 -> 0,1
+            (Direction::Stay, Direction::Down),   // P1: in mud      | P2: 0,1 -> 0,0
+            (Direction::Right, Direction::Right), // P1: 1,2         | P2: 0,0 -> 1,0
+        ];
+
+        println!("Initial positions - P1: {:?}, P2: {:?}", game.player1.current_pos, game.player2.current_pos);
+
+        // Execute moves
+        for (i, (p1_move, p2_move)) in moves.iter().enumerate() {
+            let undo = game.make_move(*p1_move, *p2_move);
+            println!("After move {} - P1: {:?}, P2: {:?}", i+1, game.player1.current_pos, game.player2.current_pos);
+            undo_stack.push(undo);
+        }
+
+        // Verify positions actually changed
+        println!("Final positions - P1: {:?}, P2: {:?}", game.player1.current_pos, game.player2.current_pos);
+        assert_ne!(game.player1.current_pos, initial_p1_pos,
+                   "Player 1 position should change after moves");
+        assert_ne!(game.player2.current_pos, initial_p2_pos,
+                   "Player 2 position should change after moves");
+
+        // Unmake moves in reverse order
+        while let Some(undo) = undo_stack.pop() {
+            game.unmake_move(undo);
+        }
+
+        // Verify complete restoration
+        assert_eq!(game.player1.current_pos, initial_state.player1.current_pos);
+        assert_eq!(game.player1.target_pos, initial_state.player1.target_pos);
+        assert_eq!(game.player1.mud_timer, initial_state.player1.mud_timer);
+        assert_eq!(game.player1.score, initial_state.player1.score);
+        assert_eq!(game.player1.misses, initial_state.player1.misses);
+    }
+    fn test_make_unmake_basic_move() {
+        let mut game = GameState::new(3, 3, HashMap::new(), 300);
+
+        // Make initial state different from default
+        game.player1.score = 1.0;
+        game.player2.misses = 2;
+        let initial_state = game.clone();
+
+        // Make a move
+        let undo = game.make_move(Direction::Right, Direction::Left);
+
+        // State should be different
+        assert_ne!(game.player1.current_pos, initial_state.player1.current_pos);
+
+        // Unmake the move
+        game.unmake_move(undo);
+
+        // State should be restored exactly
+        assert_eq!(game.player1.current_pos, initial_state.player1.current_pos);
+        assert_eq!(game.player1.score, initial_state.player1.score);
+        assert_eq!(game.player2.misses, initial_state.player2.misses);
+    }
+
+    fn test_make_unmake_cheese_collection() {
+        let mut game = GameState::new(3, 3, HashMap::new(), 300);
+
+        // Place a cheese piece
+        let cheese_pos = Coordinates::new(1, 0);
+        game.cheese.place_cheese(cheese_pos);
+        let initial_cheese_count = game.cheese.total_cheese();
+        let initial_remaining = game.cheese.remaining_cheese();
+
+        // Make a move that collects cheese
+        let undo = game.make_move(Direction::Right, Direction::Stay);
+
+        // Verify cheese was collected
+        assert_eq!(game.cheese.remaining_cheese(), initial_remaining - 1);
+        assert_eq!(game.cheese.total_cheese(), initial_cheese_count); // Should be unchanged
+        assert_eq!(game.player1.score, 1.0);
+
+        // Unmake the move
+        game.unmake_move(undo);
+
+        // Verify cheese was restored
+        assert_eq!(game.cheese.remaining_cheese(), initial_remaining);
+        assert_eq!(game.cheese.total_cheese(), initial_cheese_count); // Should still be unchanged
+        assert!(game.cheese.has_cheese(cheese_pos));
+        assert_eq!(game.player1.score, 0.0);
+    }
+
+    #[test]
+    fn test_make_unmake_simultaneous_collection() {
+        let mut game = GameState::new(3, 3, HashMap::new(), 300);
+
+        // Place cheese where both players can reach it
+        let cheese_pos = Coordinates::new(1, 1);
+        game.cheese.place_cheese(cheese_pos);
+
+        // Position players adjacent to cheese
+        game.player1.current_pos = Coordinates::new(0, 1);
+        game.player1.target_pos = Coordinates::new(0,1);
+        game.player2.current_pos = Coordinates::new(2, 1);
+        game.player2.target_pos = Coordinates::new(2,1);
+
+        // Make move where both players collect cheese
+        let undo = game.make_move(Direction::Right, Direction::Left);
+
+        // Verify simultaneous collection
+        assert_eq!(game.player1.score, 0.5);
+        assert_eq!(game.player2.score, 0.5);
+        assert!(!game.cheese.has_cheese(cheese_pos));
+
+        // Unmake move
+        game.unmake_move(undo);
+
+        // Verify restoration
+        assert_eq!(game.player1.score, 0.0);
+        assert_eq!(game.player2.score, 0.0);
+        assert!(game.cheese.has_cheese(cheese_pos));
+    }
+    /// Helper to create a test game with specific wall configuration
+    fn create_test_game_with_walls() -> GameState {
+        let mut walls = HashMap::new();
+        walls.insert(Coordinates::new(1, 0), vec![Coordinates::new(0, 0)]);
+        walls.insert(Coordinates::new(0, 0), vec![Coordinates::new(1, 0)]);
+        GameState::new(3, 3, walls, 300)
+    }
+
+    /// Helper to create a test game with mud
+    fn create_test_game_with_mud() -> GameState {
+        let mut game = GameState::new(3, 3, HashMap::new(), 300);
+        game.mud.insert(
+            (Coordinates::new(0, 0), Coordinates::new(0, 1)),
+            2  // 2 turns of mud
+        );
+        game
     }
 }

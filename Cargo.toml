@@ -32,6 +32,11 @@ name = "profile"
 path = "benches/bin/profile.rs"
 harness = false
 
+[[bench]]
+name = "game_benchmarks"
+path = "benches/game_benchmarks.rs"
+harness = false
+
 [features]
 default = []
 flame = ["dep:flame"]  # Changed from flame_it to flame
