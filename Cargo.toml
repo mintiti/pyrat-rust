@@ -8,10 +8,13 @@ description = "A Rust implementation of the PyRat game"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
 name = "pyrat"
-path = "src/lib.rs"
+path = "rust/src/lib.rs"
+crate-type = ["cdylib", "rlib"]  # Both Python module and Rust library
 
 [dependencies]
 rand = "0.8"
+pyo3 = { version = "0.20", features = ["extension-module"] }
+numpy = "0.20"
 flame = { version = "0.2.2", optional = true }
 
 [dev-dependencies]
@@ -29,14 +32,19 @@ debug = true  # Also keep debug info for bench profile
 # Just keep the bench target, remove the bin target
 [[bench]]
 name = "profile"
-path = "benches/bin/profile.rs"
+path = "rust/benches/bin/profile.rs"
 harness = false
 
 [[bench]]
 name = "game_benchmarks"
-path = "benches/game_benchmarks.rs"
+path = "rust/benches/game_benchmarks.rs"
 harness = false
 
 [features]
 default = []
 flame = ["dep:flame"]  # Changed from flame_it to flame
+
+[package.metadata.maturin]
+name = "pyrat"
+module-name = "pyrat._rust"  # Python module will be importable as pyrat._rust
+python-source = "python"
