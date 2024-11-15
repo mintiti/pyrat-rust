@@ -2,6 +2,6 @@
 
 pub mod board;
 pub mod cheese_board;
-pub mod game;
-pub mod types;
+pub mod game_logic;
 pub mod maze_generation;
+pub mod types;

@@ -1,19 +1,8 @@
-use criterion::{black_box, criterion_group, criterion_main, Criterion, BenchmarkId};
-use pyrat::{GameState, Coordinates, Direction};
-use std::collections::HashMap;
+use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use pyrat::{Coordinates, Direction, GameState};
 use rand::{random, Rng};
+use std::collections::HashMap;
 
-// Helper function to generate random moves
-fn generate_random_moves(count: usize) -> Vec<(Direction, Direction)> {
-    let mut rng = rand::thread_rng();
-    let mut moves = Vec::with_capacity(count);
-    for _ in 0..count {
-        let p1_move = unsafe { std::mem::transmute(rng.gen_range(0..5u8)) };
-        let p2_move = unsafe { std::mem::transmute(rng.gen_range(0..5u8)) };
-        moves.push((p1_move, p2_move));
-    }
-    moves
-}
 /// Creates a benchmark game state with random walls, cheese, and mud
 fn create_benchmark_game(size: u8, cheese_count: u16, mud_count: usize) -> GameState {
     let mut rng = rand::thread_rng();
@@ -26,7 +15,8 @@ fn create_benchmark_game(size: u8, cheese_count: u16, mud_count: usize) -> GameS
                 let pos = Coordinates::new(x, y);
                 let next_x = x.saturating_add(1);
                 if next_x < size {
-                    walls.entry(pos)
+                    walls
+                        .entry(pos)
                         .or_insert_with(Vec::new)
                         .push(Coordinates::new(next_x, y));
                 }
@@ -68,20 +58,16 @@ fn create_benchmark_game(size: u8, cheese_count: u16, mud_count: usize) -> GameS
 fn bench_game_creation(c: &mut Criterion) {
     let mut group = c.benchmark_group("game_creation");
 
-    for size in [8u8, 16, 32, 64,200].iter() {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(size),
-            size,
-            |b, &size| {
-                b.iter(|| {
-                    create_benchmark_game(
-                        size,
-                        (size as u16 * size as u16) / 4,  // 25% cheese coverage
-                        (size as usize * size as usize) / 8 // 12.5% mud coverage
-                    )
-                })
-            }
-        );
+    for size in [8u8, 16, 32, 64, 200].iter() {
+        group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
+            b.iter(|| {
+                create_benchmark_game(
+                    size,
+                    (size as u16 * size as u16) / 4, // 25% cheese coverage
+                    (size as usize * size as usize) / 8, // 12.5% mud coverage
+                )
+            })
+        });
     }
     group.finish();
 }
@@ -90,28 +76,24 @@ fn bench_move_processing(c: &mut Criterion) {
     let mut group = c.benchmark_group("move_processing");
     group.sample_size(50); // Increase sample size for more stable results
 
-    for size in [8u8, 16, 32,64,200].iter() {
-        group.bench_with_input(
-            BenchmarkId::new("random_moves", size),
-            size,
-            |b, &size| {
-                let game = create_benchmark_game(
-                    size,
-                    (size as u16 * size as u16) / 4,
-                    (size as usize * size as usize) / 8
-                );
+    for size in [8u8, 16, 32, 64, 200].iter() {
+        group.bench_with_input(BenchmarkId::new("random_moves", size), size, |b, &size| {
+            let game = create_benchmark_game(
+                size,
+                (size as u16 * size as u16) / 4,
+                (size as usize * size as usize) / 8,
+            );
 
-                b.iter(|| {
-                    let mut game_copy = game.clone();
-                    // Process 10 random moves
-                    for _ in 0..10 {
-                        let p1_move = unsafe { std::mem::transmute(rand::random::<u8>() % 5) };
-                        let p2_move = unsafe { std::mem::transmute(rand::random::<u8>() % 5) };
-                        black_box(game_copy.process_turn(p1_move, p2_move));
-                    }
-                });
-            }
-        );
+            b.iter(|| {
+                let mut game_copy = game.clone();
+                // Process 10 random moves
+                for _ in 0..10 {
+                    let p1_move = unsafe { std::mem::transmute(rand::random::<u8>() % 5) };
+                    let p2_move = unsafe { std::mem::transmute(rand::random::<u8>() % 5) };
+                    black_box(game_copy.process_turn(p1_move, p2_move));
+                }
+            });
+        });
     }
     group.finish();
 }
@@ -119,44 +101,29 @@ fn bench_move_processing(c: &mut Criterion) {
 fn bench_cheese_collection(c: &mut Criterion) {
     let mut group = c.benchmark_group("cheese_collection");
 
-    for size in [8u8, 16, 32,64,200].iter() {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(size),
-            size,
-            |b, &size| {
-                // Create game with high cheese density
-                let mut game = create_benchmark_game(
-                    size,
-                    (size as u16 * size as u16) / 2, // 50% cheese coverage
-                    0  // No mud for this test
-                );
+    for size in [8u8, 16, 32, 64, 200].iter() {
+        group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
+            // Create game with high cheese density
+            let mut game = create_benchmark_game(
+                size,
+                (size as u16 * size as u16) / 2, // 50% cheese coverage
+                0,                               // No mud for this test
+            );
 
-                // Find a cheese piece and position players adjacent to it
-                if let Some(&cheese_pos) = game.cheese.get_all_cheese_positions().first() {
-                    let p1_pos = Coordinates::new(
-                        cheese_pos.x.saturating_sub(1),
-                        cheese_pos.y
-                    );
-                    let p2_pos = Coordinates::new(
-                        cheese_pos.x.saturating_add(1),
-                        cheese_pos.y
-                    );
+            // Find a cheese piece and position players adjacent to it
+            if let Some(&cheese_pos) = game.cheese.get_all_cheese_positions().first() {
+                let p1_pos = Coordinates::new(cheese_pos.x.saturating_sub(1), cheese_pos.y);
+                let p2_pos = Coordinates::new(cheese_pos.x.saturating_add(1), cheese_pos.y);
 
-                    game = GameState::new_with_positions(
-                        size, size,
-                        HashMap::new(),
-                        300,
-                        p1_pos,
-                        p2_pos
-                    );
-                }
-
-                b.iter(|| {
-                    let mut game_copy = game.clone();
-                    black_box(game_copy.process_turn(Direction::Right, Direction::Left))
-                });
+                game =
+                    GameState::new_with_positions(size, size, HashMap::new(), 300, p1_pos, p2_pos);
             }
-        );
+
+            b.iter(|| {
+                let mut game_copy = game.clone();
+                black_box(game_copy.process_turn(Direction::Right, Direction::Left))
+            });
+        });
     }
     group.finish();
 }
@@ -165,30 +132,28 @@ fn bench_full_game(c: &mut Criterion) {
     let mut group = c.benchmark_group("full_game");
     group.sample_size(100); // Reduce sample size as full games take longer
 
-    for &size in [8u8, 16, 32,64, 200].iter() {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(size),
-            &size,
-            |b, &size| {
-                b.iter_with_setup(
-                    || {
-                        // Create symmetric game with size × size dimensions
-                        GameState::new_symmetric(
-                            Some(size),
-                            Some(size),
-                            Some((size as u16 * size as u16) / 4), // Use 25% of cells for cheese
-                            Some(random::<u64>()) // New random seed each time
-                        )
-                    },
-                    |mut game| {
-                        while !black_box(game.process_turn(
-                            unsafe { std::mem::transmute(rand::random::<u8>() % 5) },
-                            unsafe { std::mem::transmute(rand::random::<u8>() % 5) }
-                        )).game_over {}
-                    }
-                );
-            }
-        );
+    for &size in [8u8, 16, 32, 64, 200].iter() {
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+            b.iter_with_setup(
+                || {
+                    // Create symmetric game with size × size dimensions
+                    GameState::new_symmetric(
+                        Some(size),
+                        Some(size),
+                        Some((size as u16 * size as u16) / 4), // Use 25% of cells for cheese
+                        Some(random::<u64>()),                 // New random seed each time
+                    )
+                },
+                |mut game| {
+                    while !black_box(game.process_turn(
+                        unsafe { std::mem::transmute(rand::random::<u8>() % 5) },
+                        unsafe { std::mem::transmute(rand::random::<u8>() % 5) },
+                    ))
+                    .game_over
+                    {}
+                },
+            );
+        });
     }
     group.finish();
 }
@@ -196,30 +161,23 @@ fn bench_full_game(c: &mut Criterion) {
 fn bench_mud_movement(c: &mut Criterion) {
     let mut group = c.benchmark_group("mud_movement");
 
-    for size in [8u8, 16, 32,64,200].iter() {
-        group.bench_with_input(
-            BenchmarkId::from_parameter(size),
-            size,
-            |b, &size| {
-                // Create game with high mud density
-                let game = create_benchmark_game(
-                    size,
-                    0,  // No cheese
-                    (size as usize * size as usize) / 4  // 25% mud coverage
-                );
+    for size in [8u8, 16, 32, 64, 200].iter() {
+        group.bench_with_input(BenchmarkId::from_parameter(size), size, |b, &size| {
+            // Create game with high mud density
+            let game = create_benchmark_game(
+                size,
+                0,                                   // No cheese
+                (size as usize * size as usize) / 4, // 25% mud coverage
+            );
 
-                b.iter(|| {
-                    let mut game_copy = game.clone();
-                    // Process several moves to ensure mud interaction
-                    for _ in 0..5 {
-                        black_box(game_copy.process_turn(
-                            Direction::Right,
-                            Direction::Left
-                        ));
-                    }
-                });
-            }
-        );
+            b.iter(|| {
+                let mut game_copy = game.clone();
+                // Process several moves to ensure mud interaction
+                for _ in 0..5 {
+                    black_box(game_copy.process_turn(Direction::Right, Direction::Left));
+                }
+            });
+        });
     }
     group.finish();
 }

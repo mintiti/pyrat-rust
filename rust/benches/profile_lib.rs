@@ -1,7 +1,7 @@
 //! Profiling utilities for PyRat engine performance analysis
-use std::time::Instant;
+use pyrat::{Direction, GameState};
 use rand::Rng;
-use pyrat::{GameState, Direction};  // Adjust the crate name as needed
+use std::time::Instant; // Adjust the crate name as needed
 
 /// Configuration for profiling runs
 #[derive(Clone, Debug)]
@@ -75,10 +75,10 @@ pub fn run_profiling(config: ProfilingConfig) -> ProfilingStats {
 
         // Play random moves until game ends
         let mut moves = 0;
-        while !game.process_turn(
-            random_direction(&mut rng),
-            random_direction(&mut rng),
-        ).game_over {
+        while !game
+            .process_turn(random_direction(&mut rng), random_direction(&mut rng))
+            .game_over
+        {
             moves += 1;
         }
 

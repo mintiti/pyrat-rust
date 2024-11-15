@@ -1,15 +1,14 @@
-use pyo3::prelude::*;
-use pyo3::exceptions::PyValueError;
-use pyo3::types::PyDict;
 use numpy::IntoPyArray;
+use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
+use pyo3::types::PyDict;
 
-use crate::game::{
-    game::GameState,
-    types::Direction,
-};
+use crate::game::{game_logic::GameState, types::Direction};
 
+type StepResult = PyResult<(Py<PyDict>, Vec<f32>, bool, bool, Py<PyDict>)>;
 /// Python-facing PyRat environment
 #[pyclass]
+#[allow(clippy::module_name_repetitions)]
 pub struct PyRatEnv {
     game: GameState,
     action_space: Vec<Direction>,
@@ -30,7 +29,7 @@ impl PyRatEnv {
         height: Option<u8>,
         cheese_count: Option<u16>,
         symmetric: bool,
-        seed: Option<u64>
+        seed: Option<u64>,
     ) -> Self {
         let game = if symmetric {
             GameState::new_symmetric(width, height, cheese_count, seed)
@@ -57,14 +56,14 @@ impl PyRatEnv {
                 Some(self.game.width()),
                 Some(self.game.height()),
                 Some(self.game.total_cheese()),
-                Some(seed)
+                Some(seed),
             )
         } else {
             GameState::new_symmetric(
                 Some(self.game.width()),
                 Some(self.game.height()),
                 Some(self.game.total_cheese()),
-                None
+                None,
             )
         };
 
@@ -77,15 +76,20 @@ impl PyRatEnv {
     }
 
     /// Execute one step of the environment
-    fn step(&mut self, actions: Vec<usize>) -> PyResult<(Py<PyDict>, Vec<f32>, bool, bool, Py<PyDict>)> {
+    #[allow(clippy::needless_pass_by_value)] // Required for PyO3 compatibility
+    fn step(&mut self, actions: Vec<usize>) -> StepResult {
         if actions.len() != 2 {
             return Err(PyValueError::new_err("Must provide exactly 2 actions"));
         }
 
         // Convert action indices to Direction
-        let p1_action = self.action_space.get(actions[0])
+        let p1_action = self
+            .action_space
+            .get(actions[0])
             .ok_or_else(|| PyValueError::new_err("Invalid action for player 1"))?;
-        let p2_action = self.action_space.get(actions[1])
+        let p2_action = self
+            .action_space
+            .get(actions[1])
             .ok_or_else(|| PyValueError::new_err("Invalid action for player 2"))?;
 
         // Process turn
@@ -102,7 +106,13 @@ impl PyRatEnv {
 
             let info = PyDict::new(py);
 
-            Ok((observations.into(), rewards, terminated, truncated, info.into()))
+            Ok((
+                observations.into(),
+                rewards,
+                terminated,
+                truncated,
+                info.into(),
+            ))
         })
     }
 
@@ -130,32 +140,43 @@ impl PyRatEnv {
         obs.set_item("height", self.game.height())?;
 
         // Player positions
-        obs.set_item("player1_pos", (
-            self.game.player1_position().x,
-            self.game.player1_position().y,
-        ))?;
-        obs.set_item("player2_pos", (
-            self.game.player2_position().x,
-            self.game.player2_position().y,
-        ))?;
+        obs.set_item(
+            "player1_pos",
+            (
+                self.game.player1_position().x,
+                self.game.player1_position().y,
+            ),
+        )?;
+        obs.set_item(
+            "player2_pos",
+            (
+                self.game.player2_position().x,
+                self.game.player2_position().y,
+            ),
+        )?;
 
         // Cheese positions as numpy array
         let cheese_positions = self.game.cheese_positions();
-        let cheese_array: Vec<i32> = cheese_positions.iter()
-            .flat_map(|pos| vec![pos.x as i32, pos.y as i32])
+        let cheese_array: Vec<i32> = cheese_positions
+            .iter()
+            .flat_map(|pos| vec![i32::from(pos.x), i32::from(pos.y)])
             .collect();
         obs.set_item("cheese_positions", cheese_array.into_pyarray(py))?;
 
         // Mud positions and values
-        let mud: Vec<(i32, i32, i32, i32, i32)> = self.game.mud_positions()
+        let mud: Vec<(i32, i32, i32, i32, i32)> = self
+            .game
+            .mud_positions()
             .iter()
-            .map(|((from, to), value)| (
-                from.x as i32,
-                from.y as i32,
-                to.x as i32,
-                to.y as i32,
-                *value as i32
-            ))
+            .map(|((from, to), value)| {
+                (
+                    i32::from(from.x),
+                    i32::from(from.y),
+                    i32::from(to.x),
+                    i32::from(to.y),
+                    i32::from(*value),
+                )
+            })
             .collect();
         obs.set_item("mud", mud)?;
 

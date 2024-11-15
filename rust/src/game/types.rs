@@ -5,13 +5,15 @@ pub struct Coordinates {
 }
 
 impl Coordinates {
+    #[must_use]
     #[inline(always)]
-    pub fn new(x: u8, y: u8) -> Self {
+    pub const fn new(x: u8, y: u8) -> Self {
         Self { x, y }
     }
 
+    #[must_use]
     #[inline(always)]
-    pub fn to_index(&self, width: u8) -> usize {
+    pub const fn to_index(&self, width: u8) -> usize {
         (self.y as usize) * (width as usize) + (self.x as usize)
     }
 }
@@ -23,10 +25,8 @@ pub enum Direction {
     Right = 1,
     Down = 2,
     Left = 3,
-    Stay = 4,  // Special case, not stored in move table
+    Stay = 4, // Special case, not stored in move table
 }
-
-
 
 impl Direction {
     /// Apply move in the mathematical coordinate system where:
@@ -34,25 +34,25 @@ impl Direction {
     /// - y increases going up
     /// - (0,0) is at the bottom-left corner
     #[inline(always)]
-    pub(crate) fn apply_to(&self, pos: Coordinates) -> Coordinates {
+    pub(crate) const fn apply_to(&self, pos: Coordinates) -> Coordinates {
         match self {
-            Direction::Up => Coordinates {
+            Self::Up => Coordinates {
                 x: pos.x,
-                y: pos.y.saturating_add(1)  // Up means increasing y
+                y: pos.y.saturating_add(1), // Up means increasing y
             },
-            Direction::Down => Coordinates {
+            Self::Down => Coordinates {
                 x: pos.x,
-                y: pos.y.saturating_sub(1)  // Down means decreasing y
+                y: pos.y.saturating_sub(1), // Down means decreasing y
             },
-            Direction::Left => Coordinates {
+            Self::Left => Coordinates {
                 x: pos.x.saturating_sub(1),
-                y: pos.y
+                y: pos.y,
             },
-            Direction::Right => Coordinates {
+            Self::Right => Coordinates {
                 x: pos.x.saturating_add(1),
-                y: pos.y
+                y: pos.y,
             },
-            Direction::Stay => pos,
+            Self::Stay => pos,
         }
     }
 }
@@ -75,14 +75,14 @@ mod tests {
         fn test_to_index() {
             let test_cases = [
                 // (x, y, width, expected_index)
-                (0, 0, 10, 0),      // Top-left corner
-                (9, 0, 10, 9),      // Top-right corner
-                (0, 9, 10, 90),     // Bottom-left corner
-                (9, 9, 10, 99),     // Bottom-right corner
-                (5, 5, 10, 55),     // Middle
-                (3, 2, 15, 33),     // Non-square board
-                (0, 1, 5, 5),       // Second row start
-                (4, 1, 5, 9),       // Second row end
+                (0, 0, 10, 0),  // Top-left corner
+                (9, 0, 10, 9),  // Top-right corner
+                (0, 9, 10, 90), // Bottom-left corner
+                (9, 9, 10, 99), // Bottom-right corner
+                (5, 5, 10, 55), // Middle
+                (3, 2, 15, 33), // Non-square board
+                (0, 1, 5, 5),   // Second row start
+                (4, 1, 5, 9),   // Second row end
             ];
 
             for (x, y, width, expected) in test_cases {
@@ -91,7 +91,9 @@ mod tests {
                     coord.to_index(width),
                     expected,
                     "Failed for x={}, y={}, width={}",
-                    x, y, width
+                    x,
+                    y,
+                    width
                 );
             }
         }
@@ -126,14 +128,26 @@ mod tests {
             let center = Coordinates::new(5, 5);
 
             // Test all directions from center with mathematical coordinate system
-            assert_eq!(Direction::Up.apply_to(center), Coordinates::new(5, 6),    // Moving up increases y
-                       "Up should increase y coordinate");
-            assert_eq!(Direction::Down.apply_to(center), Coordinates::new(5, 4),  // Moving down decreases y
-                       "Down should decrease y coordinate");
-            assert_eq!(Direction::Left.apply_to(center), Coordinates::new(4, 5),
-                       "Left should decrease x coordinate");
-            assert_eq!(Direction::Right.apply_to(center), Coordinates::new(6, 5),
-                       "Right should increase x coordinate");
+            assert_eq!(
+                Direction::Up.apply_to(center),
+                Coordinates::new(5, 6), // Moving up increases y
+                "Up should increase y coordinate"
+            );
+            assert_eq!(
+                Direction::Down.apply_to(center),
+                Coordinates::new(5, 4), // Moving down decreases y
+                "Down should decrease y coordinate"
+            );
+            assert_eq!(
+                Direction::Left.apply_to(center),
+                Coordinates::new(4, 5),
+                "Left should decrease x coordinate"
+            );
+            assert_eq!(
+                Direction::Right.apply_to(center),
+                Coordinates::new(6, 5),
+                "Right should increase x coordinate"
+            );
             assert_eq!(Direction::Stay.apply_to(center), center);
         }
 
@@ -141,24 +155,42 @@ mod tests {
         fn test_coordinate_system_edges() {
             // Test bottom edge (y = 0)
             let bottom = Coordinates::new(5, 0);
-            assert_eq!(Direction::Down.apply_to(bottom), Coordinates::new(5, 0),
-                       "Down at bottom edge should saturate");
-            assert_eq!(Direction::Up.apply_to(bottom), Coordinates::new(5, 1),
-                       "Up from bottom should increase y");
+            assert_eq!(
+                Direction::Down.apply_to(bottom),
+                Coordinates::new(5, 0),
+                "Down at bottom edge should saturate"
+            );
+            assert_eq!(
+                Direction::Up.apply_to(bottom),
+                Coordinates::new(5, 1),
+                "Up from bottom should increase y"
+            );
 
             // Test top edge (y = 255)
             let top = Coordinates::new(5, 255);
-            assert_eq!(Direction::Up.apply_to(top), Coordinates::new(5, 255),
-                       "Up at top edge should saturate");
-            assert_eq!(Direction::Down.apply_to(top), Coordinates::new(5, 254),
-                       "Down from top should decrease y");
+            assert_eq!(
+                Direction::Up.apply_to(top),
+                Coordinates::new(5, 255),
+                "Up at top edge should saturate"
+            );
+            assert_eq!(
+                Direction::Down.apply_to(top),
+                Coordinates::new(5, 254),
+                "Down from top should decrease y"
+            );
 
             // Test origin behavior
-            let origin = Coordinates::new(0, 0);  // Bottom-left corner
-            assert_eq!(Direction::Down.apply_to(origin), Coordinates::new(0, 0),
-                       "Down from origin should stay at origin");
-            assert_eq!(Direction::Up.apply_to(origin), Coordinates::new(0, 1),
-                       "Up from origin should increase y");
+            let origin = Coordinates::new(0, 0); // Bottom-left corner
+            assert_eq!(
+                Direction::Down.apply_to(origin),
+                Coordinates::new(0, 0),
+                "Down from origin should stay at origin"
+            );
+            assert_eq!(
+                Direction::Up.apply_to(origin),
+                Coordinates::new(0, 1),
+                "Up from origin should increase y"
+            );
         }
 
         #[test]
@@ -167,17 +199,23 @@ mod tests {
             let player1_start = Coordinates::new(0, 9); // Top-right in a 10x10 grid
             let player2_start = Coordinates::new(9, 0); // Bottom-left in a 10x10 grid
 
-            assert_eq!(Direction::Down.apply_to(player1_start), Coordinates::new(0, 8),
-                       "Player1 moving down should decrease y");
-            assert_eq!(Direction::Right.apply_to(player2_start), Coordinates::new(10, 0),
-                       "Player2 moving right should increase x");
+            assert_eq!(
+                Direction::Down.apply_to(player1_start),
+                Coordinates::new(0, 8),
+                "Player1 moving down should decrease y"
+            );
+            assert_eq!(
+                Direction::Right.apply_to(player2_start),
+                Coordinates::new(10, 0),
+                "Player2 moving right should increase x"
+            );
         }
 
         #[test]
         fn test_saturating_behavior() {
             // Tests that the positions get saturated correctly
-            let bottom_left = Coordinates::new(0,0);
-            let upper_right = Coordinates::new(255,255);
+            let bottom_left = Coordinates::new(0, 0);
+            let upper_right = Coordinates::new(255, 255);
 
             assert_eq!(Direction::Up.apply_to(upper_right), upper_right);
             assert_eq!(Direction::Right.apply_to(upper_right), upper_right);
