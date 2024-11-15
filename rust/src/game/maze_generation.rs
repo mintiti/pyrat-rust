@@ -1,21 +1,23 @@
+use crate::Coordinates;
+use rand::prelude::SliceRandom;
 use rand::Rng;
 use std::collections::{HashMap, HashSet};
-use crate::{Coordinates};
-use rand::prelude::SliceRandom;
+
+pub type WallMap = HashMap<Coordinates, Vec<Coordinates>>;
+pub type MudMap = HashMap<(Coordinates, Coordinates), u8>;
 
 /// Configuration for maze generation
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct MazeConfig {
     pub width: u8,
     pub height: u8,
-    pub target_density: f32,  // Probability of not having a wall (0.0 to 1.0)
-    pub connected: bool,      // Whether the maze must be fully connected
-    pub symmetry: bool,       // Whether the maze should be symmetric
-    pub mud_density: f32,     // Probability of mud in valid passages (0.0 to 1.0)
-    pub mud_range: u8,        // Maximum mud value (minimum is 2)
-    pub seed: Option<u64>,    // Optional seed for reproducibility
+    pub target_density: f32, // Probability of not having a wall (0.0 to 1.0)
+    pub connected: bool,     // Whether the maze must be fully connected
+    pub symmetry: bool,      // Whether the maze should be symmetric
+    pub mud_density: f32,    // Probability of mud in valid passages (0.0 to 1.0)
+    pub mud_range: u8,       // Maximum mud value (minimum is 2)
+    pub seed: Option<u64>,   // Optional seed for reproducibility
 }
-
 
 /// Generates a complete maze with all components
 pub struct MazeGenerator {
@@ -27,11 +29,13 @@ pub struct MazeGenerator {
 
 impl MazeGenerator {
     /// Creates a new maze generator with the given configuration
+    #[must_use]
     pub fn new(config: MazeConfig) -> Self {
-        let rng = match config.seed {
-            Some(seed) => rand::SeedableRng::seed_from_u64(seed),
-            None => rand::SeedableRng::from_entropy(),
-        };
+        let rng = config
+            .seed
+            .map_or_else(rand::SeedableRng::from_entropy, |seed| {
+                rand::SeedableRng::seed_from_u64(seed)
+            });
 
         Self {
             config,
@@ -42,7 +46,7 @@ impl MazeGenerator {
     }
 
     /// Generates a complete maze with walls and mud
-    pub fn generate(&mut self) -> (HashMap<Coordinates, Vec<Coordinates>>, HashMap<(Coordinates, Coordinates), u8>) {
+    pub fn generate(&mut self) -> (WallMap, MudMap) {
         self.generate_initial_layout();
 
         if self.config.connected {
@@ -72,12 +76,14 @@ impl MazeGenerator {
 
                 if !self.config.symmetry || not_considered.contains(&current) {
                     // Horizontal connections (exactly as Python)
-                    if i + 1 < self.config.width && self.rng.gen::<f32>() > self.config.target_density {
+                    if i + 1 < self.config.width
+                        && self.rng.gen::<f32>() > self.config.target_density
+                    {
                         let next = Coordinates::new(i + 1, j);
                         let mud_value = if self.rng.gen::<f32>() < self.config.mud_density {
                             self.rng.gen_range(2..=self.config.mud_range)
                         } else {
-                            1  // Python uses 1 for no mud
+                            1 // Python uses 1 for no mud
                         };
 
                         // Add bidirectional connection
@@ -105,7 +111,9 @@ impl MazeGenerator {
                     }
 
                     // Vertical connections (exactly as Python)
-                    if j + 1 < self.config.height && self.rng.gen::<f32>() > self.config.target_density {
+                    if j + 1 < self.config.height
+                        && self.rng.gen::<f32>() > self.config.target_density
+                    {
                         let next = Coordinates::new(i, j + 1);
                         let mud_value = if self.rng.gen::<f32>() < self.config.mud_density {
                             self.rng.gen_range(2..=self.config.mud_range)
@@ -146,7 +154,8 @@ impl MazeGenerator {
 
     /// Ensures the maze is fully connected using a modified DFS algorithm
     fn ensure_connectivity(&mut self) {
-        let mut connected = vec![vec![false; self.config.height as usize]; self.config.width as usize];
+        let mut connected =
+            vec![vec![false; self.config.height as usize]; self.config.width as usize];
         let mut possible_border = Vec::new();
 
         // Start from top-left corner
@@ -158,7 +167,11 @@ impl MazeGenerator {
     }
 
     /// Recursively connects regions of the maze using DFS
-    fn connect_region(&mut self, connected: &mut Vec<Vec<bool>>, possible_border: &mut Vec<Coordinates>) {
+    fn connect_region(
+        &mut self,
+        connected: &mut [Vec<bool>],
+        possible_border: &mut Vec<Coordinates>,
+    ) {
         while !possible_border.is_empty() {
             let mut border = Vec::new();
             let mut new_possible_border = Vec::new();
@@ -170,27 +183,31 @@ impl MazeGenerator {
                 let y = current.y as usize;
 
                 // Check each direction exactly as Python does
-                if current.x + 1 < self.config.width &&
-                    !self.has_connection(current, Coordinates::new(current.x + 1, current.y)) &&
-                    !connected[(current.x + 1) as usize][y] {
+                if current.x + 1 < self.config.width
+                    && !self.has_connection(current, Coordinates::new(current.x + 1, current.y))
+                    && !connected[(current.x + 1) as usize][y]
+                {
                     border.push((current, Coordinates::new(current.x + 1, current.y)));
                     is_candidate = true;
                 }
-                if current.x > 0 &&
-                    !self.has_connection(current, Coordinates::new(current.x - 1, current.y)) &&
-                    !connected[(current.x - 1) as usize][y] {
+                if current.x > 0
+                    && !self.has_connection(current, Coordinates::new(current.x - 1, current.y))
+                    && !connected[(current.x - 1) as usize][y]
+                {
                     border.push((current, Coordinates::new(current.x - 1, current.y)));
                     is_candidate = true;
                 }
-                if current.y + 1 < self.config.height &&
-                    !self.has_connection(current, Coordinates::new(current.x, current.y + 1)) &&
-                    !connected[x][(current.y + 1) as usize] {
+                if current.y + 1 < self.config.height
+                    && !self.has_connection(current, Coordinates::new(current.x, current.y + 1))
+                    && !connected[x][(current.y + 1) as usize]
+                {
                     border.push((current, Coordinates::new(current.x, current.y + 1)));
                     is_candidate = true;
                 }
-                if current.y > 0 &&
-                    !self.has_connection(current, Coordinates::new(current.x, current.y - 1)) &&
-                    !connected[x][(current.y - 1) as usize] {
+                if current.y > 0
+                    && !self.has_connection(current, Coordinates::new(current.x, current.y - 1))
+                    && !connected[x][(current.y - 1) as usize]
+                {
                     border.push((current, Coordinates::new(current.x, current.y - 1)));
                     is_candidate = true;
                 }
@@ -245,7 +262,8 @@ impl MazeGenerator {
     }
     #[inline]
     fn has_connection(&self, from: Coordinates, to: Coordinates) -> bool {
-        self.walls.get(&from)
+        self.walls
+            .get(&from)
             .map_or(false, |connections| connections.contains(&to))
     }
 
@@ -297,19 +315,20 @@ impl MazeGenerator {
 
     /// Gets the symmetric position for a given coordinate
     #[inline(always)]
-    fn get_symmetric(&self, pos: Coordinates) -> Coordinates {
+    const fn get_symmetric(&self, pos: Coordinates) -> Coordinates {
         Coordinates::new(
             self.config.width - 1 - pos.x,
-            self.config.height - 1 - pos.y
+            self.config.height - 1 - pos.y,
         )
     }
 
     /// Checks if a cell is on the border of the maze
     #[inline(always)]
-    fn is_border_cell(&self, pos: Coordinates) -> bool {
-        pos.x == 0 || pos.y == 0 ||
-            pos.x == self.config.width - 1 ||
-            pos.y == self.config.height - 1
+    const fn is_border_cell(&self, pos: Coordinates) -> bool {
+        pos.x == 0
+            || pos.y == 0
+            || pos.x == self.config.width - 1
+            || pos.y == self.config.height - 1
     }
 
     /// Gets all valid neighboring cells
@@ -317,12 +336,16 @@ impl MazeGenerator {
         let mut neighbors = Vec::new();
         let directions = [(0, 1), (1, 0), (0, -1), (-1, 0)];
 
-        for (dx, dy) in directions.iter() {
-            let new_x = pos.x as i32 + dx;
-            let new_y = pos.y as i32 + dy;
+        #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+        for (dx, dy) in &directions {
+            let new_x = i32::from(pos.x) + dx;
+            let new_y = i32::from(pos.y) + dy;
 
-            if new_x >= 0 && new_x < self.config.width as i32 &&
-                new_y >= 0 && new_y < self.config.height as i32 {
+            if new_x >= 0
+                && new_x < i32::from(self.config.width)
+                && new_y >= 0
+                && new_y < i32::from(self.config.height)
+            {
                 neighbors.push(Coordinates::new(new_x as u8, new_y as u8));
             }
         }
@@ -333,15 +356,17 @@ impl MazeGenerator {
     /// Checks if a cell has any connections
     #[inline(always)]
     fn has_any_connection(&self, pos: Coordinates) -> bool {
-        self.walls.get(&pos).map_or(false, |connections| !connections.is_empty())
+        self.walls
+            .get(&pos)
+            .map_or(false, |connections| !connections.is_empty())
     }
 }
 
 /// Cheese placement configuration
 #[derive(Debug, Clone)]
 pub struct CheeseConfig {
-    pub count: u16,        // Number of cheese pieces to place
-    pub symmetry: bool,    // Whether cheese placement should be symmetric
+    pub count: u16,     // Number of cheese pieces to place
+    pub symmetry: bool, // Whether cheese placement should be symmetric
 }
 
 pub struct CheeseGenerator {
@@ -352,11 +377,11 @@ pub struct CheeseGenerator {
 }
 
 impl CheeseGenerator {
+    #[must_use]
     pub fn new(config: CheeseConfig, width: u8, height: u8, seed: Option<u64>) -> Self {
-        let rng = match seed {
-            Some(seed) => rand::SeedableRng::seed_from_u64(seed),
-            None => rand::SeedableRng::from_entropy(),
-        };
+        let rng = seed.map_or_else(rand::SeedableRng::from_entropy, |seed| {
+            rand::SeedableRng::seed_from_u64(seed)
+        });
 
         Self {
             config,
@@ -366,7 +391,11 @@ impl CheeseGenerator {
         }
     }
 
-    /// Generates cheese placements, ensuring they don't overlap with player positions
+    /// Generate cheese placements.
+    ///
+    /// # Panics
+    /// - When attempting to place odd number of cheese in symmetric maze with even dimensions
+    /// - When requesting more cheese pieces than available positions in the maze
     pub fn generate(
         &mut self,
         player1_pos: Coordinates,
@@ -376,16 +405,15 @@ impl CheeseGenerator {
         let mut remaining = self.config.count;
 
         // Handle center piece for odd counts in symmetric mazes
-        if self.config.symmetry {
-            if remaining % 2 == 1 {
-                if self.width % 2 == 0 || self.height % 2 == 0 {
-                    panic!("Cannot place odd number of cheese in symmetric maze with even dimensions");
-                }
-                let center = Coordinates::new(self.width / 2, self.height / 2);
-                if center != player1_pos && center != player2_pos {
-                    pieces.push(center);
-                    remaining -= 1;
-                }
+        if self.config.symmetry && remaining % 2 == 1 {
+            assert!(
+                !(self.width % 2 == 0 || self.height % 2 == 0),
+                "Cannot place odd number of cheese in symmetric maze with even dimensions"
+            );
+            let center = Coordinates::new(self.width / 2, self.height / 2);
+            if center != player1_pos && center != player2_pos {
+                pieces.push(center);
+                remaining -= 1;
             }
         }
 
@@ -396,10 +424,11 @@ impl CheeseGenerator {
         for x in 0..self.width {
             for y in 0..self.height {
                 let pos = Coordinates::new(x, y);
-                if (!self.config.symmetry || !considered.contains(&pos)) &&
-                    pos != player1_pos &&
-                    pos != player2_pos &&
-                    pos != self.get_symmetric(pos) {
+                if (!self.config.symmetry || !considered.contains(&pos))
+                    && pos != player1_pos
+                    && pos != player2_pos
+                    && pos != self.get_symmetric(pos)
+                {
                     candidates.push(pos);
                     if self.config.symmetry {
                         considered.insert(pos);
@@ -425,20 +454,18 @@ impl CheeseGenerator {
             }
         }
 
-        if remaining > 0 {
-            panic!("Too many pieces of cheese for maze dimensions");
-        }
+        assert!(
+            remaining == 0,
+            "Too many pieces of cheese for maze dimensions"
+        );
 
         pieces
     }
 
     /// Gets the symmetric position for a given coordinate
     #[inline(always)]
-    fn get_symmetric(&self, pos: Coordinates) -> Coordinates {
-        Coordinates::new(
-            self.width - 1 - pos.x,
-            self.height - 1 - pos.y
-        )
+    const fn get_symmetric(&self, pos: Coordinates) -> Coordinates {
+        Coordinates::new(self.width - 1 - pos.x, self.height - 1 - pos.y)
     }
 }
 
@@ -470,7 +497,7 @@ mod tests {
     #[test]
     fn test_symmetric_maze_generation() {
         let config = MazeConfig {
-            width: 11,  // Odd dimensions for symmetry
+            width: 11, // Odd dimensions for symmetry
             height: 11,
             target_density: 0.7,
             connected: true,
@@ -485,32 +512,20 @@ mod tests {
 
         // Check symmetry
         for (from, connections) in walls.iter() {
-            let sym_from = Coordinates::new(
-                config.width - 1 - from.x,
-                config.height - 1 - from.y
-            );
+            let sym_from = Coordinates::new(config.width - 1 - from.x, config.height - 1 - from.y);
             let sym_connections = walls.get(&sym_from).unwrap();
 
             // Check that symmetric connections exist
             for to in connections {
-                let sym_to = Coordinates::new(
-                    config.width - 1 - to.x,
-                    config.height - 1 - to.y
-                );
+                let sym_to = Coordinates::new(config.width - 1 - to.x, config.height - 1 - to.y);
                 assert!(sym_connections.contains(&sym_to));
             }
         }
 
         // Check mud symmetry
         for ((from, to), value) in mud.iter() {
-            let sym_from = Coordinates::new(
-                config.width - 1 - from.x,
-                config.height - 1 - from.y
-            );
-            let sym_to = Coordinates::new(
-                config.width - 1 - to.x,
-                config.height - 1 - to.y
-            );
+            let sym_from = Coordinates::new(config.width - 1 - from.x, config.height - 1 - from.y);
+            let sym_to = Coordinates::new(config.width - 1 - to.x, config.height - 1 - to.y);
             assert_eq!(mud.get(&(sym_from, sym_to)), Some(value));
         }
     }
@@ -520,7 +535,7 @@ mod tests {
         let config = MazeConfig {
             width: 8,
             height: 8,
-            target_density: 0.3,  // Lower density means more connections
+            target_density: 0.3, // Lower density means more connections
             connected: true,
             symmetry: false,
             mud_density: 0.2,
@@ -601,7 +616,7 @@ mod tests {
     #[test]
     fn test_symmetric_cheese_placement() {
         let config = CheeseConfig {
-            count: 5,  // Odd number
+            count: 5, // Odd number
             symmetry: true,
         };
         let width = 7;
@@ -619,7 +634,8 @@ mod tests {
         // Verify symmetry
         for piece in &cheese {
             let symmetric = generator.get_symmetric(*piece);
-            if *piece != symmetric {  // Ignore center piece
+            if *piece != symmetric {
+                // Ignore center piece
                 assert!(cheese.contains(&symmetric));
             }
         }
@@ -629,16 +645,16 @@ mod tests {
     #[should_panic(expected = "Cannot place odd number of cheese")]
     fn test_invalid_symmetric_cheese() {
         let config = CheeseConfig {
-            count: 5,  // Odd number
+            count: 5, // Odd number
             symmetry: true,
         };
-        let width = 6;  // Even dimensions
+        let width = 6; // Even dimensions
         let height = 6;
         let p1 = Coordinates::new(0, 0);
         let p2 = Coordinates::new(5, 5);
 
         let mut generator = CheeseGenerator::new(config, width, height, Some(42));
-        generator.generate(p1, p2);  // Should panic
+        generator.generate(p1, p2); // Should panic
     }
 
     #[test]
@@ -655,8 +671,14 @@ mod tests {
         let mut generator = CheeseGenerator::new(config, width, height, Some(42));
         let cheese = generator.generate(p1, p2);
 
-        assert!(!cheese.contains(&p1), "Cheese should not be placed on player 1");
-        assert!(!cheese.contains(&p2), "Cheese should not be placed on player 2");
+        assert!(
+            !cheese.contains(&p1),
+            "Cheese should not be placed on player 1"
+        );
+        assert!(
+            !cheese.contains(&p2),
+            "Cheese should not be placed on player 2"
+        );
     }
 
     #[test]
@@ -665,7 +687,7 @@ mod tests {
         let width = 5;
         let height = 5;
         let config = CheeseConfig {
-            count: 1000,  // More than possible positions
+            count: 1000, // More than possible positions
             symmetry: false,
         };
 
@@ -673,7 +695,7 @@ mod tests {
         let player2_pos = Coordinates::new(width - 1, height - 1);
 
         let mut generator = CheeseGenerator::new(config, width, height, Some(42));
-        generator.generate(player1_pos, player2_pos);  // Should panic
+        generator.generate(player1_pos, player2_pos); // Should panic
     }
 
     #[test]
@@ -684,7 +706,7 @@ mod tests {
             target_density: 0.7,
             connected: true,
             symmetry: false,
-            mud_density: 1.0,  // Always generate mud
+            mud_density: 1.0, // Always generate mud
             mud_range: 3,
             seed: Some(42),
         };

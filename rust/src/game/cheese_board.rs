@@ -5,14 +5,16 @@ pub struct CheeseBoard {
     // Each u64 represents 64 cells
     bits: Vec<u64>,
     width: u8,
-    initial_cheese_count: u16,  // Total number of cheese pieces at start
+    initial_cheese_count: u16,   // Total number of cheese pieces at start
     remaining_cheese_count: u16, // Current number of remaining pieces
 }
 
 impl CheeseBoard {
+    #[must_use]
+    #[inline(always)]
     pub fn new(width: u8, height: u8) -> Self {
         let total_cells = width as usize * height as usize;
-        let size = (total_cells + 63) / 64;  // Round up to nearest 64 cells
+        let size = (total_cells + 63) / 64; // Round up to nearest 64 cells
         Self {
             bits: vec![0; size],
             width,
@@ -21,6 +23,7 @@ impl CheeseBoard {
         }
     }
 
+    #[must_use]
     #[inline(always)]
     pub fn has_cheese(&self, pos: Coordinates) -> bool {
         let idx = pos.to_index(self.width);
@@ -49,7 +52,7 @@ impl CheeseBoard {
     }
 
     /// Special method for restoring cheese during unmake operations
-    /// This only affects remaining_cheese_count, not initial_cheese_count
+    /// This only affects `remaining_cheese_count`, not `initial_cheese_count`
     #[inline]
     pub fn restore_cheese(&mut self, pos: Coordinates) -> bool {
         let idx = pos.to_index(self.width);
@@ -84,31 +87,40 @@ impl CheeseBoard {
     }
 
     /// Returns the initial number of cheese pieces placed
+    #[must_use]
     #[inline(always)]
-    pub fn total_cheese(&self) -> u16 {
+    pub const fn total_cheese(&self) -> u16 {
         self.initial_cheese_count
     }
 
     /// Returns the current number of cheese pieces remaining
+    #[must_use]
     #[inline(always)]
-    pub fn remaining_cheese(&self) -> u16 {
+    pub const fn remaining_cheese(&self) -> u16 {
         self.remaining_cheese_count
     }
 
-    /// Get a vector of all cheese positions - useful for initialization and debugging
+    /// Returns a vector of all cheese positions.
+    ///
+    /// # Panics
+    /// May panic if internal index calculations overflow u8 bounds.
+    /// This should never happen with valid board dimensions.
+    #[must_use]
     pub fn get_all_cheese_positions(&self) -> Vec<Coordinates> {
         let mut positions = Vec::with_capacity(self.remaining_cheese_count as usize);
 
         for word_idx in 0..self.bits.len() {
             let mut word = self.bits[word_idx];
-            if word == 0 { continue; }  // Skip empty words
+            if word == 0 {
+                continue;
+            } // Skip empty words
 
             let base_idx = word_idx * 64;
             while word != 0 {
                 let trailing_zeros = word.trailing_zeros() as usize;
                 let idx = base_idx + trailing_zeros;
-                let x = (idx % self.width as usize) as u8;
-                let y = (idx / self.width as usize) as u8;
+                let x = u8::try_from(idx % self.width as usize).unwrap();
+                let y = u8::try_from(idx / self.width as usize).unwrap();
 
                 positions.push(Coordinates::new(x, y));
 
@@ -121,7 +133,7 @@ impl CheeseBoard {
     }
 
     /// Count cheese in a specific area - useful for heuristics
-    #[inline]
+    #[must_use]
     pub fn count_cheese_in_area(&self, top_left: Coordinates, bottom_right: Coordinates) -> u16 {
         let mut count = 0;
 
@@ -174,8 +186,8 @@ mod tests {
 
         // Take one cheese
         assert!(board.take_cheese(Coordinates::new(1, 1)));
-        assert_eq!(board.total_cheese(), 3);  // Total should stay the same
-        assert_eq!(board.remaining_cheese(), 2);  // Remaining should decrease
+        assert_eq!(board.total_cheese(), 3); // Total should stay the same
+        assert_eq!(board.remaining_cheese(), 2); // Remaining should decrease
     }
 
     #[test]
@@ -195,8 +207,8 @@ mod tests {
 
         // Remove cheese
         assert!(board.take_cheese(pos));
-        assert_eq!(board.total_cheese(), 1);  // Total unchanged
-        assert_eq!(board.remaining_cheese(), 0);  // Remaining decremented
+        assert_eq!(board.total_cheese(), 1); // Total unchanged
+        assert_eq!(board.remaining_cheese(), 0); // Remaining decremented
 
         // Try removing again (should fail)
         assert!(!board.take_cheese(pos));
@@ -215,13 +227,13 @@ mod tests {
 
         // Take cheese
         assert!(board.take_cheese(pos));
-        assert_eq!(board.total_cheese(), 1);  // Total unchanged
+        assert_eq!(board.total_cheese(), 1); // Total unchanged
         assert_eq!(board.remaining_cheese(), 0);
 
         // Restore cheese
         assert!(board.restore_cheese(pos));
-        assert_eq!(board.total_cheese(), 1);  // Total should still be unchanged
-        assert_eq!(board.remaining_cheese(), 1);  // Remaining should be restored
+        assert_eq!(board.total_cheese(), 1); // Total should still be unchanged
+        assert_eq!(board.remaining_cheese(), 1); // Remaining should be restored
 
         // Try to restore again (should fail)
         assert!(!board.restore_cheese(pos));

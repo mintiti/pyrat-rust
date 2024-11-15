@@ -1,5 +1,5 @@
-use crate::benches::profile_lib::{ProfilingConfig, run_profiling, print_profiling_results};
-use pyrat::{GameState, Direction};
+use crate::benches::profile_lib::{print_profiling_results, run_profiling, ProfilingConfig};
+use pyrat::{Direction, GameState};
 use rand::Rng;
 
 #[path = "../mod.rs"]
@@ -35,7 +35,7 @@ fn main() {
         Some(21),
         Some(15),
         Some(41),
-        Some(42),  // Fixed seed for reproducibility
+        Some(42), // Fixed seed for reproducibility
     );
 
     // Pre-generate random moves
@@ -55,10 +55,10 @@ fn main() {
         let mut game_copy = game.clone();
         let mut game_moves = 0;
 
-        while !game_copy.process_turn(
-            random_moves[move_idx].0,
-            random_moves[move_idx].1,
-        ).game_over {
+        while !game_copy
+            .process_turn(random_moves[move_idx].0, random_moves[move_idx].1)
+            .game_over
+        {
             game_moves += 1;
             move_idx += 1;
             if move_idx >= random_moves.len() {
@@ -76,6 +76,9 @@ fn main() {
     println!("Total moves: {}", total_moves);
     println!("Time: {:.2}s", elapsed.as_secs_f64());
     println!("Moves per second: {:.2}", moves_per_sec);
-    println!("Average game length: {:.2}", total_moves as f64 / iterations as f64);
+    println!(
+        "Average game length: {:.2}",
+        total_moves as f64 / iterations as f64
+    );
     println!("============================");
 }

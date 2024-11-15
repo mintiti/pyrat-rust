@@ -1,5 +1,4 @@
-"""
-PyRat - High-performance PyRat game environment
+"""PyRat - High-performance PyRat game environment
 
 This package provides a fast implementation of the PyRat game,
 with both raw game engine access and PettingZoo-compatible interfaces.
