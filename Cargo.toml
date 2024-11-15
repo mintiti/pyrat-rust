@@ -48,3 +48,8 @@ flame = ["dep:flame"]  # Changed from flame_it to flame
 name = "pyrat"
 module-name = "pyrat._rust"  # Python module will be importable as pyrat._rust
 python-source = "python"
+
+[lints.clippy]
+# Enable useful lint groups
+pedantic = "warn"
+nursery = "warn"
