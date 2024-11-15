@@ -1,0 +1,72 @@
+repos:
+  # Generic checks
+  -   repo: https://github.com/pre-commit/pre-commit-hooks
+      rev: v4.5.0
+      hooks:
+        -   id: trailing-whitespace
+        -   id: end-of-file-fixer
+        -   id: check-yaml
+        -   id: check-toml
+        -   id: check-added-large-files
+        -   id: debug-statements
+
+  # Python linting/formatting
+  -   repo: https://github.com/astral-sh/ruff-pre-commit
+      rev: v0.7.3
+      hooks:
+        -   id: ruff
+            args: [--fix]
+            types_or: [python, pyi]
+            files: ^python/
+        -   id: ruff-format
+            types_or: [python, pyi]
+            files: ^python/
+
+  # Python type checking
+  -   repo: https://github.com/pre-commit/mirrors-mypy
+      rev: v1.8.0
+      hooks:
+        -   id: mypy
+            files: ^python/
+            additional_dependencies:
+              - gymnasium>=0.29.0
+              - pettingzoo>=1.24.0
+
+  # Rust checks
+  -   repo: local
+      hooks:
+        -   id: fmt
+            name: cargo fmt
+            description: Format Rust code
+            entry: cargo fmt --all
+            language: system
+            types: [rust]
+            pass_filenames: false
+
+        -   id: clippy
+            name: cargo clippy
+            description: Lint Rust code
+            entry: cargo clippy -- -D warnings
+            language: system
+            types: [rust]
+            pass_filenames: false
+
+  # Tests
+  -   repo: local
+      hooks:
+        -   id: pytest
+            name: pytest
+            entry: pytest
+            language: system
+            pass_filenames: false
+            always_run: true
+            stages: [pre-push]  # Only run on push, not on every commit
+
+  -   repo: local
+      hooks:
+        -   id: cargo-bench
+            name: cargo bench
+            entry: cargo bench
+            language: system
+            pass_filenames: false
+            stages: [pre-push]

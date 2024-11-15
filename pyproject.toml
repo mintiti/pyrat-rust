@@ -7,15 +7,11 @@ name = "pyrat"
 version = "0.1.0"
 description = "High-performance PyRat game environment"
 authors = [
-    {name = "Another person"},
+    {name = "Minh Tri Truong"},
 ]
 readme = "README.md"
 requires-python = ">=3.8"
-dependencies = [
-    "numpy>=1.20.0",
-    "gymnasium>=1.0.0",
-    "pettingzoo>=1.24.0"
-]
+
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Science/Research",
@@ -33,6 +29,76 @@ features = ["pyo3/extension-module"]
 python-source = "python"
 module-name = "pyrat._rust"
 
+
+dependencies = [
+    "numpy>=1.20.0",
+    "gymnasium>=1.0.0",
+    "pettingzoo>=1.24.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.2.0",
+    "mypy>=1.8.0",
+    "pre-commit>=3.5.0",
+]
+
+[tool.ruff]
+line-length = 88
+target-version = "py38"
+
+# Enable all rules by default, then configure specific rules
+# Select a set of standard rules that cover most common cases
+lint.select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "B",   # flake8-bugbear
+    "I",   # isort
+    "C",   # flake8-comprehensions
+    "N",   # pep8-naming
+    "UP",  # pyupgrade (keeps code modern)
+    "PL",  # pylint
+    "RUF", # ruff-specific rules
+    "TID", # flake8-tidy-imports
+    "TCH", # flake8-type-checking
+    "ERA", # eradicate (commented-out code)
+]
+
+# Ignore some common annoyances
+lint.ignore = [
+    "E501",      # Line too long (handled by formatter)
+    "PLR0913",   # Too many arguments to function call
+    "B008",      # Do not perform function call in argument defaults
+]
+
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.mypy]
+python_version = "3.8"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+warn_unreachable = true
+
 [tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q --cov=pyrat --cov-report=term-missing"
 testpaths = ["python/tests"]
 python_files = ["test_*.py"]
