@@ -1,4 +1,3 @@
-use crate::benches::profile_lib::{print_profiling_results, run_profiling, ProfilingConfig};
 use pyrat::{Direction, GameState};
 use rand::Rng;
 

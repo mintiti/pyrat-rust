@@ -23,6 +23,6 @@ use pyo3::prelude::*;
 #[pymodule]
 fn _rust(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     // Register all Python-facing types and functions
-    bindings::env::register_module(m)?;
+    bindings::register_module(m)?;
     Ok(())
 }

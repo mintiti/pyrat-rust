@@ -1,5 +1,6 @@
 use crate::game::maze_generation::{CheeseConfig, CheeseGenerator, MazeConfig, MazeGenerator};
 use crate::{CheeseBoard, Coordinates, Direction, MoveTable};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// Stores the state of a player including their movement status
@@ -25,26 +26,26 @@ impl PlayerState {
     }
 }
 /// Records what happened in a move for unmake purposes
-#[derive(Clone)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct MoveUndo {
     // Player 1 state
-    p1_pos: Coordinates,
-    p1_target: Coordinates,
-    p1_mud: u8,
-    p1_score: f32,
-    p1_misses: u16,
+    pub(crate) p1_pos: Coordinates,
+    pub(crate) p1_target: Coordinates,
+    pub(crate) p1_mud: u8,
+    pub(crate) p1_score: f32,
+    pub(crate) p1_misses: u16,
 
     // Player 2 state
-    p2_pos: Coordinates,
-    p2_target: Coordinates,
-    p2_mud: u8,
-    p2_score: f32,
-    p2_misses: u16,
+    pub(crate) p2_pos: Coordinates,
+    pub(crate) p2_target: Coordinates,
+    pub(crate) p2_mud: u8,
+    pub(crate) p2_score: f32,
+    pub(crate) p2_misses: u16,
 
     // Cheese collected this move
-    collected_cheese: Vec<Coordinates>,
+    pub(crate) collected_cheese: Vec<Coordinates>,
 
-    turn: u16,
+    pub(crate) turn: u16,
 }
 
 #[derive(Clone)]
@@ -526,6 +527,20 @@ impl GameState {
     #[inline(always)]
     pub const fn height(&self) -> u8 {
         self.height
+    }
+
+    /// Get the current number of turns
+    #[must_use]
+    #[inline(always)]
+    pub const fn turns(&self) -> u16 {
+        self.turn
+    }
+
+    /// Get the maximum number of turns
+    #[must_use]
+    #[inline(always)]
+    pub const fn max_turns(&self) -> u16 {
+        self.max_turns
     }
 
     /// Get player 1's current position
