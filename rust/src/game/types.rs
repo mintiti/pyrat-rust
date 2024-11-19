@@ -1,4 +1,6 @@
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Deserialize, Serialize)]
 pub struct Coordinates {
     pub x: u8,
     pub y: u8,
@@ -53,6 +55,21 @@ impl Direction {
                 y: pos.y,
             },
             Self::Stay => pos,
+        }
+    }
+}
+
+impl TryFrom<u8> for Direction {
+    type Error = &'static str;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::Up),
+            1 => Ok(Self::Right),
+            2 => Ok(Self::Down),
+            3 => Ok(Self::Left),
+            4 => Ok(Self::Stay),
+            _ => Err("Invalid direction value"),
         }
     }
 }
