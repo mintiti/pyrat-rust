@@ -3,14 +3,16 @@ use crate::{CheeseBoard, Coordinates, Direction, MoveTable};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use crate::game::types::MudMap;
+
 /// Stores the state of a player including their movement status
 #[derive(Clone)]
-struct PlayerState {
-    current_pos: Coordinates, // Position where player is visible/started move
-    target_pos: Coordinates,  // Position player is moving to if in mud
-    mud_timer: u8,            // Turns remaining in mud, 0 if not in mud
-    score: f32,
-    misses: u16, // Counter for missed moves
+pub struct PlayerState {
+    pub current_pos: Coordinates, // Position where player is visible/started move
+    pub target_pos: Coordinates,  // Position player is moving to if in mud
+    pub mud_timer: u8,            // Turns remaining in mud, 0 if not in mud
+    pub score: f32,
+    pub misses: u16, // Counter for missed moves
 }
 
 impl PlayerState {
@@ -29,36 +31,36 @@ impl PlayerState {
 #[derive(Clone, Deserialize, Serialize)]
 pub struct MoveUndo {
     // Player 1 state
-    pub(crate) p1_pos: Coordinates,
-    pub(crate) p1_target: Coordinates,
-    pub(crate) p1_mud: u8,
-    pub(crate) p1_score: f32,
-    pub(crate) p1_misses: u16,
+    pub p1_pos: Coordinates,
+    pub p1_target: Coordinates,
+    pub p1_mud: u8,
+    pub p1_score: f32,
+    pub p1_misses: u16,
 
     // Player 2 state
-    pub(crate) p2_pos: Coordinates,
-    pub(crate) p2_target: Coordinates,
-    pub(crate) p2_mud: u8,
-    pub(crate) p2_score: f32,
-    pub(crate) p2_misses: u16,
+    pub p2_pos: Coordinates,
+    pub p2_target: Coordinates,
+    pub p2_mud: u8,
+    pub p2_score: f32,
+    pub p2_misses: u16,
 
     // Cheese collected this move
-    pub(crate) collected_cheese: Vec<Coordinates>,
+    pub collected_cheese: Vec<Coordinates>,
 
-    pub(crate) turn: u16,
+    pub turn: u16,
 }
 
 #[derive(Clone)]
 pub struct GameState {
-    width: u8,
-    height: u8,
-    move_table: MoveTable,
-    player1: PlayerState,
-    player2: PlayerState,
-    pub mud: HashMap<(Coordinates, Coordinates), u8>,
+    pub width: u8,
+    pub height: u8,
+    pub move_table: MoveTable,
+    pub player1: PlayerState,
+    pub player2: PlayerState,
+    pub mud: MudMap,
     pub cheese: CheeseBoard,
-    turn: u16,
-    max_turns: u16,
+    pub turn: u16,
+    pub max_turns: u16,
 }
 
 impl GameState {
@@ -107,7 +109,7 @@ impl GameState {
             move_table,
             player1,
             player2,
-            mud: HashMap::new(), // Start with no mud
+            mud: MudMap::new(),
             cheese: CheeseBoard::new(width, height),
             turn: 0,
             max_turns,
@@ -150,8 +152,10 @@ impl GameState {
         let mut game =
             Self::new_with_positions(width, height, walls, max_turns, player1_pos, player2_pos);
 
-        // Add mud
-        game.mud = mud;
+        // Add mud - convert from HashMap to MudMap
+        for ((pos1, pos2), value) in mud {
+            game.mud.insert(pos1, pos2, value);
+        }
 
         // Add cheese
         for &pos in cheese_positions {
@@ -391,8 +395,7 @@ impl GameState {
             // Not in mud - check new position
             let mud_time = self
                 .mud
-                .get(&(self.player1.current_pos, p1_new_pos))
-                .copied()
+                .get(self.player1.current_pos, p1_new_pos)
                 .unwrap_or(0);
             self.player1.mud_timer = mud_time;
             if mud_time <= 1 {
@@ -411,8 +414,7 @@ impl GameState {
         } else if p2_moved {
             let mud_time = self
                 .mud
-                .get(&(self.player2.current_pos, p2_new_pos))
-                .copied()
+                .get(self.player2.current_pos, p2_new_pos)
                 .unwrap_or(0);
 
             self.player2.mud_timer = mud_time;
@@ -587,8 +589,22 @@ impl GameState {
     /// Get all mud positions and their values
     #[must_use]
     #[inline(always)]
-    pub const fn mud_positions(&self) -> &HashMap<(Coordinates, Coordinates), u8> {
+    pub const fn mud_positions(&self) -> &MudMap {
         &self.mud
+    }
+
+    /// Get the mud timer for player 1
+    #[must_use]
+    #[inline(always)]
+    pub const fn player1_mud_turns(&self) -> u8 {
+        self.player1.mud_timer
+    }
+
+    /// Get the mud timer for player 2
+    #[must_use]
+    #[inline(always)]
+    pub const fn player2_mud_turns(&self) -> u8 {
+        self.player2.mud_timer
     }
 }
 
@@ -617,6 +633,8 @@ impl std::fmt::Debug for GameState {
 
 #[cfg(test)]
 mod tests {
+    use crate::game::types::MudMap;
+
     use super::*;
     use std::collections::HashMap;
 
@@ -727,10 +745,6 @@ mod tests {
     fn test_new_symmetric() {
         let game = GameState::new_symmetric(Some(11), Some(11), Some(15), Some(42));
 
-        // Verify symmetry
-        let center_x = game.width / 2;
-        let center_y = game.height / 2;
-
         // Check if cheese placement is symmetric
         let cheese_positions = game.cheese.get_all_cheese_positions();
         for pos in &cheese_positions {
@@ -793,7 +807,7 @@ mod tests {
                 score: 0.0,
                 misses: 0,
             },
-            mud: HashMap::new(),
+            mud: MudMap::new(),
             cheese: CheeseBoard::new(width, height),
             turn: 0,
             max_turns: 300,
@@ -808,7 +822,7 @@ mod tests {
     ) -> GameState {
         let mut game = create_test_game(player1_pos, player2_pos);
         for &(positions, timer) in mud_positions {
-            game.mud.insert(positions, timer);
+            game.mud.insert(positions.0, positions.1, timer);
         }
         game
     }
@@ -1031,7 +1045,8 @@ mod make_unmake_tests {
     fn create_game_with_mud() -> GameState {
         let mut game = GameState::new(3, 3, HashMap::new(), 300);
         game.mud.insert(
-            (Coordinates::new(0, 0), Coordinates::new(0, 1)),
+            Coordinates::new(0, 0),
+            Coordinates::new(0, 1),
             2, // 2 turns of mud
         );
         game
@@ -1185,9 +1200,9 @@ mod make_unmake_tests {
 
         // Add mud for both players
         game.mud
-            .insert((Coordinates::new(0, 0), Coordinates::new(0, 1)), 2);
+            .insert(Coordinates::new(0, 0), Coordinates::new(0, 1), 2);
         game.mud
-            .insert((Coordinates::new(2, 2), Coordinates::new(2, 1)), 3);
+            .insert(Coordinates::new(2, 2), Coordinates::new(2, 1), 3);
 
         let initial_state = game.clone();
 
@@ -1270,7 +1285,7 @@ mod make_unmake_tests {
 
         // Add mud
         game.mud
-            .insert((Coordinates::new(1, 1), Coordinates::new(1, 2)), 2);
+            .insert(Coordinates::new(1, 1), Coordinates::new(1, 2), 2);
 
         let initial_state = game.clone();
         let mut undo_stack = Vec::new();
@@ -1425,7 +1440,8 @@ mod make_unmake_tests {
     fn create_test_game_with_mud() -> GameState {
         let mut game = GameState::new(3, 3, HashMap::new(), 300);
         game.mud.insert(
-            (Coordinates::new(0, 0), Coordinates::new(0, 1)),
+            Coordinates::new(0, 0),
+            Coordinates::new(0, 1),
             2, // 2 turns of mud
         );
         game

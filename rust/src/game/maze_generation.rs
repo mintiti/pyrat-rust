@@ -3,8 +3,9 @@ use rand::prelude::SliceRandom;
 use rand::Rng;
 use std::collections::{HashMap, HashSet};
 
+use crate::game::types::MudMap;
+
 pub type WallMap = HashMap<Coordinates, Vec<Coordinates>>;
-pub type MudMap = HashMap<(Coordinates, Coordinates), u8>;
 
 /// Configuration for maze generation
 #[derive(Debug, Clone, Copy)]
@@ -24,7 +25,7 @@ pub struct MazeGenerator {
     config: MazeConfig,
     rng: rand::rngs::StdRng,
     walls: HashMap<Coordinates, Vec<Coordinates>>,
-    mud: HashMap<(Coordinates, Coordinates), u8>,
+    mud: MudMap,
 }
 
 impl MazeGenerator {
@@ -41,7 +42,7 @@ impl MazeGenerator {
             config,
             rng,
             walls: HashMap::new(),
-            mud: HashMap::new(),
+            mud: MudMap::new(),
         }
     }
 
@@ -91,8 +92,8 @@ impl MazeGenerator {
                         self.walls.entry(next).or_default().push(current);
 
                         if mud_value > 1 {
-                            self.mud.insert((current, next), mud_value);
-                            self.mud.insert((next, current), mud_value);
+                            self.mud.insert(current, next, mud_value);
+                            self.mud.insert(next, current, mud_value);
                         }
 
                         // Handle symmetry exactly as Python
@@ -104,8 +105,8 @@ impl MazeGenerator {
                             self.walls.entry(sym_next).or_default().push(sym_current);
 
                             if mud_value > 1 {
-                                self.mud.insert((sym_current, sym_next), mud_value);
-                                self.mud.insert((sym_next, sym_current), mud_value);
+                                self.mud.insert(sym_current, sym_next, mud_value);
+                                self.mud.insert(sym_next, sym_current, mud_value);
                             }
                         }
                     }
@@ -125,8 +126,8 @@ impl MazeGenerator {
                         self.walls.entry(next).or_default().push(current);
 
                         if mud_value > 1 {
-                            self.mud.insert((current, next), mud_value);
-                            self.mud.insert((next, current), mud_value);
+                            self.mud.insert(current, next, mud_value);
+                            self.mud.insert(next, current, mud_value);
                         }
 
                         if self.config.symmetry {
@@ -137,8 +138,8 @@ impl MazeGenerator {
                             self.walls.entry(sym_next).or_default().push(sym_current);
 
                             if mud_value > 1 {
-                                self.mud.insert((sym_current, sym_next), mud_value);
-                                self.mud.insert((sym_next, sym_current), mud_value);
+                                self.mud.insert(sym_current, sym_next, mud_value);
+                                self.mud.insert(sym_next, sym_current, mud_value);
                             }
                         }
                     }
@@ -237,8 +238,8 @@ impl MazeGenerator {
             self.walls.entry(to).or_default().push(from);
 
             if mud_value > 1 {
-                self.mud.insert((from, to), mud_value);
-                self.mud.insert((to, from), mud_value);
+                self.mud.insert(from, to, mud_value);
+                self.mud.insert(to, from, mud_value);
             }
 
             // Handle symmetry exactly as Python
@@ -250,8 +251,8 @@ impl MazeGenerator {
                 self.walls.entry(sym_to).or_default().push(sym_from);
 
                 if mud_value > 1 {
-                    self.mud.insert((sym_from, sym_to), mud_value);
-                    self.mud.insert((sym_to, sym_from), mud_value);
+                    self.mud.insert(sym_from, sym_to, mud_value);
+                    self.mud.insert(sym_to, sym_from, mud_value);
                 }
             }
 
@@ -300,15 +301,15 @@ impl MazeGenerator {
             let mud_value = self.rng.gen_range(2..=self.config.mud_range);
 
             // Add mud both ways for the passage
-            self.mud.insert((from, to), mud_value);
-            self.mud.insert((to, from), mud_value);
+            self.mud.insert(from, to, mud_value);
+            self.mud.insert(to, from, mud_value);
 
             // If symmetric, add mud for the symmetric passage
             if self.config.symmetry {
                 let sym_from = self.get_symmetric(from);
                 let sym_to = self.get_symmetric(to);
-                self.mud.insert((sym_from, sym_to), mud_value);
-                self.mud.insert((sym_to, sym_from), mud_value);
+                self.mud.insert(sym_from, sym_to, mud_value);
+                self.mud.insert(sym_to, sym_from, mud_value);
             }
         }
     }
@@ -526,7 +527,7 @@ mod tests {
         for ((from, to), value) in mud.iter() {
             let sym_from = Coordinates::new(config.width - 1 - from.x, config.height - 1 - from.y);
             let sym_to = Coordinates::new(config.width - 1 - to.x, config.height - 1 - to.y);
-            assert_eq!(mud.get(&(sym_from, sym_to)), Some(value));
+            assert_eq!(mud.get(sym_from, sym_to), Some(value));
         }
     }
 
