@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 authors = ["Minh Tri Truong"]
 description = "A Rust implementation of the PyRat game"
+repository = "https://github.com/mintiti/pyrat-rust"
+keywords = ["game", "maze", "reinforcement-learning", "python-bindings"]
+categories = ["games", "simulation"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
@@ -17,6 +20,7 @@ pyo3 = { version = "0.20", features = ["extension-module"] }
 numpy = "0.20"
 flame = { version = "0.2.2", optional = true }
 serde = { version = "1.0.214", features = ["derive"] }
+ndarray = "0.15"
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
@@ -51,6 +55,13 @@ module-name = "pyrat._rust"  # Python module will be importable as pyrat._rust
 python-source = "python"
 
 [lints.clippy]
-# Enable useful lint groups
-pedantic = "warn"
-nursery = "warn"
+# Enable useful lint groups but be selective
+cargo = "warn"          # Basic cargo lints
+complexity = "warn"     # Complexity metrics
+correctness = "warn"    # Correctness checks
+perf = "warn"          # Performance optimizations
+suspicious = "warn"     # Suspicious code patterns
+
+# Disable overly strict groups
+pedantic = "allow"      # Too strict for game engine code
+nursery = "allow"      # Experimental lints

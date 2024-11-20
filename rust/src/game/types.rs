@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Deserialize, Serialize)]
 pub struct Coordinates {
     pub x: u8,
     pub y: u8,
@@ -74,10 +75,83 @@ impl TryFrom<u8> for Direction {
     }
 }
 
+/// A wrapper around HashMap that handles bidirectional mud lookups
+#[derive(Clone, Default)]
+pub struct MudMap {
+    inner: HashMap<(Coordinates, Coordinates), u8>,
+}
+
+impl MudMap {
+    pub fn new() -> Self {
+        Self {
+            inner: HashMap::new(),
+        }
+    }
+
+    /// Insert mud between two positions (order doesn't matter)
+    pub fn insert(&mut self, pos1: Coordinates, pos2: Coordinates, value: u8) {
+        self.inner.insert((pos1, pos2), value);
+        self.inner.insert((pos2, pos1), value);
+    }
+
+    /// Get mud value between two positions (order doesn't matter)
+    pub fn get(&self, pos1: Coordinates, pos2: Coordinates) -> Option<u8> {
+        self.inner
+            .get(&(pos1, pos2))
+            .or_else(|| self.inner.get(&(pos2, pos1)))
+            .copied()
+    }
+
+    /// Returns an iterator over all unique mud positions and their values
+    pub fn iter(&self) -> impl Iterator<Item = ((Coordinates, Coordinates), u8)> + '_ {
+        self.inner
+            .iter()
+            .filter(|((pos1, pos2), _)| pos1 < pos2) // Only return one direction
+            .map(|((pos1, pos2), &value)| ((*pos1, *pos2), value))
+    }
+
+    /// Clear all mud
+    pub fn clear(&mut self) {
+        self.inner.clear();
+    }
+
+    /// Returns the number of unique mud positions
+    pub fn len(&self) -> usize {
+        self.inner.len() / 2
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+}
+
+impl std::ops::Deref for MudMap {
+    type Target = HashMap<(Coordinates, Coordinates), u8>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inner
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[test]
+    fn test_mud_map() {
+        let mut mud_map = MudMap::new();
+        let pos1 = Coordinates::new(0, 0);
+        let pos2 = Coordinates::new(0, 1);
+
+        mud_map.insert(pos1, pos2, 2);
+
+        // Test bidirectional lookup
+        assert_eq!(mud_map.get(pos1, pos2), Some(2));
+        assert_eq!(mud_map.get(pos2, pos1), Some(2));
+
+        // Test non-existent mud
+        assert_eq!(mud_map.get(pos1, Coordinates::new(1, 0)), None);
+    }
     mod coordinates {
         use super::*;
 
