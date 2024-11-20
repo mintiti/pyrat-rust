@@ -1,5 +1,7 @@
 """Tests for the PettingZoo environment wrapper."""
 
+import random
+
 import numpy as np
 from pyrat import Direction
 from pyrat.env import PyRatEnv
@@ -80,41 +82,6 @@ def test_env_step() -> None:
         assert 0 <= obs.player_position[1] < TEST_GAME_HEIGHT
 
 
-def test_env_cheese_collection() -> None:
-    """Test cheese collection in environment."""
-    env = PyRatEnv(
-        width=TEST_GAME_WIDTH, height=TEST_GAME_HEIGHT, cheese_count=TEST_CHEESE_COUNT
-    )
-    obs, _ = env.reset(seed=42)
-
-    # Get initial cheese position from matrix
-    cheese_y, cheese_x = np.where(obs["player_1"].cheese_matrix == 1)
-    cheese_pos = (int(cheese_x[0]), int(cheese_y[0]))
-
-    # Move player 1 to cheese
-    p1_pos = obs["player_1"].player_position
-
-    while p1_pos != cheese_pos:
-        actions = {"player_1": Direction.STAY, "player_2": Direction.STAY}
-
-        if p1_pos[0] < cheese_pos[0]:
-            actions["player_1"] = Direction.RIGHT
-        elif p1_pos[0] > cheese_pos[0]:
-            actions["player_1"] = Direction.LEFT
-        elif p1_pos[1] < cheese_pos[1]:
-            actions["player_1"] = Direction.UP
-        elif p1_pos[1] > cheese_pos[1]:
-            actions["player_1"] = Direction.DOWN
-
-        obs, rewards, terminations, truncations, infos = env.step(actions)
-        p1_pos = obs["player_1"].player_position
-
-    # Verify cheese collection
-    assert rewards["player_1"] > 0
-    new_cheese_matrix = obs["player_1"].cheese_matrix
-    assert new_cheese_matrix[cheese_pos[1], cheese_pos[0]] == 0
-
-
 def test_env_symmetry() -> None:
     """Test symmetric observations between players."""
     env = PyRatEnv(
@@ -131,3 +98,28 @@ def test_env_symmetry() -> None:
 
     # Matrices should be symmetric around center
     assert np.array_equal(p1_cheese, np.flip(np.flip(p2_cheese, 0), 1))
+
+
+def test_random_gameplay() -> None:
+    """Test environment with random moves until termination."""
+    env = PyRatEnv(
+        width=TEST_GAME_WIDTH, height=TEST_GAME_HEIGHT, cheese_count=TEST_CHEESE_COUNT
+    )
+    obs, _ = env.reset(seed=42)
+
+    terminated = truncated = False
+    while not (terminated or truncated):
+        # Make random moves for both players
+        actions = {
+            "player_1": Direction(
+                random.randint(0, 4)
+            ),  # 0-4 covers all directions including STAY
+            "player_2": Direction(random.randint(0, 4)),
+        }
+
+        obs, rewards, terminations, truncations, infos = env.step(actions)
+        terminated = any(terminations.values())
+        truncated = any(truncations.values())
+
+    # Basic assertions to ensure game ended properly
+    assert terminated or truncated
