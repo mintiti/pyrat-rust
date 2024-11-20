@@ -1,7 +1,7 @@
 //! Python bindings for the `PyRat` game engine
 use crate::game::game_logic::MoveUndo;
 use crate::game::observations::ObservationHandler;
-use crate::{Direction, GameState};
+use crate::{Coordinates, Direction, GameState};
 use numpy::{PyArray2, PyArray3};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -352,10 +352,59 @@ impl PyGameObservation {
     }
 }
 
+#[pyclass]
+pub struct PyObservationHandler {
+    inner: ObservationHandler,
+}
+
+#[pymethods]
+impl PyObservationHandler {
+    #[new]
+    fn new(game: &PyGameState) -> Self {
+        Self {
+            inner: ObservationHandler::new(&game.game),
+        }
+    }
+
+    fn update_collected_cheese(&mut self, collected: Vec<(u8, u8)>) {
+        let coords = collected
+            .into_iter()
+            .map(|(x, y)| Coordinates::new(x, y))
+            .collect::<Vec<_>>();
+        self.inner.update_collected_cheese(&coords);
+    }
+
+    fn refresh_cheese(&mut self, game: &PyGameState) {
+        self.inner.refresh_cheese(&game.game);
+    }
+
+    fn get_observation(
+        &self,
+        py: Python<'_>,
+        game: &PyGameState,
+        is_player_one: bool,
+    ) -> PyResult<PyGameObservation> {
+        let obs = self.inner.get_observation(py, &game.game, is_player_one);
+        Ok(PyGameObservation {
+            player_position: obs.player_position,
+            player_mud_turns: obs.player_mud_turns,
+            player_score: obs.player_score,
+            opponent_position: obs.opponent_position,
+            opponent_mud_turns: obs.opponent_mud_turns,
+            opponent_score: obs.opponent_score,
+            current_turn: obs.current_turn,
+            max_turns: obs.max_turns,
+            cheese_matrix: obs.cheese_matrix.into_py(py),
+            movement_matrix: obs.movement_matrix.into_py(py),
+        })
+    }
+}
+
 /// Register the module components
 pub(crate) fn register_module(m: &PyModule) -> PyResult<()> {
     m.add_class::<PyGameState>()?;
     m.add_class::<PyMoveUndo>()?;
     m.add_class::<PyGameObservation>()?;
+    m.add_class::<PyObservationHandler>()?;
     Ok(())
 }
