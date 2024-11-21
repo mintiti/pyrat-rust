@@ -1,30 +1,90 @@
 class PyMoveUndo:
+    """Information needed to undo a move in the game.
+
+    This class contains all state information required to reverse a move,
+    including player positions, scores, and collected cheese.
+    """
     @property
-    def p1_pos(self) -> tuple[int, int]: ...
+    def p1_pos(self) -> tuple[int, int]:
+        """Player 1's position before the move."""
+        ...
+
     @property
-    def p2_pos(self) -> tuple[int, int]: ...
+    def p2_pos(self) -> tuple[int, int]:
+        """Player 2's position before the move."""
+        ...
+
     @property
-    def p1_target(self) -> tuple[int, int]: ...
+    def p1_target(self) -> tuple[int, int]:
+        """Position player 1 was attempting to move to."""
+        ...
+
     @property
-    def p2_target(self) -> tuple[int, int]: ...
+    def p2_target(self) -> tuple[int, int]:
+        """Position player 2 was attempting to move to."""
+        ...
+
     @property
-    def p1_mud(self) -> int: ...
+    def p1_mud(self) -> int:
+        """Number of mud turns remaining for player 1."""
+        ...
+
     @property
-    def p2_mud(self) -> int: ...
+    def p2_mud(self) -> int:
+        """Number of mud turns remaining for player 2."""
+        ...
+
     @property
-    def p1_score(self) -> float: ...
+    def p1_score(self) -> float:
+        """Player 1's score before the move."""
+        ...
+
     @property
-    def p2_score(self) -> float: ...
+    def p2_score(self) -> float:
+        """Player 2's score before the move."""
+        ...
+
     @property
-    def p1_misses(self) -> int: ...
+    def p1_misses(self) -> int:
+        """Number of failed moves for player 1."""
+        ...
+
     @property
-    def p2_misses(self) -> int: ...
+    def p2_misses(self) -> int:
+        """Number of failed moves for player 2."""
+        ...
+
     @property
-    def collected_cheese(self) -> list[tuple[int, int]]: ...
+    def collected_cheese(self) -> list[tuple[int, int]]:
+        """List of positions where cheese was collected during this move."""
+        ...
+
     @property
-    def turn(self) -> int: ...
+    def turn(self) -> int:
+        """Turn number before the move was made."""
+        ...
 
 class PyGameState:
+    """Core game state implementation in Rust.
+
+    This class provides the low-level interface to the Rust game engine.
+    It manages all game state including:
+    - Player positions and scores
+    - Cheese placement and collection
+    - Mud effects and movement delays
+    - Turn counting and game termination
+
+    Note:
+        This is an internal class. Users should typically use the PyRat class
+        instead, which provides a more Pythonic interface.
+
+    Args:
+        width: Board width (default: 21)
+        height: Board height (default: 15)
+        cheese_count: Number of cheese pieces (default: 41)
+        symmetric: Whether to generate symmetric mazes (default: True)
+        seed: Random seed for reproducible games (default: None)
+    """
     def __init__(
         self,
         width: int | None = None,
