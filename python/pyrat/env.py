@@ -113,7 +113,7 @@ class PyRatEnv(ParallelEnv):  # type: ignore[misc]
         return observations, infos
 
     def step(
-        self, actions: dict[str, Direction]
+        self, actions: dict[AgentID, Direction]
     ) -> tuple[
         dict[str, Any],
         dict[str, float],
@@ -121,32 +121,40 @@ class PyRatEnv(ParallelEnv):  # type: ignore[misc]
         dict[str, bool],
         dict[str, Any],
     ]:
+        """Execute one step in the environment."""
+        # Store previous scores to calculate rewards
+        prev_p1_score = self.game.player1_score
+        prev_p2_score = self.game.player2_score
+
         # Process moves
         game_over, collected = self.game.step(
             actions["player_1"].value, actions["player_2"].value
         )
 
-        # Update observation handler with collected cheese
-        if collected:
-            self.obs_handler.update_collected_cheese(collected)
+        # Calculate score changes
+        p1_score_change = self.game.player1_score - prev_p1_score
+        p2_score_change = self.game.player2_score - prev_p2_score
 
-        # Get observations
+        # Zero-sum rewards: each player's reward is their score change minus the opponent's
+        rewards = {
+            "player_1": p1_score_change - p2_score_change,
+            "player_2": p2_score_change - p1_score_change,
+        }
+
+        # Update observations
         observations = {
             "player_1": self.obs_handler.get_observation(self.game, True),
             "player_2": self.obs_handler.get_observation(self.game, False),
         }
 
-        # Calculate rewards (just score changes for now)
-        rewards = {
-            "player_1": self.game.player1_score,
-            "player_2": self.game.player2_score,
+        terminations = {
+            "player_1": game_over,
+            "player_2": game_over,
         }
 
-        # Game termination
-        terminations = {agent: game_over for agent in self.agents}
-        truncations: dict[str, bool] = {agent: False for agent in self.agents}
+        truncations = {
+            "player_1": False,
+            "player_2": False,
+        }
 
-        # No additional info for now
-        infos: dict[str, Any] = {agent: {} for agent in self.agents}
-
-        return observations, rewards, terminations, truncations, infos
+        return observations, rewards, terminations, truncations, {}
