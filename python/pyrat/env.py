@@ -14,6 +14,35 @@ if TYPE_CHECKING:
 
 
 class PyRatEnv(ParallelEnv):  # type: ignore[misc]
+    """PyRat PettingZoo Environment
+
+    A PettingZoo parallel environment wrapper for the PyRat game. This environment
+    implements the standard PettingZoo interface for multi-agent reinforcement learning.
+
+    The observation space includes:
+    - player_position: (x,y) coordinates of the current player
+    - player_mud_turns: remaining turns stuck in mud
+    - player_score: current score
+    - opponent_position: (x,y) coordinates of the opponent
+    - opponent_mud_turns: opponent's remaining mud turns
+    - opponent_score: opponent's current score
+    - cheese_matrix: 2D binary array showing cheese locations
+    - movement_matrix: 3D array encoding valid moves and mud costs
+
+    The action space is discrete with 5 possible actions:
+    - UP (0)
+    - RIGHT (1)
+    - DOWN (2)
+    - LEFT (3)
+    - STAY (4)
+
+    Example:
+        >>> env = PyRatEnv(width=15, height=15)
+        >>> obs, info = env.reset(seed=42)
+        >>> actions = {"player_1": Direction.RIGHT, "player_2": Direction.LEFT}
+        >>> obs, rewards, terminations, truncations, infos = env.step(actions)
+    """
+
     metadata: ClassVar[dict[str, Any]] = {
         "render_modes": ["human", "rgb_array"],
         "name": "pyrat_v0",
