@@ -10,6 +10,7 @@ pub struct PyObservationHandler {
 
 #[pymethods]
 impl PyObservationHandler {
+    /// Creates a new observation handler for tracking game state.
     #[new]
     fn new(game: &PyGameState) -> Self {
         Self {
@@ -17,7 +18,10 @@ impl PyObservationHandler {
         }
     }
 
-    /// Update observation after cheese collection
+    /// Updates the observation state after cheese collection.
+    ///
+    /// Efficiently updates internal state when cheese is collected during gameplay.
+    #[pyo3(text_signature = "(self, collected)")]
     fn update_collected_cheese(&mut self, collected: Vec<(u8, u8)>) {
         let coords: Vec<Coordinates> = collected
             .into_iter()
@@ -26,19 +30,22 @@ impl PyObservationHandler {
         self.inner.update_collected_cheese(&coords);
     }
 
-    /// Update observation after move undo
+    /// Updates the observation state when cheese is restored during move undo.
+    ///
+    /// Restores cheese positions when moves are undone.
+    #[pyo3(text_signature = "(self, restored)")]
     fn update_restored_cheese(&mut self, restored: Vec<(u8, u8)>) {
         let coords: Vec<Coordinates> = restored
             .into_iter()
             .map(|(x, y)| Coordinates::new(x, y))
             .collect();
-        // Just set these positions to have cheese
         for pos in coords {
             self.inner.restore_cheese(pos);
         }
     }
 
-    /// Get current observation
+    /// Gets the current game observation from a player's perspective.
+    #[pyo3(text_signature = "(self, game, is_player_one)")]
     fn get_observation<'py>(&self, py: Python<'py>, game: &PyGameState, is_player_one: bool) -> PyGameObservation {
         PyGameObservation {
             inner: self.inner.get_observation(py, &game.game, is_player_one)

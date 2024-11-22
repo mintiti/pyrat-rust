@@ -4,6 +4,7 @@ import random
 
 import numpy as np
 from pyrat import Direction
+from pyrat._rust import PyGameState
 from pyrat.env import PyRatEnv
 
 TEST_GAME_WIDTH = 5
@@ -123,3 +124,30 @@ def test_random_gameplay() -> None:
 
     # Basic assertions to ensure game ended properly
     assert terminated or truncated
+
+
+def test_custom_maze() -> None:
+    """Test environment with custom maze configuration."""
+    game_width = 3
+    game_height = 3
+    game = PyGameState.create_custom(
+        width=game_width,
+        height=game_height,
+        walls=[
+            ((0, 0), (0, 1)),  # Vertical wall
+            ((1, 1), (2, 1)),  # Horizontal wall
+        ],
+        mud=[
+            ((1, 0), (1, 1), 2),  # 2 turns of mud
+        ],
+        cheese=[(1, 1)],  # One cheese in the middle
+        player1_pos=(0, 0),
+        player2_pos=(2, 2),
+    )
+
+    # Verify maze configuration
+    assert game.width == game_width
+    assert game.height == game_height
+    assert len(game.cheese_positions()) == 1
+    assert game.player1_position == (0, 0)
+    assert game.player2_position == (2, 2)
