@@ -46,7 +46,8 @@ fn create_benchmark_game(size: u8, cheese_count: u16, mud_count: usize) -> GameS
         let y2 = y1.saturating_add(1);
         if x2 < size && y2 < size {
             game.mud.insert(
-                (Coordinates::new(x1, y1), Coordinates::new(x2, y2)),
+                Coordinates::new(x1, y1),
+                Coordinates::new(x2, y2),
                 rng.gen_range(1..=3),
             );
         }
