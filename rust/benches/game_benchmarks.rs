@@ -183,15 +183,111 @@ fn bench_mud_movement(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_process_moves_straight_line(c: &mut Criterion) {
+    let mut group = c.benchmark_group("process_moves_straight_line");
+
+    for &size in [8u8, 16, 32, 64, 200].iter() {
+        // Start in the middle
+        let start_pos = Coordinates::new(size / 2, size / 2);
+        let other_pos = Coordinates::new(0, 0); // Other player far away
+
+        // No walls, no mud for this test
+        let game_state =
+            GameState::new_with_positions(size, size, HashMap::new(), 300, start_pos, other_pos);
+
+        // Horizontal (Right)
+        group.bench_with_input(
+            BenchmarkId::new("right", size),
+            &game_state,
+            |b, game_state| {
+                b.iter(|| {
+                    let mut game_copy = game_state.clone();
+                    for _ in 0..(size / 2) {
+                        // Go right until hitting the wall
+                        black_box(game_copy.process_moves(Direction::Right, Direction::Stay));
+                    }
+                });
+            },
+        );
+
+        // Vertical (Down) - Expect this to be potentially slower
+        group.bench_with_input(
+            BenchmarkId::new("down", size),
+            &game_state,
+            |b, game_state| {
+                b.iter(|| {
+                    let mut game_copy = game_state.clone();
+                    for _ in 0..(size / 2) {
+                        // Go down until hitting the wall
+                        black_box(game_copy.process_moves(Direction::Down, Direction::Stay));
+                    }
+                });
+            },
+        );
+    }
+    group.finish();
+}
+
+fn bench_process_moves_basic_movement(c: &mut Criterion) {
+    let mut group = c.benchmark_group("process_moves_basic");
+    group.sample_size(50); // Increase sample size for more stable results
+
+    for &size in [8u8, 16, 32, 64, 200].iter() {
+        let start_positions = [
+            Coordinates::new(0, 0),
+            Coordinates::new(size / 2, size / 2),
+            Coordinates::new(size - 1, size - 1),
+        ];
+        let directions = [
+            Direction::Up,
+            Direction::Down,
+            Direction::Left,
+            Direction::Right,
+            Direction::Stay,
+        ];
+
+        for &start_pos in &start_positions {
+            for &direction in &directions {
+                let game_state = GameState::new_with_positions(
+                    size,
+                    size,
+                    HashMap::new(), // No walls
+                    300,
+                    start_pos,
+                    Coordinates::new(0, 0), // Opponent far away
+                );
+
+                group.bench_with_input(
+                    BenchmarkId::new(
+                        format!("{:?}/{:?}", direction, start_pos),
+                        format!("{}x{}", size, size),
+                    ),
+                    &(&game_state, direction),
+                    |b, &(game_state, direction)| {
+                        b.iter(|| {
+                            let mut game_copy = game_state.clone();
+                            black_box(game_copy.process_moves(direction, Direction::Stay));
+                            // Opponent stays
+                        });
+                    },
+                );
+            }
+        }
+    }
+    group.finish();
+}
+
 criterion_group!(
     name = benches;
     config = Criterion::default()
         .warm_up_time(std::time::Duration::from_secs(1))
         .measurement_time(std::time::Duration::from_secs(5));
     targets = bench_game_creation,
-              bench_move_processing,
-              bench_cheese_collection,
-              bench_mud_movement,
-              bench_full_game,
+        bench_move_processing,
+        bench_cheese_collection,
+        bench_mud_movement,
+        bench_full_game,
+        bench_process_moves_straight_line,
+        bench_process_moves_basic_movement
 );
 criterion_main!(benches);
