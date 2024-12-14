@@ -277,6 +277,102 @@ fn bench_process_moves_basic_movement(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_process_moves_wall_collisions(c: &mut Criterion) {
+    let mut group = c.benchmark_group("process_moves_wall_collisions");
+    group.sample_size(50);
+
+    for &size in [8u8, 16, 32, 64, 200].iter() {
+        let start_pos = Coordinates::new(size / 2, size / 2);
+        let directions = [
+            Direction::Up,
+            Direction::Down,
+            Direction::Left,
+            Direction::Right,
+        ];
+
+        for &direction in &directions {
+            // Create a wall in the direction of movement
+            let mut walls = HashMap::new();
+            let wall_pos = direction.apply_to(start_pos);
+            walls.insert(start_pos, vec![wall_pos]);
+            walls.insert(wall_pos, vec![start_pos]);
+
+            let game_state = GameState::new_with_positions(
+                size,
+                size,
+                walls,
+                300,
+                start_pos,
+                Coordinates::new(0, 0), // Opponent far away
+            );
+
+            group.bench_with_input(
+                BenchmarkId::new(format!("{:?}", direction), format!("{}x{}", size, size)),
+                &(&game_state, direction),
+                |b, &(game_state, direction)| {
+                    b.iter(|| {
+                        let mut game_copy = game_state.clone();
+                        black_box(game_copy.process_moves(direction, Direction::Stay));
+                        // Opponent stays
+                    });
+                },
+            );
+        }
+    }
+    group.finish();
+}
+
+fn bench_process_moves_mud_movement(c: &mut Criterion) {
+    let mut group = c.benchmark_group("process_moves_mud_movement");
+    group.sample_size(50);
+
+    for &size in [8u8, 16, 32, 64, 200].iter() {
+        let start_pos = Coordinates::new(size / 2, size / 2);
+        let directions = [
+            Direction::Up,
+            Direction::Down,
+            Direction::Left,
+            Direction::Right,
+        ];
+
+        for &direction in &directions {
+            for &mud_timer in &[1, 2, 3] {
+                // Create mud in the direction of movement
+                let mut mud = std::collections::HashMap::new();
+                let mud_pos = direction.apply_to(start_pos);
+                mud.insert((start_pos, mud_pos), mud_timer);
+
+                let game_state = GameState::new_with_config(
+                    size,
+                    size,
+                    HashMap::new(), // No walls
+                    mud,
+                    &[], // No cheese
+                    start_pos,
+                    Coordinates::new(0, 0), // Opponent far away
+                    300,
+                );
+
+                group.bench_with_input(
+                    BenchmarkId::new(
+                        format!("{:?}/mud_timer={}", direction, mud_timer),
+                        format!("{}x{}", size, size),
+                    ),
+                    &(&game_state, direction),
+                    |b, &(game_state, direction)| {
+                        b.iter(|| {
+                            let mut game_copy = game_state.clone();
+                            black_box(game_copy.process_moves(direction, Direction::Stay));
+                            // Opponent stays
+                        });
+                    },
+                );
+            }
+        }
+    }
+    group.finish();
+}
+
 criterion_group!(
     name = benches;
     config = Criterion::default()
@@ -288,6 +384,9 @@ criterion_group!(
         bench_mud_movement,
         bench_full_game,
         bench_process_moves_straight_line,
-        bench_process_moves_basic_movement
+        bench_process_moves_basic_movement,
+        bench_process_moves_wall_collisions,
+        bench_process_moves_mud_movement,
+        bench_process_moves_combined_obstacles
 );
 criterion_main!(benches);
