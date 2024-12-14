@@ -374,7 +374,7 @@ impl GameState {
     }
 
     #[inline]
-    fn process_moves(&mut self, p1_move: Direction, p2_move: Direction) -> (bool, bool) {
+    pub fn process_moves(&mut self, p1_move: Direction, p2_move: Direction) -> (bool, bool) {
         // Store initial positions BEFORE any updates
         let p1_start_pos = self.player1.current_pos;
         let p2_start_pos = self.player2.current_pos;
