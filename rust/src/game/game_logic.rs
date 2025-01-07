@@ -468,7 +468,7 @@ impl GameState {
     }
 
     #[inline]
-    fn process_cheese_collection(&mut self) -> Vec<Coordinates> {
+    pub fn process_cheese_collection(&mut self) -> Vec<Coordinates> {
         let mut collected = Vec::with_capacity(2);
 
         // Check for simultaneous collection first

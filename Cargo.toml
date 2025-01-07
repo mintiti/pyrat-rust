@@ -45,6 +45,10 @@ name = "game_benchmarks"
 path = "rust/benches/game_benchmarks.rs"
 harness = false
 
+[[bin]]
+name = "profile_process_turn"
+path = "rust/benches/bin/profile_process_turn.rs"
+
 [features]
 default = []
 flame = ["dep:flame"]  # Changed from flame_it to flame
