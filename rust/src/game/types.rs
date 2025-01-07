@@ -37,7 +37,7 @@ impl Direction {
     /// - y increases going up
     /// - (0,0) is at the bottom-left corner
     #[inline(always)]
-    pub(crate) const fn apply_to(&self, pos: Coordinates) -> Coordinates {
+    pub const fn apply_to(&self, pos: Coordinates) -> Coordinates {
         match self {
             Self::Up => Coordinates {
                 x: pos.x,
