@@ -7,6 +7,7 @@ description = "A Rust implementation of the PyRat game"
 repository = "https://github.com/mintiti/pyrat-rust"
 keywords = ["game", "maze", "reinforcement-learning", "python-bindings"]
 categories = ["games", "simulation"]
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
