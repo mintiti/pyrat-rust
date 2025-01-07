@@ -1,0 +1,102 @@
+# PyRat Game Specification
+
+## Overview
+PyRat is a two-player strategic maze game where players (Rat and Python) compete to collect cheese while navigating through a maze with walls and mud-based movement delays. The game features simultaneous moves and delayed actions, making it particularly interesting for AI development.
+
+## Game Environment
+
+### Maze Structure
+- **Grid**: Rectangular maze of dimensions height × width
+- **Cells**: Each position in the grid is a traversable cell
+- **Walls**:
+  - Exist as barriers between adjacent cells
+  - A cell pair either has a wall or is connected
+  - The entire maze is guaranteed to be fully connected
+  - Layout is symmetric for fair play
+
+### Movement Modifiers
+- **Mud**:
+  - Located between connected cells (where no wall exists)
+  - Characterized by value N > 1 indicating traversal turns
+  - Movement through mud:
+    * Player initiates movement on turn 1 and commits to going that direction
+    * Remains in starting cell for N-1 turns
+    * Completes movement on turn N
+    * During transit:
+      - Any action is ignored
+      - Cannot collect cheese
+      - Position is the destination cell but cant collect cheeses while still stuck
+
+## Game Mechanics
+
+### Players
+- **Starting Positions**:
+  - Rat: Top-right cell (height-1, width-1)
+  - Python: Bottom-left cell (0, 0)
+  - This could be randomized too with different constructors
+- **Collision**: Players are "ghostly"
+  - Can occupy same cell
+  - Can pass through each other
+  - No blocking or collision effects
+
+### Movement
+- **Available Actions**:
+  - UP: Move to adjacent cell above
+  - DOWN: Move to adjacent cell below
+  - LEFT: Move to adjacent cell left
+  - RIGHT: Move to adjacent cell right
+  - STAY: Remain in current cell
+- **Invalid Moves**:
+  - Moving into walls
+  - Moving outside grid boundaries
+  - Result in STAY action
+
+### Simultaneous Movement Resolution
+1. Both players submit moves simultaneously
+2. Each move is processed independently
+3. Players can cross paths or end in same cell
+4. Mud movement delays are processed independently
+
+## Scoring System
+
+### Cheese Collection
+- **Placement**:
+  - Random symmetrical positions on cells
+  - Quantity range: [1, number_of_cells]
+- **Scoring**:
+  - Normal collection: 1 point and cheese is removed
+  - Simultaneous collection (both players same turn):
+    * 0.5 points each
+    * Cheese is removed
+  - Cannot collect while in mud transit
+
+## Game Progression
+
+### Turn Structure
+1. Players receive current game state
+2. Both submit moves simultaneously
+3. Process moves and mud delays
+4. Check for cheese collection
+5. Update game state
+6. Check win conditions
+
+### Win Conditions
+Game ends immediately when any of these occur:
+1. Player scores > total_cheese_count/2
+2. All cheese collected
+3. Maximum turns (300) reached
+
+### Victory Determination
+- Clear winner: Player with higher score
+- Draw conditions:
+  * Equal scores when all cheese collected
+  * Equal scores at max turns
+  * Both reach total_cheese_count/2 simultaneously
+
+### Game State Information
+Players receive each turn:
+1. Current maze state
+2. Both players' positions
+3. Current scores
+4. Remaining cheese positions
+5. Mud delay status (if applicable)

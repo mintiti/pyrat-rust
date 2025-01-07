@@ -7,6 +7,7 @@ description = "A Rust implementation of the PyRat game"
 repository = "https://github.com/mintiti/pyrat-rust"
 keywords = ["game", "maze", "reinforcement-learning", "python-bindings"]
 categories = ["games", "simulation"]
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
@@ -44,6 +45,10 @@ harness = false
 name = "game_benchmarks"
 path = "rust/benches/game_benchmarks.rs"
 harness = false
+
+[[bin]]
+name = "profile_process_turn"
+path = "rust/benches/bin/profile_process_turn.rs"
 
 [features]
 default = []
