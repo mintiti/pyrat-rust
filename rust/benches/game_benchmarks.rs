@@ -373,11 +373,68 @@ fn bench_process_moves_mud_movement(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_process_cheese_collection(c: &mut Criterion) {
+    let mut group = c.benchmark_group("process_cheese_collection");
+    group.sample_size(50);
+
+    for &size in [8u8, 16, 32, 64, 200].iter() {
+        // Basic collection (single player)
+        group.bench_with_input(
+            BenchmarkId::new("single_player", size),
+            &size,
+            |b, &size| {
+                let mut game = GameState::new(size, size, HashMap::new(), 300);
+                let p1_pos = Coordinates::new(1, 1);
+                game = GameState::new_with_positions(
+                    size, 
+                    size, 
+                    HashMap::new(), 
+                    300, 
+                    p1_pos, 
+                    Coordinates::new(0, 0)
+                );
+                game.cheese.place_cheese(p1_pos);  // Place cheese at player position
+                
+                b.iter(|| {
+                    let mut game_copy = game.clone();
+                    black_box(game_copy.process_cheese_collection())
+                });
+            },
+        );
+
+        // Simultaneous collection
+        group.bench_with_input(
+            BenchmarkId::new("simultaneous", size),
+            &size,
+            |b, &size| {
+                let mut game = GameState::new(size, size, HashMap::new(), 300);
+                let shared_pos = Coordinates::new(1, 1);
+                game = GameState::new_with_positions(
+                    size, 
+                    size, 
+                    HashMap::new(), 
+                    300, 
+                    shared_pos, 
+                    shared_pos  // Both players on same spot
+                );
+                game.cheese.place_cheese(shared_pos);
+                
+                b.iter(|| {
+                    let mut game_copy = game.clone();
+                    black_box(game_copy.process_cheese_collection())
+                });
+            },
+        );
+
+    }
+    group.finish();
+}
+
 criterion_group!(
     name = benches;
     config = Criterion::default()
         .warm_up_time(std::time::Duration::from_secs(1))
-        .measurement_time(std::time::Duration::from_secs(5));
+        .measurement_time(std::time::Duration::from_secs(1));
     targets = bench_game_creation,
         bench_move_processing,
         bench_cheese_collection,
@@ -387,6 +444,6 @@ criterion_group!(
         bench_process_moves_basic_movement,
         bench_process_moves_wall_collisions,
         bench_process_moves_mud_movement,
-        bench_process_moves_combined_obstacles
+        bench_process_cheese_collection,
 );
 criterion_main!(benches);
