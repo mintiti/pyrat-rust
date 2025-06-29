@@ -101,15 +101,26 @@ The Rust engine achieves exceptional performance:
 Prerequisites:
 - Python 3.7+
 - Rust toolchain
-- Maturin
+- uv (for fast Python package management)
 
 ```bash
 # Clone repository
 git clone https://github.com/mintiti/pyrat-engine
 cd pyrat-engine
-# Install development dependencies
-pip install -r requirements-dev.txt
-# Build and install
+
+# Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Create virtual environment
+uv venv
+
+# Activate virtual environment
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install development dependencies from pyproject.toml
+uv pip install -e ".[dev]"
+
+# Build and install the Rust extension
 maturin develop --release
 ```
 
