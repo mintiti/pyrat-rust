@@ -454,16 +454,14 @@ impl PyGameConfigBuilder {
             // Validate walls are between adjacent cells
             if !are_adjacent(*pos1, *pos2) {
                 return Err(PyValueError::new_err(format!(
-                    "Wall between {:?} and {:?} must be between adjacent cells",
-                    pos1, pos2
+                    "Wall between {pos1:?} and {pos2:?} must be between adjacent cells"
                 )));
             }
 
             // Check for duplicate walls
             if slf.walls.contains(&(*pos1, *pos2)) || slf.walls.contains(&(*pos2, *pos1)) {
                 return Err(PyValueError::new_err(format!(
-                    "Duplicate wall between {:?} and {:?}",
-                    pos1, pos2
+                    "Duplicate wall between {pos1:?} and {pos2:?}"
                 )));
             }
 
@@ -473,8 +471,7 @@ impl PyGameConfigBuilder {
                     || (*pos1 == (*mx2, *my2) && *pos2 == (*mx1, *my1))
             }) {
                 return Err(PyValueError::new_err(format!(
-                    "Cannot place wall between {:?} and {:?} where there is already mud",
-                    pos1, pos2
+                    "Cannot place wall between {pos1:?} and {pos2:?} where there is already mud"
                 )));
             }
         }

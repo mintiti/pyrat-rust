@@ -1032,14 +1032,6 @@ mod tests {
 mod make_unmake_tests {
     use super::*;
 
-    /// Helper to create a game with walls in specific positions
-    fn create_game_with_walls() -> GameState {
-        let mut walls = HashMap::new();
-        // Create a vertical wall in the middle
-        walls.insert(Coordinates::new(1, 0), vec![Coordinates::new(1, 1)]);
-        walls.insert(Coordinates::new(1, 1), vec![Coordinates::new(1, 0)]);
-        GameState::new(3, 3, walls, 300)
-    }
 
     /// Helper to create a game with mud in specific positions
     fn create_game_with_mud() -> GameState {

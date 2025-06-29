@@ -202,7 +202,7 @@ mod tests {
         #[test]
         fn test_coordinates_clone() {
             let coord1 = Coordinates::new(1, 2);
-            let coord2 = coord1.clone();
+            let coord2 = coord1;
 
             assert_eq!(coord1, coord2);
             // Ensure modifying one doesn't affect the other
