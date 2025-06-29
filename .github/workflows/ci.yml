@@ -97,8 +97,10 @@ jobs:
       run: |
         source .venv/bin/activate
         python -m pip install --upgrade pip
-        maturin develop --release
+        # Install all dependencies (base + dev) from pyproject.toml
         pip install -e ".[dev]"
+        # Now build the Rust extension in-place
+        maturin develop --release
     
     - name: Run Python tests
       run: |
