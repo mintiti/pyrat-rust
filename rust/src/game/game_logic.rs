@@ -1032,7 +1032,6 @@ mod tests {
 mod make_unmake_tests {
     use super::*;
 
-
     /// Helper to create a game with mud in specific positions
     fn create_game_with_mud() -> GameState {
         let mut game = GameState::new(3, 3, HashMap::new(), 300);
