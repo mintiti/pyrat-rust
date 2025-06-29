@@ -71,10 +71,10 @@ fn main() {
     let moves_per_sec = (total_moves as f64) / elapsed.as_secs_f64();
 
     println!("\n=== Game Loop Performance ===");
-    println!("Games simulated: {}", iterations);
-    println!("Total moves: {}", total_moves);
+    println!("Games simulated: {iterations}");
+    println!("Total moves: {total_moves}");
     println!("Time: {:.2}s", elapsed.as_secs_f64());
-    println!("Moves per second: {:.2}", moves_per_sec);
+    println!("Moves per second: {moves_per_sec:.2}");
     println!(
         "Average game length: {:.2}",
         total_moves as f64 / iterations as f64

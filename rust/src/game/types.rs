@@ -181,10 +181,7 @@ mod tests {
                 assert_eq!(
                     coord.to_index(width),
                     expected,
-                    "Failed for x={}, y={}, width={}",
-                    x,
-                    y,
-                    width
+                    "Failed for x={x}, y={y}, width={width}"
                 );
             }
         }
@@ -346,8 +343,7 @@ mod tests {
                 assert_eq!(
                     direction.apply_to(center),
                     expected,
-                    "Failed for direction {:?}",
-                    direction
+                    "Failed for direction {direction:?}"
                 );
             }
         }

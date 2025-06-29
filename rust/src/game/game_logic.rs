@@ -753,8 +753,7 @@ mod tests {
                 // Ignore center piece if it exists
                 assert!(
                     cheese_positions.contains(&symmetric_pos),
-                    "Missing symmetric cheese piece for {:?}",
-                    pos
+                    "Missing symmetric cheese piece for {pos:?}"
                 );
             }
         }
@@ -1120,8 +1119,7 @@ mod make_unmake_tests {
 
         // Print initial state
         println!(
-            "Initial state - total: {}, remaining: {}",
-            initial_total, initial_remaining
+            "Initial state - total: {initial_total}, remaining: {initial_remaining}"
         );
 
         // Enter mud
@@ -1239,14 +1237,12 @@ mod make_unmake_tests {
             // Verify collision behavior
             assert_eq!(
                 game.player1.current_pos, initial_state.player1.current_pos,
-                "Position changed on {} collision",
-                description
+                "Position changed on {description} collision"
             );
             assert_eq!(
                 game.player1.misses,
                 initial_state.player1.misses + 1,
-                "Misses not incremented on {} collision",
-                description
+                "Misses not incremented on {description} collision"
             );
 
             // Unmake move
@@ -1255,13 +1251,11 @@ mod make_unmake_tests {
             // Verify restoration
             assert_eq!(
                 game.player1.current_pos, initial_state.player1.current_pos,
-                "Position not restored after {} collision",
-                description
+                "Position not restored after {description} collision"
             );
             assert_eq!(
                 game.player1.misses, initial_state.player1.misses,
-                "Misses not restored after {} collision",
-                description
+                "Misses not restored after {description} collision"
             );
         }
     }
