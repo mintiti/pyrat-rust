@@ -8,7 +8,10 @@ use pyo3::prelude::*;
 use pyo3::Python;
 use std::collections::HashMap;
 
-type MudEntry = ((u8, u8), (u8, u8), u8);
+// Type aliases for cleaner Python API
+type Position = (u8, u8);
+type Wall = (Position, Position);
+type MudEntry = (Position, Position, u8);
 #[pyclass]
 #[derive(Clone)]
 pub struct PyMoveUndo {
@@ -297,14 +300,15 @@ impl PyGameState {
         player2_pos = None,
         max_turns = 300
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn create_custom(
         width: u8,
         height: u8,
-        walls: Vec<((u8, u8), (u8, u8))>,
-        mud: Vec<((u8, u8), (u8, u8), u8)>,
-        cheese: Vec<(u8, u8)>,
-        player1_pos: Option<(u8, u8)>,
-        player2_pos: Option<(u8, u8)>,
+        walls: Vec<Wall>,
+        mud: Vec<MudEntry>,
+        cheese: Vec<Position>,
+        player1_pos: Option<Position>,
+        player2_pos: Option<Position>,
         max_turns: u16,
     ) -> PyResult<Self> {
         // Use PyGameConfigBuilder to validate and build the game
@@ -481,11 +485,11 @@ impl PyObservationHandler {
 pub struct PyGameConfigBuilder {
     width: u8,
     height: u8,
-    walls: Vec<((u8, u8), (u8, u8))>,
+    walls: Vec<Wall>,
     mud: Vec<MudEntry>,
-    cheese: Vec<(u8, u8)>,
-    player1_pos: Option<(u8, u8)>,
-    player2_pos: Option<(u8, u8)>,
+    cheese: Vec<Position>,
+    player1_pos: Option<Position>,
+    player2_pos: Option<Position>,
     max_turns: u16,
 }
 
@@ -506,7 +510,7 @@ impl PyGameConfigBuilder {
     }
 
     /// Validates that a position is within the maze bounds
-    fn validate_position(&self, pos: (u8, u8), name: &str) -> PyResult<()> {
+    fn validate_position(&self, pos: Position, name: &str) -> PyResult<()> {
         let (x, y) = pos;
         if x >= self.width || y >= self.height {
             return Err(PyValueError::new_err(format!(
@@ -519,10 +523,7 @@ impl PyGameConfigBuilder {
 
     /// Add walls to the game
     #[pyo3(name = "with_walls")]
-    fn with_walls(
-        mut slf: PyRefMut<'_, Self>,
-        walls: Vec<((u8, u8), (u8, u8))>,
-    ) -> PyResult<PyRefMut<'_, Self>> {
+    fn with_walls(mut slf: PyRefMut<'_, Self>, walls: Vec<Wall>) -> PyResult<PyRefMut<'_, Self>> {
         for (pos1, pos2) in &walls {
             slf.validate_position(*pos1, "Wall start")?;
             slf.validate_position(*pos2, "Wall end")?;
@@ -610,7 +611,7 @@ impl PyGameConfigBuilder {
     #[pyo3(name = "with_cheese")]
     fn with_cheese(
         mut slf: PyRefMut<'_, Self>,
-        cheese: Vec<(u8, u8)>,
+        cheese: Vec<Position>,
     ) -> PyResult<PyRefMut<'_, Self>> {
         for pos in &cheese {
             slf.validate_position(*pos, "Cheese")?;
@@ -634,7 +635,7 @@ impl PyGameConfigBuilder {
     #[pyo3(name = "with_player1_pos")]
     fn with_player1_pos(
         mut slf: PyRefMut<'_, Self>,
-        pos: (u8, u8),
+        pos: Position,
     ) -> PyResult<PyRefMut<'_, Self>> {
         slf.validate_position(pos, "Player 1")?;
         slf.player1_pos = Some(pos);
@@ -645,7 +646,7 @@ impl PyGameConfigBuilder {
     #[pyo3(name = "with_player2_pos")]
     fn with_player2_pos(
         mut slf: PyRefMut<'_, Self>,
-        pos: (u8, u8),
+        pos: Position,
     ) -> PyResult<PyRefMut<'_, Self>> {
         slf.validate_position(pos, "Player 2")?;
 
@@ -722,7 +723,7 @@ impl PyGameConfigBuilder {
 }
 
 // Helper function to check if two positions are adjacent
-fn are_adjacent(pos1: (u8, u8), pos2: (u8, u8)) -> bool {
+fn are_adjacent(pos1: Position, pos2: Position) -> bool {
     let dx = pos1.0.abs_diff(pos2.0);
     let dy = pos1.1.abs_diff(pos2.1);
     (dx == 1 && dy == 0) || (dx == 0 && dy == 1)
