@@ -24,17 +24,16 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
-[tool.maturin]
-features = ["pyo3/extension-module"]
-python-source = "python"
-module-name = "pyrat._rust"
-
-
 dependencies = [
     "numpy>=1.20.0",
     "gymnasium>=1.0.0",
     "pettingzoo>=1.24.0"
 ]
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+python-source = "python"
+module-name = "pyrat._rust"
 
 [project.optional-dependencies]
 dev = [
@@ -43,6 +42,7 @@ dev = [
     "ruff>=0.2.0",
     "mypy>=1.8.0",
     "pre-commit>=3.5.0",
+    "maturin>=1.4.0",
 ]
 
 [tool.ruff]

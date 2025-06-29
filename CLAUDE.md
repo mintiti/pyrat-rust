@@ -56,12 +56,15 @@ Winner is determined by highest score, with draws possible.
 
 ### Environment Setup
 ```bash
+# Install uv (if not already installed)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
 # Create Python virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+uv venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 
 # Install Python dependencies
-pip install -e ".[dev]"
+uv pip install -e ".[dev]"
 
 # Build and install the Rust extension
 maturin develop --release

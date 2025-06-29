@@ -87,18 +87,20 @@ jobs:
         path: target
         key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('**/Cargo.lock') }}
 
-    - name: Install maturin
-      run: pip install maturin
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        enable-cache: true
+        cache-dependency-glob: "pyproject.toml"
 
     - name: Create virtual environment
-      run: python -m venv .venv
+      run: uv venv .venv
 
     - name: Build and install package with dependencies
       run: |
         source .venv/bin/activate
-        python -m pip install --upgrade pip
-        # Install dependencies directly from pyproject.toml
-        pip install numpy gymnasium pettingzoo pytest pytest-cov
+        # Install the package with all dependencies (base + dev)
+        uv pip install -e ".[dev]"
         # Build and install the Rust extension
         maturin develop --release
 
