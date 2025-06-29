@@ -1,0 +1,24 @@
+# Rust formatting configuration for PyRat project
+
+# Use stable features only
+edition = "2021"
+
+# Basic formatting
+hard_tabs = false
+tab_spaces = 4
+newline_style = "Unix"
+use_small_heuristics = "Default"
+
+# Line width
+max_width = 100
+
+# Imports (stable features only)
+reorder_imports = true
+reorder_modules = true
+
+# Impl and function formatting
+use_field_init_shorthand = true
+use_try_shorthand = true
+
+# Consistency
+match_block_trailing_comma = true
