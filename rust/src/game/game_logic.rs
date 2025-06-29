@@ -1118,9 +1118,7 @@ mod make_unmake_tests {
         let initial_remaining = game.cheese.remaining_cheese();
 
         // Print initial state
-        println!(
-            "Initial state - total: {initial_total}, remaining: {initial_remaining}"
-        );
+        println!("Initial state - total: {initial_total}, remaining: {initial_remaining}");
 
         // Enter mud
         let undo1 = game.make_move(Direction::Up, Direction::Stay);
