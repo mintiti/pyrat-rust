@@ -97,9 +97,9 @@ jobs:
       run: |
         source .venv/bin/activate
         python -m pip install --upgrade pip
-        # Install all dependencies (base + dev) from pyproject.toml
-        pip install -e ".[dev]"
-        # Now build the Rust extension in-place
+        # Install dependencies directly from pyproject.toml
+        pip install numpy gymnasium pettingzoo pytest pytest-cov
+        # Build and install the Rust extension
         maturin develop --release
     
     - name: Run Python tests
