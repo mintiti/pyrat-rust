@@ -753,8 +753,7 @@ mod tests {
                 // Ignore center piece if it exists
                 assert!(
                     cheese_positions.contains(&symmetric_pos),
-                    "Missing symmetric cheese piece for {:?}",
-                    pos
+                    "Missing symmetric cheese piece for {pos:?}"
                 );
             }
         }
@@ -1032,15 +1031,6 @@ mod tests {
 mod make_unmake_tests {
     use super::*;
 
-    /// Helper to create a game with walls in specific positions
-    fn create_game_with_walls() -> GameState {
-        let mut walls = HashMap::new();
-        // Create a vertical wall in the middle
-        walls.insert(Coordinates::new(1, 0), vec![Coordinates::new(1, 1)]);
-        walls.insert(Coordinates::new(1, 1), vec![Coordinates::new(1, 0)]);
-        GameState::new(3, 3, walls, 300)
-    }
-
     /// Helper to create a game with mud in specific positions
     fn create_game_with_mud() -> GameState {
         let mut game = GameState::new(3, 3, HashMap::new(), 300);
@@ -1128,10 +1118,7 @@ mod make_unmake_tests {
         let initial_remaining = game.cheese.remaining_cheese();
 
         // Print initial state
-        println!(
-            "Initial state - total: {}, remaining: {}",
-            initial_total, initial_remaining
-        );
+        println!("Initial state - total: {initial_total}, remaining: {initial_remaining}");
 
         // Enter mud
         let undo1 = game.make_move(Direction::Up, Direction::Stay);
@@ -1248,14 +1235,12 @@ mod make_unmake_tests {
             // Verify collision behavior
             assert_eq!(
                 game.player1.current_pos, initial_state.player1.current_pos,
-                "Position changed on {} collision",
-                description
+                "Position changed on {description} collision"
             );
             assert_eq!(
                 game.player1.misses,
                 initial_state.player1.misses + 1,
-                "Misses not incremented on {} collision",
-                description
+                "Misses not incremented on {description} collision"
             );
 
             // Unmake move
@@ -1264,13 +1249,11 @@ mod make_unmake_tests {
             // Verify restoration
             assert_eq!(
                 game.player1.current_pos, initial_state.player1.current_pos,
-                "Position not restored after {} collision",
-                description
+                "Position not restored after {description} collision"
             );
             assert_eq!(
                 game.player1.misses, initial_state.player1.misses,
-                "Misses not restored after {} collision",
-                description
+                "Misses not restored after {description} collision"
             );
         }
     }

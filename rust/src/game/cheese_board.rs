@@ -14,7 +14,7 @@ impl CheeseBoard {
     #[inline(always)]
     pub fn new(width: u8, height: u8) -> Self {
         let total_cells = width as usize * height as usize;
-        let size = (total_cells + 63) / 64; // Round up to nearest 64 cells
+        let size = total_cells.div_ceil(64); // Round up to nearest 64 cells
         Self {
             bits: vec![0; size],
             width,

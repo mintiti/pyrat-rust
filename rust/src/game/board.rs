@@ -14,7 +14,7 @@ pub struct MoveTable {
 impl MoveTable {
     #[must_use]
     pub fn new(width: u8, height: u8, walls: &HashMap<Coordinates, Vec<Coordinates>>) -> Self {
-        let size = (width as usize * height as usize + 1) / 2;
+        let size = (width as usize * height as usize).div_ceil(2);
         let mut valid_moves = vec![0u8; size];
 
         // Precompute all valid moves for each position

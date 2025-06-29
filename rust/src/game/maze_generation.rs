@@ -265,7 +265,7 @@ impl MazeGenerator {
     fn has_connection(&self, from: Coordinates, to: Coordinates) -> bool {
         self.walls
             .get(&from)
-            .map_or(false, |connections| connections.contains(&to))
+            .is_some_and(|connections| connections.contains(&to))
     }
 
     /// Adds border connections to ensure no isolated cells
@@ -359,7 +359,7 @@ impl MazeGenerator {
     fn has_any_connection(&self, pos: Coordinates) -> bool {
         self.walls
             .get(&pos)
-            .map_or(false, |connections| !connections.is_empty())
+            .is_some_and(|connections| !connections.is_empty())
     }
 }
 
@@ -508,7 +508,7 @@ mod tests {
             seed: Some(42),
         };
 
-        let mut generator = MazeGenerator::new(config.clone());
+        let mut generator = MazeGenerator::new(config);
         let (walls, mud) = generator.generate();
 
         // Check symmetry
@@ -544,7 +544,7 @@ mod tests {
             seed: Some(42),
         };
 
-        let mut generator = MazeGenerator::new(config.clone());
+        let mut generator = MazeGenerator::new(config);
         let (walls, _) = generator.generate();
 
         // Check if all cells are reachable from starting position
@@ -580,7 +580,7 @@ mod tests {
             seed: Some(42),
         };
 
-        let mut generator = MazeGenerator::new(config.clone());
+        let mut generator = MazeGenerator::new(config);
         let (walls, _) = generator.generate();
 
         // Check that border cells have at least one connection
@@ -712,7 +712,7 @@ mod tests {
             seed: Some(42),
         };
 
-        let mut generator = MazeGenerator::new(config.clone());
+        let mut generator = MazeGenerator::new(config);
         let (walls, mud) = generator.generate();
 
         // Every passage should have mud

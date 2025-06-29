@@ -238,8 +238,7 @@ mod tests {
             assert_eq!(
                 handler.cheese_matrix[[pos.x as usize, pos.y as usize]],
                 1,
-                "Cheese should be restored at {:?} after refresh",
-                pos
+                "Cheese should be restored at {pos:?} after refresh"
             );
         }
     }

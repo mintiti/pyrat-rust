@@ -181,10 +181,7 @@ mod tests {
                 assert_eq!(
                     coord.to_index(width),
                     expected,
-                    "Failed for x={}, y={}, width={}",
-                    x,
-                    y,
-                    width
+                    "Failed for x={x}, y={y}, width={width}"
                 );
             }
         }
@@ -202,7 +199,7 @@ mod tests {
         #[test]
         fn test_coordinates_clone() {
             let coord1 = Coordinates::new(1, 2);
-            let coord2 = coord1.clone();
+            let coord2 = coord1;
 
             assert_eq!(coord1, coord2);
             // Ensure modifying one doesn't affect the other
@@ -346,8 +343,7 @@ mod tests {
                 assert_eq!(
                     direction.apply_to(center),
                     expected,
-                    "Failed for direction {:?}",
-                    direction
+                    "Failed for direction {direction:?}"
                 );
             }
         }
