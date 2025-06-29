@@ -19,7 +19,7 @@ PyRat is a competitive two-player maze game where a Rat and a Python race to col
 
 ### Setup
 - **Grid**: Rectangular maze (default 21×15) with walls between cells
-- **Players**: 
+- **Players**:
   - Rat starts at top-right corner (height-1, width-1)
   - Python starts at bottom-left corner (0, 0)
 - **Cheese**: Randomly placed on cells in symmetric positions
@@ -54,29 +54,45 @@ Winner is determined by highest score, with draws possible.
 
 ## Development Commands
 
-### Python Development
+### Environment Setup
 ```bash
-# Install development dependencies
-pip install -r requirements-dev.txt
+# Create Python virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install Python dependencies
+pip install -e ".[dev]"
 
 # Build and install the Rust extension
 maturin develop --release
 
-# Run Python tests
-pytest python/tests
-
-# Run with coverage
-pytest --cov=pyrat --cov-report=term-missing
-
-# Lint Python code
-ruff check python/
-ruff format python/
-
-# Type check Python code
-mypy python/
+# Install pre-commit hooks (automatic formatting and linting)
+pre-commit install
+pre-commit install --hook-type pre-push
 ```
 
-### Rust Development
+### Code Quality Checks
+```bash
+# Format Rust code
+cargo fmt
+
+# Check Rust formatting (CI will fail if not formatted)
+cargo fmt --all -- --check
+
+# Run Rust linter with all warnings as errors
+cargo clippy --all-targets --all-features -- -D warnings
+
+# Run Rust linter (ignoring PyO3 warnings for CI)
+cargo clippy --all-targets --all-features -- -D warnings -A non-local-definitions
+
+# Run Python tests
+pytest python/tests -v
+
+# Run specific test
+pytest python/tests/test_env.py::test_custom_maze -v
+```
+
+### Building and Testing
 ```bash
 # Build the Rust library
 cargo build --release
@@ -87,15 +103,25 @@ cd rust && cargo test --lib
 # Run benchmarks
 cargo bench
 
-# Check code without building
-cargo check
-
-# Run clippy lints
-cargo clippy
-
-# Format Rust code
-cargo fmt
+# Build Python package with maturin
+maturin build --release
 ```
+
+### CI Debugging
+```bash
+# View CI run details
+gh run view <run-id>
+
+# View only failed CI logs
+gh run view <run-id> --log-failed
+```
+
+### Important Notes
+- Pre-commit hooks automatically run `cargo fmt` and other checks before commits
+- The CI will run both `cargo fmt --check` and `cargo clippy`
+- Python dependencies are in `pyproject.toml` (not requirements.txt)
+- Use `maturin develop` to build the Rust extension during development
+- To manually run all pre-commit checks: `pre-commit run --all-files`
 
 ## Architecture
 
@@ -123,7 +149,7 @@ Each player receives:
 - `player_position`: Current (x,y) coordinates
 - `player_mud_turns`: Remaining turns stuck in mud
 - `player_score`: Current score
-- `opponent_position`: Opponent's (x,y) coordinates  
+- `opponent_position`: Opponent's (x,y) coordinates
 - `opponent_mud_turns`: Opponent's mud status
 - `opponent_score`: Opponent's score
 - `cheese_matrix`: Binary matrix of cheese locations

@@ -46,7 +46,7 @@ repos:
         -   id: clippy
             name: cargo clippy
             description: Lint Rust code
-            entry: cargo clippy -- -D warnings
+            entry: cargo clippy --all-targets --all-features -- -D warnings -A non-local-definitions
             language: system
             types: [rust]
             pass_filenames: false
@@ -61,12 +61,3 @@ repos:
             pass_filenames: false
             always_run: true
             stages: [pre-push]  # Only run on push, not on every commit
-
-  -   repo: local
-      hooks:
-        -   id: cargo-bench
-            name: cargo bench
-            entry: cargo bench
-            language: system
-            pass_filenames: false
-            stages: [pre-push]

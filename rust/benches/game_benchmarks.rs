@@ -185,8 +185,8 @@ fn bench_full_game(c: &mut Criterion) {
                 },
                 |mut game| {
                     while !black_box(game.process_turn(
-                        unsafe { std::mem::transmute(rand::random::<u8>() % 5) },
-                        unsafe { std::mem::transmute(rand::random::<u8>() % 5) },
+                        unsafe { std::mem::transmute::<u8, Direction>(rand::random::<u8>() % 5) },
+                        unsafe { std::mem::transmute::<u8, Direction>(rand::random::<u8>() % 5) },
                     ))
                     .game_over
                     {}
@@ -310,8 +310,8 @@ fn bench_process_moves_basic_movement(c: &mut Criterion) {
 
                 group.bench_with_input(
                     BenchmarkId::new(
-                        format!("{:?}/{:?}", direction, start_pos),
-                        format!("{}x{}", size, size),
+                        format!("{direction:?}/{start_pos:?}"),
+                        format!("{size}x{size}"),
                     ),
                     &(&game_state, direction),
                     |b, &(game_state, direction)| {
@@ -362,7 +362,7 @@ fn bench_process_moves_wall_collisions(c: &mut Criterion) {
             );
 
             group.bench_with_input(
-                BenchmarkId::new(format!("{:?}", direction), format!("{}x{}", size, size)),
+                BenchmarkId::new(format!("{direction:?}"), format!("{size}x{size}")),
                 &(&game_state, direction),
                 |b, &(game_state, direction)| {
                     b.iter(|| {
@@ -413,8 +413,8 @@ fn bench_process_moves_mud_movement(c: &mut Criterion) {
 
                 group.bench_with_input(
                     BenchmarkId::new(
-                        format!("{:?}/mud_timer={}", direction, mud_timer),
-                        format!("{}x{}", size, size),
+                        format!("{direction:?}/mud_timer={mud_timer}"),
+                        format!("{size}x{size}"),
                     ),
                     &(&game_state, direction),
                     |b, &(game_state, direction)| {
@@ -444,9 +444,8 @@ fn bench_process_cheese_collection(c: &mut Criterion) {
             BenchmarkId::new("single_player", size),
             &size,
             |b, &size| {
-                let mut game = GameState::new(size, size, HashMap::new(), MAX_TURNS);
                 let p1_pos = Coordinates::new(1, 1);
-                game = GameState::new_with_positions(
+                let mut game = GameState::new_with_positions(
                     size,
                     size,
                     HashMap::new(),
@@ -465,9 +464,8 @@ fn bench_process_cheese_collection(c: &mut Criterion) {
 
         // Simultaneous collection
         group.bench_with_input(BenchmarkId::new("simultaneous", size), &size, |b, &size| {
-            let mut game = GameState::new(size, size, HashMap::new(), MAX_TURNS);
             let shared_pos = Coordinates::new(1, 1);
-            game = GameState::new_with_positions(
+            let mut game = GameState::new_with_positions(
                 size,
                 size,
                 HashMap::new(),

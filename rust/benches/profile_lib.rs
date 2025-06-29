@@ -1,10 +1,13 @@
 //! Profiling utilities for PyRat engine performance analysis
+#![allow(dead_code)]
+
 use pyrat::{Direction, GameState};
 use rand::Rng;
 use std::time::Instant; // Adjust the crate name as needed
 
 /// Configuration for profiling runs
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub struct ProfilingConfig {
     /// Number of games to simulate
     pub num_games: u32,
@@ -110,9 +113,10 @@ fn random_direction(rng: &mut impl Rng) -> Direction {
 
 /// Print profiling results in a formatted way
 pub fn print_profiling_results(name: &str, stats: &ProfilingStats) {
-    println!("\n=== PyRat Engine Profile: {} ===", name);
+    println!("\n=== PyRat Engine Profile: {name} ===");
     println!("Total moves processed: {}", stats.total_moves);
-    println!("Total time: {:.2}s", stats.total_time_ms as f64 / 1000.0);
+    let total_time_s = stats.total_time_ms as f64 / 1000.0;
+    println!("Total time: {total_time_s:.2}s");
     println!("Moves per second: {:.2}", stats.moves_per_second);
     println!("Average game length: {:.2}", stats.avg_game_length);
     println!("Min game length: {}", stats.min_game_length);
