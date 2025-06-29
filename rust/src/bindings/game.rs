@@ -309,10 +309,10 @@ impl PyGameState {
     ) -> PyResult<Self> {
         // Use PyGameConfigBuilder to validate and build the game
         let builder = PyGameConfigBuilder::new(width, height);
-        
+
         // Create a PyRefMut-like wrapper for the builder
         let mut builder_owned = builder;
-        
+
         // Add walls if any
         if !walls.is_empty() {
             builder_owned.walls = walls.clone();
@@ -327,7 +327,7 @@ impl PyGameState {
                 }
             }
         }
-        
+
         // Add mud if any
         if !mud.is_empty() {
             builder_owned.mud = mud.clone();
@@ -336,9 +336,7 @@ impl PyGameState {
                 builder_owned.validate_position((*x1, *y1), "Mud start")?;
                 builder_owned.validate_position((*x2, *y2), "Mud end")?;
                 if *value < 2 {
-                    return Err(PyValueError::new_err(
-                        "Mud value must be at least 2 turns"
-                    ));
+                    return Err(PyValueError::new_err("Mud value must be at least 2 turns"));
                 }
                 if !are_adjacent((*x1, *y1), (*x2, *y2)) {
                     return Err(PyValueError::new_err(format!(
@@ -347,18 +345,18 @@ impl PyGameState {
                 }
             }
         }
-        
+
         // Add cheese if any
         builder_owned.cheese = cheese;
         for pos in &builder_owned.cheese {
             builder_owned.validate_position(*pos, "Cheese")?;
         }
-        
+
         // Set player positions
         builder_owned.player1_pos = player1_pos;
         builder_owned.player2_pos = player2_pos;
         builder_owned.max_turns = max_turns;
-        
+
         // Build the game
         builder_owned.build()
     }
