@@ -1,4 +1,4 @@
-"""PyRat - High-performance PyRat game environment
+"""PyRat Engine - High-performance PyRat game engine with Python bindings
 
 This package provides a fast implementation of the PyRat game engine written in Rust
 with Python bindings. It features both a raw game engine interface and a
@@ -12,7 +12,7 @@ Key Features:
     - Customizable game parameters
 
 Example:
-    >>> from pyrat import PyRat, Direction
+    >>> from pyrat_engine import PyRat, Direction
     >>> game = PyRat(width=15, height=15)
     >>> # Make moves
     >>> result = game.step(Direction.RIGHT, Direction.LEFT)
@@ -20,7 +20,7 @@ Example:
     >>> print(f"Player 1 score: {game.scores[0]}")
 """
 
-from pyrat.game import Direction, GameResult, Position, PyRat
+from pyrat_engine.game import Direction, GameResult, Position, PyRat
 
 __version__ = "0.1.0"
 __all__ = ["PyRat", "Direction", "Position", "GameResult"]

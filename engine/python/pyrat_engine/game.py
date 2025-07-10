@@ -14,8 +14,8 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
-from pyrat._rust import PyGameState as _RustGameState
-from pyrat._rust import PyMoveUndo as _RustMoveUndo
+from pyrat_engine._rust import PyGameState as _RustGameState
+from pyrat_engine._rust import PyMoveUndo as _RustMoveUndo
 
 
 @dataclass(frozen=True)

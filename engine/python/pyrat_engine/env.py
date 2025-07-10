@@ -7,10 +7,10 @@ from gymnasium.spaces import Box, Discrete
 from gymnasium.spaces import Dict as SpaceDict
 from pettingzoo.utils.env import AgentID, ParallelEnv
 
-from pyrat._rust import PyGameState, PyObservationHandler
+from pyrat_engine._rust import PyGameState, PyObservationHandler
 
 if TYPE_CHECKING:
-    from pyrat.game import Direction
+    from pyrat_engine.game import Direction
 
 
 class PyRatEnv(ParallelEnv):  # type: ignore[misc]

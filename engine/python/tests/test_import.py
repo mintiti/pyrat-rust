@@ -1,4 +1,4 @@
-from pyrat import Direction, PyRat
+from pyrat_engine import Direction, PyRat
 
 
 def test_import() -> None:

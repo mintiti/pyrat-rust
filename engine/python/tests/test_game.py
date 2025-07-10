@@ -1,4 +1,4 @@
-from pyrat._rust import PyGameState
+from pyrat_engine._rust import PyGameState
 
 TEST_GAME_WIDTH = 5
 TEST_GAME_HEIGHT = 5
