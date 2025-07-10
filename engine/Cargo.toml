@@ -55,8 +55,8 @@ default = []
 flame = ["dep:flame"]  # Changed from flame_it to flame
 
 [package.metadata.maturin]
-name = "pyrat"
-module-name = "pyrat._rust"  # Python module will be importable as pyrat._rust
+name = "pyrat_engine"
+module-name = "pyrat_engine._rust"  # Python module will be importable as pyrat_engine._rust
 python-source = "python"
 
 [lints.clippy]

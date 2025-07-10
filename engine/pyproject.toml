@@ -3,9 +3,9 @@ requires = ["maturin>=1.4,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "pyrat"
+name = "pyrat-engine"
 version = "0.1.0"
-description = "High-performance PyRat game environment"
+description = "High-performance PyRat game engine with Python bindings"
 authors = [
     {name = "Minh Tri Truong"},
 ]
@@ -33,7 +33,7 @@ dependencies = [
 [tool.maturin]
 features = ["pyo3/extension-module"]
 python-source = "python"
-module-name = "pyrat._rust"
+module-name = "pyrat_engine._rust"
 
 [project.optional-dependencies]
 dev = [
@@ -99,6 +99,6 @@ warn_unreachable = true
 
 [tool.pytest.ini_options]
 minversion = "7.0"
-addopts = "-ra -q --cov=pyrat --cov-report=term-missing"
+addopts = "-ra -q --cov=pyrat_engine --cov-report=term-missing"
 testpaths = ["python/tests"]
 python_files = ["test_*.py"]
