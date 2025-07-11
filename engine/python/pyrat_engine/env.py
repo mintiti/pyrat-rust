@@ -94,9 +94,9 @@ class PyRatEnv(ParallelEnv):  # type: ignore[misc]
                 ),
             }
         )
-        self.observation_space: dict[AgentID, SpaceDict] = {
-            agent: obs_space for agent in self.possible_agents
-        }
+        self.observation_space: dict[AgentID, SpaceDict] = dict.fromkeys(
+            self.possible_agents, obs_space
+        )
 
     def reset(
         self, seed: int | None = None, options: dict[str, Any] | None = None
