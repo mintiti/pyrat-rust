@@ -4,7 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-PyRat Engine is a high-performance game engine implementation in Rust with Python bindings. It provides a PettingZoo-compatible interface for the PyRat maze game where two players compete to collect cheese.
+PyRat is a monorepo containing the complete PyRat ecosystem for a competitive maze game. The repository is organized into multiple components:
+
+- **engine/**: High-performance Rust game engine with Python bindings (currently implemented)
+- **gui/**: Visualization and tournament management (planned)
+- **protocol/**: AI communication protocol specification (planned)
+- **examples/**: Example AI implementations (planned)
+- **cli/**: Command-line tools (planned)
+
+This monorepo structure enables clean separation of concerns while maintaining a cohesive ecosystem.
 
 ## What is PyRat?
 
@@ -54,8 +62,31 @@ Winner is determined by highest score, with draws possible.
 
 ## Development Commands
 
-### Environment Setup
+### Monorepo Setup
 ```bash
+# From repository root
+make help  # Show all available commands
+make all   # Build all components
+```
+
+### Workspace Development (Recommended)
+This repository uses `uv` workspaces for managing the monorepo structure. This ensures proper dependency resolution between components.
+
+```bash
+# From repository root
+uv sync  # Sync all workspace dependencies
+
+# This automatically:
+# - Creates a virtual environment at .venv
+# - Installs all workspace members (engine, protocol/pyrat_base)
+# - Resolves cross-dependencies correctly
+```
+
+### Engine Development
+```bash
+# Navigate to engine directory
+cd engine
+
 # Install uv (if not already installed)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
@@ -76,6 +107,13 @@ pre-commit install --hook-type pre-push
 
 ### Code Quality Checks
 ```bash
+# From repository root
+make check  # Run all checks
+make fmt    # Format all code
+
+# From engine directory
+cd engine
+
 # Format Rust code
 cargo fmt
 
@@ -97,10 +135,18 @@ pytest python/tests/test_env.py::test_custom_maze -v
 
 ### Building and Testing
 ```bash
+# From repository root
+make test        # Run all tests
+make test-engine # Run engine tests only
+make bench       # Run benchmarks
+
+# From engine directory
+cd engine
+
 # Build the Rust library
 cargo build --release
 
-# Run Rust tests (must be in rust/ directory)
+# Run Rust tests
 cd rust && cargo test --lib
 
 # Run benchmarks
@@ -122,21 +168,23 @@ gh run view <run-id> --log-failed
 ### Important Notes
 - Pre-commit hooks automatically run `cargo fmt` and other checks before commits
 - The CI will run both `cargo fmt --check` and `cargo clippy`
-- Python dependencies are in `pyproject.toml` (not requirements.txt)
+- Python dependencies are in `engine/pyproject.toml` (not requirements.txt)
 - Use `maturin develop` to build the Rust extension during development
 - To manually run all pre-commit checks: `pre-commit run --all-files`
 
 ## Architecture
 
-The codebase follows a hybrid Rust-Python architecture:
+The monorepo follows a component-based architecture with the engine at its core:
 
-### Core Components
-1. **Rust Engine** (`rust/src/`)
+### Engine Architecture
+The engine follows a hybrid Rust-Python architecture:
+
+1. **Rust Core** (`engine/rust/src/`)
    - `game/`: Core game logic (board.rs, game_logic.rs, maze_generation.rs)
    - `bindings/`: PyO3 bindings exposing Rust to Python
    - Performance-critical operations: 10+ million moves/second
 
-2. **Python Wrapper** (`python/pyrat/`)
+2. **Python Bindings** (`engine/python/pyrat_engine/`)
    - `env.py`: PettingZoo ParallelEnv implementation
    - `game.py`: High-level game interface
    - Provides gymnasium/PettingZoo compatible API
@@ -163,4 +211,30 @@ Each player receives:
 - Rust unit tests for core game logic
 - Python integration tests for the PettingZoo interface
 - Benchmarks for performance-critical paths (game_benchmarks.rs)
-- Use `cargo test` and `pytest` separately for each language layer
+- Use `cargo test --lib` and `pytest` separately for each language layer
+- Or use `make test-engine` from the repository root for both
+
+## Future Components
+
+When implementing new components in the monorepo:
+
+### GUI Component (planned)
+- Will provide game visualization and tournament management
+- Python-based using pygame or similar
+- Will import `pyrat-engine` for game logic
+
+### Protocol Component (in development)
+- Text-based protocol for AI communication
+- Language-agnostic design (stdin/stdout)
+- SDK for easy AI development (pyrat-base package)
+- Base library at `protocol/pyrat_base/`
+
+### Examples Component (planned)
+- Collection of example AIs
+- Will use the protocol SDK
+- Demonstrations of different strategies
+
+### CLI Component (planned)
+- Command-line tools for running games
+- Tournament management
+- Replay viewing
