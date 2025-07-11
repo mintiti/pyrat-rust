@@ -1,21 +1,28 @@
 # PyRat Monorepo Makefile
 
-.PHONY: all engine gui protocol examples cli test bench clean help
+.PHONY: all engine gui protocol examples cli test bench clean help sync
 
 # Default target
-all: engine
+all: sync engine
+
+# Sync workspace dependencies
+sync:
+	@echo "Syncing workspace dependencies..."
+	uv sync
 
 # Build the engine component
-engine:
+engine: sync
 	@echo "Building PyRat Engine..."
-	cd engine && source .venv/bin/activate && maturin develop --release
+	source .venv/bin/activate && cd engine && maturin develop --release
+
+# Build the protocol component
+protocol: sync
+	@echo "Protocol component ready for development"
+	@echo "Base library at protocol/pyrat_base/"
 
 # Future components (placeholders)
 gui:
 	@echo "GUI component not yet implemented"
-
-protocol:
-	@echo "Protocol component not yet implemented"
 
 examples:
 	@echo "Examples not yet implemented"
@@ -27,15 +34,21 @@ cli:
 dev-setup:
 	@echo "Setting up development environment..."
 	@echo "Prerequisites: uv, rust toolchain"
-	cd engine && uv venv && source .venv/bin/activate && uv pip install -e ".[dev]"
+	uv sync
+	@echo "Installing pre-commit hooks..."
+	source .venv/bin/activate && pre-commit install && pre-commit install --hook-type pre-push
 
 # Testing
-test: test-engine
+test: test-engine test-protocol
 
 test-engine:
 	@echo "Running engine tests..."
 	cd engine && cargo test --lib
-	cd engine && source .venv/bin/activate && pytest python/tests -v
+	source .venv/bin/activate && cd engine && pytest python/tests -v
+
+test-protocol:
+	@echo "Running protocol tests..."
+	source .venv/bin/activate && cd protocol/pyrat_base && pytest tests -v || echo "No tests yet"
 
 # Benchmarking
 bench:
@@ -47,11 +60,14 @@ bench:
 fmt:
 	@echo "Formatting code..."
 	cd engine && cargo fmt
+	source .venv/bin/activate && ruff format engine/python protocol/pyrat_base
 
 check:
 	@echo "Running checks..."
 	cd engine && cargo fmt --all -- --check
 	cd engine && cargo clippy --all-targets --all-features -- -D warnings -A non-local-definitions
+	source .venv/bin/activate && ruff check engine/python protocol/pyrat_base
+	source .venv/bin/activate && mypy engine/python protocol/pyrat_base --ignore-missing-imports
 
 # Clean build artifacts
 clean:
@@ -71,19 +87,23 @@ help:
 	@echo "  - uv (Python package manager)"
 	@echo ""
 	@echo "Available targets:"
-	@echo "  all         - Build all components (currently just engine)"
-	@echo "  engine      - Build the PyRat engine (requires .venv activated)"
-	@echo "  dev-setup   - Set up development environment"
-	@echo "  test        - Run all tests"
-	@echo "  test-engine - Run engine tests only"
-	@echo "  bench       - Run performance benchmarks (requires Python env)"
-	@echo "  fmt         - Format all code"
-	@echo "  check       - Run code quality checks"
-	@echo "  clean       - Remove build artifacts"
-	@echo "  help        - Show this help message"
+	@echo "  all          - Sync dependencies and build all components"
+	@echo "  sync         - Sync workspace dependencies with uv"
+	@echo "  engine       - Build the PyRat engine"
+	@echo "  protocol     - Info about protocol component"
+	@echo "  dev-setup    - Set up development environment"
+	@echo "  test         - Run all tests"
+	@echo "  test-engine  - Run engine tests only"
+	@echo "  test-protocol- Run protocol tests only"
+	@echo "  bench        - Run performance benchmarks"
+	@echo "  fmt          - Format all code"
+	@echo "  check        - Run code quality checks"
+	@echo "  clean        - Remove build artifacts"
+	@echo "  help         - Show this help message"
 	@echo ""
-	@echo "Future components (not yet implemented):"
-	@echo "  gui         - PyRat GUI"
-	@echo "  protocol    - Protocol specification and SDK"
-	@echo "  examples    - Example AI implementations"
-	@echo "  cli         - Command-line tools"
+	@echo "Components:"
+	@echo "  engine       - High-performance Rust game engine (implemented)"
+	@echo "  protocol     - AI communication protocol (in development)"
+	@echo "  gui          - PyRat GUI (planned)"
+	@echo "  examples     - Example AI implementations (planned)"
+	@echo "  cli          - Command-line tools (planned)"
