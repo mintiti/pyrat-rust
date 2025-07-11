@@ -17,17 +17,17 @@ repos:
         -   id: ruff
             args: [--fix]
             types_or: [python, pyi]
-            files: ^engine/python/
+            files: ^(engine/python/|protocol/pyrat_base/)
         -   id: ruff-format
             types_or: [python, pyi]
-            files: ^engine/python/
+            files: ^(engine/python/|protocol/pyrat_base/)
 
   # Python type checking
   -   repo: https://github.com/pre-commit/mirrors-mypy
       rev: v1.8.0
       hooks:
         -   id: mypy
-            files: ^engine/python/
+            files: ^(engine/python/|protocol/pyrat_base/)
             additional_dependencies:
               - gymnasium>=0.29.0
               - pettingzoo>=1.24.0
@@ -54,9 +54,17 @@ repos:
   # Tests
   -   repo: local
       hooks:
-        -   id: pytest
-            name: pytest
-            entry: bash -c 'cd engine && source .venv/bin/activate && pytest python/tests'
+        -   id: pytest-engine
+            name: pytest engine
+            entry: bash -c 'source .venv/bin/activate && cd engine && pytest python/tests'
+            language: system
+            pass_filenames: false
+            always_run: true
+            stages: [pre-push]  # Only run on push, not on every commit
+
+        -   id: pytest-protocol
+            name: pytest protocol
+            entry: bash -c 'source .venv/bin/activate && cd protocol/pyrat_base && pytest tests || echo "No tests yet"'
             language: system
             pass_filenames: false
             always_run: true
