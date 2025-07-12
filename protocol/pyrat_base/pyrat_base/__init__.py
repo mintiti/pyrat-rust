@@ -20,6 +20,7 @@ from pyrat_base.enums import (
     response_to_string,
 )
 from pyrat_base.protocol import Command, Protocol
+from pyrat_base.protocol_state import ProtocolState
 
 __version__ = "0.1.0"
 
@@ -29,6 +30,7 @@ __all__ = [
     # Classes
     "Command",
     "Protocol",
+    "ProtocolState",
     # Enums
     "CommandType",
     "GameResult",
