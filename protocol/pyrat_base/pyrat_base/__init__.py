@@ -19,6 +19,7 @@ from pyrat_base.enums import (
     player_from_string,
     response_to_string,
 )
+from pyrat_base.io_handler import IOHandler
 from pyrat_base.protocol import Command, Protocol
 from pyrat_base.protocol_state import ProtocolState
 
@@ -29,6 +30,7 @@ __all__ = [
     "PROTOCOL_VERSION",
     # Classes
     "Command",
+    "IOHandler",
     "Protocol",
     "ProtocolState",
     # Enums
