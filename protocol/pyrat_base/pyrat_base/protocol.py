@@ -315,6 +315,9 @@ class Protocol:
                     return None
                 return Command(cmd_type, {"scores": scores})
 
+            # If we get here, it's an unhandled command type
+            return None
+
         except (ValueError, IndexError):
             return None
 

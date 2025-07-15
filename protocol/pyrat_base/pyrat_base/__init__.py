@@ -4,6 +4,8 @@ This package provides the base classes and utilities for developing PyRat AIs
 that communicate via the PyRat protocol.
 """
 
+from pyrat_base import utils
+from pyrat_base.base_ai import PyRatAI
 from pyrat_base.enums import (
     PROTOCOL_VERSION,
     CommandType,
@@ -33,6 +35,7 @@ __all__ = [
     "IOHandler",
     "Protocol",
     "ProtocolState",
+    "PyRatAI",
     # Enums
     "CommandType",
     "GameResult",
@@ -40,6 +43,8 @@ __all__ = [
     "OptionType",
     "Player",
     "ResponseType",
+    # Modules
+    "utils",
     # Utility functions
     "command_from_string",
     "game_result_from_string",

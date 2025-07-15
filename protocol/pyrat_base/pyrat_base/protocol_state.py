@@ -152,25 +152,33 @@ class ProtocolState:
         self._observation = None
 
     # Convenience methods
-    def get_valid_moves(self) -> List[Direction]:
-        """Get list of valid moves from current position.
+    def get_effective_moves(self) -> List[Direction]:
+        """Get list of moves that will result in actual movement.
 
         Returns:
-            List of Direction enums representing valid moves from current position.
-            Always includes Direction.STAY as it's always valid.
+            List of directions that are not blocked by walls or boundaries.
+            STAY is always included as it's technically an effective move
+            (you successfully stay in place).
+
+        Note: In PyRat, all moves are legal - if you try to move into a wall,
+        the engine will convert it to STAY. This method returns moves that
+        will actually change your position (plus STAY).
         """
-        valid_moves = [Direction.STAY]  # STAY is always valid
+        effective_moves = [Direction.STAY]  # STAY is always effective
 
         x, y = self.my_position
-        movement_costs = self.movement_matrix[x, y]
 
-        # Check each direction (UP, RIGHT, DOWN, LEFT)
-        directions = [Direction.UP, Direction.RIGHT, Direction.DOWN, Direction.LEFT]
-        for i, direction in enumerate(directions):
-            if movement_costs[i] >= 0:  # -1 means invalid (wall/boundary)
-                valid_moves.append(direction)
+        # Check each direction using their enum values as indices
+        for direction in [
+            Direction.UP,
+            Direction.RIGHT,
+            Direction.DOWN,
+            Direction.LEFT,
+        ]:
+            if self.movement_matrix[x, y, direction.value] >= 0:  # -1 means blocked
+                effective_moves.append(direction)
 
-        return valid_moves
+        return effective_moves
 
     def get_move_cost(self, direction: Direction) -> Optional[int]:
         """Get the mud cost for moving in a given direction.
@@ -180,24 +188,18 @@ class ProtocolState:
 
         Returns:
             The mud cost (0 for immediate move, >0 for mud delay),
-            or None if the move is invalid.
+            or None if the move is blocked by a wall/boundary.
         """
         if direction == Direction.STAY:
             return 0
 
         x, y = self.my_position
-        movement_costs = self.movement_matrix[x, y]
 
-        # Map direction to index in movement matrix
-        direction_indices = {
-            Direction.UP: 0,
-            Direction.RIGHT: 1,
-            Direction.DOWN: 2,
-            Direction.LEFT: 3,
-        }
-
-        if direction in direction_indices:
-            cost = movement_costs[direction_indices[direction]]
+        # Direction enum values already map to the correct indices:
+        # UP=0, RIGHT=1, DOWN=2, LEFT=3
+        # STAY=4 is handled above
+        if direction in [Direction.UP, Direction.RIGHT, Direction.DOWN, Direction.LEFT]:
+            cost = self.movement_matrix[x, y, direction.value]
             return cost if cost >= 0 else None
 
         return None
