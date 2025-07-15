@@ -3,3 +3,9 @@ members = [
     "engine",
     "protocol/pyrat_base",
 ]
+
+[tool.mypy]
+python_version = "3.8"
+namespace_packages = true
+explicit_package_bases = true
+mypy_path = "$MYPY_CONFIG_FILE_DIR"
