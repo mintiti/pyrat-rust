@@ -19,10 +19,16 @@ class TestIOHandler:
         assert handler._reader_thread.is_alive()
         handler.close()
 
-    def test_context_manager(self):
+    @patch("sys.stdin")
+    def test_context_manager(self, mock_stdin):
         """Test IOHandler as context manager."""
+        # Mock stdin to block on readline (simulating waiting for input)
+        mock_stdin.isatty.return_value = False
+        mock_stdin.readline = MagicMock(side_effect=lambda: time.sleep(10))
+
         with IOHandler() as handler:
             assert handler._running is True
+            # Thread should be alive and waiting for input
             assert handler._reader_thread.is_alive()
         # After context exit, should be closed
         assert handler._running is False

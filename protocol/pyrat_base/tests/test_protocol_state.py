@@ -144,19 +144,19 @@ class TestProtocolState:
             movement_matrix[0, 0, Direction.RIGHT.value] >= 0
         )  # RIGHT should be valid
 
-    def test_get_valid_moves(self, simple_game):
-        """Test get_valid_moves convenience method."""
+    def test_get_effective_moves(self, simple_game):
+        """Test get_effective_moves convenience method."""
         game = simple_game
         state = ProtocolState(game, Player.RAT)
 
         # From (0,0), RAT can only go UP or RIGHT (plus STAY)
-        valid_moves = state.get_valid_moves()
-        assert Direction.STAY in valid_moves
-        assert Direction.UP in valid_moves
-        assert Direction.RIGHT in valid_moves
-        assert Direction.DOWN not in valid_moves  # Wall/boundary
-        assert Direction.LEFT not in valid_moves  # Wall/boundary
-        assert len(valid_moves) == 3
+        effective_moves = state.get_effective_moves()
+        assert Direction.STAY in effective_moves
+        assert Direction.UP in effective_moves
+        assert Direction.RIGHT in effective_moves
+        assert Direction.DOWN not in effective_moves  # Blocked by boundary
+        assert Direction.LEFT not in effective_moves  # Blocked by boundary
+        assert len(effective_moves) == 3
 
     def test_get_move_cost(self, simple_game):
         """Test get_move_cost method."""
@@ -166,11 +166,11 @@ class TestProtocolState:
         # STAY always has cost 0
         assert state.get_move_cost(Direction.STAY) == 0
 
-        # Valid moves should have cost >= 0
+        # Effective moves should have cost >= 0
         assert state.get_move_cost(Direction.UP) == 0
         assert state.get_move_cost(Direction.RIGHT) == 0
 
-        # Invalid moves should return None
+        # Blocked moves should return None
         assert state.get_move_cost(Direction.DOWN) is None
         assert state.get_move_cost(Direction.LEFT) is None
 
