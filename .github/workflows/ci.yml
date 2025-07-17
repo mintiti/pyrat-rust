@@ -16,6 +16,11 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.9'
+
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@stable
       with:
@@ -42,14 +47,17 @@ jobs:
     - name: Check formatting
       run: cd engine && cargo fmt --all -- --check
 
-    - name: Run clippy
+    - name: Run clippy (no features)
+      run: cd engine && cargo clippy --all-targets --no-default-features -- -D warnings
+
+    - name: Run clippy (all features)
       run: cd engine && cargo clippy --all-targets --all-features -- -D warnings -A non-local-definitions
 
     - name: Run tests
-      run: cd engine && cargo test --verbose
+      run: cd engine && cargo test --lib --no-default-features --verbose
 
     - name: Build release
-      run: cd engine && cargo build --release --verbose
+      run: cd engine && cargo build --release --no-default-features --verbose
 
   python-tests:
     name: Python Tests
@@ -97,7 +105,7 @@ jobs:
           protocol/pyrat_base/pyproject.toml
 
     - name: Sync workspace dependencies
-      run: uv sync
+      run: uv sync --all-extras
 
     - name: Build Rust extension
       run: |
@@ -157,7 +165,7 @@ jobs:
           protocol/pyrat_base/pyproject.toml
 
     - name: Sync workspace dependencies
-      run: uv sync
+      run: uv sync --all-extras
 
     - name: Build Rust extension
       run: |

@@ -7,6 +7,7 @@
 #![allow(clippy::must_use_candidate)]
 #![allow(clippy::cargo_common_metadata)]
 
+#[cfg(feature = "python")]
 mod bindings;
 pub mod game;
 
@@ -18,10 +19,13 @@ pub use game::{
     maze_generation::{CheeseConfig, MazeConfig},
     types::{Coordinates, Direction},
 };
+
 // Export the Python module
+#[cfg(feature = "python")]
 use pyo3::prelude::*;
 
 /// Python module for PyRat game
+#[cfg(feature = "python")]
 #[pymodule]
 fn _rust(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     // Register all Python-facing types and functions

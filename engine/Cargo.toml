@@ -17,11 +17,11 @@ crate-type = ["cdylib", "rlib"]  # Both Python module and Rust library
 
 [dependencies]
 rand = "0.8"
-pyo3 = { version = "0.20", features = ["extension-module"] }
-numpy = "0.20"
+pyo3 = { version = "0.20", features = ["extension-module"], optional = true }
+numpy = { version = "0.20", optional = true }
 flame = { version = "0.2.2", optional = true }
 serde = { version = "1.0.214", features = ["derive"] }
-ndarray = "0.15"
+ndarray = { version = "0.15", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
@@ -51,7 +51,8 @@ name = "profile_process_turn"
 path = "rust/benches/bin/profile_process_turn.rs"
 
 [features]
-default = []
+default = ["python"]
+python = ["dep:pyo3", "dep:numpy", "dep:ndarray"]
 flame = ["dep:flame"]  # Changed from flame_it to flame
 
 [package.metadata.maturin]
