@@ -23,4 +23,4 @@ Example:
 from pyrat_engine.game import Direction, GameResult, Position, PyRat
 
 __version__ = "0.1.0"
-__all__ = ["PyRat", "Direction", "Position", "GameResult"]
+__all__ = ["Direction", "GameResult", "Position", "PyRat"]
