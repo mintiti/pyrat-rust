@@ -29,8 +29,8 @@ This repository uses uv workspaces for seamless development across components:
 git clone https://github.com/yourusername/pyrat-rust.git
 cd pyrat-rust
 
-# Sync all workspace dependencies
-uv sync
+# Sync all workspace dependencies with dev tools
+uv sync --all-extras
 
 # Build the Rust engine
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate

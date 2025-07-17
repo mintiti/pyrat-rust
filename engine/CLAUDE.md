@@ -24,15 +24,15 @@ maturin develop --release
 ### Setup (Workspace - Recommended)
 ```bash
 # From repository root
-uv sync  # This installs engine and all dependencies
+uv sync --all-extras  # This installs engine and all dependencies including dev tools
 cd engine
 maturin develop --release  # Build Rust extension
 ```
 
 ### Testing
 ```bash
-# Rust tests
-cd rust && cargo test --lib
+# Rust tests (without Python bindings)
+cargo test --lib --no-default-features
 
 # Python tests
 pytest python/tests -v
@@ -73,6 +73,12 @@ make test-engine
 ## CI/CD
 The engine is tested on Python 3.8-3.11 with:
 - Rust formatting (`cargo fmt --check`)
-- Rust linting (`cargo clippy`)
-- Rust unit tests (`cargo test --lib`)
+- Rust linting (`cargo clippy`) - runs with and without Python features
+- Rust unit tests (`cargo test --lib --no-default-features`)
 - Python integration tests (`pytest`)
+
+### Feature Flags
+- `python` (default): Enables Python bindings via PyO3
+- `flame`: Enables profiling with flame graphs
+
+Rust tests run without Python features to avoid linking issues.

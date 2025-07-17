@@ -74,12 +74,13 @@ This repository uses `uv` workspaces for managing the monorepo structure. This e
 
 ```bash
 # From repository root
-uv sync  # Sync all workspace dependencies
+uv sync --all-extras  # Sync all workspace dependencies with dev tools
 
 # This automatically:
 # - Creates a virtual environment at .venv
 # - Installs all workspace members (engine, protocol/pyrat_base)
 # - Resolves cross-dependencies correctly
+# - Installs dev dependencies like maturin, pytest, ruff, etc.
 ```
 
 ### Engine Development
@@ -146,8 +147,8 @@ cd engine
 # Build the Rust library
 cargo build --release
 
-# Run Rust tests
-cd rust && cargo test --lib
+# Run Rust tests (without Python features to avoid linking issues)
+cd engine && cargo test --lib --no-default-features
 
 # Run benchmarks
 cargo bench
@@ -211,7 +212,7 @@ Each player receives:
 - Rust unit tests for core game logic
 - Python integration tests for the PettingZoo interface
 - Benchmarks for performance-critical paths (game_benchmarks.rs)
-- Use `cargo test --lib` and `pytest` separately for each language layer
+- Use `cargo test --lib --no-default-features` and `pytest` separately for each language layer
 - Or use `make test-engine` from the repository root for both
 
 ## Future Components

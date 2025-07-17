@@ -8,7 +8,7 @@ all: sync engine
 # Sync workspace dependencies
 sync:
 	@echo "Syncing workspace dependencies..."
-	uv sync
+	uv sync --all-extras
 
 # Build the engine component
 engine: sync
@@ -34,7 +34,7 @@ cli:
 dev-setup:
 	@echo "Setting up development environment..."
 	@echo "Prerequisites: uv, rust toolchain"
-	uv sync
+	uv sync --all-extras
 	@echo "Installing pre-commit hooks..."
 	source .venv/bin/activate && pre-commit install && pre-commit install --hook-type pre-push
 
@@ -43,7 +43,7 @@ test: test-engine test-protocol
 
 test-engine:
 	@echo "Running engine tests..."
-	cd engine && cargo test --lib
+	cd engine && cargo test --lib --no-default-features
 	source .venv/bin/activate && cd engine && pytest python/tests -v
 
 test-protocol:
@@ -65,6 +65,7 @@ fmt:
 check:
 	@echo "Running checks..."
 	cd engine && cargo fmt --all -- --check
+	cd engine && cargo clippy --all-targets --no-default-features -- -D warnings
 	cd engine && cargo clippy --all-targets --all-features -- -D warnings -A non-local-definitions
 	source .venv/bin/activate && ruff check engine/python protocol/pyrat_base
 	source .venv/bin/activate && mypy engine/python protocol/pyrat_base --ignore-missing-imports
