@@ -38,37 +38,31 @@ from pyrat_base.replay import (
 __version__ = "0.1.0"
 
 __all__ = [
-    # Constants
     "PROTOCOL_VERSION",
-    # Classes
     "Command",
+    "CommandType",
+    "GameResult",
     "IOHandler",
+    "InfoType",
+    "InitialState",
+    "Move",
+    "OptionType",
+    "Player",
     "Protocol",
     "ProtocolState",
     "PyRatAI",
-    # Enums
-    "CommandType",
-    "GameResult",
-    "InfoType",
-    "OptionType",
-    "Player",
-    "ResponseType",
-    # Replay
-    "InitialState",
-    "Move",
     "Replay",
     "ReplayMetadata",
     "ReplayPlayer",
     "ReplayReader",
     "ReplayWriter",
+    "ResponseType",
     "StreamingReplayWriter",
-    # Modules
-    "utils",
-    # Utility functions
     "command_from_string",
     "game_result_from_string",
     "info_type_from_string",
     "option_type_from_string",
     "player_from_string",
     "response_to_string",
+    "utils",
 ]
