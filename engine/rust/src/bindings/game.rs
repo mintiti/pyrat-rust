@@ -8,7 +8,12 @@ use pyo3::prelude::*;
 use pyo3::Python;
 use std::collections::HashMap;
 
-// Type aliases for cleaner Python API
+use super::validation::{
+    validate_cheese_positions, validate_mud, validate_optional_position, validate_wall, PyMudEntry,
+    PyPosition, PyWall,
+};
+
+// Type aliases for internal Rust API (using u8)
 type Position = (u8, u8);
 type Wall = (Position, Position);
 type MudEntry = (Position, Position, u8);
@@ -304,61 +309,92 @@ impl PyGameState {
     fn create_custom(
         width: u8,
         height: u8,
-        walls: Vec<Wall>,
-        mud: Vec<MudEntry>,
-        cheese: Vec<Position>,
-        player1_pos: Option<Position>,
-        player2_pos: Option<Position>,
+        walls: Vec<PyWall>,
+        mud: Vec<PyMudEntry>,
+        cheese: Vec<PyPosition>,
+        player1_pos: Option<PyPosition>,
+        player2_pos: Option<PyPosition>,
         max_turns: u16,
     ) -> PyResult<Self> {
-        // Use PyGameConfigBuilder to validate and build the game
-        let builder = PyGameConfigBuilder::new(width, height);
+        // Validate and convert all inputs
+        let validated_walls: Vec<Wall> = walls
+            .into_iter()
+            .map(|w| validate_wall(w, width, height))
+            .collect::<PyResult<Vec<_>>>()?;
 
-        // Create a PyRefMut-like wrapper for the builder
+        let validated_mud: Vec<MudEntry> = mud
+            .into_iter()
+            .map(|m| validate_mud(m, width, height))
+            .collect::<PyResult<Vec<_>>>()?;
+
+        let validated_cheese = validate_cheese_positions(cheese, width, height)?;
+
+        let validated_player1_pos =
+            validate_optional_position(player1_pos, width, height, "Player 1")?;
+        let validated_player2_pos =
+            validate_optional_position(player2_pos, width, height, "Player 2")?;
+
+        // Check for duplicate walls
+        let mut wall_set = std::collections::HashSet::new();
+        for wall in &validated_walls {
+            let normalized = if wall.0 < wall.1 {
+                *wall
+            } else {
+                (wall.1, wall.0)
+            };
+            if !wall_set.insert(normalized) {
+                return Err(PyValueError::new_err(format!(
+                    "Duplicate wall between {:?} and {:?}",
+                    wall.0, wall.1
+                )));
+            }
+        }
+
+        // Check for duplicate mud
+        let mut mud_set = std::collections::HashSet::new();
+        for mud_entry in &validated_mud {
+            let normalized = if mud_entry.0 < mud_entry.1 {
+                (mud_entry.0, mud_entry.1)
+            } else {
+                (mud_entry.1, mud_entry.0)
+            };
+            if !mud_set.insert(normalized) {
+                return Err(PyValueError::new_err(format!(
+                    "Duplicate mud between {:?} and {:?}",
+                    mud_entry.0, mud_entry.1
+                )));
+            }
+        }
+
+        // Check for wall-mud conflicts
+        for wall in &validated_walls {
+            let normalized_wall = if wall.0 < wall.1 {
+                *wall
+            } else {
+                (wall.1, wall.0)
+            };
+            if mud_set.contains(&normalized_wall) {
+                return Err(PyValueError::new_err(format!(
+                    "Cannot have both wall and mud between {:?} and {:?}",
+                    wall.0, wall.1
+                )));
+            }
+        }
+
+        // Validate minimum requirements
+        if validated_cheese.is_empty() {
+            return Err(PyValueError::new_err("Game must have at least one cheese"));
+        }
+
+        // Now use the builder with validated data
+        let builder = PyGameConfigBuilder::new(width, height);
         let mut builder_owned = builder;
 
-        // Add walls if any
-        if !walls.is_empty() {
-            builder_owned.walls = walls.clone();
-            // Validate walls
-            for (pos1, pos2) in &walls {
-                builder_owned.validate_position(*pos1, "Wall start")?;
-                builder_owned.validate_position(*pos2, "Wall end")?;
-                if !are_adjacent(*pos1, *pos2) {
-                    return Err(PyValueError::new_err(format!(
-                        "Wall between {pos1:?} and {pos2:?} must be between adjacent cells"
-                    )));
-                }
-            }
-        }
-
-        // Add mud if any
-        if !mud.is_empty() {
-            builder_owned.mud = mud.clone();
-            // Validate mud
-            for ((x1, y1), (x2, y2), value) in &mud {
-                builder_owned.validate_position((*x1, *y1), "Mud start")?;
-                builder_owned.validate_position((*x2, *y2), "Mud end")?;
-                if *value < 2 {
-                    return Err(PyValueError::new_err("Mud value must be at least 2 turns"));
-                }
-                if !are_adjacent((*x1, *y1), (*x2, *y2)) {
-                    return Err(PyValueError::new_err(format!(
-                        "Mud between ({x1}, {y1}) and ({x2}, {y2}) must be between adjacent cells"
-                    )));
-                }
-            }
-        }
-
-        // Add cheese if any
-        builder_owned.cheese = cheese;
-        for pos in &builder_owned.cheese {
-            builder_owned.validate_position(*pos, "Cheese")?;
-        }
-
-        // Set player positions
-        builder_owned.player1_pos = player1_pos;
-        builder_owned.player2_pos = player2_pos;
+        builder_owned.walls = validated_walls;
+        builder_owned.mud = validated_mud;
+        builder_owned.cheese = validated_cheese;
+        builder_owned.player1_pos = validated_player1_pos;
+        builder_owned.player2_pos = validated_player2_pos;
         builder_owned.max_turns = max_turns;
 
         // Build the game

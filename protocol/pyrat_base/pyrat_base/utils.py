@@ -144,7 +144,7 @@ def find_fastest_path_dijkstra(
             # If this is a better path to next_pos, update it
             if new_cost < best_cost.get(next_pos, float("inf")):
                 best_cost[next_pos] = new_cost
-                new_path = path + [direction]
+                new_path = [*path, direction]
 
                 # Check if we reached the goal
                 if next_pos == goal:
@@ -219,7 +219,7 @@ def find_nearest_cheese_by_time(
             # If this is a better path to next_pos, update it
             if new_cost < best_cost.get(next_pos, float("inf")):
                 best_cost[next_pos] = new_cost
-                new_path = path + [direction]
+                new_path = [*path, direction]
                 paths_to_positions[next_pos] = new_path
 
                 # Add to priority queue

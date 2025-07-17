@@ -53,7 +53,8 @@ class TestPathfinding:
         # Find path from (0,0) to (4,4)
         path = utils.find_fastest_path_dijkstra(state, (0, 0), (4, 4))
         assert path is not None
-        assert len(path) == 8  # 4 moves right + 4 moves up
+        expected_path_length = 8  # 4 moves right + 4 moves up
+        assert len(path) == expected_path_length
 
         # Verify it's a valid path (many valid paths exist)
         pos = (0, 0)
@@ -87,7 +88,8 @@ class TestPathfinding:
         path = utils.find_fastest_path_dijkstra(state, (0, 1), (4, 1))
         assert path is not None
         # Must go around the wall
-        assert len(path) > 4  # More than direct distance of 4
+        min_path_length = 4  # More than direct distance of 4
+        assert len(path) > min_path_length
 
         # Verify path is valid and reaches destination
         pos = (0, 1)
@@ -134,7 +136,8 @@ class TestPathfinding:
 
         # The path should avoid the expensive mud
         # Going around should take less than 8 turns
-        assert total_time < 8
+        max_time = 8
+        assert total_time < max_time
 
     def test_dijkstra_no_path(self):
         """Test Dijkstra when no path exists."""
@@ -219,8 +222,10 @@ class TestPathfinding:
         # Cheese at (4,0): 4 turns (RIGHT, RIGHT, RIGHT, RIGHT)
         # Should choose (1,0) via the around path as it's faster (3 turns)
         assert cheese_pos == (1, 0)
-        assert time_cost == 3
-        assert len(path) == 3  # The around path
+        expected_time_cost = 3
+        expected_path_length = 3  # The around path
+        assert time_cost == expected_time_cost
+        assert len(path) == expected_path_length
 
     def test_find_nearest_cheese_by_time_complex(self):
         """Test finding nearest cheese in complex maze."""
@@ -351,10 +356,12 @@ class TestPathfinding:
 
         path = utils.find_fastest_path_dijkstra(state, (0, 0), (2, 0))
         assert path is not None
-        assert len(path) == 2  # Two moves
+        expected_moves = 2  # Two moves
+        assert len(path) == expected_moves
 
         # Total time should be 3 + 2 = 5 turns
         result = utils.find_nearest_cheese_by_time(state)
         assert result is not None
         _, _, time_cost = result
-        assert time_cost == 5
+        expected_total_time = 5
+        assert time_cost == expected_total_time

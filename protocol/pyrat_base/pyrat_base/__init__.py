@@ -24,6 +24,16 @@ from pyrat_base.enums import (
 from pyrat_base.io_handler import IOHandler
 from pyrat_base.protocol import Command, Protocol
 from pyrat_base.protocol_state import ProtocolState
+from pyrat_base.replay import (
+    InitialState,
+    Move,
+    Replay,
+    ReplayMetadata,
+    ReplayPlayer,
+    ReplayReader,
+    ReplayWriter,
+    StreamingReplayWriter,
+)
 
 __version__ = "0.1.0"
 
@@ -43,6 +53,15 @@ __all__ = [
     "OptionType",
     "Player",
     "ResponseType",
+    # Replay
+    "InitialState",
+    "Move",
+    "Replay",
+    "ReplayMetadata",
+    "ReplayPlayer",
+    "ReplayReader",
+    "ReplayWriter",
+    "StreamingReplayWriter",
     # Modules
     "utils",
     # Utility functions
