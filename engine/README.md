@@ -129,6 +129,9 @@ maturin develop --release
 
 ### Running Tests
 ```bash
+# Run Python tests
 pytest python/tests
-cargo test
+
+# Run Rust tests (without Python features to avoid linking issues)
+cargo test --lib --no-default-features
 ```
