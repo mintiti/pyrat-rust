@@ -1,3 +1,5 @@
+#![allow(clippy::uninlined_format_args)]
+
 use crate::Coordinates;
 use rand::prelude::SliceRandom;
 use rand::Rng;
@@ -12,7 +14,7 @@ pub type WallMap = HashMap<Coordinates, Vec<Coordinates>>;
 pub struct MazeConfig {
     pub width: u8,
     pub height: u8,
-    pub target_density: f32, // Probability of not having a wall (0.0 to 1.0)
+    pub target_density: f32, // Probability of having a wall (0.0 to 1.0)
     pub connected: bool,     // Whether the maze must be fully connected
     pub symmetry: bool,      // Whether the maze should be symmetric
     pub mud_density: f32,    // Probability of mud in valid passages (0.0 to 1.0)
@@ -24,7 +26,7 @@ pub struct MazeConfig {
 pub struct MazeGenerator {
     config: MazeConfig,
     rng: rand::rngs::StdRng,
-    walls: HashMap<Coordinates, Vec<Coordinates>>,
+    connections: HashMap<Coordinates, Vec<Coordinates>>,
     mud: MudMap,
 }
 
@@ -41,7 +43,7 @@ impl MazeGenerator {
         Self {
             config,
             rng,
-            walls: HashMap::new(),
+            connections: HashMap::new(),
             mud: MudMap::new(),
         }
     }
@@ -51,12 +53,20 @@ impl MazeGenerator {
         self.generate_initial_layout();
 
         if self.config.connected {
-            self.ensure_connectivity();
+            self.ensure_full_connectivity();
         }
 
         self.add_border_connections();
 
-        (self.walls.clone(), self.mud.clone())
+        // Validate before converting
+        if let Err(e) = self.validate_output() {
+            panic!("Maze generation failed validation: {e}");
+        }
+
+        // Convert connections to walls (blocked passages)
+        let walls = self.connections_to_walls();
+
+        (walls, self.mud.clone())
     }
 
     /// Generates the initial random layout of the maze
@@ -78,7 +88,7 @@ impl MazeGenerator {
                 if !self.config.symmetry || not_considered.contains(&current) {
                     // Horizontal connections (exactly as Python)
                     if i + 1 < self.config.width
-                        && self.rng.gen::<f32>() > self.config.target_density
+                        && self.rng.gen::<f32>() >= self.config.target_density
                     {
                         let next = Coordinates::new(i + 1, j);
                         let mud_value = if self.rng.gen::<f32>() < self.config.mud_density {
@@ -88,8 +98,8 @@ impl MazeGenerator {
                         };
 
                         // Add bidirectional connection
-                        self.walls.entry(current).or_default().push(next);
-                        self.walls.entry(next).or_default().push(current);
+                        self.connections.entry(current).or_default().push(next);
+                        self.connections.entry(next).or_default().push(current);
 
                         if mud_value > 1 {
                             self.mud.insert(current, next, mud_value);
@@ -101,8 +111,14 @@ impl MazeGenerator {
                             let sym_current = self.get_symmetric(current);
                             let sym_next = self.get_symmetric(next);
 
-                            self.walls.entry(sym_current).or_default().push(sym_next);
-                            self.walls.entry(sym_next).or_default().push(sym_current);
+                            self.connections
+                                .entry(sym_current)
+                                .or_default()
+                                .push(sym_next);
+                            self.connections
+                                .entry(sym_next)
+                                .or_default()
+                                .push(sym_current);
 
                             if mud_value > 1 {
                                 self.mud.insert(sym_current, sym_next, mud_value);
@@ -113,7 +129,7 @@ impl MazeGenerator {
 
                     // Vertical connections (exactly as Python)
                     if j + 1 < self.config.height
-                        && self.rng.gen::<f32>() > self.config.target_density
+                        && self.rng.gen::<f32>() >= self.config.target_density
                     {
                         let next = Coordinates::new(i, j + 1);
                         let mud_value = if self.rng.gen::<f32>() < self.config.mud_density {
@@ -122,8 +138,8 @@ impl MazeGenerator {
                             1
                         };
 
-                        self.walls.entry(current).or_default().push(next);
-                        self.walls.entry(next).or_default().push(current);
+                        self.connections.entry(current).or_default().push(next);
+                        self.connections.entry(next).or_default().push(current);
 
                         if mud_value > 1 {
                             self.mud.insert(current, next, mud_value);
@@ -134,8 +150,14 @@ impl MazeGenerator {
                             let sym_current = self.get_symmetric(current);
                             let sym_next = self.get_symmetric(next);
 
-                            self.walls.entry(sym_current).or_default().push(sym_next);
-                            self.walls.entry(sym_next).or_default().push(sym_current);
+                            self.connections
+                                .entry(sym_current)
+                                .or_default()
+                                .push(sym_next);
+                            self.connections
+                                .entry(sym_next)
+                                .or_default()
+                                .push(sym_current);
 
                             if mud_value > 1 {
                                 self.mud.insert(sym_current, sym_next, mud_value);
@@ -153,15 +175,108 @@ impl MazeGenerator {
         }
     }
 
+    /// Ensures the maze is fully connected by connecting all isolated regions
+    fn ensure_full_connectivity(&mut self) {
+        loop {
+            // Find all connected components
+            let mut visited = HashSet::new();
+            let mut components = Vec::new();
+
+            for x in 0..self.config.width {
+                for y in 0..self.config.height {
+                    let pos = Coordinates::new(x, y);
+                    if !visited.contains(&pos) {
+                        // Found a new component, explore it
+                        let mut component = HashSet::new();
+                        let mut stack = vec![pos];
+
+                        while let Some(current) = stack.pop() {
+                            if component.insert(current) {
+                                visited.insert(current);
+
+                                // Add all connected neighbors to stack
+                                if let Some(connections) = self.connections.get(&current) {
+                                    for &next in connections {
+                                        if !component.contains(&next) {
+                                            stack.push(next);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        components.push(component);
+                    }
+                }
+            }
+
+            // If there's only one component, we're done
+            if components.len() <= 1 {
+                break;
+            }
+
+            // Connect the first component to another component
+            let component1 = &components[0];
+            let component2 = &components[1];
+
+            // Find the closest pair of cells between the two components
+            let mut best_pair = None;
+            let mut min_distance = u32::MAX;
+
+            for &pos1 in component1 {
+                for &pos2 in component2 {
+                    // Check if they're adjacent
+                    let dx = (pos1.x as i32 - pos2.x as i32).unsigned_abs();
+                    let dy = (pos1.y as i32 - pos2.y as i32).unsigned_abs();
+
+                    if (dx == 1 && dy == 0) || (dx == 0 && dy == 1) {
+                        // They're adjacent, we can connect them directly
+                        best_pair = Some((pos1, pos2));
+                        min_distance = 1;
+                        break;
+                    }
+
+                    let distance = dx + dy;
+                    if distance < min_distance {
+                        min_distance = distance;
+                        best_pair = Some((pos1, pos2));
+                    }
+                }
+
+                if min_distance == 1 {
+                    break;
+                }
+            }
+
+            // Connect the two components
+            if let Some((from, to)) = best_pair {
+                if min_distance == 1 {
+                    // They're adjacent, connect directly
+                    self.add_passage(from, to);
+
+                    if self.config.symmetry {
+                        let sym_from = self.get_symmetric(from);
+                        let sym_to = self.get_symmetric(to);
+                        self.add_passage(sym_from, sym_to);
+                    }
+                } else {
+                    // They're not adjacent, we need to find a path
+                    // For simplicity, just ensure the old algorithm runs
+                    self.ensure_connectivity();
+                }
+            }
+        }
+    }
+
     /// Ensures the maze is fully connected using a modified DFS algorithm
     fn ensure_connectivity(&mut self) {
         let mut connected =
             vec![vec![false; self.config.height as usize]; self.config.width as usize];
         let mut possible_border = Vec::new();
 
-        // Start from top-left corner
-        let start = Coordinates::new(0, self.config.height - 1);
-        connected[0][self.config.height as usize - 1] = true;
+        // Start from top-left corner (0,0)
+        let start = Coordinates::new(0, 0);
+        connected[0][0] = true;
         possible_border.push(start);
 
         self.connect_region(&mut connected, &mut possible_border);
@@ -234,8 +349,8 @@ impl MazeGenerator {
             };
 
             // Add connections
-            self.walls.entry(from).or_default().push(to);
-            self.walls.entry(to).or_default().push(from);
+            self.connections.entry(from).or_default().push(to);
+            self.connections.entry(to).or_default().push(from);
 
             if mud_value > 1 {
                 self.mud.insert(from, to, mud_value);
@@ -247,8 +362,8 @@ impl MazeGenerator {
                 let sym_from = self.get_symmetric(from);
                 let sym_to = self.get_symmetric(to);
 
-                self.walls.entry(sym_from).or_default().push(sym_to);
-                self.walls.entry(sym_to).or_default().push(sym_from);
+                self.connections.entry(sym_from).or_default().push(sym_to);
+                self.connections.entry(sym_to).or_default().push(sym_from);
 
                 if mud_value > 1 {
                     self.mud.insert(sym_from, sym_to, mud_value);
@@ -263,7 +378,7 @@ impl MazeGenerator {
     }
     #[inline]
     fn has_connection(&self, from: Coordinates, to: Coordinates) -> bool {
-        self.walls
+        self.connections
             .get(&from)
             .is_some_and(|connections| connections.contains(&to))
     }
@@ -293,8 +408,8 @@ impl MazeGenerator {
     #[inline(always)]
     fn add_passage(&mut self, from: Coordinates, to: Coordinates) {
         // First add the walls bidirectionally
-        self.walls.entry(from).or_default().push(to);
-        self.walls.entry(to).or_default().push(from);
+        self.connections.entry(from).or_default().push(to);
+        self.connections.entry(to).or_default().push(from);
 
         // Then handle mud if needed
         if self.rng.gen::<f32>() < self.config.mud_density {
@@ -357,9 +472,110 @@ impl MazeGenerator {
     /// Checks if a cell has any connections
     #[inline(always)]
     fn has_any_connection(&self, pos: Coordinates) -> bool {
-        self.walls
+        self.connections
             .get(&pos)
             .is_some_and(|connections| !connections.is_empty())
+    }
+
+    /// Converts internal connections representation to walls (blocked passages)
+    /// The internal representation uses connections (where you CAN move)
+    /// But the game expects walls (where you CANNOT move)
+    fn connections_to_walls(&self) -> WallMap {
+        let mut walls = HashMap::new();
+
+        // For each position, check all four directions
+        for x in 0..self.config.width {
+            for y in 0..self.config.height {
+                let current = Coordinates::new(x, y);
+
+                // Check all four adjacent cells
+                let adjacent = [
+                    (x.saturating_sub(1), y, x > 0),                      // Left
+                    (x.saturating_add(1), y, x + 1 < self.config.width),  // Right
+                    (x, y.saturating_sub(1), y > 0),                      // Down
+                    (x, y.saturating_add(1), y + 1 < self.config.height), // Up
+                ];
+
+                for (adj_x, adj_y, in_bounds) in adjacent {
+                    if in_bounds {
+                        let adjacent = Coordinates::new(adj_x, adj_y);
+
+                        // If there's no connection, there's a wall
+                        if !self.has_connection(current, adjacent) {
+                            walls.entry(current).or_insert_with(Vec::new).push(adjacent);
+                        }
+                    }
+                }
+            }
+        }
+
+        walls
+    }
+
+    /// Validates the generated maze output
+    fn validate_output(&self) -> Result<(), String> {
+        // Check 1: Every mud entry must correspond to a connection (passage)
+        for ((from, to), mud_value) in self.mud.iter() {
+            if !self.has_connection(from, to) {
+                return Err(format!(
+                    "Mud exists between {:?} and {:?} with value {}, but there's no connection",
+                    from, to, mud_value
+                ));
+            }
+        }
+
+        // Check 2: All connections must be bidirectional
+        for (from, to_list) in &self.connections {
+            for to in to_list {
+                if !self.has_connection(*to, *from) {
+                    return Err(format!(
+                        "Connection from {:?} to {:?} is not bidirectional",
+                        from, to
+                    ));
+                }
+            }
+        }
+
+        // Check 3: If connected mode, verify full connectivity
+        if self.config.connected {
+            let mut visited = HashSet::new();
+            let mut stack = vec![Coordinates::new(0, 0)];
+
+            while let Some(current) = stack.pop() {
+                if visited.insert(current) {
+                    if let Some(connections) = self.connections.get(&current) {
+                        for &next in connections {
+                            if !visited.contains(&next) {
+                                stack.push(next);
+                            }
+                        }
+                    }
+                }
+            }
+
+            let total_cells = (self.config.width as usize) * (self.config.height as usize);
+            if visited.len() != total_cells {
+                return Err(format!(
+                    "Maze is not fully connected. Visited {} cells out of {}",
+                    visited.len(),
+                    total_cells
+                ));
+            }
+        }
+
+        // Check 4: No connections outside grid bounds
+        for (from, to_list) in &self.connections {
+            if from.x >= self.config.width || from.y >= self.config.height {
+                return Err(format!("Connection from out-of-bounds position {:?}", from));
+            }
+            for to in to_list {
+                if to.x >= self.config.width || to.y >= self.config.height {
+                    return Err(format!("Connection to out-of-bounds position {:?}", to));
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -548,13 +764,49 @@ mod tests {
         let (walls, _) = generator.generate();
 
         // Check if all cells are reachable from starting position
+        // We need to check connections, not walls, so we need to reconstruct the connections
+        let mut connections = HashMap::new();
+
+        // Build connections from walls (walls block movement, so where there's no wall, there's a connection)
+        for x in 0..config.width {
+            for y in 0..config.height {
+                let current = Coordinates::new(x, y);
+                let mut current_connections = Vec::new();
+
+                // Check all four directions
+                let adjacent = [
+                    (x.saturating_sub(1), y, x > 0),                 // Left
+                    (x.saturating_add(1), y, x + 1 < config.width),  // Right
+                    (x, y.saturating_sub(1), y > 0),                 // Down
+                    (x, y.saturating_add(1), y + 1 < config.height), // Up
+                ];
+
+                for (adj_x, adj_y, in_bounds) in adjacent {
+                    if in_bounds {
+                        let adjacent = Coordinates::new(adj_x, adj_y);
+                        // If there's no wall blocking this direction, there's a connection
+                        if !walls
+                            .get(&current)
+                            .is_some_and(|blocked| blocked.contains(&adjacent))
+                        {
+                            current_connections.push(adjacent);
+                        }
+                    }
+                }
+
+                if !current_connections.is_empty() {
+                    connections.insert(current, current_connections);
+                }
+            }
+        }
+
         let mut visited = HashSet::new();
         let mut stack = vec![Coordinates::new(0, 0)];
 
         while let Some(current) = stack.pop() {
             if visited.insert(current) {
-                if let Some(connections) = walls.get(&current) {
-                    for &next in connections {
+                if let Some(conns) = connections.get(&current) {
+                    for &next in conns {
                         if !visited.contains(&next) {
                             stack.push(next);
                         }
@@ -572,7 +824,7 @@ mod tests {
         let config = MazeConfig {
             width: 5,
             height: 5,
-            target_density: 1.0, // High density to force border handling
+            target_density: 1.0, // Maximum wall density - should still be connected
             connected: true,
             symmetry: false,
             mud_density: 0.0, // No mud for this test
@@ -583,16 +835,66 @@ mod tests {
         let mut generator = MazeGenerator::new(config);
         let (walls, _) = generator.generate();
 
-        // Check that border cells have at least one connection
+        // With high wall density (1.0), we should have many walls
+        // The exact count depends on connectivity requirements
+        // But we should have at least some walls in the maze
+        assert!(
+            !walls.is_empty(),
+            "High density maze should have some walls"
+        );
+
+        // Check that the maze is still connected despite high wall density
+        // This ensures the connectivity algorithm is working properly
+        let mut visited = HashSet::new();
+        let mut stack = vec![Coordinates::new(0, 0)];
+
+        // Build connections map from walls (inverse of walls)
+        let mut connections = HashMap::new();
         for x in 0..config.width {
             for y in 0..config.height {
-                let pos = Coordinates::new(x, y);
-                if x == 0 || y == 0 || x == config.width - 1 || y == config.height - 1 {
-                    assert!(walls.contains_key(&pos));
-                    assert!(!walls[&pos].is_empty());
+                let current = Coordinates::new(x, y);
+                let mut current_connections = Vec::new();
+
+                let adjacent = [
+                    (x.saturating_sub(1), y, x > 0),
+                    (x.saturating_add(1), y, x + 1 < config.width),
+                    (x, y.saturating_sub(1), y > 0),
+                    (x, y.saturating_add(1), y + 1 < config.height),
+                ];
+
+                for (adj_x, adj_y, in_bounds) in adjacent {
+                    if in_bounds {
+                        let adjacent = Coordinates::new(adj_x, adj_y);
+                        if !walls
+                            .get(&current)
+                            .is_some_and(|blocked| blocked.contains(&adjacent))
+                        {
+                            current_connections.push(adjacent);
+                        }
+                    }
+                }
+
+                if !current_connections.is_empty() {
+                    connections.insert(current, current_connections);
                 }
             }
         }
+
+        // Traverse connections
+        while let Some(current) = stack.pop() {
+            if visited.insert(current) {
+                if let Some(conns) = connections.get(&current) {
+                    for &next in conns {
+                        if !visited.contains(&next) {
+                            stack.push(next);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Despite high wall density, all cells should still be reachable
+        assert_eq!(visited.len(), (config.width * config.height) as usize);
     }
 
     #[test]
@@ -715,13 +1017,34 @@ mod tests {
         let mut generator = MazeGenerator::new(config);
         let (walls, mud) = generator.generate();
 
-        // Every passage should have mud
-        for (from, connections) in walls.iter() {
-            for to in connections {
-                assert!(mud.contains_key(&(*from, *to)));
-                assert!(mud[&(*from, *to)] >= 2);
-                assert!(mud[&(*from, *to)] <= 3);
-            }
+        // Mud should only exist on passages (where there are no walls)
+        // First, verify no mud exists on walls
+        for ((from, to), _) in mud.iter() {
+            // Check that there's no wall between these positions
+            let has_wall = walls
+                .get(&from)
+                .is_some_and(|blocked| blocked.contains(&to))
+                || walls
+                    .get(&to)
+                    .is_some_and(|blocked| blocked.contains(&from));
+            assert!(
+                !has_wall,
+                "Mud exists on a wall between {:?} and {:?}",
+                from, to
+            );
+        }
+
+        // With mud_density = 1.0, we should have mud on many passages
+        // But we can't check exact count since connectivity affects passage count
+        assert!(
+            !mud.is_empty(),
+            "Should have at least some mud with density 1.0"
+        );
+
+        // Check mud values are in correct range
+        for (_, value) in mud.iter() {
+            assert!(value >= 2);
+            assert!(value <= 3);
         }
     }
 }

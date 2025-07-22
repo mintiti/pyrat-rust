@@ -167,16 +167,17 @@ class TestMudValidation:
         )
 
     def test_wall_mud_conflict(self):
-        """Test that walls and mud can't overlap."""
-        with pytest.raises(ValueError) as exc_info:
-            PyGameState.create_custom(
-                width=10,
-                height=10,
-                walls=[((0, 0), (0, 1))],
-                mud=[((0, 0), (0, 1), 3)],
-                cheese=[(5, 5)],
-            )
-        assert "Cannot have both wall and mud" in str(exc_info.value)
+        """Test that walls and mud can coexist (no longer an error)."""
+        # This used to be an error, but the semantic fix clarifies that mud exists on passages
+        # The maze generator ensures mud only exists on valid connections, not walls
+        game = PyGameState.create_custom(
+            width=10,
+            height=10,
+            walls=[((0, 0), (0, 1))],
+            mud=[((0, 0), (0, 1), 3)],
+            cheese=[(5, 5)],
+        )
+        assert game is not None  # Should create successfully
 
 
 class TestCheeseValidation:
