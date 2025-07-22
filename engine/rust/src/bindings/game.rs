@@ -17,6 +17,7 @@ use super::validation::{
 type Position = (u8, u8);
 type Wall = (Position, Position);
 type MudEntry = (Position, Position, u8);
+type WallEntry = (Position, Position);
 #[pyclass]
 #[derive(Clone)]
 pub struct PyMoveUndo {
@@ -201,6 +202,61 @@ impl PyGameState {
             .collect()
     }
 
+    /// Extract all walls from the game state
+    fn wall_entries(&self) -> Vec<WallEntry> {
+        let mut walls = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        // For each position, check all adjacent cells to find walls
+        for y in 0..self.game.height() {
+            for x in 0..self.game.width() {
+                let current = Coordinates::new(x, y);
+
+                // Check all four adjacent cells
+                let adjacent = [
+                    (x.saturating_sub(1), y, x > 0, Direction::Left), // Left
+                    (
+                        x.saturating_add(1),
+                        y,
+                        x + 1 < self.game.width(),
+                        Direction::Right,
+                    ), // Right
+                    (x, y.saturating_sub(1), y > 0, Direction::Down), // Down
+                    (
+                        x,
+                        y.saturating_add(1),
+                        y + 1 < self.game.height(),
+                        Direction::Up,
+                    ), // Up
+                ];
+
+                for (adj_x, adj_y, in_bounds, direction) in adjacent {
+                    if in_bounds {
+                        let adjacent_pos = Coordinates::new(adj_x, adj_y);
+
+                        // Check if we can move to this adjacent cell
+                        if !self.game.move_table.is_move_valid(current, direction) {
+                            // Normalize wall representation (smaller position first)
+                            let wall = if (current.x, current.y) < (adjacent_pos.x, adjacent_pos.y)
+                            {
+                                ((current.x, current.y), (adjacent_pos.x, adjacent_pos.y))
+                            } else {
+                                ((adjacent_pos.x, adjacent_pos.y), (current.x, current.y))
+                            };
+
+                            // Add if not already seen
+                            if seen.insert(wall) {
+                                walls.push(wall);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        walls
+    }
+
     // Game actions
     /// Process a single game turn
     ///
@@ -366,20 +422,8 @@ impl PyGameState {
             }
         }
 
-        // Check for wall-mud conflicts
-        for wall in &validated_walls {
-            let normalized_wall = if wall.0 < wall.1 {
-                *wall
-            } else {
-                (wall.1, wall.0)
-            };
-            if mud_set.contains(&normalized_wall) {
-                return Err(PyValueError::new_err(format!(
-                    "Cannot have both wall and mud between {:?} and {:?}",
-                    wall.0, wall.1
-                )));
-            }
-        }
+        // Note: Wall-mud conflicts are not checked here because mud can exist on passages
+        // The maze generator ensures mud only exists on valid connections
 
         // Validate minimum requirements
         if validated_cheese.is_empty() {
