@@ -51,12 +51,22 @@ class PyRatAI:
             name: The name of your AI (e.g., "GreedyBot v1.0")
             author: Your name (optional)
         """
+        import os
+
         self.name = name
         self.author = author
-        self.debug = False
+        # Enable debug if PYRAT_DEBUG environment variable is set
+        self.debug = bool(
+            os.environ.get("PYRAT_DEBUG", "").lower() in ("1", "true", "yes")
+        )
 
-        # Internal state
-        self._io = IOHandler()
+        if self.debug:
+            print(
+                f"[PyRatAI] Debug mode enabled for {name}", file=sys.stderr, flush=True
+            )
+
+        # Internal state - pass debug flag to IOHandler
+        self._io = IOHandler(debug=self.debug)
         self._protocol = Protocol()
         self._state = "INITIAL"
         self._game_state: Optional[PyGameState] = None
@@ -202,6 +212,13 @@ class PyRatAI:
         Note: Complexity warnings disabled as this is a protocol state machine
         that requires handling many different states and commands.
         """
+        if self.debug:
+            print(
+                f"[PyRatAI] Starting protocol loop in state: {self._state}",
+                file=sys.stderr,
+                flush=True,
+            )
+
         try:
             while True:
                 # Check for commands
@@ -242,15 +259,22 @@ class PyRatAI:
     def _handle_initial(self, cmd: Any) -> None:
         """Handle commands in INITIAL state."""
         if cmd.type == CommandType.PYRAT:
+            if self.debug:
+                print(
+                    "[PyRatAI] Received PYRAT command, sending identification",
+                    file=sys.stderr,
+                    flush=True,
+                )
+
             # Send identification
             response = self._protocol.format_response(
-                ResponseType.ID, {"type": "name", "value": self.name}
+                ResponseType.ID, {"name": self.name}
             )
             self._io.write_response(response)
 
             if self.author:
                 response = self._protocol.format_response(
-                    ResponseType.ID, {"type": "author", "value": self.author}
+                    ResponseType.ID, {"author": self.author}
                 )
                 self._io.write_response(response)
 
@@ -262,6 +286,13 @@ class PyRatAI:
             # Send ready
             self._io.write_response("pyratready")
             self._state = "HANDSHAKE"
+
+            if self.debug:
+                print(
+                    "[PyRatAI] Handshake complete, transitioning to HANDSHAKE state",
+                    file=sys.stderr,
+                    flush=True,
+                )
 
     def _handle_handshake(self, cmd: Any) -> None:
         """Handle commands in HANDSHAKE state."""
@@ -315,7 +346,7 @@ class PyRatAI:
         elif cmd.type == CommandType.MUD:
             self._game_config["mud"] = cmd.data.get("entries", [])
         elif cmd.type == CommandType.CHEESE:
-            self._game_config["cheese"] = cmd.data.get("positions", [])
+            self._game_config["cheese"] = cmd.data.get("cheese", [])
         elif cmd.type == CommandType.PLAYER1:
             self._game_config["player1_pos"] = cmd.data["position"]
         elif cmd.type == CommandType.PLAYER2:
