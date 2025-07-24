@@ -9,7 +9,7 @@ from typing import List, Optional
 import pytest
 
 # Get the examples directory path
-EXAMPLES_DIR = Path(__file__).parent.parent / "examples"
+EXAMPLES_DIR = Path(__file__).parent.parent.parent / "examples"
 
 
 class AIProtocolTester:

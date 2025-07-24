@@ -105,7 +105,27 @@ class ReplayReader:
         if content.startswith("\ufeff"):
             content = content[1:]
 
-        lines = content.strip().split("\n")
+        # Validate input
+        content = content.strip()
+        if not content:
+            raise ValueError("Empty replay file")
+
+        # Handle different line endings (Unix \n, Windows \r\n, old Mac \r)
+        # Replace all line endings with \n for consistent processing
+        content = content.replace("\r\n", "\n").replace("\r", "\n")
+        lines = content.split("\n")
+
+        # Check if file has any valid content (metadata tags or moves)
+        has_metadata = any(
+            line.strip().startswith("[") and line.strip().endswith("]")
+            for line in lines
+        )
+        has_moves = any(
+            line.strip() and not line.strip().startswith("[") for line in lines
+        )
+
+        if not has_metadata and not has_moves:
+            raise ValueError("Invalid replay file: no metadata tags or moves found")
 
         metadata = ReplayMetadata()
         initial_state = None

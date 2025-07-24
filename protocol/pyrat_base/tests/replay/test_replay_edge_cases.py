@@ -156,8 +156,9 @@ P:(4,4)
     def test_empty_replay_file(self):
         """Test parsing empty file."""
         reader = ReplayReader()
-        with pytest.raises(IndexError):
+        with pytest.raises(ValueError) as exc_info:
             reader.parse("")
+        assert "Empty replay file" in str(exc_info.value)
 
     def test_truncated_replay(self):
         """Test parsing truncated replay."""
