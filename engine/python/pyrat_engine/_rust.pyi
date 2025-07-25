@@ -410,7 +410,7 @@ class PyGameConfigBuilder:
 
     Example:
         >>> game = (PyGameConfigBuilder(width=4, height=4)
-        ...         .with_walls([((1, 1), (1, 2))])  # Vertical wall
+        ...         .with_walls([((1, 1), (1, 2))])  # Horizontal wall
         ...         .with_mud([((1, 1), (2, 1), 3)])  # 3-turn mud
         ...         .with_cheese([(1, 2), (3, 1)])
         ...         .with_player1_pos((0, 0))
