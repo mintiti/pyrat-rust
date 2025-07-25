@@ -13,6 +13,9 @@ from pyrat_base import ProtocolState, PyRatAI
 class DummyAI(PyRatAI):
     """AI that always stays in place."""
 
+    def __init__(self):
+        super().__init__("DummyBot v1.0", "PyRat Team")
+
     def get_move(self, state: ProtocolState) -> Direction:
         """Always return STAY."""
         return Direction.STAY
@@ -20,5 +23,5 @@ class DummyAI(PyRatAI):
 
 if __name__ == "__main__":
     # Create and run the AI
-    ai = DummyAI("DummyBot v1.0", "PyRat Team")
+    ai = DummyAI()
     ai.run()

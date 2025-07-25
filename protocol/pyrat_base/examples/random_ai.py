@@ -17,6 +17,9 @@ from pyrat_base import ProtocolState, PyRatAI
 class RandomAI(PyRatAI):
     """AI that makes random valid moves."""
 
+    def __init__(self):
+        super().__init__("RandomBot v1.0", "PyRat Team")
+
     def get_move(self, state: ProtocolState) -> Direction:
         """Choose a random effective move."""
         # Get all moves that will actually change our position (or STAY)
@@ -38,5 +41,5 @@ class RandomAI(PyRatAI):
 
 if __name__ == "__main__":
     # Create and run the AI
-    ai = RandomAI("RandomBot v1.0", "PyRat Team")
+    ai = RandomAI()
     ai.run()

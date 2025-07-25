@@ -15,12 +15,12 @@ This AI demonstrates:
 - Optimal decision making based on actual time cost
 """
 
-from typing import Optional
+from typing import List, Optional, Tuple
 
 from pyrat_engine.game import Direction
 
 from pyrat_base import ProtocolState, PyRatAI
-from pyrat_base.utils import find_nearest_cheese_by_time, get_direction_toward_target
+from pyrat_base.utils import find_nearest_cheese_by_time
 
 
 class GreedyAI(PyRatAI):
@@ -28,8 +28,9 @@ class GreedyAI(PyRatAI):
 
     def __init__(self):
         super().__init__("GreedyBot v2.0", "PyRat Team")
-        self._current_target: Optional[tuple] = None
-        self._path_to_target: Optional[list] = None
+        self._current_target: Optional[Tuple[int, int]] = None
+        self._path_to_target: Optional[List[Direction]] = None
+        self._last_position: Optional[Tuple[int, int]] = None
 
     def preprocess(self, state: ProtocolState, time_limit_ms: int) -> None:
         """Analyze the maze during preprocessing."""
@@ -50,22 +51,43 @@ class GreedyAI(PyRatAI):
 
     def get_move(self, state: ProtocolState) -> Direction:
         """Move toward the cheese that can be reached in minimum turns."""
+        # Check if stuck in mud first
+        if state.my_mud_turns > 0:
+            self.log(f"Stuck in mud for {state.my_mud_turns} more turns")
+            return Direction.STAY
+
         # If no cheese left, stay
         if not state.cheese:
             self.log("No cheese remaining")
             return Direction.STAY
 
-        # Find cheese that takes minimum time to reach (accounting for mud)
-        result = find_nearest_cheese_by_time(state)
+        # Check if we moved (position changed or just got out of mud)
+        if self._last_position != state.my_position:
+            # Position changed, need to recalculate path
+            self._current_target = None
+            self._path_to_target = None
+            self.log(
+                f"Position changed from {self._last_position} to {state.my_position}"
+            )
 
-        if result is None:
-            self.log("No reachable cheese found!")
-            return Direction.STAY
+        self._last_position = state.my_position
 
-        cheese_pos, path, total_time = result
+        # Recalculate path if we don't have one or target changed
+        if (
+            self._current_target is None
+            or self._path_to_target is None
+            or len(self._path_to_target) == 0
+        ):
+            # Find cheese that takes minimum time to reach (accounting for mud)
+            result = find_nearest_cheese_by_time(state)
 
-        # Log if we found a new target
-        if cheese_pos != self._current_target:
+            if result is None:
+                self.log("No reachable cheese found!")
+                return Direction.STAY
+
+            cheese_pos, path, total_time = result
+
+            # Set new target
             self._current_target = cheese_pos
             self._path_to_target = path
             self.log(
@@ -76,15 +98,24 @@ class GreedyAI(PyRatAI):
                 string=f"Time to reach: {total_time} turns ({len(path)} moves)",
             )
 
-        # Get the first move in the path
-        if path and len(path) > 0:
-            move = path[0]
-            self.log(f"Following path: {move.name}")
+        # Get the first move in the path and consume it
+        if self._path_to_target and len(self._path_to_target) > 0:
+            move = self._path_to_target[0]
+            # Remove this move from the path for next turn
+            self._path_to_target = self._path_to_target[1:]
+
+            # Check if this move would take us into mud
+            move_cost = state.get_move_cost(move)
+            if move_cost and move_cost > 1:
+                self.log(f"Following path: {move.name} (entering {move_cost}-turn mud)")
+            else:
+                self.log(f"Following path: {move.name}")
             return move
 
-        # Fallback: use simple direction toward target
-        self.log("Using fallback movement")
-        return get_direction_toward_target(state, cheese_pos)
+        # Fallback - recalculate path
+        self.log("Path exhausted, recalculating...")
+        self._current_target = None
+        return self.get_move(state)  # Recursive call to recalculate
 
 
 if __name__ == "__main__":

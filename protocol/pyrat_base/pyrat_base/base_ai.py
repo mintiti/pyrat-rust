@@ -18,6 +18,7 @@ Example:
     ...     ai.run()
 """
 
+import os
 import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -53,10 +54,18 @@ class PyRatAI:
         """
         self.name = name
         self.author = author
-        self.debug = False
+        # Enable debug if PYRAT_DEBUG environment variable is set
+        self.debug = bool(
+            os.environ.get("PYRAT_DEBUG", "").lower() in ("1", "true", "yes")
+        )
 
-        # Internal state
-        self._io = IOHandler()
+        if self.debug:
+            print(
+                f"[PyRatAI] Debug mode enabled for {name}", file=sys.stderr, flush=True
+            )
+
+        # Internal state - pass debug flag to IOHandler
+        self._io = IOHandler(debug=self.debug)
         self._protocol = Protocol()
         self._state = "INITIAL"
         self._game_state: Optional[PyGameState] = None
@@ -202,6 +211,13 @@ class PyRatAI:
         Note: Complexity warnings disabled as this is a protocol state machine
         that requires handling many different states and commands.
         """
+        if self.debug:
+            print(
+                f"[PyRatAI] Starting protocol loop in state: {self._state}",
+                file=sys.stderr,
+                flush=True,
+            )
+
         try:
             while True:
                 # Check for commands
@@ -242,15 +258,22 @@ class PyRatAI:
     def _handle_initial(self, cmd: Any) -> None:
         """Handle commands in INITIAL state."""
         if cmd.type == CommandType.PYRAT:
+            if self.debug:
+                print(
+                    "[PyRatAI] Received PYRAT command, sending identification",
+                    file=sys.stderr,
+                    flush=True,
+                )
+
             # Send identification
             response = self._protocol.format_response(
-                ResponseType.ID, {"type": "name", "value": self.name}
+                ResponseType.ID, {"name": self.name}
             )
             self._io.write_response(response)
 
             if self.author:
                 response = self._protocol.format_response(
-                    ResponseType.ID, {"type": "author", "value": self.author}
+                    ResponseType.ID, {"author": self.author}
                 )
                 self._io.write_response(response)
 
@@ -262,6 +285,13 @@ class PyRatAI:
             # Send ready
             self._io.write_response("pyratready")
             self._state = "HANDSHAKE"
+
+            if self.debug:
+                print(
+                    "[PyRatAI] Handshake complete, transitioning to HANDSHAKE state",
+                    file=sys.stderr,
+                    flush=True,
+                )
 
     def _handle_handshake(self, cmd: Any) -> None:
         """Handle commands in HANDSHAKE state."""
@@ -300,7 +330,7 @@ class PyRatAI:
             # Ready check after timeout
             self._io.write_response("ready")
 
-    def _handle_game_init(self, cmd: Any) -> None:  # noqa: C901, PLR0912
+    def _handle_game_init(self, cmd: Any) -> None:  # noqa: C901, PLR0912, PLR0915
         """Handle commands during game initialization.
 
         Note: Complexity warnings disabled as game initialization requires
@@ -315,7 +345,7 @@ class PyRatAI:
         elif cmd.type == CommandType.MUD:
             self._game_config["mud"] = cmd.data.get("entries", [])
         elif cmd.type == CommandType.CHEESE:
-            self._game_config["cheese"] = cmd.data.get("positions", [])
+            self._game_config["cheese"] = cmd.data.get("cheese", [])
         elif cmd.type == CommandType.PLAYER1:
             self._game_config["player1_pos"] = cmd.data["position"]
         elif cmd.type == CommandType.PLAYER2:
@@ -341,18 +371,52 @@ class PyRatAI:
         elif cmd.type == CommandType.MOVES_HISTORY:
             # Recovery: replay all moves
             if self._game_state:
-                moves = cmd.data.get("moves", [])
-                for rat_move, python_move in moves:
+                history = cmd.data.get("history", [])
+                # Pair up moves (rat, python) for each turn
+                for i in range(0, len(history) - 1, 2):
+                    rat_move = history[i]
+                    python_move = history[i + 1]
                     self._game_state.step(
                         self._parse_direction(rat_move),
                         self._parse_direction(python_move),
                     )
+                # Note: If there's an odd number of moves, the last one is ignored
+                # This should only happen if recovery occurs mid-turn
         elif cmd.type == CommandType.CURRENT_POSITION:
             # Recovery: verify positions match
-            pass
+            if self._game_state and "positions" in cmd.data:
+                positions = cmd.data["positions"]
+                if Player.RAT in positions and Player.PYTHON in positions:
+                    actual_rat = self._game_state.player1_position
+                    actual_python = self._game_state.player2_position
+                    expected_rat = positions[Player.RAT]
+                    expected_python = positions[Player.PYTHON]
+
+                    if actual_rat != expected_rat or actual_python != expected_python:
+                        self.send_info(
+                            warning=f"Position mismatch during recovery! "
+                            f"Expected rat:{expected_rat} python:{expected_python}, "
+                            f"but have rat:{actual_rat} python:{actual_python}"
+                        )
         elif cmd.type == CommandType.SCORE:
             # Recovery: verify scores match
-            pass
+            if self._game_state and "scores" in cmd.data:
+                scores = cmd.data["scores"]
+                if Player.RAT in scores and Player.PYTHON in scores:
+                    actual_rat_score = self._game_state.player1_score
+                    actual_python_score = self._game_state.player2_score
+                    expected_rat_score = scores[Player.RAT]
+                    expected_python_score = scores[Player.PYTHON]
+
+                    if (
+                        actual_rat_score != expected_rat_score
+                        or actual_python_score != expected_python_score
+                    ):
+                        self.send_info(
+                            warning=f"Score mismatch during recovery! "
+                            f"Expected rat:{expected_rat_score} python:{expected_python_score}, "
+                            f"but have rat:{actual_rat_score} python:{actual_python_score}"
+                        )
 
     def _handle_preprocessing(self, cmd: Any) -> None:
         """Handle commands during preprocessing phase."""
@@ -363,7 +427,7 @@ class PyRatAI:
             # Preprocessing timed out
             self._state = "READY"
 
-    def _handle_playing(self, cmd: Any) -> None:  # noqa: C901
+    def _handle_playing(self, cmd: Any) -> None:  # noqa: C901, PLR0912
         """Handle commands during playing state.
 
         Note: Complexity warning disabled as playing state requires
@@ -371,8 +435,16 @@ class PyRatAI:
         """
         if cmd.type == CommandType.MOVES:
             # Update game state with the moves that were executed
-            rat_move = self._parse_direction(cmd.data["rat"])
-            python_move = self._parse_direction(cmd.data["python"])
+            moves = cmd.data.get("moves", {})
+            # Handle both Player enum keys and string keys
+            if Player.RAT in moves:
+                rat_move = self._parse_direction(moves[Player.RAT])
+                python_move = self._parse_direction(moves[Player.PYTHON])
+            else:
+                # Fallback to string keys
+                rat_move = self._parse_direction(moves.get("rat", "STAY"))
+                python_move = self._parse_direction(moves.get("python", "STAY"))
+
             if self._game_state:
                 self._game_state.step(rat_move, python_move)
         elif cmd.type == CommandType.GO:
@@ -564,7 +636,9 @@ class PyRatAI:
 
     def _parse_direction(self, move_str: str) -> Direction:
         """Parse a move string to Direction enum."""
-        move_str = move_str.upper()
+        if not move_str:
+            return Direction.STAY
+        move_str = str(move_str).upper()
         if move_str == "UP":
             return Direction.UP
         elif move_str == "DOWN":

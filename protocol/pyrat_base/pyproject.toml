@@ -39,6 +39,9 @@ dev = [
 [tool.hatch.build.targets.wheel]
 packages = ["pyrat_base"]
 
+[tool.hatch.build.targets.wheel.shared-data]
+"pyrat_base/py.typed" = "pyrat_base/py.typed"
+
 [tool.uv.sources]
 pyrat-engine = { workspace = true }
 
