@@ -18,6 +18,7 @@ Example:
     ...     ai.run()
 """
 
+import os
 import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -51,8 +52,6 @@ class PyRatAI:
             name: The name of your AI (e.g., "GreedyBot v1.0")
             author: Your name (optional)
         """
-        import os
-
         self.name = name
         self.author = author
         # Enable debug if PYRAT_DEBUG environment variable is set
@@ -331,7 +330,7 @@ class PyRatAI:
             # Ready check after timeout
             self._io.write_response("ready")
 
-    def _handle_game_init(self, cmd: Any) -> None:  # noqa: C901, PLR0912
+    def _handle_game_init(self, cmd: Any) -> None:  # noqa: C901, PLR0912, PLR0915
         """Handle commands during game initialization.
 
         Note: Complexity warnings disabled as game initialization requires
@@ -395,7 +394,7 @@ class PyRatAI:
 
                     if actual_rat != expected_rat or actual_python != expected_python:
                         self.send_info(
-                            f"WARNING: Position mismatch during recovery! "
+                            warning=f"Position mismatch during recovery! "
                             f"Expected rat:{expected_rat} python:{expected_python}, "
                             f"but have rat:{actual_rat} python:{actual_python}"
                         )
@@ -414,7 +413,7 @@ class PyRatAI:
                         or actual_python_score != expected_python_score
                     ):
                         self.send_info(
-                            f"WARNING: Score mismatch during recovery! "
+                            warning=f"Score mismatch during recovery! "
                             f"Expected rat:{expected_rat_score} python:{expected_python_score}, "
                             f"but have rat:{actual_rat_score} python:{actual_python_score}"
                         )
@@ -428,7 +427,7 @@ class PyRatAI:
             # Preprocessing timed out
             self._state = "READY"
 
-    def _handle_playing(self, cmd: Any) -> None:  # noqa: C901
+    def _handle_playing(self, cmd: Any) -> None:  # noqa: C901, PLR0912
         """Handle commands during playing state.
 
         Note: Complexity warning disabled as playing state requires

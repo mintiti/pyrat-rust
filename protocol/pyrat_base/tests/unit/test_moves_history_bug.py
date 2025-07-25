@@ -59,7 +59,8 @@ class TestMovesHistoryBug:
         assert cmd is not None
 
         moves = cmd.data["history"]
-        assert len(moves) == 3
+        expected_moves = 3
+        assert len(moves) == expected_moves
 
         # When pairing, the last move would be incomplete
         paired_moves = []

@@ -50,11 +50,11 @@ class CommandSequenceBuilder:
         self,
         width: int,
         height: int,
-        walls: List[Tuple[Tuple[int, int], Tuple[int, int]]] = None,
-        mud: List[Tuple[Tuple[int, int], Tuple[int, int], int]] = None,
-        cheese: List[Tuple[int, int]] = None,
+        walls: Optional[List[Tuple[Tuple[int, int], Tuple[int, int]]]] = None,
+        mud: Optional[List[Tuple[Tuple[int, int], Tuple[int, int], int]]] = None,
+        cheese: Optional[List[Tuple[int, int]]] = None,
         player1_pos: Tuple[int, int] = (0, 0),
-        player2_pos: Tuple[int, int] = None,
+        player2_pos: Optional[Tuple[int, int]] = None,
         player: Player = Player.RAT,
     ) -> "CommandSequenceBuilder":
         """Build game init sequence from game configuration."""

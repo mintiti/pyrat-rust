@@ -40,7 +40,8 @@ class TestMovesHistoryFix:
             paired_moves.append((rat_move, python_move))
 
         # Should have 3 complete turns
-        assert len(paired_moves) == 3
+        expected_pairs = 3
+        assert len(paired_moves) == expected_pairs
         assert paired_moves[0] == ("UP", "DOWN")
         assert paired_moves[1] == ("LEFT", "RIGHT")
         assert paired_moves[2] == ("STAY", "UP")

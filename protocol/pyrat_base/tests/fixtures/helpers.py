@@ -5,8 +5,10 @@ import sys
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
-from pyrat_base import Protocol, PyRatAI
-from pyrat_base.enums import CommandType
+from pyrat_engine._rust import PyGameConfigBuilder
+
+from pyrat_base import Protocol, ProtocolState, PyRatAI
+from pyrat_base.enums import CommandType, Player
 
 
 class MockAI:
@@ -14,8 +16,8 @@ class MockAI:
 
     def __init__(self, ai_instance: PyRatAI):
         self.ai = ai_instance
-        self.input_buffer = []
-        self.output_buffer = []
+        self.input_buffer: List[str] = []
+        self.output_buffer: List[str] = []
         self.protocol = Protocol()
 
     def send_command(self, command: str):
@@ -137,7 +139,8 @@ def create_game_with_obstacles() -> List[str]:
 def assert_valid_move_response(response: str) -> str:
     """Assert that a response is a valid move and return the direction."""
     parts = response.strip().split()
-    assert len(parts) == 2, f"Invalid move response format: {response}"
+    expected_parts = 2
+    assert len(parts) == expected_parts, f"Invalid move response format: {response}"
     assert parts[0] == "move", f"Response must start with 'move': {response}"
 
     direction = parts[1]
@@ -155,12 +158,15 @@ def assert_protocol_compliant(commands: List[str], responses: List[str]) -> bool
     """
     # Check handshake if present
     if commands and commands[0] == "pyrat":
-        assert len(responses) >= 3, "Handshake requires at least 3 responses"
+        min_handshake_responses = 3
+        assert (
+            len(responses) >= min_handshake_responses
+        ), "Handshake requires at least 3 responses"
         assert responses[0].startswith("pyratai "), "First response must be pyratai"
         assert responses[-1] == "pyratready", "Handshake must end with pyratready"
 
     # Check isready/readyok pairs
-    for i, cmd in enumerate(commands):
+    for _i, cmd in enumerate(commands):
         if cmd == "isready":
             # Find corresponding readyok
             found_readyok = False
@@ -193,11 +199,6 @@ def capture_ai_execution(
 @contextmanager
 def mock_game_state(width: int = 5, height: int = 5):
     """Context manager that provides a mock game state for testing."""
-    from pyrat_engine._rust import PyGameConfigBuilder
-
-    from pyrat_base import ProtocolState
-    from pyrat_base.enums import Player
-
     game = (
         PyGameConfigBuilder(width, height)
         .with_cheese([(2, 2)])

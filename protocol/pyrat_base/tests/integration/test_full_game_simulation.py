@@ -50,7 +50,7 @@ class QuickAITester:
             env=env,
         )
 
-    async def send_and_read(self, command: str, expected: str, timeout: float = 1.0):
+    async def send_and_read(self, command: str, expected: str, timeout: float = 1.0):  # noqa: C901
         """Send command and read until we see expected response."""
         # Check stderr for any errors first
         if self.process and self.process.stderr:

@@ -163,7 +163,7 @@ class TestBoundaryValidation:
         assert _parse_position("(0,0)") == (0, 0)
 
         # Negative coordinates might be invalid depending on implementation
-        result = _parse_position("(-1,-1)")
+        _result = _parse_position("(-1,-1)")
         # Implementation may allow or reject negative coordinates
 
     def test_mud_cost_boundaries(self):

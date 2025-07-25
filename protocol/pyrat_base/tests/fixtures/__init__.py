@@ -22,24 +22,22 @@ from .validators import (
 )
 
 __all__ = [
-    # Builders
+    # Sorted alphabetically
     "CommandSequenceBuilder",
-    "ProtocolExchangeBuilder",
-    # Helpers
     "MockAI",
-    "run_protocol_sequence",
-    "create_minimal_game_sequence",
-    "create_game_with_obstacles",
-    "assert_valid_move_response",
-    "assert_protocol_compliant",
-    "capture_ai_execution",
-    "mock_game_state",
-    "compare_game_states",
-    "format_protocol_exchange",
-    # Validators
+    "ProtocolExchangeBuilder",
     "ProtocolValidator",
     "ResponseValidator",
-    "validate_move_format",
-    "validate_handshake_response",
+    "assert_protocol_compliant",
+    "assert_valid_move_response",
+    "capture_ai_execution",
+    "compare_game_states",
+    "create_game_with_obstacles",
+    "create_minimal_game_sequence",
+    "format_protocol_exchange",
+    "mock_game_state",
+    "run_protocol_sequence",
     "validate_game_state_consistency",
+    "validate_handshake_response",
+    "validate_move_format",
 ]

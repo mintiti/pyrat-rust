@@ -23,7 +23,7 @@ def basic_game_config():
 
 
 @pytest.fixture
-def protocol_commands():
+def protocol_commands():  # noqa: C901
     """Factory for creating protocol command strings."""
 
     class CommandFactory:
@@ -148,11 +148,11 @@ def game_state_builder():
     def build_protocol_state(
         width: int = 5,
         height: int = 5,
-        walls: List[Tuple[Tuple[int, int], Tuple[int, int]]] = None,
-        mud: List[Tuple[Tuple[int, int], Tuple[int, int], int]] = None,
-        cheese: List[Tuple[int, int]] = None,
+        walls: Optional[List[Tuple[Tuple[int, int], Tuple[int, int]]]] = None,
+        mud: Optional[List[Tuple[Tuple[int, int], Tuple[int, int], int]]] = None,
+        cheese: Optional[List[Tuple[int, int]]] = None,
         player1_pos: Tuple[int, int] = (0, 0),
-        player2_pos: Tuple[int, int] = None,
+        player2_pos: Optional[Tuple[int, int]] = None,
         player: Player = Player.RAT,
     ) -> ProtocolState:
         """Build a ProtocolState directly using PyGameConfigBuilder."""

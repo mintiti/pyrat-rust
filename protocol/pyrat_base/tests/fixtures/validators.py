@@ -1,6 +1,6 @@
 """Protocol validation utilities for PyRat tests."""
 
-from typing import List, Optional, Tuple
+from typing import ClassVar, Dict, List, Optional, Tuple
 
 from pyrat_base import Protocol
 from pyrat_base.enums import CommandType, ResponseType
@@ -10,7 +10,7 @@ class ProtocolValidator:
     """Validate protocol sequences and state transitions."""
 
     # Valid state transitions
-    VALID_TRANSITIONS = {
+    VALID_TRANSITIONS: ClassVar[Dict[str, List[str]]] = {
         "INITIAL": ["HANDSHAKE"],
         "HANDSHAKE": ["READY"],
         "READY": ["GAME_INIT", "TERMINATED"],
@@ -22,7 +22,7 @@ class ProtocolValidator:
     }
 
     # Commands allowed in each state
-    ALLOWED_COMMANDS = {
+    ALLOWED_COMMANDS: ClassVar[Dict[str, List[CommandType]]] = {
         "INITIAL": [CommandType.PYRAT],
         "HANDSHAKE": [CommandType.ISREADY],
         "READY": [CommandType.NEW_GAME, CommandType.QUIT],
@@ -143,7 +143,8 @@ def validate_move_format(move_str: str) -> Tuple[bool, Optional[str]]:
     - "move STAY"
     """
     parts = move_str.strip().split()
-    if len(parts) != 2:
+    expected_parts = 2
+    if len(parts) != expected_parts:
         return False, "Move must have exactly 2 parts"
 
     if parts[0] != "move":
@@ -188,7 +189,7 @@ def validate_handshake_response(responses: List[str]) -> Tuple[bool, Optional[st
     return True, None
 
 
-def validate_game_state_consistency(commands: List[str]) -> Tuple[bool, Optional[str]]:
+def validate_game_state_consistency(commands: List[str]) -> Tuple[bool, Optional[str]]:  # noqa: C901, PLR0911, PLR0912
     """
     Validate that game state commands create a consistent state.
 
@@ -235,7 +236,7 @@ def validate_game_state_consistency(commands: List[str]) -> Tuple[bool, Optional
         elif cmd.type == CommandType.MUD and "mud" in cmd.data:
             if maze_width is None:
                 return False, "Mud specified before maze dimensions"
-            for (pos1, pos2), value in cmd.data["mud"]:
+            for (pos1, pos2), _value in cmd.data["mud"]:
                 # Check bounds
                 for x, y in [pos1, pos2]:
                     if not (0 <= x < maze_width and 0 <= y < maze_height):
@@ -288,15 +289,13 @@ class ResponseValidator:
     def __init__(self):
         self.protocol = Protocol()
 
-    def validate_response_format(
+    def validate_response_format(  # noqa: C901, PLR0911
         self, response_type: ResponseType, response: str
     ) -> Tuple[bool, Optional[str]]:
         """Validate that a response matches expected format for its type."""
-        # Try to parse with protocol
-        result = self.protocol.format_response(response_type, {})
-
-        # This is a simple check - in reality we'd need to implement
-        # proper validation for each response type
+        # TODO: This method currently does basic string validation.
+        # A more robust implementation would parse responses using the protocol
+        # parser to ensure they match the exact expected format.
         if response_type == ResponseType.ID:
             if not response.startswith("pyratai "):
                 return False, "ID response must start with 'pyratai'"

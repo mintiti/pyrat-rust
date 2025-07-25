@@ -29,8 +29,10 @@ class TestRecoveryStateVerification:
         assert cmd is not None
         assert cmd.type == CommandType.SCORE
         assert "scores" in cmd.data
-        assert cmd.data["scores"][Player.RAT] == 3
-        assert cmd.data["scores"][Player.PYTHON] == 2
+        expected_rat_score = 3
+        expected_python_score = 2
+        assert cmd.data["scores"][Player.RAT] == expected_rat_score
+        assert cmd.data["scores"][Player.PYTHON] == expected_python_score
 
     def test_parse_score_command_with_half_points(self):
         """Test parsing score with half points from simultaneous collection."""
@@ -41,8 +43,10 @@ class TestRecoveryStateVerification:
         assert cmd is not None
         assert cmd.type == CommandType.SCORE
         assert "scores" in cmd.data
-        assert cmd.data["scores"][Player.RAT] == 2.5
-        assert cmd.data["scores"][Player.PYTHON] == 1.5
+        expected_rat_score = 2.5
+        expected_python_score = 1.5
+        assert cmd.data["scores"][Player.RAT] == expected_rat_score
+        assert cmd.data["scores"][Player.PYTHON] == expected_python_score
 
     def test_current_position_invalid_format(self):
         """Test parsing fails with invalid position format."""
