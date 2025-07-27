@@ -148,6 +148,7 @@ class PyRat:
         cheese_count: Number of cheese pieces to place (default: 41)
         symmetric: If True, generate symmetric mazes (default: True)
         seed: Random seed for reproducible games (default: None)
+        max_turns: Maximum number of turns before game ends (default: 300)
 
     Example:
         >>> game = PyRat(width=15, height=15)
@@ -166,9 +167,12 @@ class PyRat:
         cheese_count: Optional[int] = None,
         symmetric: bool = True,
         seed: Optional[int] = None,
+        max_turns: Optional[int] = None,
     ):
         """Initialize a new PyRat game."""
-        self._game = _RustGameState(width, height, cheese_count, symmetric, seed)
+        self._game = _RustGameState(
+            width, height, cheese_count, symmetric, seed, max_turns
+        )
 
     @property
     def dimensions(self) -> Tuple[int, int]:

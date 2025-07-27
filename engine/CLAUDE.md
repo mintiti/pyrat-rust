@@ -9,6 +9,7 @@ The PyRat Engine is the core game implementation, providing:
 - Python bindings via PyO3
 - PettingZoo-compatible environment interface
 - Support for reinforcement learning research
+- Multiple game creation methods with presets and custom configurations
 
 ## Quick Development Guide
 
@@ -82,3 +83,83 @@ The engine is tested on Python 3.8-3.11 with:
 - `flame`: Enables profiling with flame graphs
 
 Rust tests run without Python features to avoid linking issues.
+
+## Game Creation API
+
+The engine provides multiple ways to create games, supporting various use cases from quick testing to precise control:
+
+### 1. Basic Constructor
+```python
+from pyrat_engine import PyRat
+
+# Default game (21x15, 41 cheese, symmetric)
+game = PyRat()
+
+# Custom parameters
+game = PyRat(width=31, height=21, cheese_count=85, max_turns=500)
+```
+
+### 2. Preset Configurations
+```python
+from pyrat_engine._rust import PyGameState
+
+# Available presets:
+# - "tiny": 11x9 board, 13 cheese, 150 turns
+# - "small": 15x11 board, 21 cheese, 200 turns
+# - "default": 21x15 board, 41 cheese, 300 turns
+# - "large": 31x21 board, 85 cheese, 400 turns
+# - "huge": 41x31 board, 165 cheese, 500 turns
+# - "empty": 21x15, no walls/mud, for testing
+# - "asymmetric": Standard size but asymmetric generation
+
+game_state = PyGameState.create_preset("large", seed=42)
+```
+
+### 3. Custom Maze Layout
+```python
+# Define specific walls, generate random cheese
+walls = [
+    ((0, 0), (0, 1)),  # Wall between (0,0) and (0,1)
+    ((1, 1), (2, 1)),  # Wall between (1,1) and (2,1)
+]
+
+game_state = PyGameState.create_from_maze(
+    width=15,
+    height=11,
+    walls=walls,
+    seed=42,        # For reproducible cheese placement
+    max_turns=200
+)
+```
+
+### 4. Custom Starting Positions
+```python
+# Use preset configuration but with custom player positions
+game_state = PyGameState.create_with_starts(
+    width=21,
+    height=15,
+    player1_start=(5, 5),
+    player2_start=(15, 9),
+    preset="default",
+    seed=42
+)
+```
+
+### 5. Full Custom Configuration
+```python
+# Complete control over all game elements
+walls = [((0, 0), (0, 1)), ((1, 1), (2, 1))]
+mud = [((2, 2), (3, 2), 3)]  # 3 turns to traverse
+cheese = [(5, 5), (10, 10), (15, 7)]
+
+game_state = PyGameState.create_custom(
+    width=21,
+    height=15,
+    walls=walls,
+    mud=mud,
+    cheese=cheese,
+    player1_pos=(0, 0),
+    player2_pos=(20, 14),
+    max_turns=300
+)
+```
