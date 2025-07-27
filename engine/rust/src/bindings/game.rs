@@ -18,6 +18,100 @@ type Position = (u8, u8);
 type Wall = (Position, Position);
 type MudEntry = (Position, Position, u8);
 type WallEntry = (Position, Position);
+
+/// Configuration for game presets
+#[derive(Clone)]
+struct PresetConfig {
+    width: u8,
+    height: u8,
+    cheese_count: u16,
+    symmetric: bool,
+    wall_density: f32,
+    mud_density: f32,
+    mud_range: u8,
+    max_turns: u16,
+}
+
+impl PresetConfig {
+    /// Get a preset configuration by name
+    fn get_preset(name: &str) -> PyResult<Self> {
+        match name {
+            "tiny" => Ok(Self {
+                width: 11,
+                height: 9,
+                cheese_count: 13,
+                symmetric: true,
+                wall_density: 0.7,
+                mud_density: 0.1,
+                mud_range: 3,
+                max_turns: 150,
+            }),
+            "small" => Ok(Self {
+                width: 15,
+                height: 11,
+                cheese_count: 21,
+                symmetric: true,
+                wall_density: 0.7,
+                mud_density: 0.1,
+                mud_range: 3,
+                max_turns: 200,
+            }),
+            "default" => Ok(Self {
+                width: 21,
+                height: 15,
+                cheese_count: 41,
+                symmetric: true,
+                wall_density: 0.7,
+                mud_density: 0.1,
+                mud_range: 3,
+                max_turns: 300,
+            }),
+            "large" => Ok(Self {
+                width: 31,
+                height: 21,
+                cheese_count: 85,
+                symmetric: true,
+                wall_density: 0.7,
+                mud_density: 0.1,
+                mud_range: 3,
+                max_turns: 400,
+            }),
+            "huge" => Ok(Self {
+                width: 41,
+                height: 31,
+                cheese_count: 165,
+                symmetric: true,
+                wall_density: 0.7,
+                mud_density: 0.1,
+                mud_range: 3,
+                max_turns: 500,
+            }),
+            "empty" => Ok(Self {
+                width: 21,
+                height: 15,
+                cheese_count: 41,
+                symmetric: true,
+                wall_density: 0.0,  // No walls
+                mud_density: 0.0,   // No mud
+                mud_range: 2,
+                max_turns: 300,
+            }),
+            "asymmetric" => Ok(Self {
+                width: 21,
+                height: 15,
+                cheese_count: 41,
+                symmetric: false,  // Key difference
+                wall_density: 0.7,
+                mud_density: 0.1,
+                mud_range: 3,
+                max_turns: 300,
+            }),
+            _ => Err(PyValueError::new_err(format!(
+                "Unknown preset '{name}'. Available presets: tiny, small, default, large, huge, empty, asymmetric"
+            ))),
+        }
+    }
+}
 #[pyclass]
 #[derive(Clone)]
 pub struct PyMoveUndo {
@@ -118,7 +212,8 @@ impl PyGameState {
         height=None,
         cheese_count=None,
         symmetric=true,
-        seed=None
+        seed=None,
+        max_turns=None
     ))]
     fn new(
         width: Option<u8>,
@@ -126,12 +221,19 @@ impl PyGameState {
         cheese_count: Option<u16>,
         symmetric: bool,
         seed: Option<u64>,
+        max_turns: Option<u16>,
     ) -> Self {
-        let game = if symmetric {
+        let mut game = if symmetric {
             GameState::new_symmetric(width, height, cheese_count, seed)
         } else {
             GameState::new_asymmetric(width, height, cheese_count, seed)
         };
+
+        // Override max_turns if provided
+        if let Some(max_turns) = max_turns {
+            game.max_turns = max_turns;
+        }
+
         let observation_handler = ObservationHandler::new(&game);
         Self {
             game,
@@ -443,6 +545,244 @@ impl PyGameState {
 
         // Build the game
         builder_owned.build()
+    }
+
+    /// Create a game from a preset configuration
+    #[staticmethod]
+    #[pyo3(signature = (preset="default", *, seed=None))]
+    fn create_preset(preset: &str, seed: Option<u64>) -> PyResult<Self> {
+        use crate::game::maze_generation::{CheeseConfig, MazeConfig};
+
+        let config = PresetConfig::get_preset(preset)?;
+
+        let maze_config = MazeConfig {
+            width: config.width,
+            height: config.height,
+            target_density: config.wall_density,
+            connected: true,
+            symmetry: config.symmetric,
+            mud_density: config.mud_density,
+            mud_range: config.mud_range,
+            seed,
+        };
+
+        let cheese_config = CheeseConfig {
+            count: config.cheese_count,
+            symmetry: config.symmetric,
+        };
+
+        let mut game =
+            GameState::new_random(config.width, config.height, maze_config, cheese_config);
+        game.max_turns = config.max_turns;
+
+        let observation_handler = ObservationHandler::new(&game);
+        Ok(Self {
+            game,
+            observation_handler,
+        })
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (
+        width,
+        height,
+        walls,
+        *,
+        seed = None,
+        max_turns = 300
+    ))]
+    fn create_from_maze(
+        width: u8,
+        height: u8,
+        walls: Vec<PyWall>,
+        seed: Option<u64>,
+        max_turns: u16,
+    ) -> PyResult<Self> {
+        // Validate and convert walls
+        let validated_walls: Vec<Wall> = walls
+            .into_iter()
+            .map(|w| validate_wall(w, width, height))
+            .collect::<PyResult<Vec<_>>>()?;
+
+        // Convert walls to adjacency list format
+        let mut walls_map: HashMap<Coordinates, Vec<Coordinates>> = HashMap::new();
+
+        // First, initialize all cells with all possible neighbors
+        for x in 0..width {
+            for y in 0..height {
+                let coord = Coordinates { x, y };
+                let mut neighbors = Vec::new();
+
+                // Check each direction
+                for &(dx, dy) in &[(0, 1), (1, 0), (0, -1), (-1, 0)] {
+                    let new_x = coord.x as i8 + dx;
+                    let new_y = coord.y as i8 + dy;
+                    if new_x >= 0 && new_x < width as i8 && new_y >= 0 && new_y < height as i8 {
+                        let neighbor = Coordinates {
+                            x: new_x as u8,
+                            y: new_y as u8,
+                        };
+                        neighbors.push(neighbor);
+                    }
+                }
+                walls_map.insert(coord, neighbors);
+            }
+        }
+
+        // Then remove connections based on walls
+        for (from, to) in validated_walls {
+            let from_coord = Coordinates {
+                x: from.0,
+                y: from.1,
+            };
+            let to_coord = Coordinates { x: to.0, y: to.1 };
+
+            // Remove connections in both directions
+            if let Some(neighbors) = walls_map.get_mut(&from_coord) {
+                neighbors.retain(|&c| c != to_coord);
+            }
+            if let Some(neighbors) = walls_map.get_mut(&to_coord) {
+                neighbors.retain(|&c| c != from_coord);
+            }
+        }
+
+        // Generate random cheese positions
+        let cheese_count = ((width as u16 * height as u16) * 13 / 100).max(1); // ~13% density
+        let rng_seed = seed.unwrap_or_else(|| {
+            use std::time::{SystemTime, UNIX_EPOCH};
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        });
+
+        use crate::game::maze_generation::{CheeseConfig, CheeseGenerator};
+        let cheese_config = CheeseConfig {
+            count: cheese_count,
+            symmetry: true,
+        };
+
+        let mut cheese_gen = CheeseGenerator::new(cheese_config, width, height, Some(rng_seed));
+
+        let p1_pos = Coordinates { x: 0, y: 0 };
+        let p2_pos = Coordinates {
+            x: width - 1,
+            y: height - 1,
+        };
+        let cheese_positions = cheese_gen.generate(p1_pos, p2_pos);
+
+        // Create game with the specified walls and generated cheese
+        let game = GameState::new_with_config(
+            width,
+            height,
+            walls_map,
+            HashMap::new(), // No mud
+            &cheese_positions,
+            Coordinates { x: 0, y: 0 }, // Default player 1 position
+            Coordinates {
+                x: width - 1,
+                y: height - 1,
+            }, // Default player 2 position
+            max_turns,
+        );
+
+        let observation_handler = ObservationHandler::new(&game);
+        Ok(Self {
+            game,
+            observation_handler,
+        })
+    }
+
+    #[staticmethod]
+    #[pyo3(signature = (
+        width,
+        height,
+        player1_start,
+        player2_start,
+        *,
+        preset = "default",
+        seed = None
+    ))]
+    fn create_with_starts(
+        width: u8,
+        height: u8,
+        player1_start: PyPosition,
+        player2_start: PyPosition,
+        preset: &str,
+        seed: Option<u64>,
+    ) -> PyResult<Self> {
+        use crate::game::maze_generation::{CheeseConfig, MazeConfig};
+
+        // Validate positions
+        let p1_pos =
+            validate_optional_position(Some(player1_start), width, height, "player1_start")?
+                .ok_or_else(|| PyValueError::new_err("player1_start validation failed"))?;
+        let p2_pos =
+            validate_optional_position(Some(player2_start), width, height, "player2_start")?
+                .ok_or_else(|| PyValueError::new_err("player2_start validation failed"))?;
+
+        // Get preset configuration
+        let config = PresetConfig::get_preset(preset)?;
+
+        // Create maze with preset configuration
+        let maze_config = MazeConfig {
+            width,
+            height,
+            target_density: config.wall_density,
+            connected: true,
+            symmetry: config.symmetric,
+            mud_density: config.mud_density,
+            mud_range: config.mud_range,
+            seed,
+        };
+
+        let cheese_config = CheeseConfig {
+            count: ((width as u16 * height as u16) * 13 / 100).max(1), // ~13% density
+            symmetry: config.symmetric,
+        };
+
+        // Generate random maze with maze generator directly
+        use crate::game::maze_generation::MazeGenerator;
+        let mut maze_gen = MazeGenerator::new(maze_config);
+        let (walls, mud) = maze_gen.generate();
+
+        // Generate cheese positions
+        use crate::game::maze_generation::CheeseGenerator;
+        let mut cheese_gen = CheeseGenerator::new(cheese_config, width, height, seed);
+        let cheese_positions = cheese_gen.generate(
+            Coordinates {
+                x: p1_pos.0,
+                y: p1_pos.1,
+            },
+            Coordinates {
+                x: p2_pos.0,
+                y: p2_pos.1,
+            },
+        );
+
+        // Create game with custom positions
+        let game = GameState::new_with_config(
+            width,
+            height,
+            walls,
+            (*mud).clone(),
+            &cheese_positions,
+            Coordinates {
+                x: p1_pos.0,
+                y: p1_pos.1,
+            },
+            Coordinates {
+                x: p2_pos.0,
+                y: p2_pos.1,
+            },
+            config.max_turns,
+        );
+
+        let observation_handler = ObservationHandler::new(&game);
+        Ok(Self {
+            game,
+            observation_handler,
+        })
     }
 }
 
