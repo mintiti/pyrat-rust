@@ -17,7 +17,7 @@ pub use game::{
     cheese_board::CheeseBoard,
     game_logic::GameState,
     maze_generation::{CheeseConfig, MazeConfig},
-    types::{Coordinates, Direction},
+    types::{Coordinates, Direction, Mud, Wall},
 };
 
 // Export the Python module

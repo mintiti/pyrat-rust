@@ -143,11 +143,11 @@ impl ObservationHandler {
         };
 
         GameObservation {
-            player_position: (player_pos.x, player_pos.y),
+            player_position: player_pos,
             player_mud_turns: player_mud,
             player_score,
 
-            opponent_position: (opponent_pos.x, opponent_pos.y),
+            opponent_position: opponent_pos,
             opponent_mud_turns: opponent_mud,
             opponent_score,
 
@@ -169,10 +169,10 @@ impl ObservationHandler {
 
 /// Game observation with numpy arrays for Python
 pub struct GameObservation<'py> {
-    pub player_position: (u8, u8),
+    pub player_position: Coordinates,
     pub player_mud_turns: u8,
     pub player_score: f32,
-    pub opponent_position: (u8, u8),
+    pub opponent_position: Coordinates,
     pub opponent_mud_turns: u8,
     pub opponent_score: f32,
     pub current_turn: u16,

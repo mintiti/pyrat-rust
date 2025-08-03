@@ -46,7 +46,9 @@ def test_env_reset() -> None:
     # Check observation structure
     for agent in env.possible_agents:
         obs = observations[agent]
-        assert isinstance(obs.player_position, tuple)
+        # Now returns Coordinates object
+        assert hasattr(obs.player_position, "x")
+        assert hasattr(obs.player_position, "y")
         assert isinstance(obs.cheese_matrix, np.ndarray)
         assert isinstance(obs.movement_matrix, np.ndarray)
 
@@ -79,8 +81,8 @@ def test_env_step() -> None:
     # Check observation updates
     for agent in env.possible_agents:
         obs = observations[agent]
-        assert 0 <= obs.player_position[0] < TEST_GAME_WIDTH
-        assert 0 <= obs.player_position[1] < TEST_GAME_HEIGHT
+        assert 0 <= obs.player_position.x < TEST_GAME_WIDTH
+        assert 0 <= obs.player_position.y < TEST_GAME_HEIGHT
 
 
 def test_env_symmetry() -> None:
@@ -149,5 +151,7 @@ def test_custom_maze() -> None:
     assert game.width == game_width
     assert game.height == game_height
     assert len(game.cheese_positions()) == 1
-    assert game.player1_position == (0, 0)
-    assert game.player2_position == (2, 2)
+    assert game.player1_position.x == 0
+    assert game.player1_position.y == 0
+    assert game.player2_position.x == 2  # noqa: PLR2004
+    assert game.player2_position.y == 2  # noqa: PLR2004

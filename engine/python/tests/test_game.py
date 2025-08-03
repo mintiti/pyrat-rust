@@ -155,8 +155,10 @@ class TestCustomCreationMethods:
 
         assert game.width == 15
         assert game.height == 11
-        assert game.player1_position == (3, 3)
-        assert game.player2_position == (11, 7)
+        assert game.player1_position.x == 3
+        assert game.player1_position.y == 3
+        assert game.player2_position.x == 11
+        assert game.player2_position.y == 7
         # Should use the preset's max_turns
         assert game.max_turns == 200
 
