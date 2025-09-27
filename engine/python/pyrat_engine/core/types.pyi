@@ -112,8 +112,8 @@ class Wall:
 
     def __init__(
         self,
-        pos1: Union[Coordinates, tuple[int, int]],
-        pos2: Union[Coordinates, tuple[int, int]],
+        pos1: Coordinates | tuple[int, int],
+        pos2: Coordinates | tuple[int, int],
     ) -> None: ...
     def blocks_movement(self, from_pos: Coordinates, to_pos: Coordinates) -> bool:
         """Check if this wall blocks movement between two positions.
@@ -157,8 +157,8 @@ class Mud:
 
     def __init__(
         self,
-        pos1: Union[Coordinates, tuple[int, int]],
-        pos2: Union[Coordinates, tuple[int, int]],
+        pos1: Coordinates | tuple[int, int],
+        pos2: Coordinates | tuple[int, int],
         value: int,
     ) -> None: ...
     def affects_movement(self, from_pos: Coordinates, to_pos: Coordinates) -> bool:

@@ -119,8 +119,8 @@ class TestTypesFunctionality:
         from pyrat_engine.core.types import Coordinates
 
         coord = Coordinates(5, 10)
-        assert coord.x == 5
-        assert coord.y == 10
+        assert coord.x == 5  # noqa: PLR2004
+        assert coord.y == 10  # noqa: PLR2004
 
     def test_coordinates_methods(self):
         """Test Coordinates methods."""
@@ -130,13 +130,13 @@ class TestTypesFunctionality:
 
         # Test get_neighbor with numeric direction values
         up_neighbor = coord.get_neighbor(0)  # UP = 0
-        assert up_neighbor.x == 5
-        assert up_neighbor.y == 6
+        assert up_neighbor.x == 5  # noqa: PLR2004
+        assert up_neighbor.y == 6  # noqa: PLR2004
 
         # Test manhattan_distance
         other = Coordinates(8, 9)
         distance = coord.manhattan_distance(other)
-        assert distance == 7  # |8-5| + |9-5| = 3 + 4 = 7
+        assert distance == 7  # noqa: PLR2004  |8-5| + |9-5| = 3 + 4 = 7
 
     def test_wall_creation(self):
         """Test creating Wall objects."""
@@ -155,7 +155,7 @@ class TestTypesFunctionality:
 
         # With Coordinates only (tuples not supported in current implementation)
         mud1 = Mud(Coordinates(0, 0), Coordinates(0, 1), 3)
-        assert mud1.value == 3
+        assert mud1.value == 3  # noqa: PLR2004
 
     def test_direction_values(self):
         """Test Direction enum values."""
@@ -176,17 +176,17 @@ class TestGameStateFunctionality:
 
         # Use odd dimensions to avoid the symmetric maze issue
         game = GameState(width=11, height=11)
-        assert game.width == 11
-        assert game.height == 11
+        assert game.width == 11  # noqa: PLR2004
+        assert game.height == 11  # noqa: PLR2004
 
     def test_game_state_preset(self):
         """Test creating GameState from preset."""
         from pyrat_engine.core.game import GameState
 
         game = GameState.create_preset("tiny", seed=42)
-        assert game.width == 11
-        assert game.height == 9
-        assert game.max_turns == 150
+        assert game.width == 11  # noqa: PLR2004
+        assert game.height == 9  # noqa: PLR2004
+        assert game.max_turns == 150  # noqa: PLR2004
 
     def test_game_state_properties(self):
         """Test GameState properties return correct types."""
@@ -221,8 +221,8 @@ class TestHighLevelAPI:
 
         game = PyRat(width=15, height=15)
         width, height = game.dimensions
-        assert width == 15
-        assert height == 15
+        assert width == 15  # noqa: PLR2004
+        assert height == 15  # noqa: PLR2004
 
     def test_env_import(self):
         """Test that the PettingZoo environment still works."""
