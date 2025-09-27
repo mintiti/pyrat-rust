@@ -27,7 +27,14 @@ repos:
       rev: v1.8.0
       hooks:
         -   id: mypy
-            files: ^(engine/python/|protocol/pyrat_base/)
+            files: ^(engine/python/pyrat_engine/|protocol/pyrat_base/pyrat_base/)
+            # Root cause: passing both .py and .pyi to mypy yields duplicate module errors.
+            # Exclude stubs here; mypy will still use them implicitly when analyzing .py.
+            exclude: \.pyi$
+            args: [
+              "--explicit-package-bases",
+              "--ignore-missing-imports",
+            ]
             additional_dependencies:
               - gymnasium>=0.29.0
               - pettingzoo>=1.24.0

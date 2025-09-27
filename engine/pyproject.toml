@@ -84,6 +84,11 @@ line-ending = "lf"
 
 [tool.mypy]
 python_version = "3.8"
+namespace_packages = true
+# Avoid path-derived module names like "engine.python..."; resolve relative to package bases
+explicit_package_bases = false
+# Analyze only engine's Python sources
+files = ["python"]
 strict = true
 warn_return_any = true
 warn_unused_configs = true

@@ -7,8 +7,6 @@ This module contains the fundamental types used throughout the engine:
 - Mud: Passages that slow movement
 """
 
-from typing import Union
-
 class Coordinates:
     """A position on the game board with x and y coordinates.
 
