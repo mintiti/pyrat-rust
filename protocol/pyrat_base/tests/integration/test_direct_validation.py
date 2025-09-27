@@ -1,6 +1,6 @@
 """Test validation directly with PyGameState."""
 
-from pyrat_engine._rust import PyGameState
+from pyrat_engine.core.game import GameState as PyGameState
 
 
 def test_negative_positions():

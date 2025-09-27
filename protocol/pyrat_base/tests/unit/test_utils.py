@@ -1,6 +1,6 @@
 """Tests for utility functions in pyrat_base.utils."""
 
-from pyrat_engine._rust import PyGameState
+from pyrat_engine.core.game import GameState as PyGameState
 from pyrat_engine.game import Direction
 
 from pyrat_base import Player, ProtocolState, utils

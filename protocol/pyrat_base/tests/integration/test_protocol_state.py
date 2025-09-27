@@ -3,7 +3,8 @@
 
 import numpy as np
 import pytest
-from pyrat_engine._rust import PyGameConfigBuilder, PyGameState
+from pyrat_engine.core.builder import GameConfigBuilder as PyGameConfigBuilder
+from pyrat_engine.core.game import GameState as PyGameState
 from pyrat_engine.game import Direction
 
 from pyrat_base import Player, ProtocolState

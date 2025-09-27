@@ -6,6 +6,7 @@
 #![allow(clippy::redundant_pub_crate)] // Suppress warning about pub(crate) in pymodule
 #![allow(clippy::must_use_candidate)]
 #![allow(clippy::cargo_common_metadata)]
+#![allow(non_local_definitions)] // pyo3 #[pymethods] expands to non-local impls
 
 #[cfg(feature = "python")]
 mod bindings;

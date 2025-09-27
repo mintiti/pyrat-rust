@@ -5,7 +5,7 @@ import sys
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
-from pyrat_engine._rust import PyGameConfigBuilder
+from pyrat_engine.core.builder import GameConfigBuilder as PyGameConfigBuilder
 
 from pyrat_base import Protocol, ProtocolState, PyRatAI
 from pyrat_base.enums import CommandType, Player

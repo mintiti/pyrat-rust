@@ -9,8 +9,8 @@ underlying Rust implementation.
 
 from typing import List, Optional, Tuple
 
-from pyrat_engine._rust import PyGameState
-from pyrat_engine.game import Direction
+from pyrat_engine.core.game import GameState as PyGameState
+from pyrat_engine.core.types import Direction
 
 from pyrat_base.enums import Player
 

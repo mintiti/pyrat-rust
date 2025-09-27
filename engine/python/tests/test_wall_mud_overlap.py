@@ -1,6 +1,6 @@
 """Test that walls and mud never overlap in the game state."""
 
-from pyrat_engine._rust import PyGameState
+from pyrat_engine.core.game import GameState as PyGameState
 
 # ruff: noqa: PLR2004
 

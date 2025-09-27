@@ -7,7 +7,7 @@ focusing on pathfinding that accounts for both walls and mud.
 import heapq
 from typing import Dict, List, Optional, Tuple
 
-from pyrat_engine.game import Direction
+from pyrat_engine.core.types import Direction
 
 from .protocol_state import ProtocolState
 

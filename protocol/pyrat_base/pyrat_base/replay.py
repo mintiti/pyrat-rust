@@ -5,8 +5,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TextIO, Tuple, Union
 
-from pyrat_engine._rust import PyGameState
-from pyrat_engine.game import Direction, GameResult, Position
+from pyrat_engine.core.game import GameState as PyGameState
+from pyrat_engine.core.types import Coordinates as Position
+from pyrat_engine.core.types import Direction
+from pyrat_engine.game import GameResult
 
 
 @dataclass

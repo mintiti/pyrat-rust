@@ -1,6 +1,6 @@
 """Test that the move parsing bug is fixed."""
 
-from pyrat_engine._rust import PyGameConfigBuilder
+from pyrat_engine.core.builder import GameConfigBuilder as PyGameConfigBuilder
 from pyrat_engine.game import Direction
 
 from pyrat_base import Protocol, PyRatAI
