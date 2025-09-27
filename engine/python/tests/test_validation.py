@@ -1,7 +1,7 @@
 """Test input validation for PyRat engine."""
 
 import pytest
-from pyrat_engine._rust import PyGameState
+from pyrat_engine.core.game import GameState as PyGameState
 
 
 class TestPositionValidation:

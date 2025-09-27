@@ -24,11 +24,26 @@ pub use game::{
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
 
-/// Python module for PyRat game
+/// Python module for PyRat game engine core implementation
 #[cfg(feature = "python")]
 #[pymodule]
-fn _rust(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
-    // Register all Python-facing types and functions
-    bindings::register_module(m)?;
+fn _core(py: Python<'_>, m: &PyModule) -> PyResult<()> {
+    // Create submodules
+    let types_module = PyModule::new(py, "types")?;
+    bindings::register_types_module(types_module)?;
+    m.add_submodule(types_module)?;
+
+    let game_module = PyModule::new(py, "game")?;
+    bindings::register_game_module(game_module)?;
+    m.add_submodule(game_module)?;
+
+    let observation_module = PyModule::new(py, "observation")?;
+    bindings::register_observation_module(observation_module)?;
+    m.add_submodule(observation_module)?;
+
+    let builder_module = PyModule::new(py, "builder")?;
+    bindings::register_builder_module(builder_module)?;
+    m.add_submodule(builder_module)?;
+
     Ok(())
 }

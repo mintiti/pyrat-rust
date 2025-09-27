@@ -20,7 +20,18 @@ Example:
     >>> print(f"Player 1 score: {game.scores[0]}")
 """
 
-from pyrat_engine.game import Direction, GameResult, Position, PyRat
+from pyrat_engine.core.game import GameState, MoveUndo
+from pyrat_engine.core.types import Coordinates, Direction, Mud, Wall
+from pyrat_engine.game import GameResult, PyRat
 
 __version__ = "0.1.0"
-__all__ = ["Direction", "GameResult", "Position", "PyRat"]
+__all__ = [
+    "Coordinates",
+    "Direction",
+    "Wall",
+    "Mud",
+    "GameState",
+    "MoveUndo",
+    "GameResult",
+    "PyRat",
+]

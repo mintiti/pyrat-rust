@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 #[cfg_attr(
     feature = "python",
-    pyclass(module = "pyrat_engine._rust", frozen, get_all)
+    pyclass(module = "pyrat_engine._core.types", frozen, get_all)
 )]
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Deserialize, Serialize)]
 pub struct Coordinates {
@@ -113,7 +113,7 @@ impl Coordinates {
     }
 }
 
-#[cfg_attr(feature = "python", pyclass(module = "pyrat_engine._rust"))]
+#[cfg_attr(feature = "python", pyclass(module = "pyrat_engine._core.types"))]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum Direction {
@@ -150,6 +150,38 @@ impl Direction {
             },
             Self::Stay => pos,
         }
+    }
+}
+
+// Python conveniences for Direction
+#[cfg(feature = "python")]
+#[pymethods]
+impl Direction {
+    #[new]
+    fn py_new(value: u8) -> PyResult<Self> {
+        Self::try_from(value)
+            .map_err(|_| PyValueError::new_err("Invalid direction value (expected 0..4)"))
+    }
+
+    #[classattr]
+    pub const UP: u8 = Self::Up as u8;
+    #[classattr]
+    pub const RIGHT: u8 = Self::Right as u8;
+    #[classattr]
+    pub const DOWN: u8 = Self::Down as u8;
+    #[classattr]
+    pub const LEFT: u8 = Self::Left as u8;
+    #[classattr]
+    pub const STAY: u8 = Self::Stay as u8;
+
+    pub fn __int__(&self) -> u8 {
+        *self as u8
+    }
+    pub fn __repr__(&self) -> String {
+        format!("Direction::{self:?}")
+    }
+    pub fn __str__(&self) -> String {
+        format!("{self:?}")
     }
 }
 
@@ -247,7 +279,7 @@ impl From<CoordinatesInput> for PyResult<Coordinates> {
 // Wall type
 #[cfg_attr(
     feature = "python",
-    pyclass(module = "pyrat_engine._rust", frozen, get_all)
+    pyclass(module = "pyrat_engine._core.types", frozen, get_all)
 )]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Wall {
@@ -303,7 +335,7 @@ impl Wall {
 // Mud type
 #[cfg_attr(
     feature = "python",
-    pyclass(module = "pyrat_engine._rust", frozen, get_all)
+    pyclass(module = "pyrat_engine._core.types", frozen, get_all)
 )]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub struct Mud {
@@ -400,10 +432,10 @@ mod tests {
         fn test_to_index() {
             let test_cases = [
                 // (x, y, width, expected_index)
-                (0, 0, 10, 0),  // Top-left corner
-                (9, 0, 10, 9),  // Top-right corner
-                (0, 9, 10, 90), // Bottom-left corner
-                (9, 9, 10, 99), // Bottom-right corner
+                (0, 0, 10, 0),  // Bottom-left corner (origin)
+                (9, 0, 10, 9),  // Bottom-right corner
+                (0, 9, 10, 90), // Top-left corner
+                (9, 9, 10, 99), // Top-right corner
                 (5, 5, 10, 55), // Middle
                 (3, 2, 15, 33), // Non-square board
                 (0, 1, 5, 5),   // Second row start

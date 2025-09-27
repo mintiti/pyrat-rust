@@ -4,7 +4,7 @@ import random
 
 import numpy as np
 from pyrat_engine import Direction
-from pyrat_engine._rust import PyGameState
+from pyrat_engine.core.game import GameState as PyGameState
 from pyrat_engine.env import PyRatEnv
 
 TEST_GAME_WIDTH = 5

@@ -9,7 +9,7 @@ This tests the low-level game state implementation including:
 # ruff: noqa: PLR2004
 
 import pytest
-from pyrat_engine._rust import PyGameState
+from pyrat_engine.core.game import GameState as PyGameState
 from pyrat_engine.game import PyRat
 
 

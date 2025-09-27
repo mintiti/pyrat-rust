@@ -10,7 +10,8 @@ Tests the new unified type system including:
 # ruff: noqa: PLR2004
 
 import pytest
-from pyrat_engine._rust import Coordinates, Direction, Mud, PyGameState, Wall
+from pyrat_engine.core.game import GameState as PyGameState
+from pyrat_engine.core.types import Coordinates, Direction, Mud, Wall
 
 
 class TestCoordinatesType:
