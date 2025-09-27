@@ -33,7 +33,7 @@ dependencies = [
 [tool.maturin]
 features = ["pyo3/extension-module"]
 python-source = "python"
-module-name = "pyrat_engine._rust"
+module-name = "pyrat_engine._core"
 
 [project.optional-dependencies]
 dev = [
