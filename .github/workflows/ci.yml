@@ -96,7 +96,7 @@ jobs:
         key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('engine/Cargo.lock') }}
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v6
+      uses: astral-sh/setup-uv@v7
       with:
         enable-cache: true
         cache-dependency-glob: |
@@ -156,7 +156,7 @@ jobs:
         key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('engine/Cargo.lock') }}
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v6
+      uses: astral-sh/setup-uv@v7
       with:
         enable-cache: true
         cache-dependency-glob: |
