@@ -408,3 +408,99 @@ class TestIOHandler:
 
         captured = capsys.readouterr()
         assert "[IOHandler] Reader thread error: Read error" in captured.err
+
+    def test_requeue_command(self):
+        """Test re-queueing commands for later processing.
+
+        Bug fix: Commands arriving during move calculation were being dropped.
+        The requeue_command() method preserves commands by putting them back
+        in the queue for later processing.
+        """
+        from pyrat_base.enums import Player
+        from pyrat_base.protocol import Command
+
+        with IOHandler() as handler:
+            # Create a command
+            moves_cmd = Command(
+                CommandType.MOVES,
+                {"moves": {Player.RAT: "UP", Player.PYTHON: "DOWN"}},
+            )
+
+            # Re-queue it
+            handler.requeue_command(moves_cmd)
+
+            # Should be available to read
+            cmd = handler.read_command(timeout=0.01)
+            assert cmd is not None
+            assert cmd.type == CommandType.MOVES
+            assert cmd.data["moves"][Player.RAT] == "UP"
+
+    def test_requeue_command_preserves_order(self):
+        """Test that multiple re-queued commands maintain order."""
+        from pyrat_base.protocol import Command
+
+        with IOHandler() as handler:
+            # Create multiple commands
+            cmd1 = Command(CommandType.GO, {})
+            cmd2 = Command(CommandType.STOP, {})
+            cmd3 = Command(CommandType.ISREADY, {})
+
+            # Re-queue them in order
+            handler.requeue_command(cmd1)
+            handler.requeue_command(cmd2)
+            handler.requeue_command(cmd3)
+
+            # They should come back in the same order
+            assert handler.read_command(timeout=0.01).type == CommandType.GO
+            assert handler.read_command(timeout=0.01).type == CommandType.STOP
+            assert handler.read_command(timeout=0.01).type == CommandType.ISREADY
+
+    def test_requeue_during_calculation(self):
+        """Test re-queueing commands while calculation is running.
+
+        This simulates the bug scenario where commands arrive during
+        move calculation and need to be preserved for later processing.
+        """
+        from pyrat_base.enums import Player
+        from pyrat_base.protocol import Command
+
+        def slow_calculation(state, stop_event=None):
+            time.sleep(0.1)  # Simulate slow AI
+            return "UP"
+
+        with IOHandler() as handler:
+            # Start a slow calculation
+            thread = handler.start_move_calculation(slow_calculation, "state")
+
+            # While calculation is running, simulate commands arriving
+            moves_cmd = Command(
+                CommandType.MOVES,
+                {"moves": {Player.RAT: "UP", Player.PYTHON: "DOWN"}},
+            )
+            timeout_cmd = Command(CommandType.TIMEOUT, {"phase": "move"})
+
+            # Simulate the command processing loop reading these commands
+            # In the actual code, these would be read from stdin
+            handler._command_queue.put(moves_cmd)
+            handler._command_queue.put(timeout_cmd)
+
+            # Read and re-queue them (simulating what _handle_go_command does)
+            cmd1 = handler.read_command(timeout=0.01)
+            assert cmd1 is not None
+            handler.requeue_command(cmd1)
+
+            cmd2 = handler.read_command(timeout=0.01)
+            assert cmd2 is not None
+            handler.requeue_command(cmd2)
+
+            # Wait for calculation to complete
+            thread.join(timeout=1.0)
+
+            # After calculation, commands should still be available
+            cmd1_after = handler.read_command(timeout=0.01)
+            cmd2_after = handler.read_command(timeout=0.01)
+
+            assert cmd1_after is not None
+            assert cmd1_after.type == CommandType.MOVES
+            assert cmd2_after is not None
+            assert cmd2_after.type == CommandType.TIMEOUT
