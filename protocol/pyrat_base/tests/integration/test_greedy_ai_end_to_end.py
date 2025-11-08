@@ -69,10 +69,11 @@ class TestGreedyAIEndToEnd:
 
     def test_greedy_navigates_around_walls(self):
         """Test greedy AI correctly navigates around walls to reach cheese."""
-        # Create maze with vertical wall forcing detour
+        # Create maze with vertical wall that has a gap at the top
+        # Wall blocks x=2→3 for y=0,1,2,3 but has a gap at y=4
         walls = [
-            ((2, y), (3, y)) for y in range(5)
-        ]  # Vertical wall at x=2-3 boundary
+            ((2, y), (3, y)) for y in range(4)
+        ]  # Vertical wall at x=2-3 boundary, gap at y=4
 
         game = PyGameState.create_custom(
             width=6,
@@ -80,37 +81,42 @@ class TestGreedyAIEndToEnd:
             walls=walls,
             mud=[],
             cheese=[(4, 0)],  # Cheese on other side of wall
-            player1_pos=(0, 0),
-            player2_pos=(5, 4),
+            player1_pos=(0, 0),  # Rat starts bottom-left
+            player2_pos=(5, 4),  # Python starts top-right
         )
 
         greedy = DirectAIRunner(GreedyAI, Player.RAT)
 
-        # Greedy should NOT try to move RIGHT into the wall
-        # It should find a path around it
-        move = greedy.get_move(game)
+        # Calculate exact optimal path from (0,0) to (4,0) around wall:
+        # 1. UP from (0,0) to (0,4): 4 steps
+        # 2. RIGHT from (0,4) to (4,4): 4 steps (through gap at y=4)
+        # 3. DOWN from (4,4) to (4,0): 4 steps
+        # Total: 12 steps exactly
+        expected_steps = 12
 
-        # The AI should choose a valid move that doesn't hit a wall
-        # At (0,0), can move UP or RIGHT. Wall blocks direct path at x=2-3.
-        # Valid paths exist by going around the wall
-        assert move in [
-            Direction.UP,
-            Direction.RIGHT,
-        ], "Should choose valid move avoiding wall"
-
-        # Simulate a few turns to verify it navigates successfully
-        for _ in range(10):
+        # Verify the AI takes exactly this many steps
+        for step in range(expected_steps):
             rat_move = greedy.get_move(game)
+
+            # Verify we're making valid moves
+            assert rat_move in [
+                Direction.UP,
+                Direction.DOWN,
+                Direction.LEFT,
+                Direction.RIGHT,
+            ], f"Step {step}: Invalid move {rat_move}"
+
             game.step(rat_move, Direction.STAY)
 
-            # If rat collected the cheese, success!
-            if game.player1_score > 0:
-                break
+        # After exactly 12 steps, rat should be at cheese location and collect it
+        assert game.player1_position == (
+            4,
+            0,
+        ), f"After {expected_steps} steps, rat should be at (4,0), but is at {game.player1_position}"
 
-        # Verify rat eventually collected the cheese
         assert (
             game.player1_score == 1.0
-        ), "Greedy should navigate around wall and collect cheese"
+        ), f"After {expected_steps} steps, rat should have collected cheese (score=1.0), but score is {game.player1_score}"
 
     def test_greedy_handles_mud_optimally(self):
         """Test greedy AI considers mud costs when choosing paths."""
