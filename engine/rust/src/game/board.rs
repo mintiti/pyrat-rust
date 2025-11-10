@@ -42,7 +42,7 @@ impl MoveTable {
                 // Pack moves into the correct half-byte
                 let idx = pos.to_index(width);
                 let byte_idx = idx / 2;
-                if idx % 2 == 0 {
+                if idx.is_multiple_of(2) {
                     // Even index - use lower 4 bits
                     valid_moves[byte_idx] |= moves;
                 } else {
@@ -64,7 +64,7 @@ impl MoveTable {
         let moves = self.valid_moves[byte_idx];
 
         // Extract the correct 4 bits based on whether index is even or odd
-        let position_moves = if idx % 2 == 0 {
+        let position_moves = if idx.is_multiple_of(2) {
             moves & 0x0F
         } else {
             moves >> 4
@@ -82,7 +82,7 @@ impl MoveTable {
         let byte_idx = idx / 2;
         let moves = self.valid_moves[byte_idx];
 
-        if idx % 2 == 0 {
+        if idx.is_multiple_of(2) {
             moves & 0x0F
         } else {
             moves >> 4
