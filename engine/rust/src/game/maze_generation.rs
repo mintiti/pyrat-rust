@@ -624,7 +624,7 @@ impl CheeseGenerator {
         // Handle center piece for odd counts in symmetric mazes
         if self.config.symmetry && remaining % 2 == 1 {
             assert!(
-                !(self.width.is_multiple_of(2) || self.height.is_multiple_of(2)),
+                !(self.width % 2 == 0 || self.height % 2 == 0),
                 "Cannot place odd number of cheese in symmetric maze with even dimensions"
             );
             let center = Coordinates::new(self.width / 2, self.height / 2);
