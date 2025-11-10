@@ -573,7 +573,8 @@ class ReplayPlayer:
         )
 
         # Execute the move
-        game_over, collected = self.game.step(rat_move.value, python_move.value)
+        # Direction is exposed as plain int constants, not enum with .value
+        game_over, collected = self.game.step(rat_move, python_move)
 
         self._move_index += 1
         self.current_turn = move.turn
