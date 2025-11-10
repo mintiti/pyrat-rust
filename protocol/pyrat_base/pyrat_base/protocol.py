@@ -15,8 +15,6 @@ Note on linting exceptions:
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
-from pyrat_engine.core.types import Direction
-
 from pyrat_base.enums import (
     CommandType,
     Player,
