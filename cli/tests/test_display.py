@@ -1,8 +1,10 @@
 """Unit tests for display logic."""
 
 import pytest
-from unittest.mock import Mock
-from typing import List, Tuple, Dict
+
+from pyrat_engine.game import PyRat
+from pyrat_engine.core import GameState as PyGameState
+from pyrat_engine.core.types import Coordinates
 
 from pyrat_runner.display import (
     Display,
@@ -13,65 +15,75 @@ from pyrat_runner.display import (
 )
 
 
-def create_mock_coordinate(x: int, y: int):
-    """Create a mock coordinate that supports indexing."""
-    coord = Mock()
-    coord.__getitem__ = lambda self, i: [x, y][i]
-    coord.__iter__ = lambda self: iter([x, y])
-    return coord
+@pytest.fixture
+def empty_game():
+    """Game with no walls or mud.
+
+    Creates a 5x5 game with players at opposite corners.
+    Has one cheese at an out-of-the-way position (engine requires at least one).
+    """
+    game_state = PyGameState.create_custom(
+        width=5,
+        height=5,
+        walls=[],
+        mud=[],
+        cheese=[(0, 4)],  # One cheese at corner to satisfy validation
+        player1_pos=(0, 0),
+        player2_pos=(4, 4),
+    )
+    wrapper = PyRat.__new__(PyRat)
+    wrapper._game = game_state
+    return wrapper
 
 
 @pytest.fixture
-def mock_game():
-    """Create a controlled mock game with known dimensions."""
-    game = Mock()
-    game._game = Mock()
-    game._game.width = 5
-    game._game.height = 5
-    return game
+def game_with_walls():
+    """Game with specific walls configured.
+
+    Walls:
+    - Vertical wall between (1,1) and (2,1)
+    - Horizontal wall between (3,2) and (3,3)
+    """
+    game_state = PyGameState.create_custom(
+        width=5,
+        height=5,
+        walls=[
+            ((1, 1), (2, 1)),  # Vertical wall
+            ((3, 2), (3, 3)),  # Horizontal wall
+        ],
+        mud=[],
+        cheese=[(0, 4)],  # One cheese at corner to satisfy validation
+        player1_pos=(0, 0),
+        player2_pos=(4, 4),
+    )
+    wrapper = PyRat.__new__(PyRat)
+    wrapper._game = game_state
+    return wrapper
 
 
 @pytest.fixture
-def empty_game(mock_game):
-    """Game with no walls, mud, or cheese."""
-    mock_game._game.wall_entries = Mock(return_value=[])
-    mock_game.mud_positions = {}
-    mock_game.player1_pos = create_mock_coordinate(0, 0)
-    mock_game.player2_pos = create_mock_coordinate(4, 4)
-    mock_game.cheese_positions = []
-    return mock_game
+def game_with_mud():
+    """Game with specific mud configured.
 
-
-@pytest.fixture
-def game_with_walls(mock_game):
-    """Game with specific walls configured."""
-    # Vertical wall between (1,1) and (2,1)
-    # Horizontal wall between (3,2) and (3,3)
-    mock_game._game.wall_entries = Mock(return_value=[
-        ((1, 1), (2, 1)),  # Vertical wall
-        ((3, 2), (3, 3)),  # Horizontal wall
-    ])
-    mock_game.mud_positions = {}
-    mock_game.player1_pos = create_mock_coordinate(0, 0)
-    mock_game.player2_pos = create_mock_coordinate(4, 4)
-    mock_game.cheese_positions = []
-    return mock_game
-
-
-@pytest.fixture
-def game_with_mud(mock_game):
-    """Game with specific mud configured."""
-    mock_game._game.wall_entries = Mock(return_value=[])
-    # Vertical mud between (1,2) and (2,2)
-    # Horizontal mud between (3,1) and (3,2)
-    mock_game.mud_positions = {
-        (create_mock_coordinate(1, 2), create_mock_coordinate(2, 2)): 3,
-        (create_mock_coordinate(3, 1), create_mock_coordinate(3, 2)): 2,
-    }
-    mock_game.player1_pos = create_mock_coordinate(0, 0)
-    mock_game.player2_pos = create_mock_coordinate(4, 4)
-    mock_game.cheese_positions = []
-    return mock_game
+    Mud patches:
+    - Vertical mud (3 turns) between (1,2) and (2,2)
+    - Horizontal mud (2 turns) between (3,1) and (3,2)
+    """
+    game_state = PyGameState.create_custom(
+        width=5,
+        height=5,
+        walls=[],
+        mud=[
+            ((1, 2), (2, 2), 3),  # Vertical mud (3 turns)
+            ((3, 1), (3, 2), 2),  # Horizontal mud (2 turns)
+        ],
+        cheese=[(0, 4)],  # One cheese at corner to satisfy validation
+        player1_pos=(0, 0),
+        player2_pos=(4, 4),
+    )
+    wrapper = PyRat.__new__(PyRat)
+    wrapper._game = game_state
+    return wrapper
 
 
 class TestCellContent:
@@ -95,13 +107,25 @@ class TestCellContent:
         # Both players and cheese at (2, 2)
         (2, 2, (2, 2), (2, 2), {(2, 2)}, RAT_AND_PYTHON_AND_CHEESE),
     ])
-    def test_cell_content_combinations(self, empty_game, x, y, rat_pos, python_pos, cheese_set, expected):
+    def test_cell_content_combinations(self, x, y, rat_pos, python_pos, cheese_set, expected):
         """Test all combinations of cell occupancy."""
-        # Configure the game with specific positions
-        empty_game.player1_pos = create_mock_coordinate(*rat_pos)
-        empty_game.player2_pos = create_mock_coordinate(*python_pos)
+        # Create a game with specific player and cheese positions
+        # Add a dummy cheese at (0,4) if cheese_set is empty (engine requires at least one)
+        cheese_list = list(cheese_set) if cheese_set else [(0, 4)]
 
-        display = Display(empty_game, delay=0)
+        game_state = PyGameState.create_custom(
+            width=5,
+            height=5,
+            walls=[],
+            mud=[],
+            cheese=cheese_list,
+            player1_pos=rat_pos,
+            player2_pos=python_pos,
+        )
+        game = PyRat.__new__(PyRat)
+        game._game = game_state
+
+        display = Display(game, delay=0)
         content = display._get_cell_content(x, y, cheese_set)
 
         assert content == expected
@@ -192,15 +216,24 @@ class TestMazeStructureBuilding:
         # From fixture: mud between (1,2) and (2,2)
         assert (1, 2) in display.v_mud, "Vertical mud should be at (1, 2)"
 
-    def test_wall_order_independence(self, mock_game):
+    def test_wall_order_independence(self):
         """Wall parsing should work regardless of coordinate order."""
         # Test that ((x1, y1), (x2, y2)) and ((x2, y2), (x1, y1)) produce same result
-        mock_game._game.wall_entries = Mock(return_value=[
-            ((2, 1), (1, 1)),  # Reversed order vertical wall
-        ])
-        mock_game.mud_positions = {}
+        game_state = PyGameState.create_custom(
+            width=5,
+            height=5,
+            walls=[
+                ((2, 1), (1, 1)),  # Reversed order vertical wall
+            ],
+            mud=[],
+            cheese=[(0, 4)],  # One cheese at corner to satisfy validation
+            player1_pos=(0, 0),
+            player2_pos=(4, 4),
+        )
+        game = PyRat.__new__(PyRat)
+        game._game = game_state
 
-        display = Display(mock_game, delay=0)
+        display = Display(game, delay=0)
         # Should still be stored with min x
         assert (1, 1) in display.v_walls, "Wall should be normalized to (1, 1)"
 
