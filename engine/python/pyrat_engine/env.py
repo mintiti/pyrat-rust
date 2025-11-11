@@ -7,10 +7,11 @@ from gymnasium.spaces import Box, Discrete
 from gymnasium.spaces import Dict as SpaceDict
 from pettingzoo.utils.env import AgentID, ParallelEnv
 
-from pyrat_engine._rust import PyGameState, PyObservationHandler
+from pyrat_engine.core import GameState as PyGameState
+from pyrat_engine.core import ObservationHandler as PyObservationHandler
 
 if TYPE_CHECKING:
-    from pyrat_engine.game import Direction
+    from pyrat_engine.core.types import Direction
 
 
 class PyRatEnv(ParallelEnv):  # type: ignore[misc]
@@ -128,7 +129,8 @@ class PyRatEnv(ParallelEnv):  # type: ignore[misc]
 
         # Process moves
         game_over, collected = self.game.step(
-            actions["player_1"].value, actions["player_2"].value
+            int(actions["player_1"]),
+            int(actions["player_2"]),  # type: ignore[arg-type]
         )
 
         # Calculate score changes

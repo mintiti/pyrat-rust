@@ -11,54 +11,11 @@ The game follows these basic rules:
 """
 
 from dataclasses import dataclass
-from enum import IntEnum
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
-from pyrat_engine._rust import PyGameState as _RustGameState
-from pyrat_engine._rust import PyMoveUndo as _RustMoveUndo
-
-
-@dataclass(frozen=True)
-class Position:
-    """2D position on the game board.
-
-    Represents a position on the game board with integer coordinates.
-    The origin (0,0) is at the bottom-left corner of the board.
-
-    Attributes:
-        x: Horizontal position (0 to width-1)
-        y: Vertical position (0 to height-1)
-    """
-
-    x: int
-    y: int
-
-    def __hash__(self) -> int:
-        return hash((self.x, self.y))
-
-    def __repr__(self) -> str:
-        return f"Pos({self.x}, {self.y})"
-
-
-class Direction(IntEnum):
-    """Available movement directions.
-
-    Defines the possible moves a player can make each turn.
-    STAY allows a player to remain in their current position.
-
-    Values:
-        UP (0): Move up one cell
-        RIGHT (1): Move right one cell
-        DOWN (2): Move down one cell
-        LEFT (3): Move left one cell
-        STAY (4): Stay in current position
-    """
-
-    UP = 0
-    RIGHT = 1
-    DOWN = 2
-    LEFT = 3
-    STAY = 4
+from pyrat_engine.core import GameState as _RustGameState
+from pyrat_engine.core import MoveUndo as _RustMoveUndo
+from pyrat_engine.core.types import Coordinates, Direction
 
 
 @dataclass(frozen=True)
@@ -83,16 +40,14 @@ class MoveUndo:
     _undo: _RustMoveUndo  # Internal rust undo data
 
     @property
-    def p1_position(self) -> Position:
+    def p1_position(self) -> Coordinates:
         """Player 1's position before the move."""
-        x, y = self._undo.p1_pos
-        return Position(x, y)
+        return self._undo.p1_pos
 
     @property
-    def p2_position(self) -> Position:
+    def p2_position(self) -> Coordinates:
         """Player 2's position before the move."""
-        x, y = self._undo.p2_pos
-        return Position(x, y)
+        return self._undo.p2_pos
 
     @property
     def scores(self) -> Tuple[float, float]:
@@ -100,9 +55,9 @@ class MoveUndo:
         return (self._undo.p1_score, self._undo.p2_score)
 
     @property
-    def collected_cheese(self) -> List[Position]:
+    def collected_cheese(self) -> List[Coordinates]:
         """Cheese collected during this move."""
-        return [Position(x, y) for x, y in self._undo.collected_cheese]
+        return list(self._undo.collected_cheese)
 
     @property
     def turn(self) -> int:
@@ -131,7 +86,7 @@ class GameResult(NamedTuple):
     """
 
     game_over: bool
-    collected_cheese: List[Position]
+    collected_cheese: List[Coordinates]
     p1_score: float
     p2_score: float
 
@@ -190,16 +145,14 @@ class PyRat:
         return self._game.max_turns
 
     @property
-    def player1_pos(self) -> Position:
+    def player1_pos(self) -> Coordinates:
         """Get player 1's position."""
-        x, y = self._game.player1_position
-        return Position(x, y)
+        return self._game.player1_position
 
     @property
-    def player2_pos(self) -> Position:
+    def player2_pos(self) -> Coordinates:
         """Get player 2's position."""
-        x, y = self._game.player2_position
-        return Position(x, y)
+        return self._game.player2_position
 
     @property
     def scores(self) -> Tuple[float, float]:
@@ -207,24 +160,24 @@ class PyRat:
         return self._game.player1_score, self._game.player2_score
 
     @property
-    def cheese_positions(self) -> List[Position]:
+    def cheese_positions(self) -> List[Coordinates]:
         """Get all cheese positions."""
-        return [Position(x, y) for x, y in self._game.cheese_positions()]
+        return self._game.cheese_positions()
 
     @property
-    def mud_positions(self) -> Dict[Tuple[Position, Position], int]:
+    def mud_positions(self) -> Dict[Tuple[Coordinates, Coordinates], int]:
         """Get mud positions and their values."""
         return {
-            (Position(x1, y1), Position(x2, y2)): value
+            (Coordinates(x1, y1), Coordinates(x2, y2)): value
             for ((x1, y1), (x2, y2), value) in self._game.mud_entries()
         }
 
     def step(self, p1_move: Direction, p2_move: Direction) -> GameResult:
         """Execute one game step."""
-        game_over, collected = self._game.step(p1_move.value, p2_move.value)
+        game_over, collected = self._game.step(int(p1_move), int(p2_move))
         return GameResult(
             game_over=game_over,
-            collected_cheese=[Position(x, y) for x, y in collected],
+            collected_cheese=list(collected),
             p1_score=self._game.player1_score,
             p2_score=self._game.player2_score,
         )
@@ -235,7 +188,7 @@ class PyRat:
 
     def make_move(self, p1_move: Direction, p2_move: Direction) -> MoveUndo:
         """Make a move and return undo information."""
-        undo = self._game.make_move(p1_move.value, p2_move.value)
+        undo = self._game.make_move(int(p1_move), int(p2_move))
         return MoveUndo(_undo=undo)
 
     def unmake_move(self, undo: MoveUndo) -> None:

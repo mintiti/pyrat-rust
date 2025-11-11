@@ -81,6 +81,11 @@ uv sync --all-extras  # Sync all workspace dependencies with dev tools
 # - Installs all workspace members (engine, protocol/pyrat_base)
 # - Resolves cross-dependencies correctly
 # - Installs dev dependencies like maturin, pytest, ruff, etc.
+
+# Install pre-commit hooks (required for all developers)
+source .venv/bin/activate
+pre-commit install
+pre-commit install --hook-type pre-push
 ```
 
 ### Engine Development

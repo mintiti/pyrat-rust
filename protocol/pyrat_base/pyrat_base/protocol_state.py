@@ -9,8 +9,8 @@ underlying Rust implementation.
 
 from typing import List, Optional, Tuple
 
-from pyrat_engine._rust import PyGameState
-from pyrat_engine.game import Direction
+from pyrat_engine.core.game import GameState as PyGameState
+from pyrat_engine.core.types import Coordinates, Direction
 
 from pyrat_base.enums import Player
 
@@ -71,8 +71,8 @@ class ProtocolState:
         return self._game.max_turns
 
     @property
-    def cheese(self) -> List[Tuple[int, int]]:
-        """List of remaining cheese positions as (x, y) tuples."""
+    def cheese(self) -> List[Coordinates]:
+        """List of remaining cheese positions."""
         return self._game.cheese_positions()
 
     @property
@@ -93,13 +93,13 @@ class ProtocolState:
         return self._observation
 
     @property
-    def my_position(self) -> Tuple[int, int]:
-        """My current position as (x, y) tuple."""
+    def my_position(self) -> Coordinates:
+        """My current position."""
         return self._get_observation().player_position
 
     @property
-    def opponent_position(self) -> Tuple[int, int]:
-        """Opponent's current position as (x, y) tuple."""
+    def opponent_position(self) -> Coordinates:
+        """Opponent's current position."""
         return self._get_observation().opponent_position
 
     @property
@@ -166,7 +166,8 @@ class ProtocolState:
         """
         effective_moves = [Direction.STAY]  # STAY is always effective
 
-        x, y = self.my_position
+        pos = self.my_position
+        x, y = pos.x, pos.y
 
         # Check each direction using their enum values as indices
         for direction in [
@@ -175,7 +176,7 @@ class ProtocolState:
             Direction.DOWN,
             Direction.LEFT,
         ]:
-            if self.movement_matrix[x, y, direction.value] >= 0:  # -1 means blocked
+            if self.movement_matrix[x, y, direction] >= 0:  # -1 means blocked
                 effective_moves.append(direction)
 
         return effective_moves
@@ -193,13 +194,14 @@ class ProtocolState:
         if direction == Direction.STAY:
             return 0
 
-        x, y = self.my_position
+        pos = self.my_position
+        x, y = pos.x, pos.y
 
         # Direction enum values already map to the correct indices:
         # UP=0, RIGHT=1, DOWN=2, LEFT=3
         # STAY=4 is handled above
         if direction in [Direction.UP, Direction.RIGHT, Direction.DOWN, Direction.LEFT]:
-            cost = self.movement_matrix[x, y, direction.value]
+            cost = self.movement_matrix[x, y, direction]
             return cost if cost >= 0 else None
 
         return None

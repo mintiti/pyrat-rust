@@ -1,7 +1,7 @@
 //! Python bindings for the `PyRat` game engine
 use crate::game::game_logic::MoveUndo;
 use crate::game::observations::ObservationHandler;
-use crate::{Coordinates, Direction, GameState};
+use crate::{Coordinates, Direction, GameState, Wall};
 use numpy::{PyArray2, PyArray3};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -15,7 +15,6 @@ use super::validation::{
 
 // Type aliases for internal Rust API (using u8)
 type Position = (u8, u8);
-type Wall = (Position, Position);
 type MudEntry = (Position, Position, u8);
 type WallEntry = (Position, Position);
 
@@ -121,23 +120,23 @@ pub struct PyMoveUndo {
 #[pymethods]
 impl PyMoveUndo {
     #[getter]
-    fn p1_pos(&self) -> (u8, u8) {
-        (self.inner.p1_pos.x, self.inner.p1_pos.y)
+    fn p1_pos(&self) -> Coordinates {
+        self.inner.p1_pos
     }
 
     #[getter]
-    fn p2_pos(&self) -> (u8, u8) {
-        (self.inner.p2_pos.x, self.inner.p2_pos.y)
+    fn p2_pos(&self) -> Coordinates {
+        self.inner.p2_pos
     }
 
     #[getter]
-    fn p1_target(&self) -> (u8, u8) {
-        (self.inner.p1_target.x, self.inner.p1_target.y)
+    fn p1_target(&self) -> Coordinates {
+        self.inner.p1_target
     }
 
     #[getter]
-    fn p2_target(&self) -> (u8, u8) {
-        (self.inner.p2_target.x, self.inner.p2_target.y)
+    fn p2_target(&self) -> Coordinates {
+        self.inner.p2_target
     }
 
     #[getter]
@@ -171,12 +170,8 @@ impl PyMoveUndo {
     }
 
     #[getter]
-    fn collected_cheese(&self) -> Vec<(u8, u8)> {
-        self.inner
-            .collected_cheese
-            .iter()
-            .map(|pos| (pos.x, pos.y))
-            .collect()
+    fn collected_cheese(&self) -> Vec<Coordinates> {
+        self.inner.collected_cheese.clone()
     }
 
     #[getter]
@@ -186,10 +181,10 @@ impl PyMoveUndo {
 
     fn __repr__(&self) -> String {
         format!(
-            "MoveUndo(turn={}, p1_pos={:?}, p2_pos={:?}, p1_score={:.1}, p2_score={:.1})",
+            "MoveUndo(turn={}, p1_pos={}, p2_pos={}, p1_score={:.1}, p2_score={:.1})",
             self.inner.turn,
-            self.p1_pos(),
-            self.p2_pos(),
+            self.inner.p1_pos.__repr__(),
+            self.inner.p2_pos.__repr__(),
             self.inner.p1_score,
             self.inner.p2_score
         )
@@ -265,15 +260,13 @@ impl PyGameState {
 
     // Player positions
     #[getter]
-    fn player1_position(&self) -> (u8, u8) {
-        let pos = self.game.player1_position();
-        (pos.x, pos.y)
+    fn player1_position(&self) -> Coordinates {
+        self.game.player1_position()
     }
 
     #[getter]
-    fn player2_position(&self) -> (u8, u8) {
-        let pos = self.game.player2_position();
-        (pos.x, pos.y)
+    fn player2_position(&self) -> Coordinates {
+        self.game.player2_position()
     }
 
     // Scores
@@ -288,12 +281,8 @@ impl PyGameState {
     }
 
     // Game elements
-    fn cheese_positions(&self) -> Vec<(u8, u8)> {
-        self.game
-            .cheese_positions()
-            .into_iter()
-            .map(|pos| (pos.x, pos.y))
-            .collect()
+    fn cheese_positions(&self) -> Vec<Coordinates> {
+        self.game.cheese_positions()
     }
 
     fn mud_entries(&self) -> Vec<MudEntry> {
@@ -362,8 +351,8 @@ impl PyGameState {
     // Game actions
     /// Process a single game turn
     ///
-    /// Returns (game_over: bool, collected_cheese: List[(x, y)])
-    fn step(&mut self, p1_move: u8, p2_move: u8) -> PyResult<(bool, Vec<(u8, u8)>)> {
+    /// Returns (game_over: bool, collected_cheese: List[Coordinates])
+    fn step(&mut self, p1_move: u8, p2_move: u8) -> PyResult<(bool, Vec<Coordinates>)> {
         let p1_dir = Direction::try_from(p1_move)
             .map_err(|_| PyValueError::new_err("Invalid move for player 1"))?;
         let p2_dir = Direction::try_from(p2_move)
@@ -375,13 +364,7 @@ impl PyGameState {
         self.observation_handler
             .update_collected_cheese(&result.collected_cheese);
 
-        let collected = result
-            .collected_cheese
-            .into_iter()
-            .map(|pos| (pos.x, pos.y))
-            .collect();
-
-        Ok((result.game_over, collected))
+        Ok((result.game_over, result.collected_cheese))
     }
 
     /// Make a move with undo capability
@@ -495,15 +478,11 @@ impl PyGameState {
         // Check for duplicate walls
         let mut wall_set = std::collections::HashSet::new();
         for wall in &validated_walls {
-            let normalized = if wall.0 < wall.1 {
-                *wall
-            } else {
-                (wall.1, wall.0)
-            };
-            if !wall_set.insert(normalized) {
+            // Wall is already normalized in validate_wall
+            if !wall_set.insert((wall.pos1, wall.pos2)) {
                 return Err(PyValueError::new_err(format!(
                     "Duplicate wall between {:?} and {:?}",
-                    wall.0, wall.1
+                    wall.pos1, wall.pos2
                 )));
             }
         }
@@ -630,12 +609,9 @@ impl PyGameState {
         }
 
         // Then remove connections based on walls
-        for (from, to) in validated_walls {
-            let from_coord = Coordinates {
-                x: from.0,
-                y: from.1,
-            };
-            let to_coord = Coordinates { x: to.0, y: to.1 };
+        for wall in validated_walls {
+            let from_coord = wall.pos1;
+            let to_coord = wall.pos2;
 
             // Remove connections in both directions
             if let Some(neighbors) = walls_map.get_mut(&from_coord) {
@@ -683,6 +659,90 @@ impl PyGameState {
                 x: width - 1,
                 y: height - 1,
             }, // Default player 2 position
+            max_turns,
+        );
+
+        let observation_handler = ObservationHandler::new(&game);
+        Ok(Self {
+            game,
+            observation_handler,
+        })
+    }
+
+    /// Create a game from a list of validated Wall objects
+    #[staticmethod]
+    #[pyo3(signature = (width, height, walls, *, seed=None, max_turns=300))]
+    fn create_from_walls(
+        width: u8,
+        height: u8,
+        walls: Vec<crate::Wall>,
+        seed: Option<u64>,
+        max_turns: u16,
+    ) -> PyResult<Self> {
+        // Convert walls to adjacency list format
+        let mut walls_map: HashMap<Coordinates, Vec<Coordinates>> = HashMap::new();
+
+        // Initialize all cells with neighbors
+        for x in 0..width {
+            for y in 0..height {
+                let coord = Coordinates { x, y };
+                let mut neighbors = Vec::new();
+                for &(dx, dy) in &[(0, 1), (1, 0), (0, -1), (-1, 0)] {
+                    let new_x = coord.x as i8 + dx;
+                    let new_y = coord.y as i8 + dy;
+                    if new_x >= 0 && new_x < width as i8 && new_y >= 0 && new_y < height as i8 {
+                        neighbors.push(Coordinates {
+                            x: new_x as u8,
+                            y: new_y as u8,
+                        });
+                    }
+                }
+                walls_map.insert(coord, neighbors);
+            }
+        }
+
+        // Remove connections based on walls
+        for wall in walls {
+            let from_coord = wall.pos1;
+            let to_coord = wall.pos2;
+            if let Some(neighbors) = walls_map.get_mut(&from_coord) {
+                neighbors.retain(|&c| c != to_coord);
+            }
+            if let Some(neighbors) = walls_map.get_mut(&to_coord) {
+                neighbors.retain(|&c| c != from_coord);
+            }
+        }
+
+        // Generate cheese using default density and provided seed
+        let rng_seed = seed.unwrap_or_else(|| {
+            use std::time::{SystemTime, UNIX_EPOCH};
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs()
+        });
+
+        use crate::game::maze_generation::{CheeseConfig, CheeseGenerator};
+        let cheese_config = CheeseConfig {
+            count: ((width as u16 * height as u16) * 13 / 100).max(1),
+            symmetry: true,
+        };
+        let mut cheese_gen = CheeseGenerator::new(cheese_config, width, height, Some(rng_seed));
+        let p1_pos = Coordinates { x: 0, y: 0 };
+        let p2_pos = Coordinates {
+            x: width - 1,
+            y: height - 1,
+        };
+        let cheese_positions = cheese_gen.generate(p1_pos, p2_pos);
+
+        let game = GameState::new_with_config(
+            width,
+            height,
+            walls_map,
+            HashMap::new(),
+            &cheese_positions,
+            p1_pos,
+            p2_pos,
             max_turns,
         );
 
@@ -788,10 +848,10 @@ impl PyGameState {
 
 #[pyclass]
 pub struct PyGameObservation {
-    player_position: (u8, u8),
+    player_position: Coordinates,
     player_mud_turns: u8,
     player_score: f32,
-    opponent_position: (u8, u8),
+    opponent_position: Coordinates,
     opponent_mud_turns: u8,
     opponent_score: f32,
     current_turn: u16,
@@ -803,7 +863,7 @@ pub struct PyGameObservation {
 #[pymethods]
 impl PyGameObservation {
     #[getter]
-    fn player_position(&self) -> (u8, u8) {
+    fn player_position(&self) -> Coordinates {
         self.player_position
     }
 
@@ -818,7 +878,7 @@ impl PyGameObservation {
     }
 
     #[getter]
-    fn opponent_position(&self) -> (u8, u8) {
+    fn opponent_position(&self) -> Coordinates {
         self.opponent_position
     }
 
@@ -905,7 +965,7 @@ impl PyObservationHandler {
 pub struct PyGameConfigBuilder {
     width: u8,
     height: u8,
-    walls: Vec<Wall>,
+    walls: Vec<crate::Wall>,
     mud: Vec<MudEntry>,
     cheese: Vec<Position>,
     player1_pos: Option<Position>,
@@ -943,33 +1003,28 @@ impl PyGameConfigBuilder {
 
     /// Add walls to the game
     #[pyo3(name = "with_walls")]
-    fn with_walls(mut slf: PyRefMut<'_, Self>, walls: Vec<Wall>) -> PyResult<PyRefMut<'_, Self>> {
-        for (pos1, pos2) in &walls {
-            slf.validate_position(*pos1, "Wall start")?;
-            slf.validate_position(*pos2, "Wall end")?;
-
-            // Validate walls are between adjacent cells
-            if !are_adjacent(*pos1, *pos2) {
-                return Err(PyValueError::new_err(format!(
-                    "Wall between {pos1:?} and {pos2:?} must be between adjacent cells"
-                )));
-            }
-
+    fn with_walls(
+        mut slf: PyRefMut<'_, Self>,
+        walls: Vec<crate::Wall>,
+    ) -> PyResult<PyRefMut<'_, Self>> {
+        // Walls are already validated by the Wall constructor
+        // Just check for duplicates and mud conflicts
+        for wall in &walls {
             // Check for duplicate walls
-            if slf.walls.contains(&(*pos1, *pos2)) || slf.walls.contains(&(*pos2, *pos1)) {
-                return Err(PyValueError::new_err(format!(
-                    "Duplicate wall between {pos1:?} and {pos2:?}"
-                )));
+            if slf.walls.iter().any(|existing| existing == wall) {
+                return Err(PyValueError::new_err(format!("Duplicate wall: {wall:?}")));
             }
 
-            // Check for overlap with existing mud (in both directions)
+            // Check for overlap with existing mud
+            let pos1 = (wall.pos1.x, wall.pos1.y);
+            let pos2 = (wall.pos2.x, wall.pos2.y);
             if slf.mud.iter().any(|((mx1, my1), (mx2, my2), _)| {
-                (*pos1 == (*mx1, *my1) && *pos2 == (*mx2, *my2))
-                    || (*pos1 == (*mx2, *my2) && *pos2 == (*mx1, *my1))
+                (pos1 == (*mx1, *my1) && pos2 == (*mx2, *my2))
+                    || (pos1 == (*mx2, *my2) && pos2 == (*mx1, *my1))
             }) {
-                return Err(PyValueError::new_err(format!(
-                    "Cannot place wall between {pos1:?} and {pos2:?} where there is already mud"
-                )));
+                return Err(PyValueError::new_err(
+                    "Cannot place wall where there is already mud".to_string(),
+                ));
             }
         }
 
@@ -1001,9 +1056,13 @@ impl PyGameConfigBuilder {
             }
 
             // Check for overlap with walls
-            if slf.walls.contains(&((*x1, *y1), (*x2, *y2)))
-                || slf.walls.contains(&((*x2, *y2), (*x1, *y1)))
-            {
+            let mud_coord1 = Coordinates::new(*x1, *y1);
+            let mud_coord2 = Coordinates::new(*x2, *y2);
+
+            if slf.walls.iter().any(|wall| {
+                (wall.pos1 == mud_coord1 && wall.pos2 == mud_coord2)
+                    || (wall.pos1 == mud_coord2 && wall.pos2 == mud_coord1)
+            }) {
                 return Err(PyValueError::new_err(format!(
                     "Cannot place mud between {:?} and {:?} where there is already a wall",
                     (x1, y1),
@@ -1024,6 +1083,42 @@ impl PyGameConfigBuilder {
             }
         }
         slf.mud = mud;
+        Ok(slf)
+    }
+
+    /// Add mud using Mud objects
+    #[pyo3(name = "with_mud_objects")]
+    fn with_mud_objects(
+        mut slf: PyRefMut<'_, Self>,
+        mud: Vec<crate::Mud>,
+    ) -> PyResult<PyRefMut<'_, Self>> {
+        // Convert to internal tuple representation, reusing validations from Wall/Mud types
+        let mut converted: Vec<MudEntry> = Vec::new();
+        for m in mud {
+            // Check overlap with walls
+            if slf.walls.iter().any(|w| {
+                (w.pos1 == m.pos1 && w.pos2 == m.pos2) || (w.pos1 == m.pos2 && w.pos2 == m.pos1)
+            }) {
+                return Err(PyValueError::new_err(format!(
+                    "Cannot place mud between {:?} and {:?} where there is already a wall",
+                    (m.pos1.x, m.pos1.y),
+                    (m.pos2.x, m.pos2.y)
+                )));
+            }
+            // Check duplicates
+            if converted.iter().any(|((x1, y1), (x2, y2), _)| {
+                (m.pos1.x, m.pos1.y) == (*x1, *y1) && (m.pos2.x, m.pos2.y) == (*x2, *y2)
+                    || (m.pos1.x, m.pos1.y) == (*x2, *y2) && (m.pos2.x, m.pos2.y) == (*x1, *y1)
+            }) {
+                return Err(PyValueError::new_err(format!(
+                    "Duplicate mud between {:?} and {:?}",
+                    (m.pos1.x, m.pos1.y),
+                    (m.pos2.x, m.pos2.y)
+                )));
+            }
+            converted.push(((m.pos1.x, m.pos1.y), (m.pos2.x, m.pos2.y), m.value));
+        }
+        slf.mud = converted;
         Ok(slf)
     }
 
@@ -1051,6 +1146,31 @@ impl PyGameConfigBuilder {
         Ok(slf)
     }
 
+    /// Add cheese using Coordinates objects
+    #[pyo3(name = "with_cheese_coords")]
+    fn with_cheese_coords(
+        mut slf: PyRefMut<'_, Self>,
+        cheese: Vec<Coordinates>,
+    ) -> PyResult<PyRefMut<'_, Self>> {
+        let mut seen = std::collections::HashSet::new();
+        for pos in &cheese {
+            if pos.x >= slf.width || pos.y >= slf.height {
+                return Err(PyValueError::new_err(format!(
+                    "Cheese position ({}, {}) is outside maze bounds ({}x{})",
+                    pos.x, pos.y, slf.width, slf.height
+                )));
+            }
+            if !seen.insert((pos.x, pos.y)) {
+                return Err(PyValueError::new_err(format!(
+                    "Duplicate cheese position at ({}, {})",
+                    pos.x, pos.y
+                )));
+            }
+        }
+        slf.cheese = cheese.into_iter().map(|c| (c.x, c.y)).collect();
+        Ok(slf)
+    }
+
     /// Set player 1 position
     #[pyo3(name = "with_player1_pos")]
     fn with_player1_pos(
@@ -1074,6 +1194,28 @@ impl PyGameConfigBuilder {
         Ok(slf)
     }
 
+    /// Set player 1 position using Coordinates
+    #[pyo3(name = "with_player1_pos_coords")]
+    fn with_player1_pos_coords(
+        mut slf: PyRefMut<'_, Self>,
+        pos: Coordinates,
+    ) -> PyResult<PyRefMut<'_, Self>> {
+        slf.validate_position((pos.x, pos.y), "Player 1")?;
+        slf.player1_pos = Some((pos.x, pos.y));
+        Ok(slf)
+    }
+
+    /// Set player 2 position using Coordinates
+    #[pyo3(name = "with_player2_pos_coords")]
+    fn with_player2_pos_coords(
+        mut slf: PyRefMut<'_, Self>,
+        pos: Coordinates,
+    ) -> PyResult<PyRefMut<'_, Self>> {
+        slf.validate_position((pos.x, pos.y), "Player 2")?;
+        slf.player2_pos = Some((pos.x, pos.y));
+        Ok(slf)
+    }
+
     /// Set maximum turns
     #[pyo3(name = "with_max_turns")]
     fn with_max_turns(mut slf: PyRefMut<'_, Self>, max_turns: u16) -> PyResult<PyRefMut<'_, Self>> {
@@ -1094,9 +1236,9 @@ impl PyGameConfigBuilder {
 
         // Convert walls to HashMap
         let mut wall_map = HashMap::new();
-        for ((x1, y1), (x2, y2)) in &self.walls {
-            let pos1 = Coordinates::new(*x1, *y1);
-            let pos2 = Coordinates::new(*x2, *y2);
+        for wall in &self.walls {
+            let pos1 = wall.pos1;
+            let pos2 = wall.pos2;
             wall_map.entry(pos1).or_insert_with(Vec::new).push(pos2);
             wall_map.entry(pos2).or_insert_with(Vec::new).push(pos1);
         }
@@ -1149,12 +1291,31 @@ fn are_adjacent(pos1: Position, pos2: Position) -> bool {
     (dx == 1 && dy == 0) || (dx == 0 && dy == 1)
 }
 
-/// Register the module components
-pub(crate) fn register_module(m: &PyModule) -> PyResult<()> {
+/// Register types submodule
+pub(crate) fn register_types(m: &PyModule) -> PyResult<()> {
+    m.add_class::<Coordinates>()?;
+    m.add_class::<Direction>()?;
+    m.add_class::<crate::Wall>()?;
+    m.add_class::<crate::Mud>()?;
+    Ok(())
+}
+
+/// Register game submodule
+pub(crate) fn register_game(m: &PyModule) -> PyResult<()> {
     m.add_class::<PyGameState>()?;
     m.add_class::<PyMoveUndo>()?;
+    Ok(())
+}
+
+/// Register observation submodule
+pub(crate) fn register_observation(m: &PyModule) -> PyResult<()> {
     m.add_class::<PyGameObservation>()?;
     m.add_class::<PyObservationHandler>()?;
+    Ok(())
+}
+
+/// Register builder submodule
+pub(crate) fn register_builder(m: &PyModule) -> PyResult<()> {
     m.add_class::<PyGameConfigBuilder>()?;
     Ok(())
 }

@@ -9,7 +9,7 @@ This tests the low-level game state implementation including:
 # ruff: noqa: PLR2004
 
 import pytest
-from pyrat_engine._rust import PyGameState
+from pyrat_engine.core.game import GameState as PyGameState
 from pyrat_engine.game import PyRat
 
 
@@ -155,8 +155,10 @@ class TestCustomCreationMethods:
 
         assert game.width == 15
         assert game.height == 11
-        assert game.player1_position == (3, 3)
-        assert game.player2_position == (11, 7)
+        assert game.player1_position.x == 3
+        assert game.player1_position.y == 3
+        assert game.player2_position.x == 11
+        assert game.player2_position.y == 7
         # Should use the preset's max_turns
         assert game.max_turns == 200
 

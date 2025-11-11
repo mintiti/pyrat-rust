@@ -6,7 +6,8 @@ makes optimal decisions considering walls, mud, and actual travel time.
 # ruff: noqa: PLR2004
 
 import pytest
-from pyrat_engine._rust import PyGameState
+from pyrat_engine.core.game import GameState as PyGameState
+from pyrat_engine.core.types import Coordinates
 from pyrat_engine.game import Direction
 
 from pyrat_base.enums import Player
@@ -52,7 +53,7 @@ class TestBasicPathfinding:
         assert result is not None
 
         cheese_pos, path, time = result
-        assert cheese_pos == (1, 0)
+        assert cheese_pos == Coordinates(1, 0)
         assert time == 1
         assert path == [Direction.RIGHT]
 
@@ -80,7 +81,7 @@ class TestWallNavigation:
         cheese_pos, _, time = result
         # Direct to (2,0) would be 2 moves but wall blocks it
         # Path to (3,3) is shorter when considering the wall
-        assert cheese_pos == (3, 3)
+        assert cheese_pos == Coordinates(3, 3)
         # Expected time accounting for wall detour
         assert time == 10
 
@@ -121,7 +122,7 @@ class TestMudNavigation:
         assert result is not None
 
         cheese_pos, _, time = result
-        assert cheese_pos == expected_cheese
+        assert cheese_pos == Coordinates(*expected_cheese)
         assert time == expected_time
 
 
@@ -154,7 +155,7 @@ class TestComplexMazes:
 
         cheese_pos, _, time = result
         # Should choose (1,1) as it's more accessible
-        assert cheese_pos == (1, 1)
+        assert cheese_pos == Coordinates(1, 1)
         assert time == 2
 
     def test_multiple_mud_paths_choose_optimal(self, create_game_state):
@@ -186,7 +187,7 @@ class TestComplexMazes:
 
         # Should find path through least costly mud (2-turn)
         cheese_pos, path, _ = result
-        assert cheese_pos == (3, 2)
+        assert cheese_pos == Coordinates(3, 2)
         # Path should be relatively short since we found the optimal route
         # The 2-turn mud path is better than the 3-turn or 5-turn alternatives
         assert len(path) <= 6  # Should find a reasonably short path
@@ -213,7 +214,7 @@ class TestAlgorithmComparison:
         cheese_pos, _, time = result
         # Manhattan: (2,0)=2, (0,4)=4
         # Actual time: (2,0)=20 (heavy mud), (0,4)=4
-        assert cheese_pos == (0, 4)
+        assert cheese_pos == Coordinates(0, 4)
         assert time == 4
 
 
@@ -284,6 +285,6 @@ class TestPathfindingIntegration:
 
         # Verify it finds a valid path
         cheese_pos, path, time = result
-        assert cheese_pos in [(4, 0), (1, 3), (5, 4)]
+        assert cheese_pos in [Coordinates(4, 0), Coordinates(1, 3), Coordinates(5, 4)]
         assert time > 0
         assert len(path) > 0

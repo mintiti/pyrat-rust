@@ -1,6 +1,7 @@
 """Test validation directly with PyGameState."""
 
-from pyrat_engine._rust import PyGameState
+from pyrat_engine.core.game import GameState as PyGameState
+from pyrat_engine.core.types import Coordinates
 
 
 def test_negative_positions():
@@ -71,5 +72,5 @@ def test_valid_creation():
     expected_height = 10
     assert game.width == expected_width
     assert game.height == expected_height
-    assert game.player1_position == (0, 0)
-    assert game.player2_position == (9, 9)
+    assert game.player1_position == Coordinates(0, 0)
+    assert game.player2_position == Coordinates(9, 9)

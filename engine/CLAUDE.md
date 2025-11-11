@@ -101,7 +101,7 @@ game = PyRat(width=31, height=21, cheese_count=85, max_turns=500)
 
 ### 2. Preset Configurations
 ```python
-from pyrat_engine._rust import PyGameState
+from pyrat_engine.core.game import GameState as PyGameState
 
 # Available presets:
 # - "tiny": 11x9 board, 13 cheese, 150 turns

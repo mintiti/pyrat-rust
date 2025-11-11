@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from typing import List, Optional, Tuple
 
 import pytest
-from pyrat_engine._rust import PyGameConfigBuilder
+from pyrat_engine.core.builder import GameConfigBuilder as PyGameConfigBuilder
 
 from pyrat_base import Protocol, ProtocolState
 from pyrat_base.enums import Player

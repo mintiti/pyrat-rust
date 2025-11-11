@@ -48,7 +48,7 @@ pub fn validate_position(pos: PyPosition, width: u8, height: u8, name: &str) -> 
 }
 
 /// Validates and converts a wall with signed positions
-pub fn validate_wall(wall: PyWall, width: u8, height: u8) -> PyResult<((u8, u8), (u8, u8))> {
+pub fn validate_wall(wall: PyWall, width: u8, height: u8) -> PyResult<crate::Wall> {
     let (pos1, pos2) = wall;
 
     // Validate both positions
@@ -62,7 +62,21 @@ pub fn validate_wall(wall: PyWall, width: u8, height: u8) -> PyResult<((u8, u8),
         )));
     }
 
-    Ok((validated_pos1, validated_pos2))
+    // Create Wall struct with normalized order
+    let coord1 = crate::Coordinates::new(validated_pos1.0, validated_pos1.1);
+    let coord2 = crate::Coordinates::new(validated_pos2.0, validated_pos2.1);
+
+    // Normalize order (smaller position first)
+    let (wall_pos1, wall_pos2) = if coord1 < coord2 {
+        (coord1, coord2)
+    } else {
+        (coord2, coord1)
+    };
+
+    Ok(crate::Wall {
+        pos1: wall_pos1,
+        pos2: wall_pos2,
+    })
 }
 
 /// Validates and converts a mud entry with signed values

@@ -6,6 +6,7 @@
 #![allow(clippy::redundant_pub_crate)] // Suppress warning about pub(crate) in pymodule
 #![allow(clippy::must_use_candidate)]
 #![allow(clippy::cargo_common_metadata)]
+#![allow(non_local_definitions)] // pyo3 #[pymethods] expands to non-local impls
 
 #[cfg(feature = "python")]
 mod bindings;
@@ -17,18 +18,33 @@ pub use game::{
     cheese_board::CheeseBoard,
     game_logic::GameState,
     maze_generation::{CheeseConfig, MazeConfig},
-    types::{Coordinates, Direction},
+    types::{Coordinates, Direction, Mud, Wall},
 };
 
 // Export the Python module
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
 
-/// Python module for PyRat game
+/// Python module for PyRat game engine core implementation
 #[cfg(feature = "python")]
 #[pymodule]
-fn _rust(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
-    // Register all Python-facing types and functions
-    bindings::register_module(m)?;
+fn _core(py: Python<'_>, m: &PyModule) -> PyResult<()> {
+    // Create submodules
+    let types_module = PyModule::new(py, "types")?;
+    bindings::register_types_module(types_module)?;
+    m.add_submodule(types_module)?;
+
+    let game_module = PyModule::new(py, "game")?;
+    bindings::register_game_module(game_module)?;
+    m.add_submodule(game_module)?;
+
+    let observation_module = PyModule::new(py, "observation")?;
+    bindings::register_observation_module(observation_module)?;
+    m.add_submodule(observation_module)?;
+
+    let builder_module = PyModule::new(py, "builder")?;
+    bindings::register_builder_module(builder_module)?;
+    m.add_submodule(builder_module)?;
+
     Ok(())
 }

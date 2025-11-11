@@ -1,7 +1,7 @@
 """Test input validation for PyRat engine."""
 
 import pytest
-from pyrat_engine._rust import PyGameState
+from pyrat_engine.core.game import GameState as PyGameState
 
 
 class TestPositionValidation:
@@ -226,8 +226,10 @@ class TestValidInputs:
 
         assert game.width == expected_width
         assert game.height == expected_height
-        assert game.player1_position == (0, 0)
-        assert game.player2_position == (9, 9)
+        assert game.player1_position.x == 0
+        assert game.player1_position.y == 0
+        assert game.player2_position.x == 9  # noqa: PLR2004
+        assert game.player2_position.y == 9  # noqa: PLR2004
         assert len(game.cheese_positions()) == expected_cheese_count
         assert game.max_turns == expected_max_turns
 

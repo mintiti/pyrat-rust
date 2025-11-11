@@ -1,6 +1,7 @@
 """Test validation through replay system for cases that the parser supports."""
 
 import pytest
+from pyrat_engine.core.types import Coordinates
 
 from pyrat_base.replay import ReplayPlayer, ReplayReader
 
@@ -59,7 +60,7 @@ def test_empty_cheese_in_replay():
 
     # ReplayPlayer adds a default cheese if none provided
     assert len(player.game.cheese_positions()) == 1
-    assert player.game.cheese_positions()[0] == (5, 5)  # Center position
+    assert player.game.cheese_positions()[0] == Coordinates(5, 5)  # Center position
 
 
 def test_valid_replay_still_works():

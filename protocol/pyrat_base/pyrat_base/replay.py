@@ -5,8 +5,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TextIO, Tuple, Union
 
-from pyrat_engine._rust import PyGameState
-from pyrat_engine.game import Direction, GameResult, Position
+from pyrat_engine.core.game import GameState as PyGameState
+from pyrat_engine.core.types import Coordinates as Position
+from pyrat_engine.core.types import Direction
+from pyrat_engine.game import GameResult
 
 
 @dataclass
@@ -571,7 +573,8 @@ class ReplayPlayer:
         )
 
         # Execute the move
-        game_over, collected = self.game.step(rat_move.value, python_move.value)
+        # Direction is exposed as plain int constants, not enum with .value
+        game_over, collected = self.game.step(rat_move, python_move)
 
         self._move_index += 1
         self.current_turn = move.turn

@@ -3,7 +3,9 @@
 
 import numpy as np
 import pytest
-from pyrat_engine._rust import PyGameConfigBuilder, PyGameState
+from pyrat_engine.core.builder import GameConfigBuilder as PyGameConfigBuilder
+from pyrat_engine.core.game import GameState as PyGameState
+from pyrat_engine.core.types import Coordinates
 from pyrat_engine.game import Direction
 
 from pyrat_base import Player, ProtocolState
@@ -55,8 +57,8 @@ class TestProtocolState:
         # Cheese positions
         cheese = state.cheese
         assert len(cheese) == 2
-        assert (1, 1) in cheese
-        assert (3, 3) in cheese
+        assert Coordinates(1, 1) in cheese
+        assert Coordinates(3, 3) in cheese
 
         # Mud entries (empty in this simple game)
         assert state.mud == []
@@ -67,8 +69,8 @@ class TestProtocolState:
         state = ProtocolState(game, Player.RAT)
 
         # RAT perspective
-        assert state.my_position == (0, 0)
-        assert state.opponent_position == (4, 4)
+        assert state.my_position == Coordinates(0, 0)
+        assert state.opponent_position == Coordinates(4, 4)
         assert state.my_score == 0.0
         assert state.opponent_score == 0.0
         assert state.my_mud_turns == 0
@@ -80,8 +82,8 @@ class TestProtocolState:
         state = ProtocolState(game, Player.PYTHON)
 
         # PYTHON perspective (swapped)
-        assert state.my_position == (4, 4)
-        assert state.opponent_position == (0, 0)
+        assert state.my_position == Coordinates(4, 4)
+        assert state.opponent_position == Coordinates(0, 0)
         assert state.my_score == 0.0
         assert state.opponent_score == 0.0
         assert state.my_mud_turns == 0
@@ -133,15 +135,16 @@ class TestProtocolState:
         assert movement_matrix.shape == (5, 5, 4)
         # Check movement from (0,0) - should have walls on left and down
         # The third dimension corresponds to [UP, RIGHT, DOWN, LEFT]
+        # Direction constants are plain ints, no .value needed
         assert (
-            movement_matrix[0, 0, Direction.DOWN.value] == -1
+            movement_matrix[0, 0, Direction.DOWN] == -1
         )  # DOWN is invalid (boundary)
         assert (
-            movement_matrix[0, 0, Direction.LEFT.value] == -1
+            movement_matrix[0, 0, Direction.LEFT] == -1
         )  # LEFT is invalid (boundary)
-        assert movement_matrix[0, 0, Direction.UP.value] >= 0  # UP should be valid
+        assert movement_matrix[0, 0, Direction.UP] >= 0  # UP should be valid
         assert (
-            movement_matrix[0, 0, Direction.RIGHT.value] >= 0
+            movement_matrix[0, 0, Direction.RIGHT] >= 0
         )  # RIGHT should be valid
 
     def test_get_effective_moves(self, simple_game):
@@ -204,19 +207,19 @@ class TestProtocolState:
         state_python = ProtocolState(game, Player.PYTHON)
 
         # Initial positions
-        assert state_rat.my_position == (0, 0)
-        assert state_python.my_position == (4, 4)
+        assert state_rat.my_position == Coordinates(0, 0)
+        assert state_python.my_position == Coordinates(4, 4)
 
-        # Make a move
-        game.step(Direction.RIGHT.value, Direction.LEFT.value)
+        # Make a move (Direction constants are plain ints)
+        game.step(Direction.RIGHT, Direction.LEFT)
 
         # Invalidate caches
         state_rat.invalidate_cache()
         state_python.invalidate_cache()
 
         # Check updated positions
-        assert state_rat.my_position == (1, 0)
-        assert state_python.my_position == (3, 4)
+        assert state_rat.my_position == Coordinates(1, 0)
+        assert state_python.my_position == Coordinates(3, 4)
 
         # Check turn advanced
         assert state_rat.turn == 1
@@ -235,8 +238,8 @@ class TestProtocolState:
 
         state = ProtocolState(game, Player.RAT)
 
-        # Move to collect cheese
-        game.step(Direction.RIGHT.value, Direction.LEFT.value)
+        # Move to collect cheese (Direction constants are plain ints)
+        game.step(Direction.RIGHT, Direction.LEFT)
         state.invalidate_cache()
 
         # Both players should have collected cheese

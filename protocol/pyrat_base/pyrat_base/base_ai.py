@@ -23,8 +23,8 @@ import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from pyrat_engine._rust import PyGameState
-from pyrat_engine.game import Direction
+from pyrat_engine.core.game import GameState as PyGameState
+from pyrat_engine.core.types import Direction
 
 from .enums import CommandType, GameResult, Player, ResponseType
 from .io_handler import IOHandler

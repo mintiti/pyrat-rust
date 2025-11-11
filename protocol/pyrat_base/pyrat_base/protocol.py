@@ -15,8 +15,6 @@ Note on linting exceptions:
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
-from pyrat_engine.game import Direction
-
 from pyrat_base.enums import (
     CommandType,
     Player,
@@ -25,6 +23,11 @@ from pyrat_base.enums import (
     game_result_from_string,
     player_from_string,
 )
+
+# Direction constants for validation and formatting
+# Direction from Rust is exposed as integer constants, not an iterable enum
+VALID_DIRECTION_NAMES = ["UP", "RIGHT", "DOWN", "LEFT", "STAY"]
+DIRECTION_INT_TO_NAME = {0: "UP", 1: "RIGHT", 2: "DOWN", 3: "LEFT", 4: "STAY"}
 
 
 @dataclass
@@ -368,8 +371,9 @@ class Protocol:
             if "move" not in data:
                 raise ValueError("MOVE response requires 'move' in data")
             move = data["move"]
-            if isinstance(move, Direction):
-                move = move.name
+            if isinstance(move, int):
+                # Direction constants are exposed as plain ints from Rust
+                move = DIRECTION_INT_TO_NAME.get(move, str(move))
             return f"move {move}"
 
         elif response_type == ResponseType.POSTPROCESSINGDONE:
@@ -456,8 +460,7 @@ def _parse_mud(s: str) -> Optional[Tuple[Tuple[int, int], Tuple[int, int], int]]
 def _parse_move(s: str) -> Optional[str]:
     """Parse and validate a move string."""
     s = s.upper()
-    valid_moves = [d.name for d in Direction]
-    if s in valid_moves:
+    if s in VALID_DIRECTION_NAMES:
         return s
     return None
 

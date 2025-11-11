@@ -8,4 +8,4 @@ members = [
 python_version = "3.8"
 namespace_packages = true
 explicit_package_bases = true
-mypy_path = "$MYPY_CONFIG_FILE_DIR"
+files = ["engine/python", "protocol/pyrat_base"]
