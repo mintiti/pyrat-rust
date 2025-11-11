@@ -11,6 +11,56 @@ from .ai_process import AIProcess
 from .display import Display
 
 
+# ===========================
+# Pure game logic functions
+# ===========================
+
+def determine_winner_from_scores(rat_score: float, python_score: float) -> str:
+    """Determine the winner based on final scores.
+
+    Pure function - no side effects, same inputs always produce same outputs.
+
+    Args:
+        rat_score: Rat's final score
+        python_score: Python's final score
+
+    Returns:
+        Winner: "rat", "python", or "draw"
+    """
+    if rat_score > python_score:
+        return "rat"
+    elif python_score > rat_score:
+        return "python"
+    else:
+        return "draw"
+
+
+def classify_ai_move_error(
+    is_alive: bool,
+    move: Optional[Direction]
+) -> Tuple[bool, Direction, Optional[str]]:
+    """Classify AI move error and determine appropriate response.
+
+    Pure function - decision logic without side effects.
+
+    Args:
+        is_alive: Whether the AI process is still alive
+        move: Move returned by AI (None if timeout/crash)
+
+    Returns:
+        Tuple of (should_continue, move_to_use, error_message)
+        - should_continue: False if AI crashed, True if just timeout or success
+        - move_to_use: Direction to use (original move or STAY)
+        - error_message: Error message to display (None if no error)
+    """
+    if move is None:
+        if not is_alive:
+            return False, Direction.STAY, "AI process crashed"
+        else:
+            return True, Direction.STAY, "AI timed out, defaulting to STAY"
+    return True, move, None
+
+
 class GameRunner:
     """Orchestrates a PyRat game between two AI processes."""
 
@@ -118,14 +168,14 @@ class GameRunner:
             - should_continue: False if AI crashed, True if just timeout
             - move_to_use: Direction.STAY if timeout, original move otherwise
         """
-        if move is None:
-            if not ai.is_alive():
-                self.display.show_error(player, "AI process crashed")
-                return False, Direction.STAY
-            else:
-                self.display.show_error(player, "AI timed out, defaulting to STAY")
-                return True, Direction.STAY
-        return True, move
+        # Use pure function to classify error
+        should_continue, move_to_use, error_message = classify_ai_move_error(ai.is_alive(), move)
+
+        # Handle side effect (display error) if needed
+        if error_message:
+            self.display.show_error(player, error_message)
+
+        return should_continue, move_to_use
 
     def _get_ai_moves(
         self,
@@ -202,12 +252,8 @@ class GameRunner:
         rat_score = scores[0]
         python_score = scores[1]
 
-        if rat_score > python_score:
-            winner = "rat"
-        elif python_score > rat_score:
-            winner = "python"
-        else:
-            winner = "draw"
+        # Use pure function to determine winner
+        winner = determine_winner_from_scores(rat_score, python_score)
 
         return winner, rat_score, python_score
 
