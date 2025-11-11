@@ -8,6 +8,14 @@ from pyrat_engine.core.types import Coordinates
 
 from pyrat_runner.display import (
     Display,
+    MazeStructures,
+    build_maze_structures,
+    get_cell_content,
+    get_vertical_separator,
+    get_horizontal_separator,
+    render_board,
+    render_header,
+    render_winner_screen,
     RAT, PYTHON, RAT_AND_PYTHON, CHEESE,
     RAT_AND_CHEESE, PYTHON_AND_CHEESE, RAT_AND_PYTHON_AND_CHEESE, EMPTY,
     VERTICAL_WALL, VERTICAL_MUD, VERTICAL_NOTHING,
