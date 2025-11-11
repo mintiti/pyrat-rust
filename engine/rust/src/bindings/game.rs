@@ -5,6 +5,7 @@ use crate::{Coordinates, Direction, GameState, Wall};
 use numpy::{PyArray2, PyArray3};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
+use pyo3::types::PyModule;
 use pyo3::Python;
 use std::collections::HashMap;
 
@@ -397,6 +398,7 @@ impl PyGameState {
     }
 
     /// Reset the game state
+    #[pyo3(signature = (seed=None))]
     fn reset(&mut self, seed: Option<u64>) {
         self.game = GameState::new_symmetric(
             Some(self.game.width()),
@@ -440,8 +442,8 @@ impl PyGameState {
             opponent_score: obs.opponent_score,
             current_turn: obs.current_turn,
             max_turns: obs.max_turns,
-            cheese_matrix: obs.cheese_matrix.into_py(py),
-            movement_matrix: obs.movement_matrix.into_py(py),
+            cheese_matrix: obs.cheese_matrix.unbind(),
+            movement_matrix: obs.movement_matrix.unbind(),
         })
     }
 
@@ -914,13 +916,13 @@ impl PyGameObservation {
     }
 
     #[getter]
-    fn cheese_matrix<'a>(&'a self, py: Python<'a>) -> PyResult<&'a PyArray2<u8>> {
-        Ok(self.cheese_matrix.as_ref(py))
+    fn cheese_matrix<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray2<u8>>> {
+        Ok(self.cheese_matrix.bind(py).clone())
     }
 
     #[getter]
-    fn movement_matrix<'a>(&'a self, py: Python<'a>) -> PyResult<&'a PyArray3<i8>> {
-        Ok(self.movement_matrix.as_ref(py))
+    fn movement_matrix<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, PyArray3<i8>>> {
+        Ok(self.movement_matrix.bind(py).clone())
     }
 }
 
@@ -966,8 +968,8 @@ impl PyObservationHandler {
             opponent_score: obs.opponent_score,
             current_turn: obs.current_turn,
             max_turns: obs.max_turns,
-            cheese_matrix: obs.cheese_matrix.into_py(py),
-            movement_matrix: obs.movement_matrix.into_py(py),
+            cheese_matrix: obs.cheese_matrix.unbind(),
+            movement_matrix: obs.movement_matrix.unbind(),
         })
     }
 }
@@ -1303,7 +1305,7 @@ fn are_adjacent(pos1: Position, pos2: Position) -> bool {
 }
 
 /// Register types submodule
-pub(crate) fn register_types(m: &PyModule) -> PyResult<()> {
+pub(crate) fn register_types(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Coordinates>()?;
     m.add_class::<Direction>()?;
     m.add_class::<crate::Wall>()?;
@@ -1312,21 +1314,21 @@ pub(crate) fn register_types(m: &PyModule) -> PyResult<()> {
 }
 
 /// Register game submodule
-pub(crate) fn register_game(m: &PyModule) -> PyResult<()> {
+pub(crate) fn register_game(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyGameState>()?;
     m.add_class::<PyMoveUndo>()?;
     Ok(())
 }
 
 /// Register observation submodule
-pub(crate) fn register_observation(m: &PyModule) -> PyResult<()> {
+pub(crate) fn register_observation(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyGameObservation>()?;
     m.add_class::<PyObservationHandler>()?;
     Ok(())
 }
 
 /// Register builder submodule
-pub(crate) fn register_builder(m: &PyModule) -> PyResult<()> {
+pub(crate) fn register_builder(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyGameConfigBuilder>()?;
     Ok(())
 }

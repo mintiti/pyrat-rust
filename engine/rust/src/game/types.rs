@@ -113,7 +113,10 @@ impl Coordinates {
     }
 }
 
-#[cfg_attr(feature = "python", pyclass(module = "pyrat_engine._core.types"))]
+#[cfg_attr(
+    feature = "python",
+    pyclass(module = "pyrat_engine._core.types", eq, eq_int)
+)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum Direction {
