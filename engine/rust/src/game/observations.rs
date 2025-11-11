@@ -155,8 +155,8 @@ impl ObservationHandler {
             max_turns: game.max_turns(),
 
             // Convert matrices to numpy arrays
-            cheese_matrix: self.cheese_matrix.clone().into_pyarray_bound(py),
-            movement_matrix: self.movement_constraints.matrix.clone().into_pyarray_bound(py),
+            cheese_matrix: self.cheese_matrix.clone().into_pyarray(py),
+            movement_matrix: self.movement_constraints.matrix.clone().into_pyarray(py),
         }
     }
 

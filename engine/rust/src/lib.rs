@@ -30,19 +30,19 @@ use pyo3::prelude::*;
 #[pymodule]
 fn _core(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Create submodules
-    let types_module = PyModule::new_bound(m.py(), "types")?;
+    let types_module = PyModule::new(m.py(), "types")?;
     bindings::register_types_module(&types_module)?;
     m.add_submodule(&types_module)?;
 
-    let game_module = PyModule::new_bound(m.py(), "game")?;
+    let game_module = PyModule::new(m.py(), "game")?;
     bindings::register_game_module(&game_module)?;
     m.add_submodule(&game_module)?;
 
-    let observation_module = PyModule::new_bound(m.py(), "observation")?;
+    let observation_module = PyModule::new(m.py(), "observation")?;
     bindings::register_observation_module(&observation_module)?;
     m.add_submodule(&observation_module)?;
 
-    let builder_module = PyModule::new_bound(m.py(), "builder")?;
+    let builder_module = PyModule::new(m.py(), "builder")?;
     bindings::register_builder_module(&builder_module)?;
     m.add_submodule(&builder_module)?;
 
