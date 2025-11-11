@@ -7,13 +7,13 @@ can be used as a drop-in replacement for Tuple[int, int] in the protocol layer.
 These tests are CRITICAL for the protocol layer migration. All must pass before
 proceeding with the full tuple → Coordinates migration.
 """
+# ruff: noqa: PLR2004
 
 import json
 import pickle
 from typing import Dict, List, Set
 
 import pytest
-
 from pyrat_engine.core.types import Coordinates
 
 
@@ -68,7 +68,7 @@ class TestCoordinatesTupleEquality:
 
         # Try direct comparison (might not work)
         try:
-            result = (coord == (5, 10))
+            result = coord == (5, 10)
             if result:
                 # Direct equality works!
                 assert coord == (5, 10)
@@ -328,14 +328,14 @@ class TestCoordinatesMethods:
 
         # Adjacent positions
         assert center.is_adjacent_to(Coordinates(5, 11))  # UP
-        assert center.is_adjacent_to(Coordinates(5, 9))   # DOWN
+        assert center.is_adjacent_to(Coordinates(5, 9))  # DOWN
         assert center.is_adjacent_to(Coordinates(6, 10))  # RIGHT
         assert center.is_adjacent_to(Coordinates(4, 10))  # LEFT
 
         # Not adjacent
         assert not center.is_adjacent_to(Coordinates(6, 11))  # Diagonal
         assert not center.is_adjacent_to(Coordinates(5, 10))  # Self
-        assert not center.is_adjacent_to(Coordinates(0, 0))   # Far away
+        assert not center.is_adjacent_to(Coordinates(0, 0))  # Far away
 
     def test_coordinates_manhattan_distance(self):
         """Test manhattan_distance method."""
@@ -404,6 +404,7 @@ class TestCoordinatesTypeAnnotations:
 
     def test_function_with_coordinates_type(self):
         """Test that functions can accept Coordinates type."""
+
         def distance_from_origin(pos: Coordinates) -> int:
             return pos.x + pos.y
 
@@ -412,6 +413,7 @@ class TestCoordinatesTypeAnnotations:
 
     def test_function_returning_coordinates(self):
         """Test that functions can return Coordinates type."""
+
         def create_origin() -> Coordinates:
             return Coordinates(0, 0)
 

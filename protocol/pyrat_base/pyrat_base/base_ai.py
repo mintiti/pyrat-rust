@@ -625,6 +625,13 @@ class PyRatAI:
                     return
                 elif cmd.type == CommandType.ISREADY:
                     self._io.write_response("readyok")
+                # Important: Don't drop other commands!
+                # Any command that isn't STOP or ISREADY should be re-queued
+                # so it can be processed after the move calculation completes.
+                # This is critical for MOVES commands which update game state.
+                else:
+                    # Re-queue the command for processing after calculation
+                    self._io.requeue_command(cmd)
 
         # Get result
         result, exception = self._io.wait_for_calculation(timeout=0.1)

@@ -136,16 +136,10 @@ class TestProtocolState:
         # Check movement from (0,0) - should have walls on left and down
         # The third dimension corresponds to [UP, RIGHT, DOWN, LEFT]
         # Direction constants are plain ints, no .value needed
-        assert (
-            movement_matrix[0, 0, Direction.DOWN] == -1
-        )  # DOWN is invalid (boundary)
-        assert (
-            movement_matrix[0, 0, Direction.LEFT] == -1
-        )  # LEFT is invalid (boundary)
+        assert movement_matrix[0, 0, Direction.DOWN] == -1  # DOWN is invalid (boundary)
+        assert movement_matrix[0, 0, Direction.LEFT] == -1  # LEFT is invalid (boundary)
         assert movement_matrix[0, 0, Direction.UP] >= 0  # UP should be valid
-        assert (
-            movement_matrix[0, 0, Direction.RIGHT] >= 0
-        )  # RIGHT should be valid
+        assert movement_matrix[0, 0, Direction.RIGHT] >= 0  # RIGHT should be valid
 
     def test_get_effective_moves(self, simple_game):
         """Test get_effective_moves convenience method."""

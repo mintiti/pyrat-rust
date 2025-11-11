@@ -18,7 +18,7 @@ from typing import List, Optional
 import pytest
 
 # Get the examples directory path
-EXAMPLES_DIR = Path(__file__).parent.parent.parent / "examples"
+EXAMPLES_DIR = Path(__file__).parent.parent.parent / "pyrat_base" / "examples"
 
 
 class QuickAITester:

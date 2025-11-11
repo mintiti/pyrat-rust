@@ -144,6 +144,19 @@ class IOHandler:
         """Check if any commands are available in the queue."""
         return not self._command_queue.empty()
 
+    def requeue_command(self, command: Command) -> None:
+        """Put a command back into the queue for later processing.
+
+        This is used when a command is read during move calculation but
+        can't be processed immediately (e.g., MOVES commands that arrive
+        while the AI is still calculating). The command will be processed
+        in the next iteration of the main event loop.
+
+        Args:
+            command: The command to re-queue
+        """
+        self._command_queue.put(command)
+
     def write_response(self, response: str) -> None:
         """Write a response to stdout with proper flushing.
 
