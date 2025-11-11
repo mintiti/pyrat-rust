@@ -318,6 +318,62 @@ def render_header(
     return '\n'.join(lines)
 
 
+def render_game_state(
+    width: int,
+    height: int,
+    rat_pos: Tuple[int, int],
+    python_pos: Tuple[int, int],
+    rat_score: float,
+    python_score: float,
+    cheese_set: Set[Tuple[int, int]],
+    structures: MazeStructures,
+    rat_move: Optional[Direction],
+    python_move: Optional[Direction],
+    turn: int
+) -> str:
+    """Render the complete game state as a string.
+
+    Pure function - returns complete game visualization without side effects.
+    Combines header and board rendering into a single output.
+
+    Args:
+        width: Board width
+        height: Board height
+        rat_pos: Rat position as (x, y)
+        python_pos: Python position as (x, y)
+        rat_score: Rat's current score
+        python_score: Python's current score
+        cheese_set: Set of cheese positions
+        structures: Pre-computed maze structures
+        rat_move: Rat's last move (or None)
+        python_move: Python's last move (or None)
+        turn: Current turn number
+
+    Returns:
+        Multi-line string containing the complete game visualization
+    """
+    header = render_header(
+        rat_pos=rat_pos,
+        rat_score=rat_score,
+        rat_move=rat_move,
+        python_pos=python_pos,
+        python_score=python_score,
+        python_move=python_move,
+        turn=turn
+    )
+
+    board = render_board(
+        width=width,
+        height=height,
+        rat_pos=rat_pos,
+        python_pos=python_pos,
+        cheese_set=cheese_set,
+        structures=structures
+    )
+
+    return header + board + "\n"
+
+
 def render_winner_screen(winner: str, rat_score: float, python_score: float) -> str:
     """Render the game over screen.
 
@@ -437,6 +493,9 @@ class Display:
         """
         Render the current game state with enhanced visualization.
 
+        Thin wrapper that extracts data from game state and delegates to pure
+        render_game_state() function. Handles side effects (clear screen, print).
+
         Args:
             rat_move: Last move made by rat
             python_move: Last move made by python
@@ -452,30 +511,23 @@ class Display:
         height = self.game._game.height
         turn = self.game.turn
 
-        # Use pure functions to generate strings
-        header = render_header(
-            rat_pos=rat_pos,
-            rat_score=scores[0],
-            rat_move=rat_move,
-            python_pos=python_pos,
-            python_score=scores[1],
-            python_move=python_move,
-            turn=turn
-        )
-
-        board = render_board(
+        # Use pure function to generate complete output
+        output = render_game_state(
             width=width,
             height=height,
             rat_pos=rat_pos,
             python_pos=python_pos,
+            rat_score=scores[0],
+            python_score=scores[1],
             cheese_set=cheese_set,
-            structures=self.structures
+            structures=self.structures,
+            rat_move=rat_move,
+            python_move=python_move,
+            turn=turn
         )
 
-        # Print the rendered output
-        print(header)
-        print(board)
-        print()
+        # Handle side effect (printing)
+        print(output, end='')
 
     def show_winner(self, winner: str, rat_score: float, python_score: float):
         """
