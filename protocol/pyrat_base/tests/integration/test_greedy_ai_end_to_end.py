@@ -70,6 +70,7 @@ class TestGreedyAIEndToEnd:
             Direction.RIGHT,
         ], "Should move toward remaining cheese"
 
+    @pytest.mark.slow
     def test_greedy_navigates_around_walls(self):
         """Test greedy AI correctly navigates around walls to reach cheese."""
         # Create maze with vertical wall that has a gap at the top
@@ -174,6 +175,7 @@ class TestGreedyAIEndToEnd:
         assert game.player1_score > game.player2_score, "Greedy AI should beat dummy AI"
         assert game.player1_score > 0, "Greedy AI should collect at least one cheese"
 
+    @pytest.mark.slow
     def test_greedy_state_synchronization_multi_turn(self):
         """Test greedy AI maintains correct state over multiple turns.
 
@@ -224,6 +226,7 @@ class TestGreedyAIEndToEnd:
         unique_positions = set(positions_visited)
         assert len(unique_positions) > 1, "Rat should move to different positions"
 
+    @pytest.mark.slow
     @pytest.mark.parametrize("seed", [12345, 54321, 99999, 11111])
     def test_greedy_on_random_mazes(self, seed):
         """Test greedy AI performs well on various random mazes."""
@@ -316,6 +319,7 @@ class TestGreedyAIEndToEnd:
         assert game.player2_score == expected_simultaneous_score
 
 
+@pytest.mark.slow
 class TestGreedyVsGreedy:
     """Precise, deterministic tests for greedy vs greedy gameplay.
 

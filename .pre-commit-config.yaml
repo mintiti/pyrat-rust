@@ -71,7 +71,7 @@ repos:
 
         -   id: pytest-protocol
             name: pytest protocol
-            entry: bash -c 'source .venv/bin/activate && cd protocol/pyrat_base && pytest tests || echo "No tests yet"'
+            entry: bash -c 'source .venv/bin/activate && cd protocol/pyrat_base && pytest tests -m "not slow" || echo "No tests yet"'
             language: system
             pass_filenames: false
             always_run: true
