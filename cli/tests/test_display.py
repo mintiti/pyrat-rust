@@ -1,8 +1,8 @@
 """Unit tests for display logic."""
 
 import pytest
-from unittest.mock import Mock, MagicMock
-from pyrat_engine import PyRat
+from unittest.mock import Mock
+from typing import List, Tuple, Dict
 
 from pyrat_runner.display import (
     Display,
@@ -13,228 +13,202 @@ from pyrat_runner.display import (
 )
 
 
+def create_mock_coordinate(x: int, y: int):
+    """Create a mock coordinate that supports indexing."""
+    coord = Mock()
+    coord.__getitem__ = lambda self, i: [x, y][i]
+    coord.__iter__ = lambda self: iter([x, y])
+    return coord
+
+
+@pytest.fixture
+def mock_game():
+    """Create a controlled mock game with known dimensions."""
+    game = Mock()
+    game._game = Mock()
+    game._game.width = 5
+    game._game.height = 5
+    return game
+
+
+@pytest.fixture
+def empty_game(mock_game):
+    """Game with no walls, mud, or cheese."""
+    mock_game._game.wall_entries = Mock(return_value=[])
+    mock_game.mud_positions = {}
+    mock_game.player1_pos = create_mock_coordinate(0, 0)
+    mock_game.player2_pos = create_mock_coordinate(4, 4)
+    mock_game.cheese_positions = []
+    return mock_game
+
+
+@pytest.fixture
+def game_with_walls(mock_game):
+    """Game with specific walls configured."""
+    # Vertical wall between (1,1) and (2,1)
+    # Horizontal wall between (3,2) and (3,3)
+    mock_game._game.wall_entries = Mock(return_value=[
+        ((1, 1), (2, 1)),  # Vertical wall
+        ((3, 2), (3, 3)),  # Horizontal wall
+    ])
+    mock_game.mud_positions = {}
+    mock_game.player1_pos = create_mock_coordinate(0, 0)
+    mock_game.player2_pos = create_mock_coordinate(4, 4)
+    mock_game.cheese_positions = []
+    return mock_game
+
+
+@pytest.fixture
+def game_with_mud(mock_game):
+    """Game with specific mud configured."""
+    mock_game._game.wall_entries = Mock(return_value=[])
+    # Vertical mud between (1,2) and (2,2)
+    # Horizontal mud between (3,1) and (3,2)
+    mock_game.mud_positions = {
+        (create_mock_coordinate(1, 2), create_mock_coordinate(2, 2)): 3,
+        (create_mock_coordinate(3, 1), create_mock_coordinate(3, 2)): 2,
+    }
+    mock_game.player1_pos = create_mock_coordinate(0, 0)
+    mock_game.player2_pos = create_mock_coordinate(4, 4)
+    mock_game.cheese_positions = []
+    return mock_game
+
+
 class TestCellContent:
     """Test cell content determination logic."""
 
-    def setup_method(self):
-        """Create a game state for testing."""
-        self.game = PyRat(width=5, height=5, cheese_count=2, seed=42)
-        self.display = Display(self.game, delay=0)
+    @pytest.mark.parametrize("x,y,rat_pos,python_pos,cheese_set,expected", [
+        # Empty cell - no players, no cheese
+        (2, 2, (0, 0), (4, 4), set(), EMPTY),
+        # Rat only at (1, 1)
+        (1, 1, (1, 1), (4, 4), set(), RAT),
+        # Python only at (3, 3)
+        (3, 3, (0, 0), (3, 3), set(), PYTHON),
+        # Cheese only at (2, 2)
+        (2, 2, (0, 0), (4, 4), {(2, 2)}, CHEESE),
+        # Rat and cheese at (1, 1)
+        (1, 1, (1, 1), (4, 4), {(1, 1)}, RAT_AND_CHEESE),
+        # Python and cheese at (3, 3)
+        (3, 3, (0, 0), (3, 3), {(3, 3)}, PYTHON_AND_CHEESE),
+        # Both players at (2, 2), no cheese
+        (2, 2, (2, 2), (2, 2), set(), RAT_AND_PYTHON),
+        # Both players and cheese at (2, 2)
+        (2, 2, (2, 2), (2, 2), {(2, 2)}, RAT_AND_PYTHON_AND_CHEESE),
+    ])
+    def test_cell_content_combinations(self, empty_game, x, y, rat_pos, python_pos, cheese_set, expected):
+        """Test all combinations of cell occupancy."""
+        # Configure the game with specific positions
+        empty_game.player1_pos = create_mock_coordinate(*rat_pos)
+        empty_game.player2_pos = create_mock_coordinate(*python_pos)
 
-    def test_empty_cell(self):
-        """Empty cell should return EMPTY."""
-        cheese_set = set()
-        # Assuming players are not at (2, 2)
-        content = self.display._get_cell_content(2, 2, cheese_set)
-        assert content == EMPTY
+        display = Display(empty_game, delay=0)
+        content = display._get_cell_content(x, y, cheese_set)
 
-    def test_rat_only(self):
-        """Cell with only rat should return RAT."""
-        cheese_set = set()
-        rat_pos = self.game.player1_pos
-        content = self.display._get_cell_content(rat_pos[0], rat_pos[1], cheese_set)
-        assert content == RAT
-
-    def test_python_only(self):
-        """Cell with only python should return PYTHON."""
-        cheese_set = set()
-        python_pos = self.game.player2_pos
-        content = self.display._get_cell_content(python_pos[0], python_pos[1], cheese_set)
-        assert content == PYTHON
-
-    def test_cheese_only(self):
-        """Cell with only cheese should return CHEESE."""
-        cheese_positions = self.game.cheese_positions
-        if cheese_positions:
-            cheese_pos = cheese_positions[0]
-            cheese_set = {(cheese_pos[0], cheese_pos[1])}
-            # Make sure no player is there
-            rat_pos = self.game.player1_pos
-            python_pos = self.game.player2_pos
-            if (cheese_pos[0] != rat_pos[0] or cheese_pos[1] != rat_pos[1]) and \
-               (cheese_pos[0] != python_pos[0] or cheese_pos[1] != python_pos[1]):
-                content = self.display._get_cell_content(cheese_pos[0], cheese_pos[1], cheese_set)
-                assert content == CHEESE
-
-    def test_rat_and_cheese(self):
-        """Cell with rat and cheese should return RAT_AND_CHEESE."""
-        rat_pos = self.game.player1_pos
-        cheese_set = {(rat_pos[0], rat_pos[1])}
-        content = self.display._get_cell_content(rat_pos[0], rat_pos[1], cheese_set)
-        assert content == RAT_AND_CHEESE
-
-    def test_python_and_cheese(self):
-        """Cell with python and cheese should return PYTHON_AND_CHEESE."""
-        python_pos = self.game.player2_pos
-        cheese_set = {(python_pos[0], python_pos[1])}
-        content = self.display._get_cell_content(python_pos[0], python_pos[1], cheese_set)
-        assert content == PYTHON_AND_CHEESE
-
-    def test_rat_and_python(self):
-        """Cell with both players should return RAT_AND_PYTHON."""
-        # Create a mock where both players are at same position
-        mock_game = Mock()
-        mock_game.player1_pos = (2, 2)
-        mock_game.player2_pos = (2, 2)
-        mock_game._game = Mock()
-        mock_game._game.width = 5
-        mock_game._game.height = 5
-        mock_game._game.wall_entries = Mock(return_value=[])
-        mock_game.mud_positions = {}
-
-        display = Display(mock_game, delay=0)
-        cheese_set = set()
-        content = display._get_cell_content(2, 2, cheese_set)
-        assert content == RAT_AND_PYTHON
-
-    def test_rat_and_python_and_cheese(self):
-        """Cell with both players and cheese should return RAT_AND_PYTHON_AND_CHEESE."""
-        # Create a mock where both players are at same position with cheese
-        mock_game = Mock()
-        mock_game.player1_pos = (2, 2)
-        mock_game.player2_pos = (2, 2)
-        mock_game._game = Mock()
-        mock_game._game.width = 5
-        mock_game._game.height = 5
-        mock_game._game.wall_entries = Mock(return_value=[])
-        mock_game.mud_positions = {}
-
-        display = Display(mock_game, delay=0)
-        cheese_set = {(2, 2)}
-        content = display._get_cell_content(2, 2, cheese_set)
-        assert content == RAT_AND_PYTHON_AND_CHEESE
+        assert content == expected
 
 
-class TestVerticalSeparator:
-    """Test vertical separator determination logic."""
+class TestSeparators:
+    """Test wall and mud separator determination logic."""
 
-    def setup_method(self):
-        """Create a display with known walls and mud."""
-        mock_game = Mock()
-        mock_game._game = Mock()
-        mock_game._game.width = 5
-        mock_game._game.height = 5
-        mock_game._game.wall_entries = Mock(return_value=[
-            ((1, 1), (2, 1)),  # Vertical wall at x=2, y=1
-        ])
-        mock_game.mud_positions = {
-            (Mock(x=3, y=2, __getitem__=lambda s, i: [3, 2][i]),
-             Mock(x=4, y=2, __getitem__=lambda s, i: [4, 2][i])): 2  # Vertical mud at x=4, y=2
-        }
+    @pytest.mark.parametrize("x,y,expected", [
+        # Wall position from fixture: vertical wall between (1,1) and (2,1)
+        # Stored at min_x = 1
+        (1, 1, VERTICAL_WALL),
+        # Position with no wall or mud
+        (0, 0, VERTICAL_NOTHING),
+        (3, 3, VERTICAL_NOTHING),
+    ])
+    def test_vertical_separator_with_walls(self, game_with_walls, x, y, expected):
+        """Test vertical separators with known wall positions."""
+        display = Display(game_with_walls, delay=0)
+        assert display._get_vertical_separator(x, y) == expected
 
-        self.display = Display(mock_game, delay=0)
+    @pytest.mark.parametrize("x,y,expected", [
+        # Mud position from fixture: vertical mud between (1,2) and (2,2)
+        # Stored at min_x = 1
+        (1, 2, VERTICAL_MUD),
+        # Position with no wall or mud
+        (0, 0, VERTICAL_NOTHING),
+        (4, 4, VERTICAL_NOTHING),
+    ])
+    def test_vertical_separator_with_mud(self, game_with_mud, x, y, expected):
+        """Test vertical separators with known mud positions."""
+        display = Display(game_with_mud, delay=0)
+        assert display._get_vertical_separator(x, y) == expected
 
-    def test_vertical_wall(self):
-        """Position with wall should return VERTICAL_WALL."""
-        self.display.v_walls.add((2, 1))
-        assert self.display._get_vertical_separator(2, 1) == VERTICAL_WALL
+    @pytest.mark.parametrize("x,y,expected", [
+        # Wall position from fixture: horizontal wall between (3,2) and (3,3)
+        (3, 2, HORIZONTAL_WALL),
+        # Position with no wall or mud
+        (0, 0, HORIZONTAL_NOTHING),
+        (1, 1, HORIZONTAL_NOTHING),
+    ])
+    def test_horizontal_separator_with_walls(self, game_with_walls, x, y, expected):
+        """Test horizontal separators with known wall positions."""
+        display = Display(game_with_walls, delay=0)
+        assert display._get_horizontal_separator(x, y) == expected
 
-    def test_vertical_mud(self):
-        """Position with mud should return VERTICAL_MUD."""
-        self.display.v_mud.add((4, 2))
-        assert self.display._get_vertical_separator(4, 2) == VERTICAL_MUD
-
-    def test_vertical_nothing(self):
-        """Position with no wall or mud should return VERTICAL_NOTHING."""
-        # Test a position that has no wall or mud
-        assert self.display._get_vertical_separator(0, 0) == VERTICAL_NOTHING
-
-
-class TestHorizontalSeparator:
-    """Test horizontal separator determination logic."""
-
-    def setup_method(self):
-        """Create a display with known walls and mud."""
-        mock_game = Mock()
-        mock_game._game = Mock()
-        mock_game._game.width = 5
-        mock_game._game.height = 5
-        mock_game._game.wall_entries = Mock(return_value=[
-            ((1, 1), (1, 2)),  # Horizontal wall at x=1, y=1
-        ])
-        mock_game.mud_positions = {
-            (Mock(x=3, y=2, __getitem__=lambda s, i: [3, 2][i]),
-             Mock(x=3, y=3, __getitem__=lambda s, i: [3, 3][i])): 2  # Horizontal mud at x=3, y=2
-        }
-
-        self.display = Display(mock_game, delay=0)
-
-    def test_horizontal_wall(self):
-        """Position with wall should return HORIZONTAL_WALL."""
-        self.display.h_walls.add((1, 1))
-        assert self.display._get_horizontal_separator(1, 1) == HORIZONTAL_WALL
-
-    def test_horizontal_mud(self):
-        """Position with mud should return HORIZONTAL_MUD."""
-        self.display.h_mud.add((3, 2))
-        assert self.display._get_horizontal_separator(3, 2) == HORIZONTAL_MUD
-
-    def test_horizontal_nothing(self):
-        """Position with no wall or mud should return HORIZONTAL_NOTHING."""
-        assert self.display._get_horizontal_separator(2, 2) == HORIZONTAL_NOTHING
+    @pytest.mark.parametrize("x,y,expected", [
+        # Mud position from fixture: horizontal mud between (3,1) and (3,2)
+        (3, 1, HORIZONTAL_MUD),
+        # Position with no wall or mud
+        (0, 0, HORIZONTAL_NOTHING),
+        (2, 2, HORIZONTAL_NOTHING),
+    ])
+    def test_horizontal_separator_with_mud(self, game_with_mud, x, y, expected):
+        """Test horizontal separators with known mud positions."""
+        display = Display(game_with_mud, delay=0)
+        assert display._get_horizontal_separator(x, y) == expected
 
 
 class TestMazeStructureBuilding:
     """Test that walls and mud are correctly parsed into display structures."""
 
-    def test_horizontal_wall_parsing(self):
-        """Horizontal walls should be added to h_walls."""
-        mock_game = Mock()
-        mock_game._game = Mock()
-        mock_game._game.width = 5
-        mock_game._game.height = 5
-        # Wall between (2, 1) and (2, 2) - same x, different y
+    def test_horizontal_wall_parsing(self, game_with_walls):
+        """Horizontal walls (same x, different y) should be added to h_walls."""
+        # Wall between (3, 2) and (3, 3) - same column, different rows
+        display = Display(game_with_walls, delay=0)
+        # From fixture: ((3,2), (3,3)) is horizontal wall
+        assert (3, 2) in display.h_walls, "Horizontal wall should be at (3, 2)"
+
+    def test_vertical_wall_parsing(self, game_with_walls):
+        """Vertical walls (different x, same y) should be added to v_walls."""
+        # Wall between (1, 1) and (2, 1) - different columns, same row
+        display = Display(game_with_walls, delay=0)
+        # From fixture: ((1,1), (2,1)) is vertical wall
+        assert (1, 1) in display.v_walls, "Vertical wall should be at (1, 1)"
+
+    def test_horizontal_mud_parsing(self, game_with_mud):
+        """Horizontal mud (same x, different y) should be added to h_mud."""
+        # Mud between (3, 1) and (3, 2) - same column, different rows
+        display = Display(game_with_mud, delay=0)
+        # From fixture: mud between (3,1) and (3,2)
+        assert (3, 1) in display.h_mud, "Horizontal mud should be at (3, 1)"
+
+    def test_vertical_mud_parsing(self, game_with_mud):
+        """Vertical mud (different x, same y) should be added to v_mud."""
+        # Mud between (1, 2) and (2, 2) - different columns, same row
+        display = Display(game_with_mud, delay=0)
+        # From fixture: mud between (1,2) and (2,2)
+        assert (1, 2) in display.v_mud, "Vertical mud should be at (1, 2)"
+
+    def test_wall_order_independence(self, mock_game):
+        """Wall parsing should work regardless of coordinate order."""
+        # Test that ((x1, y1), (x2, y2)) and ((x2, y2), (x1, y1)) produce same result
         mock_game._game.wall_entries = Mock(return_value=[
-            ((2, 1), (2, 2)),
+            ((2, 1), (1, 1)),  # Reversed order vertical wall
         ])
         mock_game.mud_positions = {}
 
         display = Display(mock_game, delay=0)
-        assert (2, 1) in display.h_walls
+        # Should still be stored with min x
+        assert (1, 1) in display.v_walls, "Wall should be normalized to (1, 1)"
 
-    def test_vertical_wall_parsing(self):
-        """Vertical walls should be added to v_walls."""
-        mock_game = Mock()
-        mock_game._game = Mock()
-        mock_game._game.width = 5
-        mock_game._game.height = 5
-        # Wall between (1, 2) and (2, 2) - different x, same y
-        mock_game._game.wall_entries = Mock(return_value=[
-            ((1, 2), (2, 2)),
-        ])
-        mock_game.mud_positions = {}
+    def test_empty_maze_structures(self, empty_game):
+        """Display with no walls or mud should have empty structure sets."""
+        display = Display(empty_game, delay=0)
 
-        display = Display(mock_game, delay=0)
-        assert (1, 2) in display.v_walls
-
-    def test_horizontal_mud_parsing(self):
-        """Horizontal mud should be added to h_mud."""
-        mock_game = Mock()
-        mock_game._game = Mock()
-        mock_game._game.width = 5
-        mock_game._game.height = 5
-        mock_game._game.wall_entries = Mock(return_value=[])
-        # Mud between (3, 1) and (3, 2) - same x, different y
-        mock_game.mud_positions = {
-            (Mock(__getitem__=lambda s, i: [3, 1][i]),
-             Mock(__getitem__=lambda s, i: [3, 2][i])): 2
-        }
-
-        display = Display(mock_game, delay=0)
-        assert (3, 1) in display.h_mud
-
-    def test_vertical_mud_parsing(self):
-        """Vertical mud should be added to v_mud."""
-        mock_game = Mock()
-        mock_game._game = Mock()
-        mock_game._game.width = 5
-        mock_game._game.height = 5
-        mock_game._game.wall_entries = Mock(return_value=[])
-        # Mud between (1, 3) and (2, 3) - different x, same y
-        mock_game.mud_positions = {
-            (Mock(__getitem__=lambda s, i: [1, 3][i]),
-             Mock(__getitem__=lambda s, i: [2, 3][i])): 2
-        }
-
-        display = Display(mock_game, delay=0)
-        assert (1, 3) in display.v_mud
+        assert len(display.h_walls) == 0, "Should have no horizontal walls"
+        assert len(display.v_walls) == 0, "Should have no vertical walls"
+        assert len(display.h_mud) == 0, "Should have no horizontal mud"
+        assert len(display.v_mud) == 0, "Should have no vertical mud"
