@@ -17,8 +17,8 @@ crate-type = ["cdylib", "rlib"]  # Both Python module and Rust library
 
 [dependencies]
 rand = "0.8"
-pyo3 = { version = "0.24", features = ["extension-module"], optional = true }
-numpy = { version = "0.24", optional = true }
+pyo3 = { version = "0.25", features = ["extension-module"], optional = true }
+numpy = { version = "0.25", optional = true }
 flame = { version = "0.2.2", optional = true }
 serde = { version = "1.0.214", features = ["derive"] }
 ndarray = { version = "0.15", optional = true }
