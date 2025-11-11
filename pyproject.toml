@@ -2,6 +2,7 @@
 members = [
     "engine",
     "protocol/pyrat_base",
+    "cli",
 ]
 
 [tool.mypy]

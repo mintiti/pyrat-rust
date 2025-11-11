@@ -1,0 +1,27 @@
+[project]
+name = "pyrat-runner"
+version = "0.1.0"
+description = "Command-line tool to run and visualize PyRat games between AI processes"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "pyrat-engine",
+    "pyrat-base",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-mock>=3.12.0",
+]
+
+[tool.uv.sources]
+pyrat-engine = { workspace = true }
+pyrat-base = { workspace = true }
+
+[project.scripts]
+pyrat-game = "pyrat_runner.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
