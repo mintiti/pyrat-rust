@@ -319,45 +319,40 @@ def render_header(
 
 
 def render_game_state(
-    width: int,
-    height: int,
-    rat_pos: Tuple[int, int],
-    python_pos: Tuple[int, int],
-    rat_score: float,
-    python_score: float,
-    cheese_set: Set[Tuple[int, int]],
+    game,
     structures: MazeStructures,
-    rat_move: Optional[Direction],
-    python_move: Optional[Direction],
-    turn: int
+    rat_move: Optional[Direction] = None,
+    python_move: Optional[Direction] = None
 ) -> str:
     """Render the complete game state as a string.
 
     Pure function - returns complete game visualization without side effects.
-    Combines header and board rendering into a single output.
+    Reads from game state but does not modify it.
 
     Args:
-        width: Board width
-        height: Board height
-        rat_pos: Rat position as (x, y)
-        python_pos: Python position as (x, y)
-        rat_score: Rat's current score
-        python_score: Python's current score
-        cheese_set: Set of cheese positions
+        game: PyRat game instance (read-only)
         structures: Pre-computed maze structures
         rat_move: Rat's last move (or None)
         python_move: Python's last move (or None)
-        turn: Current turn number
 
     Returns:
         Multi-line string containing the complete game visualization
     """
+    # Extract data from game state (read-only operations)
+    rat_pos = (game.player1_pos[0], game.player1_pos[1])
+    python_pos = (game.player2_pos[0], game.player2_pos[1])
+    scores = game.scores
+    cheese_set = set((c[0], c[1]) for c in game.cheese_positions)
+    width = game._game.width
+    height = game._game.height
+    turn = game.turn
+
     header = render_header(
         rat_pos=rat_pos,
-        rat_score=rat_score,
+        rat_score=scores[0],
         rat_move=rat_move,
         python_pos=python_pos,
-        python_score=python_score,
+        python_score=scores[1],
         python_move=python_move,
         turn=turn
     )
@@ -493,8 +488,8 @@ class Display:
         """
         Render the current game state with enhanced visualization.
 
-        Thin wrapper that extracts data from game state and delegates to pure
-        render_game_state() function. Handles side effects (clear screen, print).
+        Thin wrapper that delegates to pure render_game_state() function.
+        Handles side effects (clear screen, print).
 
         Args:
             rat_move: Last move made by rat
@@ -502,28 +497,12 @@ class Display:
         """
         self.clear()
 
-        # Extract game state data
-        rat_pos = (self.game.player1_pos[0], self.game.player1_pos[1])
-        python_pos = (self.game.player2_pos[0], self.game.player2_pos[1])
-        scores = self.game.scores
-        cheese_set = set((c[0], c[1]) for c in self.game.cheese_positions)
-        width = self.game._game.width
-        height = self.game._game.height
-        turn = self.game.turn
-
         # Use pure function to generate complete output
         output = render_game_state(
-            width=width,
-            height=height,
-            rat_pos=rat_pos,
-            python_pos=python_pos,
-            rat_score=scores[0],
-            python_score=scores[1],
-            cheese_set=cheese_set,
+            game=self.game,
             structures=self.structures,
             rat_move=rat_move,
-            python_move=python_move,
-            turn=turn
+            python_move=python_move
         )
 
         # Handle side effect (printing)
