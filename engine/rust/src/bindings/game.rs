@@ -398,6 +398,7 @@ impl PyGameState {
     }
 
     /// Reset the game state
+    #[pyo3(signature = (seed=None))]
     fn reset(&mut self, seed: Option<u64>) {
         self.game = GameState::new_symmetric(
             Some(self.game.width()),
