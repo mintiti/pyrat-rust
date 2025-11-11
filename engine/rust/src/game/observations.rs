@@ -1,6 +1,6 @@
 use crate::{Coordinates, Direction, GameState};
 use ndarray::{Array2, Array3};
-use numpy::{IntoPyArray, PyArray2, PyArray3};
+use numpy::{PyArray2, PyArray3};
 use pyo3::{Bound, Python};
 use std::convert::TryFrom;
 
@@ -155,8 +155,8 @@ impl ObservationHandler {
             max_turns: game.max_turns(),
 
             // Convert matrices to numpy arrays
-            cheese_matrix: self.cheese_matrix.clone().into_pyarray(py),
-            movement_matrix: self.movement_constraints.matrix.clone().into_pyarray(py),
+            cheese_matrix: PyArray2::from_array(py, &self.cheese_matrix),
+            movement_matrix: PyArray3::from_array(py, &self.movement_constraints.matrix),
         }
     }
 
