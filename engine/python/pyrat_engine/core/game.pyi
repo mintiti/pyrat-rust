@@ -187,6 +187,32 @@ class GameState:
         ...
 
     @staticmethod
+    def create_from_walls(
+        width: int,
+        height: int,
+        walls: list[Wall],
+        *,
+        seed: int | None = None,
+        max_turns: int = 300,
+    ) -> GameState:
+        """Create a game from a list of validated Wall objects.
+
+        Similar to create_from_maze but specifically accepts Wall objects
+        rather than tuples. Useful when working with Wall instances directly.
+
+        Args:
+            width: Width of the game board
+            height: Height of the game board
+            walls: List of Wall objects defining the maze structure
+            seed: Random seed for reproducible cheese placement
+            max_turns: Maximum number of turns before game ends
+
+        Returns:
+            A new GameState instance with the specified walls and random cheese
+        """
+        ...
+
+    @staticmethod
     def create_with_starts(
         width: int,
         height: int,
@@ -255,6 +281,16 @@ class GameState:
         """Current score of player 2."""
         ...
 
+    @property
+    def player1_mud_turns(self) -> int:
+        """Number of turns player 1 remains stuck in mud (0 if not in mud)."""
+        ...
+
+    @property
+    def player2_mud_turns(self) -> int:
+        """Number of turns player 2 remains stuck in mud (0 if not in mud)."""
+        ...
+
     def cheese_positions(self) -> list[Coordinates]:
         """Get positions of all remaining cheese pieces.
 
@@ -271,6 +307,16 @@ class GameState:
             - Starting position (x1,y1)
             - Ending position (x2,y2)
             - Number of turns required to cross the mud
+        """
+        ...
+
+    def wall_entries(self) -> list[tuple[tuple[int, int], tuple[int, int]]]:
+        """Get all walls in the maze.
+
+        Returns:
+            List of wall entries, each containing:
+            - Starting position (x1,y1)
+            - Ending position (x2,y2)
         """
         ...
 

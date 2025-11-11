@@ -280,6 +280,17 @@ impl PyGameState {
         self.game.player2_score()
     }
 
+    // Mud status
+    #[getter]
+    fn player1_mud_turns(&self) -> u8 {
+        self.game.player1_mud_turns()
+    }
+
+    #[getter]
+    fn player2_mud_turns(&self) -> u8 {
+        self.game.player2_mud_turns()
+    }
+
     // Game elements
     fn cheese_positions(&self) -> Vec<Coordinates> {
         self.game.cheese_positions()
