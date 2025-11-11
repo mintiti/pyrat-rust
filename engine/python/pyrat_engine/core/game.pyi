@@ -255,6 +255,16 @@ class GameState:
         """Current score of player 2."""
         ...
 
+    @property
+    def player1_mud_turns(self) -> int:
+        """Number of turns player 1 remains stuck in mud (0 if not in mud)."""
+        ...
+
+    @property
+    def player2_mud_turns(self) -> int:
+        """Number of turns player 2 remains stuck in mud (0 if not in mud)."""
+        ...
+
     def cheese_positions(self) -> list[Coordinates]:
         """Get positions of all remaining cheese pieces.
 
