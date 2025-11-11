@@ -3,25 +3,25 @@
 mod game;
 mod validation;
 
-use pyo3::prelude::PyModule;
-use pyo3::PyResult;
+use pyo3::prelude::*;
+use pyo3::types::PyModule;
 
-pub(crate) fn register_types_module(m: &PyModule) -> PyResult<()> {
+pub(crate) fn register_types_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     game::register_types(m)?;
     Ok(())
 }
 
-pub(crate) fn register_game_module(m: &PyModule) -> PyResult<()> {
+pub(crate) fn register_game_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     game::register_game(m)?;
     Ok(())
 }
 
-pub(crate) fn register_observation_module(m: &PyModule) -> PyResult<()> {
+pub(crate) fn register_observation_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     game::register_observation(m)?;
     Ok(())
 }
 
-pub(crate) fn register_builder_module(m: &PyModule) -> PyResult<()> {
+pub(crate) fn register_builder_module(m: &Bound<'_, PyModule>) -> PyResult<()> {
     game::register_builder(m)?;
     Ok(())
 }
