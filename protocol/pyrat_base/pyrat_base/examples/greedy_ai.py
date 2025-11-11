@@ -17,10 +17,26 @@ This AI demonstrates:
 
 from typing import List, Optional, Tuple
 
-from pyrat_engine.game import Direction
+from pyrat_engine.core.types import Direction
 
 from pyrat_base import ProtocolState, PyRatAI
 from pyrat_base.utils import find_nearest_cheese_by_time
+
+
+def _direction_name(direction: int) -> str:
+    """Get the name of a direction (since Direction is now int-based)."""
+    if direction == Direction.UP:
+        return "UP"
+    elif direction == Direction.RIGHT:
+        return "RIGHT"
+    elif direction == Direction.DOWN:
+        return "DOWN"
+    elif direction == Direction.LEFT:
+        return "LEFT"
+    elif direction == Direction.STAY:
+        return "STAY"
+    else:
+        return f"UNKNOWN({direction})"
 
 
 class GreedyAI(PyRatAI):
@@ -107,9 +123,11 @@ class GreedyAI(PyRatAI):
             # Check if this move would take us into mud
             move_cost = state.get_move_cost(move)
             if move_cost and move_cost > 1:
-                self.log(f"Following path: {move.name} (entering {move_cost}-turn mud)")
+                self.log(
+                    f"Following path: {_direction_name(move)} (entering {move_cost}-turn mud)"
+                )
             else:
-                self.log(f"Following path: {move.name}")
+                self.log(f"Following path: {_direction_name(move)}")
             return move
 
         # Fallback - recalculate path

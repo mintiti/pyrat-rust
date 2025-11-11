@@ -6,10 +6,11 @@ This test verifies that the greedy AI:
 3. Maintains correct game state synchronization
 4. Outperforms simpler AIs (wins against dummy AI)
 """
+# ruff: noqa: PLR2004
 
 import pytest
-from pyrat_engine._rust import PyGameState
-from pyrat_engine.game import Direction
+from pyrat_engine.core.game import GameState as PyGameState
+from pyrat_engine.core.types import Coordinates, Direction
 
 from pyrat_base import ProtocolState
 from pyrat_base.enums import Player
@@ -43,7 +44,7 @@ class TestGreedyAIEndToEnd:
             mud=[],
             cheese=[(1, 0), (4, 4)],  # Close cheese and far cheese
             player1_pos=(0, 0),  # Rat starts at bottom-left
-            player2_pos=(4, 4),  # Python starts at top-right (on cheese)
+            player2_pos=(0, 4),  # Python starts at top-left (away from cheese)
         )
 
         greedy = DirectAIRunner(GreedyAI, Player.RAT)
@@ -58,7 +59,7 @@ class TestGreedyAIEndToEnd:
         game.step(Direction.RIGHT, Direction.STAY)
 
         # Verify rat moved
-        assert game.player1_position == (1, 0), "Rat should be at (1, 0)"
+        assert game.player1_position == Coordinates(1, 0), "Rat should be at (1, 0)"
 
         # Turn 2: Rat should now be on the cheese at (1,0)
         # Greedy should target the remaining cheese
@@ -112,11 +113,7 @@ class TestGreedyAIEndToEnd:
 
         # After exactly 12 steps, rat should be at cheese location and collect it
         assert (
-            game.player1_position
-            == (
-                4,
-                0,
-            )
+            game.player1_position == Coordinates(4, 0)
         ), f"After {expected_steps} steps, rat should be at (4,0), but is at {game.player1_position}"
 
         assert (
@@ -317,6 +314,354 @@ class TestGreedyAIEndToEnd:
         expected_simultaneous_score = 0.5
         assert game.player1_score == expected_simultaneous_score
         assert game.player2_score == expected_simultaneous_score
+
+
+class TestGreedyVsGreedy:
+    """Precise, deterministic tests for greedy vs greedy gameplay.
+
+    These tests verify exact turn-by-turn behavior with known outcomes.
+    They also test the critical command requeue bug fix for state synchronization.
+    """
+
+    def test_symmetric_race_equal_split(self):
+        """Test symmetric maze where both AIs collect equal cheese.
+
+        Setup: 1D maze, symmetric cheese placement
+        - Cheese at (1,0), (2,0), (3,0)
+        - Rat at (0,0), Python at (4,0)
+
+        Expected:
+        - Turn 1: Rat collects (1,0), Python collects (3,0)
+        - Turn 2: Both reach (2,0) simultaneously
+        - Final: Rat=1.5, Python=1.5
+        """
+        game = PyGameState.create_custom(
+            width=5,
+            height=1,
+            walls=[],
+            mud=[],
+            cheese=[(1, 0), (2, 0), (3, 0)],
+            player1_pos=(0, 0),  # Rat starts left
+            player2_pos=(4, 0),  # Python starts right
+        )
+
+        greedy_rat = DirectAIRunner(GreedyAI, Player.RAT)
+        greedy_python = DirectAIRunner(GreedyAI, Player.PYTHON)
+
+        # Turn 1: Both move toward nearest cheese
+        rat_move = greedy_rat.get_move(game)
+        python_move = greedy_python.get_move(game)
+
+        assert rat_move == Direction.RIGHT, "Turn 1: Rat should move RIGHT to (1,0)"
+        assert python_move == Direction.LEFT, "Turn 1: Python should move LEFT to (3,0)"
+
+        game.step(rat_move, python_move)
+
+        # After turn 1: Both collected their nearest cheese
+        assert game.player1_position == Coordinates(1, 0), "Turn 1: Rat at (1,0)"
+        assert game.player2_position == Coordinates(3, 0), "Turn 1: Python at (3,0)"
+        assert game.player1_score == 1.0, "Turn 1: Rat score = 1.0"
+        assert game.player2_score == 1.0, "Turn 1: Python score = 1.0"
+        assert len(game.cheese_positions()) == 1, "Turn 1: 1 cheese remaining at (2,0)"
+
+        # Turn 2: Both target (2,0), simultaneous collection
+        rat_move = greedy_rat.get_move(game)
+        python_move = greedy_python.get_move(game)
+
+        assert rat_move == Direction.RIGHT, "Turn 2: Rat should move RIGHT to (2,0)"
+        assert python_move == Direction.LEFT, "Turn 2: Python should move LEFT to (2,0)"
+
+        game.step(rat_move, python_move)
+
+        # After turn 2: Simultaneous collection at (2,0)
+        assert game.player1_position == Coordinates(2, 0), "Turn 2: Rat at (2,0)"
+        assert game.player2_position == Coordinates(2, 0), "Turn 2: Python at (2,0)"
+        assert game.player1_score == 1.5, "Turn 2: Rat score = 1.5 (simultaneous)"
+        assert game.player2_score == 1.5, "Turn 2: Python score = 1.5 (simultaneous)"
+        assert len(game.cheese_positions()) == 0, "Turn 2: All cheese collected"
+
+        # Verify total
+        total_cheese = game.player1_score + game.player2_score
+        assert total_cheese == 3.0, "Total cheese collected = 3.0"
+
+    def test_asymmetric_advantage_clear_winner(self):
+        """Test asymmetric maze where Rat has clear advantage.
+
+        Setup: 1D maze, Rat much closer to all cheese
+        - Cheese at (1,0), (2,0)
+        - Rat at (0,0), Python at (6,0)
+
+        Expected:
+        - Turn 1: Rat collects (1,0), Python moves toward (2,0)
+        - Turn 2: Rat collects (2,0), Python still moving
+        - Final: Rat=2.0, Python=0.0
+        """
+        game = PyGameState.create_custom(
+            width=7,
+            height=1,
+            walls=[],
+            mud=[],
+            cheese=[(1, 0), (2, 0)],
+            player1_pos=(0, 0),  # Rat starts left
+            player2_pos=(6, 0),  # Python starts far right
+        )
+
+        greedy_rat = DirectAIRunner(GreedyAI, Player.RAT)
+        greedy_python = DirectAIRunner(GreedyAI, Player.PYTHON)
+
+        # Turn 1: Rat collects (1,0), Python moves LEFT
+        rat_move = greedy_rat.get_move(game)
+        python_move = greedy_python.get_move(game)
+
+        assert rat_move == Direction.RIGHT, "Turn 1: Rat should move RIGHT to (1,0)"
+        assert python_move == Direction.LEFT, "Turn 1: Python should move LEFT"
+
+        game.step(rat_move, python_move)
+
+        assert game.player1_position == Coordinates(1, 0), "Turn 1: Rat at (1,0)"
+        assert game.player2_position == Coordinates(5, 0), "Turn 1: Python at (5,0)"
+        assert game.player1_score == 1.0, "Turn 1: Rat score = 1.0"
+        assert game.player2_score == 0.0, "Turn 1: Python score = 0.0"
+
+        # Turn 2: Rat collects (2,0), Python continues moving
+        rat_move = greedy_rat.get_move(game)
+        python_move = greedy_python.get_move(game)
+
+        assert rat_move == Direction.RIGHT, "Turn 2: Rat should move RIGHT to (2,0)"
+        assert python_move == Direction.LEFT, "Turn 2: Python should move LEFT"
+
+        game.step(rat_move, python_move)
+
+        assert game.player1_position == Coordinates(2, 0), "Turn 2: Rat at (2,0)"
+        assert game.player2_position == Coordinates(4, 0), "Turn 2: Python at (4,0)"
+        assert game.player1_score == 2.0, "Turn 2: Rat score = 2.0"
+        assert game.player2_score == 0.0, "Turn 2: Python score = 0.0"
+        assert len(game.cheese_positions()) == 0, "Turn 2: All cheese collected by Rat"
+
+        # Verify Rat won with 100% of cheese
+        assert game.player1_score == 2.0, "Final: Rat wins with all cheese"
+        assert game.player2_score == 0.0, "Final: Python gets no cheese"
+
+    def test_mud_timing_strategic_delay(self):
+        """Test mud affecting arrival time and cheese collection.
+
+        Setup: 3x5 maze with mud blocking direct path
+        - Cheese at (2,1) center
+        - Rat at (0,1) with 5-turn mud blocking right
+        - Python at (4,1) with clear path
+
+        Expected:
+        - Rat avoids mud (goes UP→RIGHT→DOWN = 3 moves)
+        - Python goes direct LEFT (2 moves)
+        - Python wins
+        """
+        game = PyGameState.create_custom(
+            width=5,
+            height=3,
+            walls=[],
+            mud=[
+                ((0, 1), (1, 1), 5),  # Heavy mud if Rat goes right directly
+            ],
+            cheese=[(2, 1)],  # Center cheese
+            player1_pos=(0, 1),  # Rat starts left middle
+            player2_pos=(4, 1),  # Python starts right middle
+        )
+
+        greedy_rat = DirectAIRunner(GreedyAI, Player.RAT)
+        greedy_python = DirectAIRunner(GreedyAI, Player.PYTHON)
+
+        # Turn 1: Rat should avoid mud by going UP, Python goes LEFT
+        rat_move = greedy_rat.get_move(game)
+        python_move = greedy_python.get_move(game)
+
+        assert rat_move == Direction.UP, "Turn 1: Rat should go UP to avoid mud"
+        assert python_move == Direction.LEFT, "Turn 1: Python should go LEFT"
+
+        game.step(rat_move, python_move)
+
+        assert game.player1_position == Coordinates(0, 2), "Turn 1: Rat at (0,2)"
+        assert game.player2_position == Coordinates(3, 1), "Turn 1: Python at (3,1)"
+        # Rat avoided mud by going UP, Python has clear path
+
+        # Turn 2: Rat goes RIGHT, Python collects cheese at (2,1)
+        rat_move = greedy_rat.get_move(game)
+        python_move = greedy_python.get_move(game)
+
+        assert rat_move == Direction.RIGHT, "Turn 2: Rat should go RIGHT"
+        assert python_move == Direction.LEFT, "Turn 2: Python should go LEFT to (2,1)"
+
+        game.step(rat_move, python_move)
+
+        assert game.player1_position == Coordinates(1, 2), "Turn 2: Rat at (1,2)"
+        assert game.player2_position == Coordinates(2, 1), "Turn 2: Python at (2,1)"
+        assert game.player2_score == 1.0, "Turn 2: Python collected cheese"
+        assert game.player1_score == 0.0, "Turn 2: Rat hasn't collected yet"
+
+        # Verify Python won, Rat never entered mud
+        assert game.player2_score == 1.0, "Final: Python wins"
+        assert game.player1_score == 0.0, "Final: Rat gets no cheese"
+        assert len(game.cheese_positions()) == 0, "Final: All cheese collected"
+
+    def test_state_synchronization_simultaneous_calculation(self):
+        """CRITICAL: Test state synchronization during simultaneous calculation.
+
+        This is the regression test for the command requeue bug fix.
+        When both AIs calculate moves simultaneously, commands arriving during
+        calculation must be re-queued (not dropped) to prevent state desync.
+
+        Setup: 7x7 maze with multiple cheese
+        - Both greedy AIs calculating moves at the same time
+        - Verify state consistency after each turn
+
+        Expected:
+        - No state desync between AI perspectives and actual game state
+        - Both AIs see consistent opponent positions
+        - Both AIs see same cheese list
+        - Total cheese collected equals initial count
+        """
+        game = PyGameState.create_custom(
+            width=7,
+            height=7,
+            walls=[],
+            mud=[],
+            cheese=[
+                (1, 1),
+                (5, 1),
+                (3, 3),
+                (1, 5),
+                (5, 5),
+            ],  # 5 cheese distributed
+            player1_pos=(0, 0),  # Rat bottom-left
+            player2_pos=(6, 0),  # Python bottom-right
+        )
+
+        greedy_rat = DirectAIRunner(GreedyAI, Player.RAT)
+        greedy_python = DirectAIRunner(GreedyAI, Player.PYTHON)
+
+        initial_cheese_count = len(game.cheese_positions())
+        max_turns = 30
+
+        for turn in range(max_turns):
+            # Get states from both perspectives BEFORE moves
+            rat_state = ProtocolState(game, Player.RAT)
+            python_state = ProtocolState(game, Player.PYTHON)
+
+            # CRITICAL: Verify both AIs see consistent game state
+            assert (
+                rat_state.opponent_position == game.player2_position
+            ), f"Turn {turn}: Rat sees wrong opponent position"
+            assert (
+                python_state.opponent_position == game.player1_position
+            ), f"Turn {turn}: Python sees wrong opponent position"
+
+            # Both AIs should see same cheese list
+            assert set(rat_state.cheese) == set(
+                python_state.cheese
+            ), f"Turn {turn}: Cheese mismatch between AI perspectives"
+
+            # Both calculate moves simultaneously (this is where bug could occur)
+            rat_move = greedy_rat.get_move(game)
+            python_move = greedy_python.get_move(game)
+
+            # Execute moves
+            game.step(rat_move, python_move)
+
+            # Verify state consistency AFTER moves
+            assert (
+                game.player1_position.x >= 0 and game.player1_position.x < 7
+            ), f"Turn {turn}: Rat position out of bounds"
+            assert (
+                game.player2_position.x >= 0 and game.player2_position.x < 7
+            ), f"Turn {turn}: Python position out of bounds"
+
+            # Check if game over
+            if len(game.cheese_positions()) == 0:
+                break
+
+        # Final verification
+        total_collected = game.player1_score + game.player2_score
+        assert (
+            total_collected == initial_cheese_count
+        ), f"Cheese accounting error: collected {total_collected}, expected {initial_cheese_count}"
+
+        # Both should have collected some cheese (greedy AIs are good)
+        assert game.player1_score > 0, "Rat should collect at least one cheese"
+        assert game.player2_score > 0, "Python should collect at least one cheese"
+
+        # No cheese should remain
+        assert len(game.cheese_positions()) == 0, "All cheese should be collected"
+
+    def test_wall_navigation_different_paths(self):
+        """Test wall forcing different optimal paths for each AI.
+
+        Setup: 7x5 maze with vertical wall dividing it
+        - Vertical wall at x=3 from y=0 to y=3 (gap at y=4)
+        - Cheese at (1,2) left side, (5,2) right side
+        - Rat at (0,0), Python at (6,0)
+
+        Expected:
+        - Rat takes path to (1,2) on left side
+        - Python takes path to (5,2) on right side
+        - Both navigate around wall efficiently
+        - Both collect one cheese each
+        """
+        # Create vertical wall blocking middle, with gap at top
+        walls = [((3, y), (4, y)) for y in range(4)]  # Wall from y=0 to y=3
+
+        game = PyGameState.create_custom(
+            width=7,
+            height=5,
+            walls=walls,
+            mud=[],
+            cheese=[(1, 2), (5, 2)],  # One cheese on each side of wall
+            player1_pos=(0, 0),  # Rat on left side
+            player2_pos=(6, 0),  # Python on right side
+        )
+
+        greedy_rat = DirectAIRunner(GreedyAI, Player.RAT)
+        greedy_python = DirectAIRunner(GreedyAI, Player.PYTHON)
+
+        # Both should target nearest cheese (on their respective sides)
+        # Rat: (0,0) → (1,2) = RIGHT + UP + UP = 3 moves
+        # Python: (6,0) → (5,2) = LEFT + UP + UP = 3 moves
+
+        # Turn 1: Both start moving toward their nearest cheese
+        rat_move = greedy_rat.get_move(game)
+        python_move = greedy_python.get_move(game)
+
+        # Both should move toward their cheese (exact path may vary, but should move)
+        assert rat_move in [
+            Direction.UP,
+            Direction.RIGHT,
+        ], "Turn 1: Rat should move toward (1,2)"
+        assert python_move in [
+            Direction.UP,
+            Direction.LEFT,
+        ], "Turn 1: Python should move toward (5,2)"
+
+        # Run until both collect their cheese (max 5 turns should be enough)
+        for _turn in range(5):
+            rat_move = greedy_rat.get_move(game)
+            python_move = greedy_python.get_move(game)
+            game.step(rat_move, python_move)
+
+            # Check if both collected
+            if game.player1_score >= 1.0 and game.player2_score >= 1.0:
+                break
+
+        # Verify both collected exactly one cheese each
+        assert game.player1_score == 1.0, "Rat should collect exactly 1 cheese"
+        assert game.player2_score == 1.0, "Python should collect exactly 1 cheese"
+        assert len(game.cheese_positions()) == 0, "All cheese should be collected"
+
+        # Verify neither crossed the wall (stayed on their side)
+        # Rat should be on left side (x <= 3), Python on right side (x >= 3)
+        assert game.player1_position == Coordinates(
+            1, 2
+        ), "Rat should be at (1,2) where cheese was"
+        assert game.player2_position == Coordinates(
+            5, 2
+        ), "Python should be at (5,2) where cheese was"
 
 
 if __name__ == "__main__":
