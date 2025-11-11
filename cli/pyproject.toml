@@ -9,6 +9,12 @@ dependencies = [
     "pyrat-base",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-mock>=3.12.0",
+]
+
 [tool.uv.sources]
 pyrat-engine = { workspace = true }
 pyrat-base = { workspace = true }
