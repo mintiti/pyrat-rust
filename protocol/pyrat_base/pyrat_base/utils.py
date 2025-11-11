@@ -246,9 +246,7 @@ def find_nearest_cheese_by_time(
     return None
 
 
-def get_direction_toward_target(
-    state: ProtocolState, target: Coordinates
-) -> Direction:
+def get_direction_toward_target(state: ProtocolState, target: Coordinates) -> Direction:
     """Get the best direction to move toward a target using Dijkstra pathfinding.
 
     This finds the fastest path (accounting for mud) to the target and

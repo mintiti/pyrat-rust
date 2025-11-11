@@ -52,7 +52,9 @@ class TestPathfinding:
         state = ProtocolState(game, Player.RAT)
 
         # Find path from (0,0) to (4,4)
-        path = utils.find_fastest_path_dijkstra(state, Coordinates(0, 0), Coordinates(4, 4))
+        path = utils.find_fastest_path_dijkstra(
+            state, Coordinates(0, 0), Coordinates(4, 4)
+        )
         assert path is not None
         expected_path_length = 8  # 4 moves right + 4 moves up
         assert len(path) == expected_path_length
@@ -86,7 +88,9 @@ class TestPathfinding:
         state = ProtocolState(game, Player.RAT)
 
         # Direct path is blocked, must go around (up or down then across)
-        path = utils.find_fastest_path_dijkstra(state, Coordinates(0, 1), Coordinates(4, 1))
+        path = utils.find_fastest_path_dijkstra(
+            state, Coordinates(0, 1), Coordinates(4, 1)
+        )
         assert path is not None
         # Must go around the wall
         min_path_length = 4  # More than direct distance of 4
@@ -122,7 +126,9 @@ class TestPathfinding:
         # Two possible strategies:
         # 1. Direct through mud: 2 normal + 5 mud + 1 normal = 8 turns
         # 2. Go around: more moves but no mud
-        path = utils.find_fastest_path_dijkstra(state, Coordinates(0, 2), Coordinates(4, 2))
+        path = utils.find_fastest_path_dijkstra(
+            state, Coordinates(0, 2), Coordinates(4, 2)
+        )
         assert path is not None
 
         # Calculate actual time cost of the path
@@ -163,7 +169,9 @@ class TestPathfinding:
         state = ProtocolState(game, Player.RAT)
 
         # No path exists
-        path = utils.find_fastest_path_dijkstra(state, Coordinates(0, 2), Coordinates(4, 2))
+        path = utils.find_fastest_path_dijkstra(
+            state, Coordinates(0, 2), Coordinates(4, 2)
+        )
         assert path is None
 
     def test_dijkstra_same_position(self):
@@ -173,7 +181,9 @@ class TestPathfinding:
         )
         state = ProtocolState(game, Player.RAT)
 
-        path = utils.find_fastest_path_dijkstra(state, Coordinates(2, 2), Coordinates(2, 2))
+        path = utils.find_fastest_path_dijkstra(
+            state, Coordinates(2, 2), Coordinates(2, 2)
+        )
         assert path == []  # Empty path
 
     def test_find_nearest_cheese_by_time_simple(self):
@@ -355,7 +365,9 @@ class TestPathfinding:
         )
         state = ProtocolState(game, Player.RAT)
 
-        path = utils.find_fastest_path_dijkstra(state, Coordinates(0, 0), Coordinates(2, 0))
+        path = utils.find_fastest_path_dijkstra(
+            state, Coordinates(0, 0), Coordinates(2, 0)
+        )
         assert path is not None
         expected_moves = 2  # Two moves
         assert len(path) == expected_moves

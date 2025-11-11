@@ -93,7 +93,6 @@ class TestProtocolBugFixes:
         This test verifies that MOVES commands are preserved.
         """
         from pyrat_base import IOHandler
-        from pyrat_base.protocol import Command
 
         # Parse a MOVES command (this is what arrives during calculation)
         cmd = Protocol.parse_command("moves rat:UP python:DOWN")
@@ -167,8 +166,7 @@ class TestProtocolBugFixes:
 
         # AI's game state WITH THE BUG (MOVES command dropped)
         ai_state_buggy = SimpleGameState()
-        # BUG: MOVES command was dropped, so no update applied
-        # ai_state_buggy.apply_moves("UP", "DOWN")  # This line never executed!
+        # BUG: MOVES command was dropped, so no update applied (line never executed)
         assert ai_state_buggy.rat_pos == (0, 0)  # Still at start!
         assert ai_state_buggy.python_pos == (4, 4)  # Still at start!
         assert ai_state_buggy.turn == 0  # Turn never incremented!

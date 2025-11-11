@@ -13,8 +13,8 @@ from pyrat_engine.game import Direction
 
 from pyrat_base import ProtocolState
 from pyrat_base.enums import Player
-from pyrat_base.examples.greedy_ai import GreedyAI
 from pyrat_base.examples.dummy_ai import DummyAI
+from pyrat_base.examples.greedy_ai import GreedyAI
 
 
 class DirectAIRunner:
@@ -50,7 +50,9 @@ class TestGreedyAIEndToEnd:
 
         # Turn 1: Greedy should move toward (1,0) which is closer
         move = greedy.get_move(game)
-        assert move == Direction.RIGHT, "Should move RIGHT toward nearest cheese at (1,0)"
+        assert (
+            move == Direction.RIGHT
+        ), "Should move RIGHT toward nearest cheese at (1,0)"
 
         # Execute the move
         game.step(Direction.RIGHT, Direction.STAY)
@@ -109,9 +111,12 @@ class TestGreedyAIEndToEnd:
             game.step(rat_move, Direction.STAY)
 
         # After exactly 12 steps, rat should be at cheese location and collect it
-        assert game.player1_position == (
-            4,
-            0,
+        assert (
+            game.player1_position
+            == (
+                4,
+                0,
+            )
         ), f"After {expected_steps} steps, rat should be at (4,0), but is at {game.player1_position}"
 
         assert (
@@ -169,9 +174,7 @@ class TestGreedyAIEndToEnd:
                 break
 
         # Greedy should beat dummy (dummy just stays, greedy actively collects)
-        assert (
-            game.player1_score > game.player2_score
-        ), "Greedy AI should beat dummy AI"
+        assert game.player1_score > game.player2_score, "Greedy AI should beat dummy AI"
         assert game.player1_score > 0, "Greedy AI should collect at least one cheese"
 
     def test_greedy_state_synchronization_multi_turn(self):
@@ -232,18 +235,20 @@ class TestGreedyAIEndToEnd:
         greedy = DirectAIRunner(GreedyAI, Player.RAT)
 
         max_turns = 200
-        for turn in range(max_turns):
+        min_cheese_for_success = 5
+        min_cheese_threshold = 3
+        for _turn in range(max_turns):
             move = greedy.get_move(game)
             game.step(move, Direction.STAY)
 
             # If collected majority of cheese, success
-            if game.player1_score >= 5:
+            if game.player1_score >= min_cheese_for_success:
                 break
 
         # Greedy should collect at least half the cheese in reasonable time
         assert (
-            game.player1_score >= 3
-        ), f"Greedy should collect at least 3 cheese (got {game.player1_score})"
+            game.player1_score >= min_cheese_threshold
+        ), f"Greedy should collect at least {min_cheese_threshold} cheese (got {game.player1_score})"
 
     def test_greedy_recalculates_when_cheese_collected(self):
         """Test greedy AI updates its target when cheese is collected."""
@@ -263,17 +268,21 @@ class TestGreedyAIEndToEnd:
         move1 = greedy.get_move(game)
         assert move1 == Direction.RIGHT
 
+        expected_score_after_first = 1.0
+        expected_score_after_second = 2.0
+        expected_score_after_third = 3.0
+
         # Move and collect cheese at (1,0)
         game.step(Direction.RIGHT, Direction.STAY)
-        assert game.player1_score == 1.0
+        assert game.player1_score == expected_score_after_first
 
         # After collecting (1,0), should target (2,0) next
         move2 = greedy.get_move(game)
         assert move2 == Direction.RIGHT, "Should continue to next nearest cheese"
 
-        # Collect (2,0)
+        # Move and collect cheese at (2,0)
         game.step(Direction.RIGHT, Direction.STAY)
-        assert game.player1_score == 2.0
+        assert game.player1_score == expected_score_after_second
 
         # Should target (3,0)
         move3 = greedy.get_move(game)
@@ -281,7 +290,7 @@ class TestGreedyAIEndToEnd:
 
         # Collect final cheese
         game.step(Direction.RIGHT, Direction.STAY)
-        assert game.player1_score == 3.0
+        assert game.player1_score == expected_score_after_third
 
     def test_greedy_handles_simultaneous_collection(self):
         """Test greedy AI handles simultaneous cheese collection correctly."""
@@ -305,8 +314,9 @@ class TestGreedyAIEndToEnd:
         game.step(Direction.RIGHT, Direction.LEFT)
 
         # Check simultaneous collection works correctly
-        assert game.player1_score == 0.5
-        assert game.player2_score == 0.5
+        expected_simultaneous_score = 0.5
+        assert game.player1_score == expected_simultaneous_score
+        assert game.player2_score == expected_simultaneous_score
 
 
 if __name__ == "__main__":
