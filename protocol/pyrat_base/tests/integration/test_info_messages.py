@@ -45,7 +45,7 @@ class InfoMessageTester:
         )
 
     async def send_and_read(
-        self, command: str, wait_for: Optional[str] = None, timeout: float = 1.0
+        self, command: str, wait_for: Optional[str] = None, timeout: float = 0.2
     ):
         """Send command and read responses until we see expected response."""
         # Send command
@@ -99,6 +99,7 @@ class InfoMessageTester:
 
 
 @pytest.mark.asyncio
+@pytest.mark.slow
 async def test_greedy_ai_sends_info_messages():
     """Test that greedy AI sends info messages during gameplay."""
     tester = InfoMessageTester("greedy_ai.py", debug=True)
@@ -122,7 +123,7 @@ async def test_greedy_ai_sends_info_messages():
 
         # Start preprocessing
         responses = await tester.send_and_read(
-            "startpreprocessing", "preprocessingdone", timeout=2.0
+            "startpreprocessing", "preprocessingdone", timeout=0.5
         )
 
         # Check for preprocessing info messages
@@ -141,7 +142,7 @@ async def test_greedy_ai_sends_info_messages():
 
         # Request a move
         await tester.send_and_read("moves rat:STAY python:STAY")
-        responses = await tester.send_and_read("go", "move", timeout=1.0)
+        responses = await tester.send_and_read("go", "move", timeout=0.2)
 
         # Check for move-related info messages
         move_infos = [
@@ -167,6 +168,7 @@ async def test_greedy_ai_sends_info_messages():
 
 
 @pytest.mark.asyncio
+@pytest.mark.slow
 async def test_info_message_format():
     """Test that info messages are properly formatted."""
     tester = InfoMessageTester(
