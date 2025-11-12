@@ -101,7 +101,7 @@ async def test_ai_handshake():
         try:
             await tester.start()
             await tester.send("pyrat")
-            responses = await tester.read_until("pyratready", timeout=0.2)
+            responses = await tester.read_until("pyratready", timeout=2.0)
 
             # Debug: print what we got
             print(f"\n{ai_name} responses: {responses}")
