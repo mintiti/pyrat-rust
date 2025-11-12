@@ -9,6 +9,7 @@ underlying Rust implementation.
 
 from typing import List, Optional, Tuple
 
+from pyrat_engine.core import DirectionType
 from pyrat_engine.core.game import GameState as PyGameState
 from pyrat_engine.core.types import Coordinates, Direction
 
@@ -152,11 +153,11 @@ class ProtocolState:
         self._observation = None
 
     # Convenience methods
-    def get_effective_moves(self) -> List[Direction]:
+    def get_effective_moves(self) -> List[DirectionType]:
         """Get list of moves that will result in actual movement.
 
         Returns:
-            List of directions that are not blocked by walls or boundaries.
+            List of direction values that are not blocked by walls or boundaries.
             STAY is always included as it's technically an effective move
             (you successfully stay in place).
 
@@ -181,11 +182,11 @@ class ProtocolState:
 
         return effective_moves
 
-    def get_move_cost(self, direction: Direction) -> Optional[int]:
+    def get_move_cost(self, direction: DirectionType) -> Optional[int]:
         """Get the mud cost for moving in a given direction.
 
         Args:
-            direction: The direction to check
+            direction: The direction value to check
 
         Returns:
             The mud cost (0 for immediate move, >0 for mud delay),
