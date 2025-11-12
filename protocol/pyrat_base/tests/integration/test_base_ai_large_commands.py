@@ -155,7 +155,7 @@ class TestLargeCommandIntegration:
 
     def test_create_game_with_many_walls(self):
         """Test creating a game state with many walls."""
-        from pyrat_engine._rust import PyGameState
+        from pyrat_engine.core.game import GameState as PyGameState
 
         # Create walls (but not too many to avoid performance issues)
         walls = []
