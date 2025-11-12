@@ -48,7 +48,7 @@ test-engine:
 
 test-protocol:
 	@echo "Running protocol tests..."
-	source .venv/bin/activate && cd protocol/pyrat_base && pytest tests -v || echo "No tests yet"
+	source .venv/bin/activate && cd protocol/pyrat_base && pytest tests -v -n auto || echo "No tests yet"
 
 # Benchmarking
 bench:
