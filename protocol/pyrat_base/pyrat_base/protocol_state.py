@@ -11,6 +11,7 @@ from typing import List, Optional, Tuple
 
 from pyrat_engine.core import DirectionType
 from pyrat_engine.core.game import GameState as PyGameState
+from pyrat_engine.core.observation import GameObservation as PyGameObservation
 from pyrat_engine.core.types import Coordinates, Direction
 
 from pyrat_base.enums import Player
@@ -48,7 +49,9 @@ class ProtocolState:
         """
         self._game = game_state
         self.i_am = i_am
-        self._observation = None  # Cache for current observation
+        self._observation: Optional[PyGameObservation] = (
+            None  # Cache for current observation
+        )
 
     # Direct passthrough properties (zero overhead)
     @property
@@ -82,7 +85,7 @@ class ProtocolState:
         return self._game.mud_entries()
 
     # Protocol-oriented properties using cached observation
-    def _get_observation(self) -> "PyGameObservation":  # type: ignore[name-defined]
+    def _get_observation(self) -> PyGameObservation:
         """Get observation from my perspective (with caching).
 
         This method caches the observation to avoid repeated calls to the

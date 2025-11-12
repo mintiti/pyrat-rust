@@ -318,8 +318,9 @@ class Protocol:
                     return None
                 return Command(cmd_type, {"scores": scores})
 
-            # If we get here, it's an unhandled command type
-            return None
+            else:
+                # Unhandled command type (defensive fallback)
+                return None  # type: ignore[unreachable]
 
         except (ValueError, IndexError):
             return None
