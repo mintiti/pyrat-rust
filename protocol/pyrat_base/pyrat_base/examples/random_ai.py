@@ -12,6 +12,7 @@ import random
 from pyrat_engine.game import Direction
 
 from pyrat_base import ProtocolState, PyRatAI
+from pyrat_base.protocol import DIRECTION_INT_TO_NAME
 
 
 class RandomAI(PyRatAI):
@@ -34,7 +35,9 @@ class RandomAI(PyRatAI):
         move = random.choice(effective_moves)
 
         # Log our choice if in debug mode
-        self.log(f"Position: {state.my_position}, Choosing: {move.name}")
+        self.log(
+            f"Position: {state.my_position}, Choosing: {DIRECTION_INT_TO_NAME[move]}"
+        )
 
         return move
 

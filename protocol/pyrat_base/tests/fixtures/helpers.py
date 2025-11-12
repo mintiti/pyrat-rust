@@ -9,6 +9,7 @@ from pyrat_engine.core.builder import GameConfigBuilder as PyGameConfigBuilder
 
 from pyrat_base import Protocol, ProtocolState, PyRatAI
 from pyrat_base.enums import CommandType, Player
+from pyrat_base.protocol import DIRECTION_INT_TO_NAME
 
 
 class MockAI:
@@ -44,7 +45,7 @@ class MockAI:
                     if hasattr(self.ai, "_game_state") and self.ai._game_state:
                         state = self.ai._protocol_state
                         move = self.ai.get_move(state)
-                        responses.append(f"move {move.name}")
+                        responses.append(f"move {DIRECTION_INT_TO_NAME[move]}")
                     else:
                         responses.append("move STAY")
                 elif cmd.type == CommandType.PREPROCESSING_DONE:

@@ -3,6 +3,7 @@
 
 from pyrat_engine.game import Direction
 
+from pyrat_base.protocol import DIRECTION_INT_TO_NAME
 from pyrat_base.replay import (
     InitialState,
     Move,
@@ -78,9 +79,9 @@ def read_replay_example():
     # Show moves
     print("\nMoves:")
     for move in replay.moves:
-        print(
-            f"  Turn {move.turn}: Rat {move.rat_move.name}, Python {move.python_move.name}"
-        )
+        rat_name = DIRECTION_INT_TO_NAME.get(move.rat_move, str(move.rat_move))
+        python_name = DIRECTION_INT_TO_NAME.get(move.python_move, str(move.python_move))
+        print(f"  Turn {move.turn}: Rat {rat_name}, Python {python_name}")
         if move.comment:
             print(f"    Comment: {move.comment}")
 

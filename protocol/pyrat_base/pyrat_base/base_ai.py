@@ -28,7 +28,7 @@ from pyrat_engine.core.types import Direction
 
 from .enums import CommandType, GameResult, Player, ResponseType
 from .io_handler import IOHandler
-from .protocol import Protocol
+from .protocol import DIRECTION_INT_TO_NAME, Protocol
 from .protocol_state import ProtocolState
 
 
@@ -597,7 +597,7 @@ class PyRatAI:
                 move = self.get_move(state)
 
                 # Convert Direction to string
-                return str(move.name)
+                return DIRECTION_INT_TO_NAME[move]
 
             except Exception as e:
                 if self.debug:
