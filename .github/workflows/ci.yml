@@ -177,7 +177,7 @@ jobs:
       run: |
         source .venv/bin/activate
         cd protocol/pyrat_base
-        pytest tests -v || echo "No tests yet"
+        pytest tests -v -n auto || echo "No tests yet"
 
     - name: Check Protocol formatting
       run: |
