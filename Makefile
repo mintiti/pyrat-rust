@@ -1,6 +1,6 @@
 # PyRat Monorepo Makefile
 
-.PHONY: all engine gui protocol examples cli test bench clean help sync
+.PHONY: all engine gui protocol examples cli cli-help test bench clean help sync test-cli
 
 # Default target
 all: sync engine
@@ -28,7 +28,12 @@ examples:
 	@echo "Examples not yet implemented"
 
 cli:
-	@echo "CLI tools not yet implemented"
+	@echo "CLI tools ready for use"
+	@echo "Run 'pyrat-game --help' for usage instructions"
+
+cli-help:
+	@echo "Displaying CLI help..."
+	source .venv/bin/activate && pyrat-game --help
 
 # Development tasks
 dev-setup:
@@ -39,7 +44,7 @@ dev-setup:
 	source .venv/bin/activate && pre-commit install && pre-commit install --hook-type pre-push
 
 # Testing
-test: test-engine test-protocol
+test: test-engine test-protocol test-cli
 
 test-engine:
 	@echo "Running engine tests..."
@@ -49,6 +54,10 @@ test-engine:
 test-protocol:
 	@echo "Running protocol tests..."
 	source .venv/bin/activate && cd protocol/pyrat_base && pytest tests -v -n auto || echo "No tests yet"
+
+test-cli:
+	@echo "Running CLI tests..."
+	source .venv/bin/activate && cd cli && pytest tests -v
 
 # Benchmarking
 bench:
@@ -92,10 +101,13 @@ help:
 	@echo "  sync         - Sync workspace dependencies with uv"
 	@echo "  engine       - Build the PyRat engine"
 	@echo "  protocol     - Info about protocol component"
+	@echo "  cli          - Info about CLI tools"
+	@echo "  cli-help     - Display CLI help documentation"
 	@echo "  dev-setup    - Set up development environment"
 	@echo "  test         - Run all tests"
 	@echo "  test-engine  - Run engine tests only"
 	@echo "  test-protocol- Run protocol tests only"
+	@echo "  test-cli     - Run CLI tests only"
 	@echo "  bench        - Run performance benchmarks"
 	@echo "  fmt          - Format all code"
 	@echo "  check        - Run code quality checks"
@@ -105,6 +117,6 @@ help:
 	@echo "Components:"
 	@echo "  engine       - High-performance Rust game engine (implemented)"
 	@echo "  protocol     - AI communication protocol (in development)"
+	@echo "  cli          - Command-line tools (implemented)"
 	@echo "  gui          - PyRat GUI (planned)"
 	@echo "  examples     - Example AI implementations (planned)"
-	@echo "  cli          - Command-line tools (planned)"
