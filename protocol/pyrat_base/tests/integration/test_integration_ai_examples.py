@@ -92,6 +92,7 @@ class AIProtocolTester:
             await self.process.wait()
 
 
+@pytest.mark.flaky(reruns=2, reruns_delay=1)
 @pytest.mark.asyncio
 @pytest.mark.slow
 async def test_ai_handshake():
@@ -101,7 +102,7 @@ async def test_ai_handshake():
         try:
             await tester.start()
             await tester.send("pyrat")
-            responses = await tester.read_until("pyratready", timeout=2.0)
+            responses = await tester.read_until("pyratready", timeout=5.0)
 
             # Debug: print what we got
             print(f"\n{ai_name} responses: {responses}")

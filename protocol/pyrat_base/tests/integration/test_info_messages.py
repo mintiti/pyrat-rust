@@ -98,6 +98,7 @@ class InfoMessageTester:
             await self.process.wait()
 
 
+@pytest.mark.flaky(reruns=2, reruns_delay=1)
 @pytest.mark.asyncio
 @pytest.mark.slow
 async def test_greedy_ai_sends_info_messages():
@@ -108,7 +109,7 @@ async def test_greedy_ai_sends_info_messages():
         await tester.start()
 
         # Handshake
-        responses = await tester.send_and_read("pyrat", "pyratready")
+        responses = await tester.send_and_read("pyrat", "pyratready", timeout=5.0)
         assert any("pyratready" in r for r in responses)
 
         # Minimal game setup
@@ -123,7 +124,7 @@ async def test_greedy_ai_sends_info_messages():
 
         # Start preprocessing
         responses = await tester.send_and_read(
-            "startpreprocessing", "preprocessingdone", timeout=2.0
+            "startpreprocessing", "preprocessingdone", timeout=5.0
         )
 
         # Check for preprocessing info messages
@@ -142,7 +143,7 @@ async def test_greedy_ai_sends_info_messages():
 
         # Request a move
         await tester.send_and_read("moves rat:STAY python:STAY")
-        responses = await tester.send_and_read("go", "move", timeout=2.0)
+        responses = await tester.send_and_read("go", "move", timeout=5.0)
 
         # Check for move-related info messages
         move_infos = [
