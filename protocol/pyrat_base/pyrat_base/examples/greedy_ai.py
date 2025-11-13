@@ -15,9 +15,10 @@ This AI demonstrates:
 - Optimal decision making based on actual time cost
 """
 
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
-from pyrat_engine.core.types import Direction
+from pyrat_engine.core import DirectionType
+from pyrat_engine.core.types import Coordinates, Direction
 
 from pyrat_base import ProtocolState, PyRatAI
 from pyrat_base.utils import find_nearest_cheese_by_time
@@ -42,11 +43,11 @@ def _direction_name(direction: int) -> str:
 class GreedyAI(PyRatAI):
     """AI that uses Dijkstra pathfinding to reach cheese in minimum time."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__("GreedyBot v2.0", "PyRat Team")
-        self._current_target: Optional[Tuple[int, int]] = None
-        self._path_to_target: Optional[List[Direction]] = None
-        self._last_position: Optional[Tuple[int, int]] = None
+        self._current_target: Optional[Coordinates] = None
+        self._path_to_target: Optional[List[DirectionType]] = None
+        self._last_position: Optional[Coordinates] = None
 
     def preprocess(self, state: ProtocolState, time_limit_ms: int) -> None:
         """Analyze the maze during preprocessing."""
@@ -65,7 +66,7 @@ class GreedyAI(PyRatAI):
         # Each wall is counted twice (once from each side)
         self.log(f"Total walls: {wall_count // 2}")
 
-    def get_move(self, state: ProtocolState) -> Direction:
+    def get_move(self, state: ProtocolState) -> DirectionType:
         """Move toward the cheese that can be reached in minimum turns."""
         # Check if stuck in mud first
         if state.my_mud_turns > 0:

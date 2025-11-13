@@ -59,8 +59,8 @@ class Move:
     """A single turn's moves and metadata."""
 
     turn: int
-    rat_move: Union[Direction, str]  # Direction or "*" for timeout
-    python_move: Union[Direction, str]
+    rat_move: Union[int, str]  # Direction value (int) or "*" for timeout
+    python_move: Union[int, str]  # Direction value (int) or "*" for timeout
     rat_time_ms: Optional[int] = None
     python_time_ms: Optional[int] = None
     comment: Optional[str] = None
@@ -290,7 +290,7 @@ class ReplayReader:
             positions.append((x, y))
         return positions
 
-    def _parse_move(self, text: str) -> Union[Direction, str]:
+    def _parse_move(self, text: str) -> Union[int, str]:
         """Parse move notation to Direction or special string."""
         if text == "*":
             return "*"  # Timeout
@@ -412,7 +412,7 @@ class ReplayWriter:
 
         return "\n".join(lines)
 
-    def _format_move(self, move: Union[Direction, str]) -> str:
+    def _format_move(self, move: Union[int, str]) -> str:
         """Format a move as PRF notation."""
         if isinstance(move, str):
             return move  # Special notation like '*'
@@ -581,7 +581,7 @@ class ReplayPlayer:
 
         return GameResult(
             game_over=game_over,
-            collected_cheese=[Position(x, y) for x, y in collected],
+            collected_cheese=[Position(coord.x, coord.y) for coord in collected],
             p1_score=self.game.player1_score,
             p2_score=self.game.player2_score,
         )

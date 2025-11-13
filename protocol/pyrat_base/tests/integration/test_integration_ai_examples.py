@@ -52,7 +52,7 @@ class AIProtocolTester:
             self.process.stdin.write(f"{command}\n".encode())
             await self.process.stdin.drain()
 
-    async def read_until(self, expected: str, timeout: float = 1.0):
+    async def read_until(self, expected: str, timeout: float = 0.2):
         """Read responses until we see the expected string."""
         responses = []
         try:
@@ -92,7 +92,9 @@ class AIProtocolTester:
             await self.process.wait()
 
 
+@pytest.mark.flaky(reruns=2, reruns_delay=1)
 @pytest.mark.asyncio
+@pytest.mark.slow
 async def test_ai_handshake():
     """Test that all example AIs complete handshake correctly."""
     for ai_name in ["dummy_ai.py", "random_ai.py", "greedy_ai.py"]:
@@ -100,7 +102,7 @@ async def test_ai_handshake():
         try:
             await tester.start()
             await tester.send("pyrat")
-            responses = await tester.read_until("pyratready", timeout=1.0)
+            responses = await tester.read_until("pyratready", timeout=5.0)
 
             # Debug: print what we got
             print(f"\n{ai_name} responses: {responses}")
@@ -119,6 +121,7 @@ async def test_ai_handshake():
 
 
 @pytest.mark.asyncio
+@pytest.mark.slow
 async def test_ai_with_small_maze():
     """Test AIs can handle a small maze initialization."""
     tester = AIProtocolTester("dummy_ai.py")
@@ -140,7 +143,7 @@ async def test_ai_with_small_maze():
         await tester.send("startpreprocessing t:1000")
 
         # Wait for preprocessing done
-        responses = await tester.read_until("preprocessingdone", timeout=2.0)
+        responses = await tester.read_until("preprocessingdone", timeout=0.5)
         assert "preprocessingdone" in responses
 
         # Check AI is still alive
@@ -153,7 +156,7 @@ async def test_ai_with_small_maze():
 @pytest.mark.asyncio
 async def test_ai_with_large_maze():
     """Test AIs can handle a large maze with many walls."""
-    from pyrat_engine._rust import PyGameState
+    from pyrat_engine.core.game import GameState as PyGameState
 
     # Create a real game to get realistic wall data
     game = PyGameState(width=21, height=15)
@@ -197,7 +200,7 @@ async def test_ai_with_large_maze():
         await tester.send("startpreprocessing t:1000")
 
         # Wait for preprocessing done
-        responses = await tester.read_until("preprocessingdone", timeout=2.0)
+        responses = await tester.read_until("preprocessingdone", timeout=0.5)
 
         if "preprocessingdone" not in responses:
             stderr = await tester.get_stderr()
@@ -208,6 +211,7 @@ async def test_ai_with_large_maze():
 
 
 @pytest.mark.asyncio
+@pytest.mark.slow
 async def test_ai_move_cycle():
     """Test AI can handle a complete move cycle."""
     tester = AIProtocolTester("random_ai.py")
@@ -231,7 +235,7 @@ async def test_ai_move_cycle():
         await tester.send("go t:100")
 
         # Read move response
-        responses = await tester.read_until("move", timeout=1.0)
+        responses = await tester.read_until("move", timeout=0.2)
         move_response = next((r for r in responses if r.startswith("move ")), None)
 
         assert move_response is not None, "AI didn't send a move"

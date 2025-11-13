@@ -7,12 +7,13 @@ focusing on pathfinding that accounts for both walls and mud.
 import heapq
 from typing import Dict, List, Optional, Tuple
 
+from pyrat_engine.core import DirectionType
 from pyrat_engine.core.types import Coordinates, Direction
 
 from .protocol_state import ProtocolState
 
 
-def direction_to_offset(direction: Direction) -> Tuple[int, int]:
+def direction_to_offset(direction: DirectionType) -> Tuple[int, int]:
     """Convert a Direction to position offset.
 
     In PyRat's coordinate system:
@@ -38,7 +39,7 @@ def direction_to_offset(direction: Direction) -> Tuple[int, int]:
         return (0, 0)
 
 
-def offset_to_direction(dx: int, dy: int) -> Optional[Direction]:
+def offset_to_direction(dx: int, dy: int) -> Optional[DirectionType]:
     """Convert position offset to Direction.
 
     Args:
@@ -46,7 +47,7 @@ def offset_to_direction(dx: int, dy: int) -> Optional[Direction]:
         dy: Y offset
 
     Returns:
-        Direction enum or None if not a unit move
+        Direction value or None if not a unit move
     """
     if dx == 0 and dy == 1:
         return Direction.UP  # UP is +y
@@ -62,12 +63,12 @@ def offset_to_direction(dx: int, dy: int) -> Optional[Direction]:
         return None
 
 
-def position_after_move(pos: Coordinates, direction: Direction) -> Coordinates:
+def position_after_move(pos: Coordinates, direction: DirectionType) -> Coordinates:
     """Calculate position after moving in a direction.
 
     Args:
         pos: Current position
-        direction: Direction to move
+        direction: Direction value to move
 
     Returns:
         New position after move
@@ -76,7 +77,7 @@ def position_after_move(pos: Coordinates, direction: Direction) -> Coordinates:
     return Coordinates(pos.x + dx, pos.y + dy)
 
 
-def _position_after_move(pos: Coordinates, direction: Direction) -> Coordinates:
+def _position_after_move(pos: Coordinates, direction: DirectionType) -> Coordinates:
     """Calculate position after moving in a direction (internal helper).
 
     Args:
@@ -92,7 +93,7 @@ def _position_after_move(pos: Coordinates, direction: Direction) -> Coordinates:
 
 def find_fastest_path_dijkstra(
     state: ProtocolState, start: Coordinates, goal: Coordinates
-) -> Optional[List[Direction]]:
+) -> Optional[List[DirectionType]]:
     """Find the fastest path using Dijkstra's algorithm, accounting for mud.
 
     This finds the path that takes the minimum number of turns to traverse,
@@ -112,7 +113,9 @@ def find_fastest_path_dijkstra(
     # Priority queue: (total_cost, counter, position, path)
     # counter is used as tie-breaker to avoid comparing Coordinates
     counter = 0
-    pq: List[Tuple[int, int, Coordinates, List[Direction]]] = [(0, counter, start, [])]
+    pq: List[Tuple[int, int, Coordinates, List[DirectionType]]] = [
+        (0, counter, start, [])
+    ]
     # Best known cost to reach each position
     best_cost: Dict[Coordinates, int] = {start: 0}
 
@@ -166,7 +169,7 @@ def find_fastest_path_dijkstra(
 
 def find_nearest_cheese_by_time(
     state: ProtocolState,
-) -> Optional[Tuple[Coordinates, List[Direction], int]]:
+) -> Optional[Tuple[Coordinates, List[DirectionType], int]]:
     """Find the cheese that can be reached in the minimum number of turns.
 
     This uses Dijkstra's algorithm to find the cheese that takes the
@@ -183,15 +186,17 @@ def find_nearest_cheese_by_time(
 
     my_pos = state.my_position
     best_cheese: Optional[Coordinates] = None
-    best_path: Optional[List[Direction]] = None
+    best_path: Optional[List[DirectionType]] = None
     best_time: float = float("inf")
 
     # Run Dijkstra from my position to all positions
     # Priority queue: (total_cost, counter, position, path)
     counter = 0
-    pq: List[Tuple[int, int, Coordinates, List[Direction]]] = [(0, counter, my_pos, [])]
+    pq: List[Tuple[int, int, Coordinates, List[DirectionType]]] = [
+        (0, counter, my_pos, [])
+    ]
     best_cost: Dict[Coordinates, int] = {my_pos: 0}
-    paths_to_positions: Dict[Coordinates, List[Direction]] = {my_pos: []}
+    paths_to_positions: Dict[Coordinates, List[DirectionType]] = {my_pos: []}
 
     while pq:
         current_cost, _, current_pos, path = heapq.heappop(pq)
@@ -246,7 +251,9 @@ def find_nearest_cheese_by_time(
     return None
 
 
-def get_direction_toward_target(state: ProtocolState, target: Coordinates) -> Direction:
+def get_direction_toward_target(
+    state: ProtocolState, target: Coordinates
+) -> DirectionType:
     """Get the best direction to move toward a target using Dijkstra pathfinding.
 
     This finds the fastest path (accounting for mud) to the target and

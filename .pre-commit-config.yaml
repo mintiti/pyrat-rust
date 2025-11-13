@@ -22,22 +22,26 @@ repos:
             types_or: [python, pyi]
             files: ^(engine/python/|protocol/pyrat_base/)
 
-  # Python type checking
-  -   repo: https://github.com/pre-commit/mirrors-mypy
-      rev: v1.8.0
+  # Python type checking - run same as CI for consistency
+  -   repo: local
       hooks:
-        -   id: mypy
-            files: ^(engine/python/pyrat_engine/|protocol/pyrat_base/pyrat_base/)
-            # Root cause: passing both .py and .pyi to mypy yields duplicate module errors.
-            # Exclude stubs here; mypy will still use them implicitly when analyzing .py.
-            exclude: \.pyi$
-            args: [
-              "--explicit-package-bases",
-              "--ignore-missing-imports",
-            ]
-            additional_dependencies:
-              - gymnasium>=0.29.0
-              - pettingzoo>=1.24.0
+        -   id: mypy-protocol
+            name: mypy protocol
+            description: Type check protocol package (matches CI)
+            entry: bash -c 'source .venv/bin/activate && cd protocol/pyrat_base && mypy pyrat_base --ignore-missing-imports'
+            language: system
+            pass_filenames: false
+            files: ^protocol/pyrat_base/
+            types: [python]
+
+        -   id: mypy-engine
+            name: mypy engine
+            description: Type check engine package (matches CI)
+            entry: bash -c 'source .venv/bin/activate && cd engine && mypy python/pyrat_engine --ignore-missing-imports'
+            language: system
+            pass_filenames: false
+            files: ^engine/python/
+            types: [python]
 
   # Rust checks
   -   repo: local
@@ -71,7 +75,7 @@ repos:
 
         -   id: pytest-protocol
             name: pytest protocol
-            entry: bash -c 'source .venv/bin/activate && cd protocol/pyrat_base && pytest tests -m "not slow" || echo "No tests yet"'
+            entry: bash -c 'source .venv/bin/activate && cd protocol/pyrat_base && pytest tests -n auto -m "not slow" || echo "No tests yet"'
             language: system
             pass_filenames: false
             always_run: true

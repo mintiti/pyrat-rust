@@ -50,7 +50,7 @@ class QuickAITester:
             env=env,
         )
 
-    async def send_and_read(self, command: str, expected: str, timeout: float = 1.0):  # noqa: C901
+    async def send_and_read(self, command: str, expected: str, timeout: float = 0.2):  # noqa: C901
         """Send command and read until we see expected response."""
         # Check stderr for any errors first
         if self.process and self.process.stderr:
@@ -117,6 +117,7 @@ class QuickAITester:
 
 @pytest.mark.asyncio
 @pytest.mark.timeout(5)
+@pytest.mark.slow
 async def test_greedy_ai_basic_functionality():
     """Test greedy AI can complete handshake and make a move."""
     tester = QuickAITester("greedy_ai.py")
@@ -124,8 +125,8 @@ async def test_greedy_ai_basic_functionality():
     try:
         await tester.start()
 
-        # Handshake
-        assert await tester.send_and_read("pyrat", "pyratready")
+        # Handshake (subprocess startup needs more time in parallel execution)
+        assert await tester.send_and_read("pyrat", "pyratready", timeout=0.5)
 
         # Minimal game setup - send commands without waiting for responses
         tester.process.stdin.write(b"newgame\n")
@@ -139,7 +140,7 @@ async def test_greedy_ai_basic_functionality():
         await tester.process.stdin.drain()
 
         # Skip preprocessing, go straight to move
-        assert await tester.send_and_read("go", "move")
+        assert await tester.send_and_read("go", "move", timeout=0.5)
 
         # Read any remaining output to capture info messages
         await tester.read_available_output()
@@ -153,6 +154,7 @@ async def test_greedy_ai_basic_functionality():
 
 @pytest.mark.asyncio
 @pytest.mark.timeout(5)
+@pytest.mark.slow
 async def test_random_ai_basic_functionality():
     """Test random AI can complete handshake and make a move."""
     tester = QuickAITester("random_ai.py")
@@ -160,8 +162,8 @@ async def test_random_ai_basic_functionality():
     try:
         await tester.start()
 
-        # Handshake
-        assert await tester.send_and_read("pyrat", "pyratready")
+        # Handshake (subprocess startup needs more time in parallel execution)
+        assert await tester.send_and_read("pyrat", "pyratready", timeout=0.5)
 
         # Minimal game setup - send commands without waiting for responses
         tester.process.stdin.write(b"newgame\n")
@@ -175,7 +177,7 @@ async def test_random_ai_basic_functionality():
         await tester.process.stdin.drain()
 
         # Request move
-        assert await tester.send_and_read("go", "move")
+        assert await tester.send_and_read("go", "move", timeout=0.5)
 
     finally:
         await tester.cleanup()
@@ -183,6 +185,7 @@ async def test_random_ai_basic_functionality():
 
 @pytest.mark.asyncio
 @pytest.mark.timeout(5)
+@pytest.mark.slow
 async def test_dummy_ai_basic_functionality():
     """Test dummy AI always returns STAY."""
     tester = QuickAITester("dummy_ai.py")
@@ -190,8 +193,8 @@ async def test_dummy_ai_basic_functionality():
     try:
         await tester.start()
 
-        # Handshake
-        assert await tester.send_and_read("pyrat", "pyratready")
+        # Handshake (subprocess startup needs more time in parallel execution)
+        assert await tester.send_and_read("pyrat", "pyratready", timeout=0.5)
 
         # Minimal game setup - send commands without waiting for responses
         tester.process.stdin.write(b"newgame\n")
@@ -205,7 +208,7 @@ async def test_dummy_ai_basic_functionality():
         await tester.process.stdin.drain()
 
         # Request move - dummy should always return STAY
-        assert await tester.send_and_read("go", "move STAY")
+        assert await tester.send_and_read("go", "move STAY", timeout=0.5)
 
     finally:
         await tester.cleanup()

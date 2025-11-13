@@ -12,6 +12,7 @@ import queue
 import select
 import sys
 import threading
+import time
 from typing import Any, Callable, Dict, Optional, Tuple
 
 from .protocol import Command, Protocol
@@ -121,6 +122,8 @@ class IOHandler:
             except Exception as e:
                 if self.debug:
                     self._debug_log(f"Reader thread error: {e}")
+                # Add backoff to prevent tight error loops
+                time.sleep(0.01)  # 10ms backoff on error
                 # Continue reading even on errors
 
     def read_command(self, timeout: float = 0) -> Optional[Command]:

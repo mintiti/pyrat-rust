@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Example of using the PyRat replay system."""
 
-from pyrat_engine.game import Direction
+from pyrat_engine.core.types import Direction
 
+from pyrat_base.protocol import DIRECTION_INT_TO_NAME
 from pyrat_base.replay import (
     InitialState,
     Move,
@@ -15,7 +16,7 @@ from pyrat_base.replay import (
 )
 
 
-def create_replay_example():
+def create_replay_example() -> None:
     """Create a simple replay and save it."""
     print("Creating a simple replay...")
 
@@ -63,7 +64,7 @@ def create_replay_example():
     print("Saved replay to example_game.pyrat")
 
 
-def read_replay_example():
+def read_replay_example() -> None:
     """Read and analyze a replay."""
     print("\nReading replay...")
 
@@ -78,14 +79,22 @@ def read_replay_example():
     # Show moves
     print("\nMoves:")
     for move in replay.moves:
-        print(
-            f"  Turn {move.turn}: Rat {move.rat_move.name}, Python {move.python_move.name}"
+        rat_name = (
+            DIRECTION_INT_TO_NAME.get(move.rat_move, str(move.rat_move))
+            if isinstance(move.rat_move, int)
+            else move.rat_move
         )
+        python_name = (
+            DIRECTION_INT_TO_NAME.get(move.python_move, str(move.python_move))
+            if isinstance(move.python_move, int)
+            else move.python_move
+        )
+        print(f"  Turn {move.turn}: Rat {rat_name}, Python {python_name}")
         if move.comment:
             print(f"    Comment: {move.comment}")
 
 
-def streaming_example():
+def streaming_example() -> None:
     """Example of writing a replay during gameplay."""
     print("\nStreaming replay example...")
 
@@ -124,7 +133,7 @@ def streaming_example():
     print("Saved streaming replay to streaming_game.pyrat")
 
 
-def replay_player_example():
+def replay_player_example() -> None:
     """Example of using ReplayPlayer to step through a game."""
     print("\nReplay player example...")
 
@@ -152,7 +161,7 @@ def replay_player_example():
     )
 
 
-def main():
+def main() -> None:
     """Run all examples."""
     create_replay_example()
     read_replay_example()

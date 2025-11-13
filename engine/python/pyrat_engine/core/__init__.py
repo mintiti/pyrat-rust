@@ -21,6 +21,10 @@ Direction = _impl.types.Direction
 Wall = _impl.types.Wall
 Mud = _impl.types.Mud
 
+# Type alias for direction values (Direction.UP, Direction.RIGHT, etc. are ints)
+# Use this in type hints when referring to direction values, not the Direction class
+DirectionType = int
+
 GameState = _impl.game.PyGameState
 MoveUndo = _impl.game.PyMoveUndo
 
@@ -38,6 +42,7 @@ __all__ = [
     # Types
     "Coordinates",
     "Direction",
+    "DirectionType",
     "Wall",
     "Mud",
     # Game

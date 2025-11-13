@@ -6,7 +6,7 @@ method to create their AI strategy.
 
 Example:
     >>> from pyrat_base import PyRatAI, ProtocolState
-    >>> from pyrat_engine.game import Direction
+    >>> from pyrat_engine.core.types import Direction
     >>>
     >>> class MyAI(PyRatAI):
     ...     def get_move(self, state: ProtocolState) -> Direction:
@@ -23,12 +23,13 @@ import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
+from pyrat_engine.core import DirectionType
 from pyrat_engine.core.game import GameState as PyGameState
 from pyrat_engine.core.types import Direction
 
 from .enums import CommandType, GameResult, Player, ResponseType
 from .io_handler import IOHandler
-from .protocol import Protocol
+from .protocol import DIRECTION_INT_TO_NAME, Protocol
 from .protocol_state import ProtocolState
 
 
@@ -85,11 +86,11 @@ class PyRatAI:
         self._final_score: Optional[Tuple[float, float]] = None
 
     # Abstract method - users must implement
-    def get_move(self, state: ProtocolState) -> Direction:
+    def get_move(self, state: ProtocolState) -> DirectionType:
         """Calculate the next move given the current game state.
 
         This is the main method users must implement. It receives the current
-        game state and should return a Direction indicating the desired move.
+        game state and should return a direction value (int) indicating the desired move.
 
         The method can be interrupted by a 'stop' command, in which case the
         best move found so far should be returned.
@@ -597,7 +598,7 @@ class PyRatAI:
                 move = self.get_move(state)
 
                 # Convert Direction to string
-                return str(move.name)
+                return DIRECTION_INT_TO_NAME[move]
 
             except Exception as e:
                 if self.debug:
@@ -641,8 +642,8 @@ class PyRatAI:
         else:
             self._io.write_response("move STAY")
 
-    def _parse_direction(self, move_str: str) -> Direction:
-        """Parse a move string to Direction enum."""
+    def _parse_direction(self, move_str: str) -> DirectionType:
+        """Parse a move string to direction value."""
         if not move_str:
             return Direction.STAY
         move_str = str(move_str).upper()
