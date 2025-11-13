@@ -41,19 +41,16 @@ class TestIOHandler:
         mock_stdin.isatty = MagicMock(return_value=False)
 
         with IOHandler() as handler:
-            # Give reader thread time to process
-            time.sleep(0.1)
-
             # Should have read 3 commands
-            cmd1 = handler.read_command()
+            cmd1 = handler.read_command(timeout=1.0)
             assert cmd1 is not None
             assert cmd1.type == CommandType.PYRAT
 
-            cmd2 = handler.read_command()
+            cmd2 = handler.read_command(timeout=1.0)
             assert cmd2 is not None
             assert cmd2.type == CommandType.ISREADY
 
-            cmd3 = handler.read_command()
+            cmd3 = handler.read_command(timeout=1.0)
             assert cmd3 is not None
             assert cmd3.type == CommandType.GO
 
@@ -69,17 +66,12 @@ class TestIOHandler:
         mock_stdin.isatty = MagicMock(return_value=False)
 
         with IOHandler() as handler:
-            time.sleep(0.2)  # Give more time for processing
-
-            # Should only get valid commands
-            cmd1 = handler.read_command()
+            # Should only get valid commands (unknown command should be ignored)
+            cmd1 = handler.read_command(timeout=2.0)
             assert cmd1 is not None
             assert cmd1.type == CommandType.PYRAT
 
-            # Give time for the unknown command to be processed and ignored
-            time.sleep(0.1)
-
-            cmd2 = handler.read_command()
+            cmd2 = handler.read_command(timeout=2.0)
             assert cmd2 is not None
             assert cmd2.type == CommandType.ISREADY
 
@@ -241,10 +233,9 @@ class TestIOHandler:
         mock_stdin.isatty = MagicMock(return_value=False)
 
         with IOHandler() as handler:
-            time.sleep(0.1)
-
             # Should read one command
-            cmd = handler.read_command()
+            cmd = handler.read_command(timeout=1.0)
+            assert cmd is not None
             assert cmd.type == CommandType.PYRAT
 
             # Close stdin to simulate EOF
@@ -264,13 +255,13 @@ class TestIOHandler:
         mock_stdin.isatty = MagicMock(return_value=False)
 
         with IOHandler() as handler:
-            time.sleep(0.1)
-
             # Should only get non-empty commands
-            cmd1 = handler.read_command()
+            cmd1 = handler.read_command(timeout=1.0)
+            assert cmd1 is not None
             assert cmd1.type == CommandType.PYRAT
 
-            cmd2 = handler.read_command()
+            cmd2 = handler.read_command(timeout=1.0)
+            assert cmd2 is not None
             assert cmd2.type == CommandType.ISREADY
 
             assert handler.read_command() is None
@@ -388,13 +379,20 @@ class TestIOHandler:
     def test_reader_thread_exception_handling(self, mock_stdin, capsys):
         """Test that reader thread continues after exceptions."""
         # Create a stdin that causes an exception then recovers
-        mock_stdin.readline = MagicMock(
-            side_effect=[
-                Exception("Read error"),  # First call fails
-                "pyrat\n",  # Second call succeeds
-                "",  # EOF
-            ]
-        )
+        call_count = [0]
+
+        def readline_with_error():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise Exception("Read error")
+            elif call_count[0] == 2:
+                return "pyrat\n"
+            else:
+                # Block on subsequent calls (simulating waiting for input)
+                time.sleep(10)
+                return ""
+
+        mock_stdin.readline = MagicMock(side_effect=readline_with_error)
         mock_stdin.isatty = MagicMock(return_value=False)
 
         with IOHandler(debug=True) as handler:
