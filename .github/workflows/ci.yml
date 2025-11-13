@@ -190,3 +190,63 @@ jobs:
         source .venv/bin/activate
         cd protocol/pyrat_base
         mypy pyrat_base --ignore-missing-imports
+
+  cli-tests:
+    name: CLI Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.8", "3.9", "3.10", "3.11"]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('engine/Cargo.lock') }}
+
+    - name: Cache cargo index
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('engine/Cargo.lock') }}
+
+    - name: Cache cargo build
+      uses: actions/cache@v4
+      with:
+        path: engine/target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('engine/Cargo.lock') }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
+        cache-dependency-glob: |
+          pyproject.toml
+          engine/pyproject.toml
+          protocol/pyrat_base/pyproject.toml
+          cli/pyproject.toml
+
+    - name: Sync workspace dependencies
+      run: uv sync --all-extras
+
+    - name: Build Rust extension
+      run: |
+        source .venv/bin/activate
+        cd engine
+        maturin develop --release
+
+    - name: Run CLI tests
+      run: |
+        source .venv/bin/activate
+        pytest cli/tests -v

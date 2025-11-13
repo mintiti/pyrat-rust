@@ -3,7 +3,7 @@ name = "pyrat-runner"
 version = "0.1.0"
 description = "Command-line tool to run and visualize PyRat games between AI processes"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.8"
 dependencies = [
     "pyrat-engine",
     "pyrat-base",
