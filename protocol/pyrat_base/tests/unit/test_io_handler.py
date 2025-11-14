@@ -392,14 +392,20 @@ class TestIOHandler:
     @patch("sys.stdin", new_callable=io.StringIO)
     def test_reader_thread_exception_handling(self, mock_stdin, capsys):
         """Test that reader thread continues after exceptions."""
-        # Create a stdin that causes an exception then recovers
-        mock_stdin.readline = MagicMock(
-            side_effect=[
-                Exception("Read error"),  # First call fails
-                "pyrat\n",  # Second call succeeds
-                "",  # EOF
-            ]
-        )
+
+        # Create a readline that throws exception, then succeeds, then returns EOF forever
+        call_count = [0]  # Use list to allow modification in nested function
+
+        def readline_with_error():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise Exception("Read error")
+            if call_count[0] == 2:  # noqa: PLR2004
+                return "pyrat\n"
+            # Return EOF for all subsequent calls
+            return ""
+
+        mock_stdin.readline = MagicMock(side_effect=readline_with_error)
         mock_stdin.isatty = MagicMock(return_value=False)
 
         with IOHandler(debug=True) as handler:
