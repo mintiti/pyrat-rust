@@ -9,6 +9,9 @@ import pytest
 
 from pyrat_base import CommandType, IOHandler
 
+# Mark entire module to run serially due to sys.stdin mocking
+pytestmark = pytest.mark.serial
+
 
 class TestIOHandler:
     """Test the IOHandler class."""
@@ -289,37 +292,28 @@ class TestIOHandler:
         thread.stop()
         assert thread.should_stop()
 
-    @pytest.mark.xdist_group("stdin_mocking")
     @patch("sys.stdin", new_callable=io.StringIO)
-    def test_debug_logging_received(self, mock_stdin, capsys):
+    def test_debug_logging_received(self, mock_stdin, capsys, serial_lock):
         """Test debug logging when receiving commands."""
-        mock_stdin.write("pyrat\nunknowncommand\n")
-        mock_stdin.seek(0)
-        mock_stdin.isatty = MagicMock(return_value=False)
+        with serial_lock:
+            mock_stdin.write("pyrat\nunknowncommand\n")
+            mock_stdin.seek(0)
+            mock_stdin.isatty = MagicMock(return_value=False)
 
-        with IOHandler(debug=True) as handler:
-            # Wait for reader thread to be ready - ensures thread has captured sys.stdin
-            assert handler._reader_ready.wait(
-                timeout=1.0
-            ), "Reader thread should signal ready"
+            with IOHandler(debug=True) as handler:
+                # Wait for reader thread to be ready - ensures thread has captured sys.stdin
+                assert handler._reader_ready.wait(
+                    timeout=1.0
+                ), "Reader thread should signal ready"
 
-            # Read the valid command - use timeout to wait for thread to read from stdin
-            # Retry multiple times for flaky CI environments
-            cmd = None
-            for attempt in range(3):
-                cmd = handler.read_command(timeout=5.0)
-                if cmd is not None:
-                    break
-                if attempt < 2:  # noqa: PLR2004
-                    time.sleep(0.1)  # Brief pause before retry
-            assert (
-                cmd is not None
-            ), "Failed to read command after 3 attempts (15s total)"
-            assert cmd.type == CommandType.PYRAT
+                # Read the valid command - use timeout to wait for thread to read from stdin
+                cmd = handler.read_command(timeout=2.0)
+                assert cmd is not None
+                assert cmd.type == CommandType.PYRAT
 
-        captured = capsys.readouterr()
-        assert "[IOHandler] Received: pyrat" in captured.err
-        assert "[IOHandler] Unknown command ignored: unknowncommand" in captured.err
+            captured = capsys.readouterr()
+            assert "[IOHandler] Received: pyrat" in captured.err
+            assert "[IOHandler] Unknown command ignored: unknowncommand" in captured.err
 
     def test_stop_existing_calculation(self):
         """Test that starting a new calculation stops the existing one."""
@@ -401,48 +395,38 @@ class TestIOHandler:
             # Clean up
             handler.stop_calculation()
 
-    @pytest.mark.xdist_group("stdin_mocking")
     @patch("sys.stdin", new_callable=io.StringIO)
-    def test_reader_thread_exception_handling(self, mock_stdin, capsys):
+    def test_reader_thread_exception_handling(self, mock_stdin, capsys, serial_lock):
         """Test that reader thread continues after exceptions."""
+        with serial_lock:
+            # Create a readline that throws exception, then succeeds, then returns EOF forever
+            call_count = [0]  # Use list to allow modification in nested function
 
-        # Create a readline that throws exception, then succeeds, then returns EOF forever
-        call_count = [0]  # Use list to allow modification in nested function
+            def readline_with_error():
+                call_count[0] += 1
+                if call_count[0] == 1:
+                    raise Exception("Read error")
+                if call_count[0] == 2:  # noqa: PLR2004
+                    return "pyrat\n"
+                # Return EOF for all subsequent calls
+                return ""
 
-        def readline_with_error():
-            call_count[0] += 1
-            if call_count[0] == 1:
-                raise Exception("Read error")
-            if call_count[0] == 2:  # noqa: PLR2004
-                return "pyrat\n"
-            # Return EOF for all subsequent calls
-            return ""
+            mock_stdin.readline = MagicMock(side_effect=readline_with_error)
+            mock_stdin.isatty = MagicMock(return_value=False)
 
-        mock_stdin.readline = MagicMock(side_effect=readline_with_error)
-        mock_stdin.isatty = MagicMock(return_value=False)
+            with IOHandler(debug=True) as handler:
+                # Wait for reader thread to be ready
+                assert handler._reader_ready.wait(
+                    timeout=1.0
+                ), "Reader thread should signal ready"
 
-        with IOHandler(debug=True) as handler:
-            # Wait for reader thread to be ready
-            assert handler._reader_ready.wait(
-                timeout=1.0
-            ), "Reader thread should signal ready"
+                # Give reader time to handle exception (10ms backoff) and recover
+                cmd = handler.read_command(timeout=2.0)
+                assert cmd is not None
+                assert cmd.type == CommandType.PYRAT
 
-            # Give reader time to handle exception (10ms backoff) and recover
-            # Retry multiple times for flaky CI environments
-            cmd = None
-            for attempt in range(3):
-                cmd = handler.read_command(timeout=5.0)
-                if cmd is not None:
-                    break
-                if attempt < 2:  # noqa: PLR2004
-                    time.sleep(0.1)  # Brief pause before retry
-            assert (
-                cmd is not None
-            ), "Failed to read command after 3 attempts (15s total)"
-            assert cmd.type == CommandType.PYRAT
-
-        captured = capsys.readouterr()
-        assert "[IOHandler] Reader thread error: Read error" in captured.err
+            captured = capsys.readouterr()
+            assert "[IOHandler] Reader thread error: Read error" in captured.err
 
     def test_requeue_command(self):
         """Test re-queueing commands for later processing.
