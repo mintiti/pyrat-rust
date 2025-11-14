@@ -76,6 +76,7 @@ class IOHandler:
         self._protocol = Protocol()
         self._calculation_thread: Optional[CalculationThread] = None
         self._write_lock = threading.Lock()
+        self._reader_ready = threading.Event()  # Signals when reader thread is ready
 
         # Start stdin reader thread
         self._reader_thread = threading.Thread(target=self._stdin_reader, daemon=True)
@@ -88,6 +89,9 @@ class IOHandler:
         platform-specific cases, EOF, and error handling in one cohesive flow.
         Breaking it up would harm readability.
         """
+        # Signal that thread is ready and has captured sys.stdin
+        self._reader_ready.set()
+
         while self._running:
             try:
                 # Platform-specific stdin availability check

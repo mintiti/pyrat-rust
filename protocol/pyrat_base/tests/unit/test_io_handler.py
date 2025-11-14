@@ -295,10 +295,14 @@ class TestIOHandler:
         mock_stdin.isatty = MagicMock(return_value=False)
 
         with IOHandler(debug=True) as handler:
-            time.sleep(0.1)
+            # Wait for reader thread to be ready - ensures thread has captured sys.stdin
+            assert handler._reader_ready.wait(
+                timeout=1.0
+            ), "Reader thread should signal ready"
 
-            # Read the valid command
-            cmd = handler.read_command()
+            # Read the valid command - use timeout to wait for thread to read from stdin
+            cmd = handler.read_command(timeout=1.0)
+            assert cmd is not None
             assert cmd.type == CommandType.PYRAT
 
         captured = capsys.readouterr()
