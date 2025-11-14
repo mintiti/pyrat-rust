@@ -17,10 +17,10 @@ repos:
         -   id: ruff
             args: [--fix]
             types_or: [python, pyi]
-            files: ^(engine/python/|protocol/pyrat_base/)
+            files: ^(engine/python/|protocol/pyrat_base/|cli/)
         -   id: ruff-format
             types_or: [python, pyi]
-            files: ^(engine/python/|protocol/pyrat_base/)
+            files: ^(engine/python/|protocol/pyrat_base/|cli/)
 
   # Python type checking - run same as CI for consistency
   -   repo: local
@@ -41,6 +41,15 @@ repos:
             language: system
             pass_filenames: false
             files: ^engine/python/
+            types: [python]
+
+        -   id: mypy-cli
+            name: mypy CLI
+            description: Type check CLI package (matches CI)
+            entry: bash -c 'source .venv/bin/activate && cd cli && mypy pyrat_cli --ignore-missing-imports'
+            language: system
+            pass_filenames: false
+            files: ^cli/
             types: [python]
 
   # Rust checks
@@ -76,6 +85,14 @@ repos:
         -   id: pytest-protocol
             name: pytest protocol
             entry: bash -c 'source .venv/bin/activate && cd protocol/pyrat_base && pytest tests -n auto -m "not slow" || echo "No tests yet"'
+            language: system
+            pass_filenames: false
+            always_run: true
+            stages: [pre-push]  # Only run on push, not on every commit
+
+        -   id: pytest-cli
+            name: pytest CLI
+            entry: bash -c 'source .venv/bin/activate && pytest cli/tests'
             language: system
             pass_filenames: false
             always_run: true

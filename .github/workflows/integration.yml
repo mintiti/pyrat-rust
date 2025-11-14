@@ -1,0 +1,75 @@
+name: Integration
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    uses: ./.github/workflows/rust.yml
+
+  test:
+    uses: ./.github/workflows/test.yml
+
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [rust, test]
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('engine/Cargo.lock') }}
+
+    - name: Cache cargo index
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('engine/Cargo.lock') }}
+
+    - name: Cache cargo build
+      uses: actions/cache@v4
+      with:
+        path: engine/target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('engine/Cargo.lock') }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
+        cache-dependency-glob: |
+          pyproject.toml
+          engine/pyproject.toml
+          protocol/pyrat_base/pyproject.toml
+          cli/pyproject.toml
+
+    - name: Sync workspace dependencies
+      run: uv sync --all-extras
+
+    - name: Build Rust extension
+      run: |
+        source .venv/bin/activate
+        cd engine
+        maturin develop --release
+
+    - name: Run integration tests
+      run: |
+        source .venv/bin/activate
+        pytest tests/integration -v
