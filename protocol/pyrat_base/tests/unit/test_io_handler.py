@@ -287,7 +287,8 @@ class TestIOHandler:
 
         with IOHandler(debug=True) as handler:
             # Read the valid command with timeout to wait for thread processing
-            cmd = handler.read_command(timeout=1.0)
+            # Use 2.0s timeout to be safe in slow CI environments
+            cmd = handler.read_command(timeout=2.0)
             assert cmd is not None
             assert cmd.type == CommandType.PYRAT
 
