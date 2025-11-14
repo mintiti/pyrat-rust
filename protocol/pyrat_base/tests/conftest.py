@@ -5,29 +5,11 @@ import sys
 from contextlib import contextmanager
 from typing import List, Optional, Tuple
 
-import filelock
 import pytest
 from pyrat_engine.core.builder import GameConfigBuilder as PyGameConfigBuilder
 
 from pyrat_base import Protocol, ProtocolState
 from pyrat_base.enums import Player
-
-
-@pytest.fixture(scope="session")
-def serial_lock(tmp_path_factory):
-    """Session-scoped lock file for serial test execution."""
-    lockfile = tmp_path_factory.getbasetemp().parent / "serial.lock"
-    return filelock.FileLock(str(lockfile))
-
-
-def pytest_collection_modifyitems(items):
-    """Assign tests marked as serial to the same xdist group and add lock fixture."""
-    for item in items:
-        if "serial" in item.keywords:
-            item.add_marker(pytest.mark.xdist_group(name="serial"))
-            # Inject serial_lock fixture
-            if "serial_lock" not in item.fixturenames:
-                item.fixturenames.append("serial_lock")
 
 
 @pytest.fixture
