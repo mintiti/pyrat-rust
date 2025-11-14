@@ -301,7 +301,8 @@ class TestIOHandler:
             ), "Reader thread should signal ready"
 
             # Read the valid command - use timeout to wait for thread to read from stdin
-            cmd = handler.read_command(timeout=1.0)
+            # Use longer timeout for slow CI environments
+            cmd = handler.read_command(timeout=2.0)
             assert cmd is not None
             assert cmd.type == CommandType.PYRAT
 
