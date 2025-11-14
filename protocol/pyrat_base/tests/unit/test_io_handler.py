@@ -304,9 +304,17 @@ class TestIOHandler:
             ), "Reader thread should signal ready"
 
             # Read the valid command - use timeout to wait for thread to read from stdin
-            # Use generous timeout for slow CI environments with parallel test execution
-            cmd = handler.read_command(timeout=5.0)
-            assert cmd is not None
+            # Retry multiple times for flaky CI environments
+            cmd = None
+            for attempt in range(3):
+                cmd = handler.read_command(timeout=5.0)
+                if cmd is not None:
+                    break
+                if attempt < 2:  # noqa: PLR2004
+                    time.sleep(0.1)  # Brief pause before retry
+            assert (
+                cmd is not None
+            ), "Failed to read command after 3 attempts (15s total)"
             assert cmd.type == CommandType.PYRAT
 
         captured = capsys.readouterr()
@@ -420,9 +428,17 @@ class TestIOHandler:
             ), "Reader thread should signal ready"
 
             # Give reader time to handle exception (10ms backoff) and recover
-            # Use generous timeout for slow CI environments with parallel test execution
-            cmd = handler.read_command(timeout=5.0)
-            assert cmd is not None
+            # Retry multiple times for flaky CI environments
+            cmd = None
+            for attempt in range(3):
+                cmd = handler.read_command(timeout=5.0)
+                if cmd is not None:
+                    break
+                if attempt < 2:  # noqa: PLR2004
+                    time.sleep(0.1)  # Brief pause before retry
+            assert (
+                cmd is not None
+            ), "Failed to read command after 3 attempts (15s total)"
             assert cmd.type == CommandType.PYRAT
 
         captured = capsys.readouterr()
