@@ -5,6 +5,8 @@ import threading
 import time
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from pyrat_base import CommandType, IOHandler
 
 
@@ -287,6 +289,7 @@ class TestIOHandler:
         thread.stop()
         assert thread.should_stop()
 
+    @pytest.mark.xdist_group("stdin_mocking")
     @patch("sys.stdin", new_callable=io.StringIO)
     def test_debug_logging_received(self, mock_stdin, capsys):
         """Test debug logging when receiving commands."""
@@ -301,8 +304,8 @@ class TestIOHandler:
             ), "Reader thread should signal ready"
 
             # Read the valid command - use timeout to wait for thread to read from stdin
-            # Use longer timeout for slow CI environments (3s for parallel test execution)
-            cmd = handler.read_command(timeout=3.0)
+            # Use generous timeout for slow CI environments with parallel test execution
+            cmd = handler.read_command(timeout=5.0)
             assert cmd is not None
             assert cmd.type == CommandType.PYRAT
 
@@ -390,6 +393,7 @@ class TestIOHandler:
             # Clean up
             handler.stop_calculation()
 
+    @pytest.mark.xdist_group("stdin_mocking")
     @patch("sys.stdin", new_callable=io.StringIO)
     def test_reader_thread_exception_handling(self, mock_stdin, capsys):
         """Test that reader thread continues after exceptions."""
@@ -416,8 +420,8 @@ class TestIOHandler:
             ), "Reader thread should signal ready"
 
             # Give reader time to handle exception (10ms backoff) and recover
-            # Use longer timeout for slow CI environments (3s for parallel test execution)
-            cmd = handler.read_command(timeout=3.0)
+            # Use generous timeout for slow CI environments with parallel test execution
+            cmd = handler.read_command(timeout=5.0)
             assert cmd is not None
             assert cmd.type == CommandType.PYRAT
 
