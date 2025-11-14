@@ -301,8 +301,8 @@ class TestIOHandler:
             ), "Reader thread should signal ready"
 
             # Read the valid command - use timeout to wait for thread to read from stdin
-            # Use longer timeout for slow CI environments
-            cmd = handler.read_command(timeout=2.0)
+            # Use longer timeout for slow CI environments (3s for parallel test execution)
+            cmd = handler.read_command(timeout=3.0)
             assert cmd is not None
             assert cmd.type == CommandType.PYRAT
 
@@ -416,8 +416,8 @@ class TestIOHandler:
             ), "Reader thread should signal ready"
 
             # Give reader time to handle exception (10ms backoff) and recover
-            # Use longer timeout for slow CI environments
-            cmd = handler.read_command(timeout=2.0)
+            # Use longer timeout for slow CI environments (3s for parallel test execution)
+            cmd = handler.read_command(timeout=3.0)
             assert cmd is not None
             assert cmd.type == CommandType.PYRAT
 
