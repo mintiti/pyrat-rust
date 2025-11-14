@@ -7,10 +7,8 @@ A high-performance game engine and ecosystem for the PyRat maze game, where a Ra
 This is a monorepo containing all PyRat ecosystem components:
 
 - **[engine/](engine/)** - High-performance Rust game engine with Python bindings
-- **[protocol/](protocol/)** - AI communication protocol and base library (in development)
-- **[gui/](gui/)** - Visualization and tournament management (coming soon)
-- **[examples/](examples/)** - Example AI implementations (coming soon)
-- **[cli/](cli/)** - Command-line tools (coming soon)
+- **[protocol/](protocol/)** - AI communication protocol and base library
+- **[cli/](cli/)** - Command-line game runner with enhanced visualization
 
 ## Quick Start
 
@@ -38,6 +36,17 @@ cd engine
 maturin develop --release
 ```
 
+### Run a Game
+
+```bash
+# Run a game between two AIs
+pyrat-game protocol/pyrat_base/pyrat_base/examples/greedy_ai.py \
+           protocol/pyrat_base/pyrat_base/examples/random_ai.py
+
+# Custom configuration
+pyrat-game --width 31 --height 21 --cheese 85 --seed 42 bot1.py bot2.py
+```
+
 ### Run Tests
 
 ```bash
@@ -47,6 +56,7 @@ make test
 # Test specific components
 make test-engine    # Engine tests
 make test-protocol  # Protocol tests
+make test-cli       # CLI tests
 ```
 
 ### Development Commands
@@ -61,18 +71,23 @@ make check       # Run all checks
 ## Components
 
 ### Engine
-The core game implementation in Rust with Python bindings. Provides high-performance game state management and PettingZoo-compatible environment.
+High-performance Rust game engine with Python bindings. Use it to:
+- Build and train AI agents with reinforcement learning (PettingZoo/Gymnasium compatible)
+- Simulate games programmatically
+- Benchmark AI strategies
 
-### Protocol
-Text-based communication protocol for AI development. Includes:
-- Protocol specification (`protocol/spec.md`)
-- Base library for AI development (`protocol/pyrat_base/`)
-- Language-agnostic design for AI implementation in any language
+### Protocol & Base Library
+Write AIs in any language using a simple text-based protocol (stdin/stdout):
+- `protocol/spec.md` - Protocol specification
+- `protocol/pyrat_base/` - Python SDK with base classes and helpers
+- Example AIs included: dummy (stays still), random (random moves), greedy (Dijkstra pathfinding)
 
-### Future Components
-- **GUI**: Game visualization and tournament management
-- **Examples**: Reference AI implementations
-- **CLI**: Command-line tools for running games
+### CLI
+Run and visualize games between AI scripts:
+```bash
+pyrat-game my_ai.py opponent_ai.py
+```
+Features color visualization, configurable game parameters, and graceful error handling. See [cli/README.md](cli/README.md) for details.
 
 ## Development
 

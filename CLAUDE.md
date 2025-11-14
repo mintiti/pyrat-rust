@@ -6,11 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 PyRat is a monorepo containing the complete PyRat ecosystem for a competitive maze game. The repository is organized into multiple components:
 
-- **engine/**: High-performance Rust game engine with Python bindings (currently implemented)
-- **gui/**: Visualization and tournament management (planned)
-- **protocol/**: AI communication protocol specification (planned)
-- **examples/**: Example AI implementations (planned)
-- **cli/**: Command-line tools (planned)
+- **engine/**: Rust game engine with PyO3 bindings - core game logic and Python API
+- **protocol/**: Text-based AI communication protocol and Python SDK (`pyrat_base`)
+- **cli/**: Command-line game runner tool (`pyrat-game` command)
 
 This monorepo structure enables clean separation of concerns while maintaining a cohesive ecosystem.
 
@@ -144,6 +142,8 @@ pytest python/tests/test_env.py::test_custom_maze -v
 # From repository root
 make test        # Run all tests
 make test-engine # Run engine tests only
+make test-protocol # Run protocol tests only
+make test-cli    # Run CLI tests only
 make bench       # Run benchmarks
 
 # From engine directory
@@ -160,6 +160,21 @@ cargo bench
 
 # Build Python package with maturin
 maturin build --release
+```
+
+### Running Games with CLI
+```bash
+# From repository root (after uv sync --all-extras)
+# Run game between two AIs
+pyrat-game protocol/pyrat_base/pyrat_base/examples/greedy_ai.py \
+           protocol/pyrat_base/pyrat_base/examples/random_ai.py
+
+# Custom game configuration
+pyrat-game --width 31 --height 21 --cheese 85 --seed 42 \
+           --delay 0.1 --timeout 1.0 bot1.py bot2.py
+
+# See all options
+pyrat-game --help
 ```
 
 ### CI Debugging
@@ -183,23 +198,63 @@ gh run view <run-id> --log-failed
 The monorepo follows a component-based architecture with the engine at its core:
 
 ### Engine Architecture
-The engine follows a hybrid Rust-Python architecture:
+Hybrid Rust-Python design with PyO3 bindings:
 
-1. **Rust Core** (`engine/rust/src/`)
-   - `game/`: Core game logic (board.rs, game_logic.rs, maze_generation.rs)
-   - `bindings/`: PyO3 bindings exposing Rust to Python
-   - Performance-critical operations: 10+ million moves/second
+**Rust Core** (`engine/rust/src/`):
+- `game/`: Core game logic (board.rs, game_logic.rs, maze_generation.rs)
+- `bindings/`: PyO3 bindings exposing Rust types and functions to Python
+- Performance: 10+ million moves/second for game simulations
 
-2. **Python Bindings** (`engine/python/pyrat_engine/`)
-   - `env.py`: PettingZoo ParallelEnv implementation
-   - `game.py`: High-level game interface
-   - Provides gymnasium/PettingZoo compatible API
+**Python Layer** (`engine/python/pyrat_engine/`):
+- `env.py`: PettingZoo ParallelEnv wrapper for RL frameworks
+- `game.py`: High-level game interface
+- Provides Gymnasium/PettingZoo compatible API
 
-### Key Design Patterns
-- The Rust `PyGameState` maintains all game state and logic
-- Python `PyRatEnv` wraps the Rust game for RL framework compatibility
-- Observations are computed in Rust and converted to numpy arrays
-- Zero-sum reward calculation happens in the Python layer
+### Working with Types
+Types are exposed directly from Rust to Python - no tuple conversions:
+
+**Coordinates:**
+```python
+pos = game.player1_position()  # Returns Coordinates object
+x = pos.x  # NOT pos[0]
+y = pos.y  # NOT pos[1]
+
+# Helper methods available:
+neighbor = pos.get_neighbor(Direction.UP)
+distance = pos.manhattan_distance(other_pos)
+is_next = pos.is_adjacent_to(other_pos)
+```
+
+**Backward compatibility:** Functions accept tuples via `CoordinatesInput`, but return `Coordinates` objects.
+
+**Other types:**
+- `Direction` - Enum: UP, DOWN, LEFT, RIGHT, STAY
+- `Wall` - Wall between two coordinates
+- `Mud` - Mud passage with turn count
+
+### Accessing Game State
+Key properties and methods on `GameState`:
+
+```python
+# Player positions (returns Coordinates)
+pos1 = game.player1_position()
+pos2 = game.player2_position()
+
+# Mud status (0 if not in mud, >0 for turns remaining)
+mud1 = game.player1_mud_turns
+mud2 = game.player2_mud_turns
+
+# Scores
+score1 = game.player1_score()
+score2 = game.player2_score()
+
+# Cheese locations (returns list of Coordinates)
+cheese = game.cheese_locations()
+
+# Game state
+is_done = game.is_game_over()
+turn = game.turn_count()
+```
 
 ### Observation Space
 Each player receives:
@@ -220,27 +275,24 @@ Each player receives:
 - Use `cargo test --lib --no-default-features` and `pytest` separately for each language layer
 - Or use `make test-engine` from the repository root for both
 
-## Future Components
+## Component Details
 
-When implementing new components in the monorepo:
+### Protocol (`protocol/`)
+Text-based stdin/stdout protocol for AI communication. The `pyrat_base` package provides:
+- `BaseAI` class - Extend this to implement your AI
+- `IOHandler` - Manages command queue and async communication
+- `ProtocolState` - Tracks game state from protocol messages
+- Example AIs in `pyrat_base/examples/`: `dummy_ai.py`, `random_ai.py`, `greedy_ai.py`
 
-### GUI Component (planned)
-- Will provide game visualization and tournament management
-- Python-based using pygame or similar
-- Will import `pyrat-engine` for game logic
+**Key pattern:** Commands arriving during move calculation are re-queued to prevent state desynchronization.
 
-### Protocol Component (in development)
-- Text-based protocol for AI communication
-- Language-agnostic design (stdin/stdout)
-- SDK for easy AI development (pyrat-base package)
-- Base library at `protocol/pyrat_base/`
+### CLI (`cli/`)
+Game runner subprocess manager. Architecture:
+- `cli.py` - Entry point and argparse configuration
+- `ai_process.py` - Subprocess communication via protocol
+- `game_runner.py` - Game loop orchestration, handles AI failures
+- `display.py` - Terminal rendering with ANSI colors and Unicode
 
-### Examples Component (planned)
-- Collection of example AIs
-- Will use the protocol SDK
-- Demonstrations of different strategies
+Command: `pyrat-game bot1.py bot2.py`
 
-### CLI Component (planned)
-- Command-line tools for running games
-- Tournament management
-- Replay viewing
+**Key pattern:** AI crashes and timeouts default to STAY action to keep game running.
