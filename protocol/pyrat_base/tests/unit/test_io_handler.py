@@ -3,7 +3,7 @@
 import io
 import threading
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 from pyrat_base import CommandType, IOHandler
 
@@ -19,28 +19,25 @@ class TestIOHandler:
         assert handler._reader_thread.is_alive()
         handler.close()
 
-    @patch("sys.stdin")
-    def test_context_manager(self, mock_stdin):
+    def test_context_manager(self):
         """Test IOHandler as context manager."""
-        # Mock stdin to block on readline (simulating waiting for input)
-        mock_stdin.isatty.return_value = False
+        # Create mock stdin that blocks on readline (simulating waiting for input)
+        # Use spec to avoid unnecessary attributes like fileno()
+        mock_stdin = MagicMock(spec=["readline"])
         mock_stdin.readline = MagicMock(side_effect=lambda: time.sleep(10))
 
-        with IOHandler() as handler:
+        with IOHandler(input_stream=mock_stdin) as handler:
             assert handler._running is True
             # Thread should be alive and waiting for input
             assert handler._reader_thread.is_alive()
         # After context exit, should be closed
         assert handler._running is False
 
-    @patch("sys.stdin", new_callable=io.StringIO)
-    def test_stdin_reading(self, mock_stdin):
+    def test_stdin_reading(self):
         """Test reading commands from stdin."""
-        mock_stdin.write("pyrat\nisready\ngo\n")
-        mock_stdin.seek(0)
-        mock_stdin.isatty = MagicMock(return_value=False)
+        mock_stdin = io.StringIO("pyrat\nisready\ngo\n")
 
-        with IOHandler() as handler:
+        with IOHandler(input_stream=mock_stdin) as handler:
             # Give reader thread time to process
             time.sleep(0.1)
 
@@ -60,15 +57,11 @@ class TestIOHandler:
             # No more commands
             assert handler.read_command() is None
 
-    @patch("sys.stdin", new_callable=io.StringIO)
-    def test_unknown_command_ignored(self, mock_stdin):
+    def test_unknown_command_ignored(self):
         """Test that unknown commands are ignored."""
-        mock_stdin.write("pyrat\nunknowncommand\nisready\n")
-        mock_stdin.seek(0)
-        # Mock isatty to return False so we don't use select
-        mock_stdin.isatty = MagicMock(return_value=False)
+        mock_stdin = io.StringIO("pyrat\nunknowncommand\nisready\n")
 
-        with IOHandler() as handler:
+        with IOHandler(input_stream=mock_stdin) as handler:
             time.sleep(0.2)  # Give more time for processing
 
             # Should only get valid commands
@@ -233,37 +226,28 @@ class TestIOHandler:
         captured = capsys.readouterr()
         assert "[IOHandler] Sent: test message" in captured.err
 
-    @patch("sys.stdin", new_callable=io.StringIO)
-    def test_eof_handling(self, mock_stdin):
+    def test_eof_handling(self):
         """Test handling EOF on stdin."""
-        mock_stdin.write("pyrat\n")
-        mock_stdin.seek(0)
-        mock_stdin.isatty = MagicMock(return_value=False)
+        mock_stdin = io.StringIO("pyrat\n")
 
-        with IOHandler() as handler:
+        with IOHandler(input_stream=mock_stdin) as handler:
             time.sleep(0.1)
 
             # Should read one command
             cmd = handler.read_command()
             assert cmd.type == CommandType.PYRAT
 
-            # Close stdin to simulate EOF
-            mock_stdin.close()
-
-            # Reader thread should handle EOF gracefully
+            # Reader thread should handle EOF gracefully (StringIO already at EOF)
             time.sleep(0.1)
 
             # No more commands
             assert handler.read_command() is None
 
-    @patch("sys.stdin", new_callable=io.StringIO)
-    def test_empty_lines_ignored(self, mock_stdin):
+    def test_empty_lines_ignored(self):
         """Test that empty lines are ignored."""
-        mock_stdin.write("pyrat\n\n\nisready\n\n")
-        mock_stdin.seek(0)
-        mock_stdin.isatty = MagicMock(return_value=False)
+        mock_stdin = io.StringIO("pyrat\n\n\nisready\n\n")
 
-        with IOHandler() as handler:
+        with IOHandler(input_stream=mock_stdin) as handler:
             time.sleep(0.1)
 
             # Should only get non-empty commands
@@ -287,18 +271,18 @@ class TestIOHandler:
         thread.stop()
         assert thread.should_stop()
 
-    @patch("sys.stdin", new_callable=io.StringIO)
-    def test_debug_logging_received(self, mock_stdin, capsys):
+    def test_debug_logging_received(self, capsys):
         """Test debug logging when receiving commands."""
-        mock_stdin.write("pyrat\nunknowncommand\n")
-        mock_stdin.seek(0)
-        mock_stdin.isatty = MagicMock(return_value=False)
+        # Create mock input stream with test data
+        mock_stdin = io.StringIO("pyrat\nunknowncommand\n")
 
-        with IOHandler(debug=True) as handler:
+        with IOHandler(input_stream=mock_stdin, debug=True) as handler:
+            # Give reader thread time to process input
             time.sleep(0.1)
 
             # Read the valid command
-            cmd = handler.read_command()
+            cmd = handler.read_command(timeout=0.1)
+            assert cmd is not None
             assert cmd.type == CommandType.PYRAT
 
         captured = capsys.readouterr()
@@ -385,24 +369,30 @@ class TestIOHandler:
             # Clean up
             handler.stop_calculation()
 
-    @patch("sys.stdin", new_callable=io.StringIO)
-    def test_reader_thread_exception_handling(self, mock_stdin, capsys):
+    def test_reader_thread_exception_handling(self, capsys):
         """Test that reader thread continues after exceptions."""
-        # Create a stdin that causes an exception then recovers
-        mock_stdin.readline = MagicMock(
-            side_effect=[
-                Exception("Read error"),  # First call fails
-                "pyrat\n",  # Second call succeeds
-                "",  # EOF
-            ]
-        )
-        mock_stdin.isatty = MagicMock(return_value=False)
+        # Create a mock input stream with custom readline behavior
+        call_count = [0]  # Use list to allow modification in nested function
 
-        with IOHandler(debug=True) as handler:
-            time.sleep(0.2)  # Give reader time to handle exception and recover
+        def readline_with_error():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                raise Exception("Read error")
+            if call_count[0] == 2:  # noqa: PLR2004
+                return "pyrat\n"
+            # Return EOF for all subsequent calls
+            return ""
 
-            # Should still get the command after the exception
-            cmd = handler.read_command()
+        # Create a minimal mock that doesn't have fileno() to avoid select()
+        mock_stdin = MagicMock(spec=["readline"])
+        mock_stdin.readline = MagicMock(side_effect=readline_with_error)
+
+        with IOHandler(input_stream=mock_stdin, debug=True) as handler:
+            # Give reader time to handle exception (10ms backoff) and recover
+            time.sleep(0.05)
+
+            # Read the command that should arrive after error recovery
+            cmd = handler.read_command(timeout=0.1)
             assert cmd is not None
             assert cmd.type == CommandType.PYRAT
 

@@ -13,7 +13,7 @@ import select
 import sys
 import threading
 import time
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, TextIO, Tuple
 
 from .protocol import Command, Protocol
 
@@ -64,18 +64,28 @@ class IOHandler:
     - Synchronized writing to stdout
     """
 
-    def __init__(self, debug: bool = False):
+    def __init__(
+        self,
+        input_stream: Optional[TextIO] = None,
+        output_stream: Optional[TextIO] = None,
+        debug: bool = False,
+    ):
         """Initialize the IOHandler.
 
         Args:
+            input_stream: Input stream to read from (default: sys.stdin)
+            output_stream: Output stream to write to (default: sys.stdout)
             debug: If True, enables debug logging of protocol messages
         """
         self.debug = debug
+        self._input_stream = input_stream or sys.stdin
+        self._output_stream = output_stream or sys.stdout
         self._command_queue: queue.Queue[Command] = queue.Queue()
         self._running = True
         self._protocol = Protocol()
         self._calculation_thread: Optional[CalculationThread] = None
         self._write_lock = threading.Lock()
+        self._reader_ready = threading.Event()  # Signals when reader thread is ready
 
         # Start stdin reader thread
         self._reader_thread = threading.Thread(target=self._stdin_reader, daemon=True)
@@ -88,19 +98,37 @@ class IOHandler:
         platform-specific cases, EOF, and error handling in one cohesive flow.
         Breaking it up would harm readability.
         """
+        # Signal that thread is ready and has captured input stream
+        self._reader_ready.set()
+
         while self._running:
             try:
-                # Platform-specific stdin availability check
-                if platform.system() != "Windows" and sys.stdin.isatty():
-                    # On Unix-like systems, use select for non-blocking check
-                    if sys.stdin in select.select([sys.stdin], [], [], 0.1)[0]:
-                        line = sys.stdin.readline()
+                # Detect if we can use select() on this stream
+                # Only use select if:
+                # 1. Not on Windows
+                # 2. Stream has isatty() method and it returns True
+                # 3. Stream has fileno() method (real file descriptor)
+                can_use_select = (
+                    platform.system() != "Windows"
+                    and hasattr(self._input_stream, "isatty")
+                    and callable(self._input_stream.isatty)
+                    and self._input_stream.isatty()
+                    and hasattr(self._input_stream, "fileno")
+                )
+
+                if can_use_select:
+                    # On Unix-like systems with TTY, use select for non-blocking check
+                    if (
+                        self._input_stream
+                        in select.select([self._input_stream], [], [], 0.1)[0]
+                    ):
+                        line = self._input_stream.readline()
                     else:
                         continue
                 else:
-                    # On Windows or non-interactive, readline blocks
-                    # but that's okay in a separate thread
-                    line = sys.stdin.readline()
+                    # On Windows, non-TTY, or in-memory streams, readline blocks
+                    # but that's okay in a separate daemon thread
+                    line = self._input_stream.readline()
 
                 if not line:  # EOF
                     break
@@ -161,13 +189,13 @@ class IOHandler:
         self._command_queue.put(command)
 
     def write_response(self, response: str) -> None:
-        """Write a response to stdout with proper flushing.
+        """Write a response to output stream with proper flushing.
 
         Args:
             response: The response string to write
         """
         with self._write_lock:
-            print(response, flush=True)
+            print(response, file=self._output_stream, flush=True)
             if self.debug:
                 self._debug_log(f"Sent: {response}")
 
