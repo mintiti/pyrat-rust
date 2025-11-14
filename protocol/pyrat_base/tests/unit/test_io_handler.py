@@ -281,20 +281,25 @@ class TestIOHandler:
     @patch("sys.stdin", new_callable=io.StringIO)
     def test_debug_logging_received(self, mock_stdin, capsys):
         """Test debug logging when receiving commands."""
-        mock_stdin.write("pyrat\nunknowncommand\n")
+        # Add a third command to make the test more robust (matches working test pattern)
+        mock_stdin.write("pyrat\nunknowncommand\nisready\n")
         mock_stdin.seek(0)
         mock_stdin.isatty = MagicMock(return_value=False)
 
         with IOHandler(debug=True) as handler:
-            # Read the valid command with timeout to wait for thread processing
-            # Use 2.0s timeout to be safe in slow CI environments
-            cmd = handler.read_command(timeout=2.0)
-            assert cmd is not None
-            assert cmd.type == CommandType.PYRAT
+            # Read the valid commands with timeout
+            cmd1 = handler.read_command(timeout=2.0)
+            assert cmd1 is not None
+            assert cmd1.type == CommandType.PYRAT
+
+            cmd2 = handler.read_command(timeout=2.0)
+            assert cmd2 is not None
+            assert cmd2.type == CommandType.ISREADY
 
         captured = capsys.readouterr()
         assert "[IOHandler] Received: pyrat" in captured.err
         assert "[IOHandler] Unknown command ignored: unknowncommand" in captured.err
+        assert "[IOHandler] Received: isready" in captured.err
 
     def test_stop_existing_calculation(self):
         """Test that starting a new calculation stops the existing one."""
