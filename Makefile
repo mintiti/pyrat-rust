@@ -1,6 +1,6 @@
 # PyRat Monorepo Makefile
 
-.PHONY: all engine gui protocol examples cli test bench clean help sync
+.PHONY: all engine gui protocol examples cli test bench clean help sync lint lint-engine lint-protocol lint-cli test-cli test-integration
 
 # Default target
 all: sync engine
@@ -27,8 +27,9 @@ gui:
 examples:
 	@echo "Examples not yet implemented"
 
-cli:
-	@echo "CLI tools not yet implemented"
+cli: sync
+	@echo "CLI component ready for development"
+	@echo "Command-line game runner at cli/"
 
 # Development tasks
 dev-setup:
@@ -39,7 +40,7 @@ dev-setup:
 	source .venv/bin/activate && pre-commit install && pre-commit install --hook-type pre-push
 
 # Testing
-test: test-engine test-protocol
+test: test-engine test-protocol test-cli
 
 test-engine:
 	@echo "Running engine tests..."
@@ -49,6 +50,14 @@ test-engine:
 test-protocol:
 	@echo "Running protocol tests..."
 	source .venv/bin/activate && cd protocol/pyrat_base && pytest tests -v -n auto || echo "No tests yet"
+
+test-cli:
+	@echo "Running CLI tests..."
+	source .venv/bin/activate && pytest cli/tests -v
+
+test-integration:
+	@echo "Running integration tests..."
+	source .venv/bin/activate && pytest tests/integration -v
 
 # Benchmarking
 bench:
@@ -60,15 +69,33 @@ bench:
 fmt:
 	@echo "Formatting code..."
 	cd engine && cargo fmt
-	source .venv/bin/activate && ruff format engine/python protocol/pyrat_base
+	source .venv/bin/activate && ruff format engine/python protocol/pyrat_base cli
 
 check:
 	@echo "Running checks..."
 	cd engine && cargo fmt --all -- --check
 	cd engine && cargo clippy --all-targets --no-default-features -- -D warnings
 	cd engine && cargo clippy --all-targets --all-features -- -D warnings -A non-local-definitions
-	source .venv/bin/activate && ruff check engine/python protocol/pyrat_base
-	source .venv/bin/activate && mypy engine/python protocol/pyrat_base --ignore-missing-imports
+	source .venv/bin/activate && ruff check engine/python protocol/pyrat_base cli
+	source .venv/bin/activate && mypy engine/python/pyrat_engine protocol/pyrat_base/pyrat_base cli/pyrat_cli --ignore-missing-imports
+
+# Linting targets
+lint: lint-engine lint-protocol lint-cli
+
+lint-engine:
+	@echo "Linting engine Python code..."
+	source .venv/bin/activate && ruff check engine/python
+	source .venv/bin/activate && mypy engine/python/pyrat_engine --ignore-missing-imports
+
+lint-protocol:
+	@echo "Linting protocol code..."
+	source .venv/bin/activate && ruff check protocol/pyrat_base
+	source .venv/bin/activate && mypy protocol/pyrat_base/pyrat_base --ignore-missing-imports
+
+lint-cli:
+	@echo "Linting CLI code..."
+	source .venv/bin/activate && ruff check cli
+	source .venv/bin/activate && mypy cli/pyrat_cli --ignore-missing-imports
 
 # Clean build artifacts
 clean:
@@ -88,23 +115,36 @@ help:
 	@echo "  - uv (Python package manager)"
 	@echo ""
 	@echo "Available targets:"
-	@echo "  all          - Sync dependencies and build all components"
-	@echo "  sync         - Sync workspace dependencies with uv"
-	@echo "  engine       - Build the PyRat engine"
-	@echo "  protocol     - Info about protocol component"
-	@echo "  dev-setup    - Set up development environment"
-	@echo "  test         - Run all tests"
-	@echo "  test-engine  - Run engine tests only"
-	@echo "  test-protocol- Run protocol tests only"
-	@echo "  bench        - Run performance benchmarks"
-	@echo "  fmt          - Format all code"
-	@echo "  check        - Run code quality checks"
-	@echo "  clean        - Remove build artifacts"
-	@echo "  help         - Show this help message"
+	@echo "  all              - Sync dependencies and build all components"
+	@echo "  sync             - Sync workspace dependencies with uv"
+	@echo "  engine           - Build the PyRat engine"
+	@echo "  protocol         - Info about protocol component"
+	@echo "  cli              - Info about CLI component"
+	@echo "  dev-setup        - Set up development environment"
+	@echo ""
+	@echo "Testing:"
+	@echo "  test             - Run all tests (engine, protocol, CLI)"
+	@echo "  test-engine      - Run engine tests only"
+	@echo "  test-protocol    - Run protocol tests only"
+	@echo "  test-cli         - Run CLI tests only"
+	@echo "  test-integration - Run integration tests"
+	@echo ""
+	@echo "Code Quality:"
+	@echo "  fmt              - Format all code"
+	@echo "  check            - Run all code quality checks"
+	@echo "  lint             - Lint all Python components"
+	@echo "  lint-engine      - Lint engine Python code"
+	@echo "  lint-protocol    - Lint protocol code"
+	@echo "  lint-cli         - Lint CLI code"
+	@echo ""
+	@echo "Other:"
+	@echo "  bench            - Run performance benchmarks"
+	@echo "  clean            - Remove build artifacts"
+	@echo "  help             - Show this help message"
 	@echo ""
 	@echo "Components:"
-	@echo "  engine       - High-performance Rust game engine (implemented)"
-	@echo "  protocol     - AI communication protocol (in development)"
-	@echo "  gui          - PyRat GUI (planned)"
-	@echo "  examples     - Example AI implementations (planned)"
-	@echo "  cli          - Command-line tools (planned)"
+	@echo "  engine           - High-performance Rust game engine (implemented)"
+	@echo "  protocol         - AI communication protocol (implemented)"
+	@echo "  cli              - Command-line game runner (implemented)"
+	@echo "  gui              - PyRat GUI (planned)"
+	@echo "  examples         - Example AI implementations (planned)"
