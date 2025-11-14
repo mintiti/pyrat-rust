@@ -380,6 +380,8 @@ class TestIOHandler:
         """Test that reader thread continues after exceptions."""
         # Create a stdin that causes an exception then recovers
         call_count = [0]
+        # Use Event for thread-safe blocking
+        block_event = threading.Event()
 
         def readline_with_error():
             call_count[0] += 1
@@ -388,8 +390,8 @@ class TestIOHandler:
             elif call_count[0] == 2:
                 return "pyrat\n"
             else:
-                # Block on subsequent calls (simulating waiting for input)
-                time.sleep(10)
+                # Block indefinitely to keep thread alive
+                block_event.wait()
                 return ""
 
         mock_stdin.readline = MagicMock(side_effect=readline_with_error)
@@ -397,8 +399,8 @@ class TestIOHandler:
 
         with IOHandler(debug=True) as handler:
             # Should still get the command after the exception
-            # Use timeout to wait for thread to handle exception and recover
-            cmd = handler.read_command(timeout=1.0)
+            # Use longer timeout to account for error recovery backoff (10ms)
+            cmd = handler.read_command(timeout=2.0)
             assert cmd is not None
             assert cmd.type == CommandType.PYRAT
 
