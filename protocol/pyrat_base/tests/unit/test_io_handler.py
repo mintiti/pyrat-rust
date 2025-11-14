@@ -403,10 +403,13 @@ class TestIOHandler:
         mock_stdin.isatty = MagicMock(return_value=False)
 
         with IOHandler(debug=True) as handler:
-            time.sleep(0.2)  # Give reader time to handle exception and recover
+            # Wait for reader thread to be ready
+            assert handler._reader_ready.wait(
+                timeout=1.0
+            ), "Reader thread should signal ready"
 
-            # Should still get the command after the exception
-            cmd = handler.read_command()
+            # Give reader time to handle exception and recover, then read command
+            cmd = handler.read_command(timeout=1.0)
             assert cmd is not None
             assert cmd.type == CommandType.PYRAT
 
