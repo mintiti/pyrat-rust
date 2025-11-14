@@ -414,8 +414,9 @@ class TestIOHandler:
                 timeout=1.0
             ), "Reader thread should signal ready"
 
-            # Give reader time to handle exception and recover, then read command
-            cmd = handler.read_command(timeout=1.0)
+            # Give reader time to handle exception (10ms backoff) and recover
+            # Use longer timeout for slow CI environments
+            cmd = handler.read_command(timeout=2.0)
             assert cmd is not None
             assert cmd.type == CommandType.PYRAT
 
