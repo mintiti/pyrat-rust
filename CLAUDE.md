@@ -9,8 +9,6 @@ PyRat is a monorepo containing the complete PyRat ecosystem for a competitive ma
 - **engine/**: Rust game engine with PyO3 bindings - core game logic and Python API
 - **protocol/**: Text-based AI communication protocol and Python SDK (`pyrat_base`)
 - **cli/**: Command-line game runner tool (`pyrat-game` command)
-- **gui/**: Planned - advanced visualization and tournament management
-- **examples/**: Planned - additional reference AI implementations
 
 This monorepo structure enables clean separation of concerns while maintaining a cohesive ecosystem.
 
@@ -298,7 +296,3 @@ Game runner subprocess manager. Architecture:
 Command: `pyrat-game bot1.py bot2.py`
 
 **Key pattern:** AI crashes and timeouts default to STAY action to keep game running.
-
-### Future Components
-- **GUI** - Tournament management and visualization (planned)
-- **Examples** - More reference AI implementations (planned)

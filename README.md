@@ -9,8 +9,6 @@ This is a monorepo containing all PyRat ecosystem components:
 - **[engine/](engine/)** - High-performance Rust game engine with Python bindings
 - **[protocol/](protocol/)** - AI communication protocol and base library
 - **[cli/](cli/)** - Command-line game runner with enhanced visualization
-- **[gui/](gui/)** - Advanced visualization and tournament management (coming soon)
-- **[examples/](examples/)** - Example AI implementations (coming soon)
 
 ## Quick Start
 
@@ -90,10 +88,6 @@ Run and visualize games between AI scripts:
 pyrat-game my_ai.py opponent_ai.py
 ```
 Features color visualization, configurable game parameters, and graceful error handling. See [cli/README.md](cli/README.md) for details.
-
-### Coming Soon
-- **GUI** - Tournament management and advanced visualization
-- **More Examples** - Reference implementations of different AI strategies
 
 ## Development
 
