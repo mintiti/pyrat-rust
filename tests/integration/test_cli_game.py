@@ -22,7 +22,7 @@ def test_cli_runs_random_vs_random():
     # Run the CLI
     result = subprocess.run(
         [
-            sys.executable, "-m", "pyrat_cli.cli",
+            sys.executable, "-m", "pyrat_runner.cli",
             "--width", "11",
             "--height", "9",
             "--cheese", "5",
@@ -56,7 +56,7 @@ def test_cli_runs_greedy_vs_dummy():
     # Run the CLI
     result = subprocess.run(
         [
-            sys.executable, "-m", "pyrat_cli.cli",
+            sys.executable, "-m", "pyrat_runner.cli",
             "--width", "7",
             "--height", "5",
             "--cheese", "3",
@@ -97,7 +97,7 @@ if __name__ == "__main__":
         # Run CLI with very short timeout
         result = subprocess.run(
             [
-                sys.executable, "-m", "pyrat_cli.cli",
+                sys.executable, "-m", "pyrat_runner.cli",
                 "--width", "7",
                 "--height", "5",
                 "--cheese", "1",
