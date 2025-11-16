@@ -28,7 +28,7 @@ def test_cli_runs_random_vs_random():
             "--cheese", "5",
             "--seed", "42",
             "--timeout", "1.0",
-            "--no-display",
+            "--delay", "0",
             str(random_ai),
             str(random_ai),
         ],
@@ -39,7 +39,7 @@ def test_cli_runs_random_vs_random():
 
     # Check that the game completed successfully
     assert result.returncode == 0, f"CLI failed with stderr: {result.stderr}"
-    assert "Game Over" in result.stdout or "Final Score" in result.stdout
+    assert "GAME OVER" in result.stdout or "Final Score" in result.stdout
 
 
 def test_cli_runs_greedy_vs_dummy():
@@ -62,7 +62,7 @@ def test_cli_runs_greedy_vs_dummy():
             "--cheese", "3",
             "--seed", "123",
             "--timeout", "1.0",
-            "--no-display",
+            "--delay", "0",
             str(greedy_ai),
             str(dummy_ai),
         ],
@@ -80,13 +80,17 @@ def test_cli_handles_timeout():
     # Create a temporary AI that takes too long
     timeout_ai = Path(__file__).parent / "slow_ai.py"
     timeout_ai.write_text("""
-from pyrat_base import BaseAI
+from pyrat_base import PyRatAI
+from pyrat_engine.game import Direction
 import time
 
-class SlowAI(BaseAI):
-    def choose_move(self, state):
+class SlowAI(PyRatAI):
+    def __init__(self):
+        super().__init__("SlowBot", "Test")
+
+    def get_move(self, state):
         time.sleep(10)  # Intentionally too slow
-        return "up"
+        return Direction.UP
 
 if __name__ == "__main__":
     ai = SlowAI()
@@ -102,7 +106,7 @@ if __name__ == "__main__":
                 "--height", "5",
                 "--cheese", "1",
                 "--timeout", "0.1",
-                "--no-display",
+                "--delay", "0",
                 str(timeout_ai),
                 str(timeout_ai),
             ],
