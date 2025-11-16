@@ -12,4 +12,4 @@ Direction = _impl.types.Direction
 Wall = _impl.types.Wall
 Mud = _impl.types.Mud
 
-__all__ = ["Coordinates", "Direction", "Wall", "Mud"]
+__all__ = ["Coordinates", "Direction", "Mud", "Wall"]
