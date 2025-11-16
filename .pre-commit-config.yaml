@@ -46,7 +46,7 @@ repos:
         -   id: mypy-cli
             name: mypy CLI
             description: Type check CLI package (matches CI)
-            entry: bash -c 'source .venv/bin/activate && cd cli && mypy pyrat_cli --ignore-missing-imports'
+            entry: bash -c 'source .venv/bin/activate && cd cli && mypy pyrat_runner --ignore-missing-imports'
             language: system
             pass_filenames: false
             files: ^cli/

@@ -77,7 +77,7 @@ check:
 	cd engine && cargo clippy --all-targets --no-default-features -- -D warnings
 	cd engine && cargo clippy --all-targets --all-features -- -D warnings -A non-local-definitions
 	source .venv/bin/activate && ruff check engine/python protocol/pyrat_base cli
-	source .venv/bin/activate && mypy engine/python/pyrat_engine protocol/pyrat_base/pyrat_base cli/pyrat_cli --ignore-missing-imports
+	source .venv/bin/activate && mypy engine/python/pyrat_engine protocol/pyrat_base/pyrat_base cli/pyrat_runner --ignore-missing-imports
 
 # Linting targets
 lint: lint-engine lint-protocol lint-cli
@@ -95,7 +95,7 @@ lint-protocol:
 lint-cli:
 	@echo "Linting CLI code..."
 	source .venv/bin/activate && ruff check cli
-	source .venv/bin/activate && mypy cli/pyrat_cli --ignore-missing-imports
+	source .venv/bin/activate && mypy cli/pyrat_runner --ignore-missing-imports
 
 # Clean build artifacts
 clean:
