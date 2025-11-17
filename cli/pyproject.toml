@@ -34,7 +34,6 @@ disable_error_code = [
     "call-overload",
     "arg-type",
     "assignment",
-    "var-annotated",
     "return-value",
     "union-attr",
     "attr-defined"

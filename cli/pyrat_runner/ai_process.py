@@ -78,7 +78,7 @@ class AIProcess:
         self.process: Optional[subprocess.Popen] = None
         self.state = AIState.NOT_STARTED
         self.info = AIInfo()
-        self._output_queue = queue.Queue()
+        self._output_queue: queue.Queue[str] = queue.Queue()
         self._reader_thread = None
 
     def _reader(self):
