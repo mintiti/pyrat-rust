@@ -1,0 +1,79 @@
+name: Lint
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_call:  # Allow being called by other workflows
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+
+  lint:
+    name: Lint All Components
+    runs-on: ubuntu-latest
+    needs: build
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Download build artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: rust-extension
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
+        cache-dependency-glob: |
+          pyproject.toml
+          engine/pyproject.toml
+          protocol/pyrat_base/pyproject.toml
+          cli/pyproject.toml
+
+    - name: Sync workspace dependencies
+      run: uv sync --all-extras
+
+    - name: Check Engine Python formatting
+      run: |
+        source .venv/bin/activate
+        cd engine
+        ruff check python/
+
+    - name: Type check Engine Python
+      run: |
+        source .venv/bin/activate
+        cd engine
+        mypy python/pyrat_engine --ignore-missing-imports
+
+    - name: Check Protocol formatting
+      run: |
+        source .venv/bin/activate
+        cd protocol/pyrat_base
+        ruff check pyrat_base
+
+    - name: Type check Protocol
+      run: |
+        source .venv/bin/activate
+        cd protocol/pyrat_base
+        mypy pyrat_base --ignore-missing-imports
+
+    - name: Check CLI formatting
+      run: |
+        source .venv/bin/activate
+        cd cli
+        ruff check pyrat_runner
+
+    - name: Type check CLI
+      run: |
+        source .venv/bin/activate
+        cd cli
+        mypy pyrat_runner --ignore-missing-imports

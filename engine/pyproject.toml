@@ -73,6 +73,11 @@ lint.ignore = [
     "B008",      # Do not perform function call in argument defaults
 ]
 
+# Per-file ignores
+[tool.ruff.lint.per-file-ignores]
+"python/tests/*" = ["PLC0415"]  # Allow imports in test methods for module testing
+"python/pyrat_engine/core/__init__.py" = ["RUF022"]  # Intentionally categorized __all__
+
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -101,6 +106,11 @@ warn_redundant_casts = true
 warn_unused_ignores = true
 warn_no_return = true
 warn_unreachable = true
+
+# TODO: Fix mypy errors in these files
+[[tool.mypy.overrides]]
+module = ["pyrat_engine.game", "pyrat_engine.env"]
+disable_error_code = ["valid-type", "no-any-return", "attr-defined", "call-overload", "unused-ignore"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"

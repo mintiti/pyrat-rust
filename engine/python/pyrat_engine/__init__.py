@@ -28,10 +28,10 @@ __version__ = "0.1.0"
 __all__ = [
     "Coordinates",
     "Direction",
-    "Wall",
-    "Mud",
+    "GameResult",
     "GameState",
     "MoveUndo",
-    "GameResult",
+    "Mud",
     "PyRat",
+    "Wall",
 ]

@@ -284,6 +284,10 @@ rust-project.json
 
 # Cursor
 .cursorrules
+
+# macOS
+.DS_Store
+
 # End of https://www.toptal.com/developers/gitignore/api/rust,rust-analyzer,jetbrains+all,python
 pyrat-rust/bin/
 pyrat-rust/pyvenv.cfg

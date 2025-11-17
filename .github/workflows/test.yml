@@ -1,67 +1,23 @@
-name: CI
+name: Test
 
 on:
   push:
     branches: [ main ]
   pull_request:
     branches: [ main ]
+  workflow_call:  # Allow being called by other workflows
 
 env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  rust-checks:
-    name: Rust Checks
+  lint:
+    uses: ./.github/workflows/lint.yml
+
+  test-engine:
+    name: Engine Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.9'
-
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        components: rustfmt, clippy
-
-    - name: Cache cargo registry
-      uses: actions/cache@v4
-      with:
-        path: ~/.cargo/registry
-        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('engine/Cargo.lock') }}
-
-    - name: Cache cargo index
-      uses: actions/cache@v4
-      with:
-        path: ~/.cargo/git
-        key: ${{ runner.os }}-cargo-index-${{ hashFiles('engine/Cargo.lock') }}
-
-    - name: Cache cargo build
-      uses: actions/cache@v4
-      with:
-        path: engine/target
-        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('engine/Cargo.lock') }}
-
-    - name: Check formatting
-      run: cd engine && cargo fmt --all -- --check
-
-    - name: Run clippy (no features)
-      run: cd engine && cargo clippy --all-targets --no-default-features -- -D warnings
-
-    - name: Run clippy (all features)
-      run: cd engine && cargo clippy --all-targets --all-features -- -D warnings -A non-local-definitions
-
-    - name: Run tests
-      run: cd engine && cargo test --lib --no-default-features --verbose
-
-    - name: Build release
-      run: cd engine && cargo build --release --no-default-features --verbose
-
-  python-tests:
-    name: Python Tests
-    runs-on: ubuntu-latest
+    needs: lint
     strategy:
       matrix:
         python-version: ["3.8", "3.9", "3.10", "3.11"]
@@ -103,6 +59,7 @@ jobs:
           pyproject.toml
           engine/pyproject.toml
           protocol/pyrat_base/pyproject.toml
+          cli/pyproject.toml
 
     - name: Sync workspace dependencies
       run: uv sync --all-extras
@@ -113,15 +70,16 @@ jobs:
         cd engine
         maturin develop --release
 
-    - name: Run Python tests
+    - name: Run Engine tests
       run: |
         source .venv/bin/activate
         cd engine
         pytest python/tests -v
 
-  protocol-tests:
-    name: Protocol Tests
+  test-protocol:
+    name: Protocol Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    needs: lint
     strategy:
       matrix:
         python-version: ["3.8", "3.9", "3.10", "3.11"]
@@ -163,6 +121,7 @@ jobs:
           pyproject.toml
           engine/pyproject.toml
           protocol/pyrat_base/pyproject.toml
+          cli/pyproject.toml
 
     - name: Sync workspace dependencies
       run: uv sync --all-extras
@@ -179,21 +138,10 @@ jobs:
         cd protocol/pyrat_base
         pytest tests -v -n auto
 
-    - name: Check Protocol formatting
-      run: |
-        source .venv/bin/activate
-        cd protocol/pyrat_base
-        ruff check pyrat_base
-
-    - name: Type check Protocol
-      run: |
-        source .venv/bin/activate
-        cd protocol/pyrat_base
-        mypy pyrat_base --ignore-missing-imports
-
-  cli-tests:
-    name: CLI Tests
+  test-cli:
+    name: CLI Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    needs: lint
     strategy:
       matrix:
         python-version: ["3.8", "3.9", "3.10", "3.11"]

@@ -1,7 +1,6 @@
 """AI process management and protocol communication."""
 
 import queue
-import select
 import subprocess
 import sys
 import threading
@@ -14,13 +13,7 @@ from pyrat_engine.game import Direction
 
 
 # Direction name mapping
-DIRECTION_NAMES = {
-    0: "UP",
-    1: "RIGHT",
-    2: "DOWN",
-    3: "LEFT",
-    4: "STAY"
-}
+DIRECTION_NAMES = {0: "UP", 1: "RIGHT", 2: "DOWN", 3: "LEFT", 4: "STAY"}
 
 # Reverse mapping for parsing
 DIRECTION_FROM_NAME = {
@@ -28,7 +21,7 @@ DIRECTION_FROM_NAME = {
     "DOWN": Direction.DOWN,
     "LEFT": Direction.LEFT,
     "RIGHT": Direction.RIGHT,
-    "STAY": Direction.STAY
+    "STAY": Direction.STAY,
 }
 
 
@@ -44,6 +37,7 @@ def parse_direction(name: str) -> Direction:
 
 class AIState(Enum):
     """AI process state."""
+
     NOT_STARTED = "not_started"
     HANDSHAKE = "handshake"
     READY = "ready"
@@ -56,6 +50,7 @@ class AIState(Enum):
 @dataclass
 class AIInfo:
     """AI identification information."""
+
     name: str = "Unknown AI"
     author: Optional[str] = None
     options: dict = None
@@ -95,7 +90,7 @@ class AIProcess:
                     self._output_queue.put(line.strip())
                 else:
                     break
-        except:
+        except (ValueError, OSError):  # Stream closed or I/O error
             pass
 
     def start(self) -> bool:
@@ -131,7 +126,10 @@ class AIProcess:
                     # Check if process crashed
                     if self.process.poll() is not None:
                         stderr_output = self.process.stderr.read()
-                        print(f"AI {self.player_name} crashed during handshake", file=sys.stderr)
+                        print(
+                            f"AI {self.player_name} crashed during handshake",
+                            file=sys.stderr,
+                        )
                         if stderr_output:
                             print(f"stderr: {stderr_output}", file=sys.stderr)
                         self.state = AIState.CRASHED
@@ -157,6 +155,7 @@ class AIProcess:
         except Exception as e:
             print(f"Error starting AI {self.player_name}: {e}", file=sys.stderr)
             import traceback
+
             traceback.print_exc()
             self.state = AIState.CRASHED
             return False
@@ -172,12 +171,16 @@ class AIProcess:
         self._write_line("newgame")
 
         # Send maze dimensions
-        self._write_line(f"maze height:{game_state._game.height} width:{game_state._game.width}")
+        self._write_line(
+            f"maze height:{game_state._game.height} width:{game_state._game.width}"
+        )
 
         # Send walls
         walls = game_state._game.wall_entries()
         if walls:
-            walls_str = " ".join(f"({w[0][0]},{w[0][1]})-({w[1][0]},{w[1][1]})" for w in walls)
+            walls_str = " ".join(
+                f"({w[0][0]},{w[0][1]})-({w[1][0]},{w[1][1]})" for w in walls
+            )
             self._write_line(f"walls {walls_str}")
 
         # Send mud
@@ -185,7 +188,9 @@ class AIProcess:
         if mud:
             mud_parts = []
             for (cell1, cell2), turns in mud.items():
-                mud_parts.append(f"({cell1[0]},{cell1[1]})-({cell2[0]},{cell2[1]}):{turns}")
+                mud_parts.append(
+                    f"({cell1[0]},{cell1[1]})-({cell2[0]},{cell2[1]}):{turns}"
+                )
             self._write_line(f"mud {' '.join(mud_parts)}")
 
         # Send cheese
@@ -204,7 +209,9 @@ class AIProcess:
         self._write_line(f"youare {self.player_name}")
 
         # Time controls (using defaults from spec)
-        self._write_line(f"timecontrol preprocessing:{int(preprocessing_time * 1000)} turn:{int(self.timeout * 1000)}")
+        self._write_line(
+            f"timecontrol preprocessing:{int(preprocessing_time * 1000)} turn:{int(self.timeout * 1000)}"
+        )
 
         # Start preprocessing
         self.state = AIState.PREPROCESSING
@@ -224,7 +231,9 @@ class AIProcess:
         # Preprocessing timeout - continue anyway
         self.state = AIState.PLAYING
 
-    def get_move(self, rat_move: Direction, python_move: Direction) -> Optional[Direction]:
+    def get_move(
+        self, rat_move: Direction, python_move: Direction
+    ) -> Optional[Direction]:
         """
         Request a move from the AI.
 
@@ -257,7 +266,10 @@ class AIProcess:
                 move_str = line[5:].strip()
                 direction = parse_direction(move_str)
                 if direction is None:
-                    print(f"Invalid move from {self.player_name}: {move_str}", file=sys.stderr)
+                    print(
+                        f"Invalid move from {self.player_name}: {move_str}",
+                        file=sys.stderr,
+                    )
                     return Direction.STAY
                 return direction
             elif line.startswith("info "):
@@ -323,6 +335,8 @@ class AIProcess:
 
     def is_alive(self) -> bool:
         """Check if AI process is still alive."""
-        return (self.process is not None and
-                self.process.poll() is None and
-                self.state not in [AIState.CRASHED, AIState.TIMED_OUT])
+        return (
+            self.process is not None
+            and self.process.poll() is None
+            and self.state not in [AIState.CRASHED, AIState.TIMED_OUT]
+        )
