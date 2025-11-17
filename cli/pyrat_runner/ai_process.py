@@ -53,7 +53,7 @@ class AIInfo:
 
     name: str = "Unknown AI"
     author: Optional[str] = None
-    options: dict = None
+    options: Optional[dict] = None
 
     def __post_init__(self):
         if self.options is None:
@@ -79,7 +79,7 @@ class AIProcess:
         self.state = AIState.NOT_STARTED
         self.info = AIInfo()
         self._output_queue: queue.Queue[str] = queue.Queue()
-        self._reader_thread = None
+        self._reader_thread: Optional[threading.Thread] = None
 
     def _reader(self):
         """Background thread to read output from AI process."""

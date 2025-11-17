@@ -33,7 +33,6 @@ files = ["pyrat_runner"]
 disable_error_code = [
     "call-overload",
     "arg-type",
-    "assignment",
     "return-value",
     "union-attr",
     "attr-defined"
