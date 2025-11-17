@@ -5,7 +5,7 @@ import sys
 from dataclasses import dataclass
 from typing import Dict, FrozenSet, List, Optional, Set, Tuple
 
-from pyrat_engine.game import Direction
+from pyrat_engine.core import Direction
 
 
 # Direction name mapping

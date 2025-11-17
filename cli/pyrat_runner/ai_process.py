@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
-from pyrat_engine.game import Direction
+from pyrat_engine.core import Direction
 
 
 # Direction name mapping

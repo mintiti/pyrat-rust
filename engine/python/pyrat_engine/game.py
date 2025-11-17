@@ -18,6 +18,8 @@ from pyrat_engine.core import GameState as _RustGameState
 from pyrat_engine.core import MoveUndo as _RustMoveUndo
 from pyrat_engine.core.types import Coordinates
 
+__all__ = ["MoveUndo", "GameResult", "PyRat"]
+
 
 @dataclass(frozen=True)
 class MoveUndo:

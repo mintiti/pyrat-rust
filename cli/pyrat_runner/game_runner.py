@@ -5,7 +5,7 @@ import time
 from typing import Optional, Tuple
 
 from pyrat_engine import PyRat
-from pyrat_engine.game import Direction
+from pyrat_engine.core import Direction
 
 from .ai_process import AIProcess
 from .display import Display
