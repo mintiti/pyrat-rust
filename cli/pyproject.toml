@@ -29,9 +29,3 @@ build-backend = "hatchling.build"
 [tool.mypy]
 python_version = "3.8"
 files = ["pyrat_runner"]
-# TODO: Fix type errors - temporarily disabled for CI reorganization
-disable_error_code = [
-    "call-overload",
-    "union-attr",
-    "attr-defined"
-]

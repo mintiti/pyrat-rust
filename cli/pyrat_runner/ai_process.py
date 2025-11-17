@@ -125,6 +125,8 @@ class AIProcess:
                 if line is None:
                     # Check if process crashed
                     if self.process.poll() is not None:
+                        # Type narrowing: process exists and stderr is not None (we created it with PIPE)
+                        assert self.process.stderr is not None
                         stderr_output = self.process.stderr.read()
                         print(
                             f"AI {self.player_name} crashed during handshake",
