@@ -130,7 +130,7 @@ class PyRatEnv(ParallelEnv):  # type: ignore[misc]
         # Process moves
         game_over, collected = self.game.step(
             int(actions["player_1"]),
-            int(actions["player_2"]),  # type: ignore[arg-type]
+            int(actions["player_2"]),
         )
 
         # Calculate score changes
