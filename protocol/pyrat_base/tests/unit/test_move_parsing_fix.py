@@ -1,8 +1,8 @@
 """Test that the move parsing bug is fixed."""
 
+from pyrat_engine.core import Direction
 from pyrat_engine.core.builder import GameConfigBuilder as PyGameConfigBuilder
 from pyrat_engine.core.types import Coordinates
-from pyrat_engine.game import Direction
 
 from pyrat_base import Protocol, PyRatAI
 from pyrat_base.enums import CommandType, Player
