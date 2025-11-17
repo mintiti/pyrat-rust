@@ -110,7 +110,7 @@ warn_unreachable = true
 # TODO: Fix mypy errors in these files
 [[tool.mypy.overrides]]
 module = ["pyrat_engine.game", "pyrat_engine.env"]
-disable_error_code = ["no-any-return"]
+disable_error_code = []
 
 [tool.pytest.ini_options]
 minversion = "7.0"
