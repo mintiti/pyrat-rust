@@ -82,7 +82,7 @@ make test-protocol
 ### Basic Example
 ```python
 from pyrat_base import PyRatAI, ProtocolState
-from pyrat_engine.game import Direction
+from pyrat_engine.core import Direction
 
 class MyAI(PyRatAI):
     def __init__(self):

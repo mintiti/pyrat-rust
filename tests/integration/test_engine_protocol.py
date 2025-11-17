@@ -7,7 +7,8 @@ to interact with the engine.
 """
 
 import pytest
-from pyrat_engine.game import PyRat, Direction
+from pyrat_engine.game import PyRat
+from pyrat_engine.core import Direction
 from pyrat_base.protocol_state import ProtocolState
 from pyrat_base.enums import Player
 

@@ -89,7 +89,7 @@ Walls are tuples of adjacent cells: `((x1, y1), (x2, y2))`
 ### Creating Example AIs
 ```python
 from pyrat_base import PyRatAI, ProtocolState
-from pyrat_engine.game import Direction
+from pyrat_engine.core import Direction
 
 class MyAI(PyRatAI):
     def __init__(self):

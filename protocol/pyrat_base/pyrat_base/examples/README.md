@@ -42,7 +42,7 @@ To create your own AI:
 1. Import the necessary modules:
    ```python
    from pyrat_base import PyRatAI, ProtocolState
-   from pyrat_engine.game import Direction
+   from pyrat_engine.core import Direction
    ```
 
 2. Create a class that inherits from PyRatAI:
