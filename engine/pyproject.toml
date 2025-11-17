@@ -107,11 +107,6 @@ warn_unused_ignores = true
 warn_no_return = true
 warn_unreachable = true
 
-# TODO: Fix mypy errors in these files
-[[tool.mypy.overrides]]
-module = ["pyrat_engine.game", "pyrat_engine.env"]
-disable_error_code = ["valid-type", "no-any-return", "attr-defined", "call-overload", "unused-ignore"]
-
 [tool.pytest.ini_options]
 minversion = "7.0"
 addopts = "-ra -q --cov=pyrat_engine --cov-report=term-missing"

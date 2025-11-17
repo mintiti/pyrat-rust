@@ -6,9 +6,9 @@ makes optimal decisions considering walls, mud, and actual travel time.
 # ruff: noqa: PLR2004
 
 import pytest
+from pyrat_engine.core import Direction
 from pyrat_engine.core.game import GameState as PyGameState
 from pyrat_engine.core.types import Coordinates
-from pyrat_engine.game import Direction
 
 from pyrat_base.enums import Player
 from pyrat_base.protocol_state import ProtocolState

@@ -13,9 +13,12 @@ The game follows these basic rules:
 from dataclasses import dataclass
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
+from pyrat_engine.core import DirectionType
 from pyrat_engine.core import GameState as _RustGameState
 from pyrat_engine.core import MoveUndo as _RustMoveUndo
-from pyrat_engine.core.types import Coordinates, Direction
+from pyrat_engine.core.types import Coordinates
+
+__all__ = ["GameResult", "MoveUndo", "PyRat"]
 
 
 @dataclass(frozen=True)
@@ -172,9 +175,9 @@ class PyRat:
             for ((x1, y1), (x2, y2), value) in self._game.mud_entries()
         }
 
-    def step(self, p1_move: Direction, p2_move: Direction) -> GameResult:
+    def step(self, p1_move: DirectionType, p2_move: DirectionType) -> GameResult:
         """Execute one game step."""
-        game_over, collected = self._game.step(int(p1_move), int(p2_move))
+        game_over, collected = self._game.step(p1_move, p2_move)
         return GameResult(
             game_over=game_over,
             collected_cheese=list(collected),
@@ -186,9 +189,9 @@ class PyRat:
         """Reset the game."""
         self._game.reset(seed)
 
-    def make_move(self, p1_move: Direction, p2_move: Direction) -> MoveUndo:
+    def make_move(self, p1_move: DirectionType, p2_move: DirectionType) -> MoveUndo:
         """Make a move and return undo information."""
-        undo = self._game.make_move(int(p1_move), int(p2_move))
+        undo = self._game.make_move(p1_move, p2_move)
         return MoveUndo(_undo=undo)
 
     def unmake_move(self, undo: MoveUndo) -> None:

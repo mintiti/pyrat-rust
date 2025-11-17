@@ -3,7 +3,7 @@
 import tempfile
 
 import pytest
-from pyrat_engine.game import Direction
+from pyrat_engine.core import Direction
 
 from pyrat_base.replay import (
     InitialState,

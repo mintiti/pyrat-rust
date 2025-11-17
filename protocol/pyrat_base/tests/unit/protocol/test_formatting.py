@@ -5,7 +5,7 @@ into text messages that the engine can understand.
 """
 
 import pytest
-from pyrat_engine.game import Direction
+from pyrat_engine.core import Direction
 
 from pyrat_base import Protocol, ResponseType
 

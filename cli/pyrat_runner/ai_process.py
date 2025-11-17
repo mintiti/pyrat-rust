@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Optional
 
-from pyrat_engine.game import Direction
+from pyrat_engine.core import Direction
 
 
 # Direction name mapping
@@ -53,7 +53,7 @@ class AIInfo:
 
     name: str = "Unknown AI"
     author: Optional[str] = None
-    options: dict = None
+    options: Optional[dict] = None
 
     def __post_init__(self):
         if self.options is None:
@@ -78,8 +78,8 @@ class AIProcess:
         self.process: Optional[subprocess.Popen] = None
         self.state = AIState.NOT_STARTED
         self.info = AIInfo()
-        self._output_queue = queue.Queue()
-        self._reader_thread = None
+        self._output_queue: queue.Queue[str] = queue.Queue()
+        self._reader_thread: Optional[threading.Thread] = None
 
     def _reader(self):
         """Background thread to read output from AI process."""
@@ -125,6 +125,8 @@ class AIProcess:
                 if line is None:
                     # Check if process crashed
                     if self.process.poll() is not None:
+                        # Type narrowing: process exists and stderr is not None (we created it with PIPE)
+                        assert self.process.stderr is not None
                         stderr_output = self.process.stderr.read()
                         print(
                             f"AI {self.player_name} crashed during handshake",

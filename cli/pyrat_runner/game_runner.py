@@ -5,7 +5,7 @@ import time
 from typing import Optional, Tuple
 
 from pyrat_engine import PyRat
-from pyrat_engine.game import Direction
+from pyrat_engine.core import Direction
 
 from .ai_process import AIProcess
 from .display import Display
@@ -14,6 +14,7 @@ from .display import Display
 # ===========================
 # Pure game logic functions
 # ===========================
+
 
 def determine_winner_from_scores(rat_score: float, python_score: float) -> str:
     """Determine the winner based on final scores.
@@ -36,8 +37,7 @@ def determine_winner_from_scores(rat_score: float, python_score: float) -> str:
 
 
 def classify_ai_move_error(
-    is_alive: bool,
-    move: Optional[Direction]
+    is_alive: bool, move: Optional[Direction]
 ) -> Tuple[bool, Direction, Optional[str]]:
     """Classify AI move error and determine appropriate response.
 
@@ -95,10 +95,7 @@ class GameRunner:
 
         # Create game
         self.game = PyRat(
-            width=width,
-            height=height,
-            cheese_count=cheese_count,
-            seed=seed
+            width=width, height=height, cheese_count=cheese_count, seed=seed
         )
 
         # Create AI processes
@@ -155,7 +152,9 @@ class GameRunner:
         self.display.render()
         time.sleep(self.display_delay)
 
-    def _handle_ai_move_error(self, player: str, ai: AIProcess, move: Optional[Direction]) -> Tuple[bool, Direction]:
+    def _handle_ai_move_error(
+        self, player: str, ai: AIProcess, move: Optional[Direction]
+    ) -> Tuple[bool, Direction]:
         """Handle AI move timeout or crash.
 
         Args:
@@ -169,7 +168,9 @@ class GameRunner:
             - move_to_use: Direction.STAY if timeout, original move otherwise
         """
         # Use pure function to classify error
-        should_continue, move_to_use, error_message = classify_ai_move_error(ai.is_alive(), move)
+        should_continue, move_to_use, error_message = classify_ai_move_error(
+            ai.is_alive(), move
+        )
 
         # Handle side effect (display error) if needed
         if error_message:
@@ -178,9 +179,7 @@ class GameRunner:
         return should_continue, move_to_use
 
     def _get_ai_moves(
-        self,
-        rat_prev_move: Direction,
-        python_prev_move: Direction
+        self, rat_prev_move: Direction, python_prev_move: Direction
     ) -> Tuple[bool, Optional[Direction], Optional[Direction]]:
         """Get moves from both AIs with error handling.
 
@@ -199,12 +198,16 @@ class GameRunner:
         python_move = self.python_ai.get_move(rat_prev_move, python_prev_move)
 
         # Handle rat AI errors
-        should_continue, rat_move = self._handle_ai_move_error("rat", self.rat_ai, rat_move)
+        should_continue, rat_move = self._handle_ai_move_error(
+            "rat", self.rat_ai, rat_move
+        )
         if not should_continue:
             return False, None, None
 
         # Handle python AI errors
-        should_continue, python_move = self._handle_ai_move_error("python", self.python_ai, python_move)
+        should_continue, python_move = self._handle_ai_move_error(
+            "python", self.python_ai, python_move
+        )
         if not should_continue:
             return False, None, None
 
@@ -221,10 +224,15 @@ class GameRunner:
 
         while True:
             # Get moves from both AIs
-            success, rat_move_new, python_move_new = self._get_ai_moves(rat_move, python_move)
+            success, rat_move_new, python_move_new = self._get_ai_moves(
+                rat_move, python_move
+            )
             if not success:
                 return False
 
+            # Type narrowing: success=True guarantees moves are not None
+            assert rat_move_new is not None
+            assert python_move_new is not None
             rat_move = rat_move_new
             python_move = python_move_new
 
@@ -257,7 +265,9 @@ class GameRunner:
 
         return winner, rat_score, python_score
 
-    def _finalize_game(self, winner: str, rat_score: float, python_score: float) -> None:
+    def _finalize_game(
+        self, winner: str, rat_score: float, python_score: float
+    ) -> None:
         """Finalize the game by notifying AIs and displaying results.
 
         Args:

@@ -2,7 +2,7 @@
 
 from typing import List, Optional, Tuple
 
-from pyrat_engine.game import Direction
+from pyrat_engine.core import Direction
 
 from pyrat_base.enums import Player
 from pyrat_base.protocol import DIRECTION_INT_TO_NAME

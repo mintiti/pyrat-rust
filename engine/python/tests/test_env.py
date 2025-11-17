@@ -114,10 +114,10 @@ def test_random_gameplay() -> None:
     while not (terminated or truncated):
         # Make random moves for both players
         actions = {
-            "player_1": Direction(
-                random.randint(0, 4)
+            "player_1": random.randint(
+                0, 4
             ),  # 0-4 covers all directions including STAY
-            "player_2": Direction(random.randint(0, 4)),
+            "player_2": random.randint(0, 4),
         }
 
         obs, rewards, terminations, truncations, infos = env.step(actions)

@@ -3,19 +3,13 @@
 import os
 import sys
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, FrozenSet, List, Optional, Set, Tuple
 
-from pyrat_engine.game import Direction
+from pyrat_engine.core import Direction
 
 
 # Direction name mapping
-DIRECTION_NAMES = {
-    0: "UP",
-    1: "RIGHT",
-    2: "DOWN",
-    3: "LEFT",
-    4: "STAY"
-}
+DIRECTION_NAMES = {0: "UP", 1: "RIGHT", 2: "DOWN", 3: "LEFT", 4: "STAY"}
 
 
 def get_direction_name(direction: Direction) -> str:
@@ -28,10 +22,11 @@ def get_direction_name(direction: Direction) -> str:
 @dataclass(frozen=True)
 class MazeStructures:
     """Immutable structure holding pre-computed wall and mud positions."""
-    h_walls: Set[Tuple[int, int]]  # Horizontal walls (between rows)
-    v_walls: Set[Tuple[int, int]]  # Vertical walls (between columns)
-    h_mud: Set[Tuple[int, int]]    # Horizontal mud (between rows)
-    v_mud: Set[Tuple[int, int]]    # Vertical mud (between columns)
+
+    h_walls: FrozenSet[Tuple[int, int]]  # Horizontal walls (between rows)
+    v_walls: FrozenSet[Tuple[int, int]]  # Vertical walls (between columns)
+    h_mud: FrozenSet[Tuple[int, int]]  # Horizontal mud (between rows)
+    v_mud: FrozenSet[Tuple[int, int]]  # Vertical mud (between columns)
 
 
 # Display configuration
@@ -68,9 +63,10 @@ CORNER = "+"
 # Pure rendering functions
 # ===========================
 
+
 def build_maze_structures(
     walls: List[Tuple[Tuple[int, int], Tuple[int, int]]],
-    mud: Dict[Tuple[Tuple[int, int], Tuple[int, int]], int]
+    mud: Dict[Tuple[Tuple[int, int], Tuple[int, int]], int],
 ) -> MazeStructures:
     """Build wall and mud lookup structures from raw data.
 
@@ -89,7 +85,7 @@ def build_maze_structures(
     v_mud = set()
 
     # Process walls
-    for ((x1, y1), (x2, y2)) in walls:
+    for (x1, y1), (x2, y2) in walls:
         if x1 == x2:  # Same column, different row (horizontal wall)
             min_y = min(y1, y2)
             h_walls.add((x1, min_y))
@@ -112,7 +108,7 @@ def build_maze_structures(
         h_walls=frozenset(h_walls),
         v_walls=frozenset(v_walls),
         h_mud=frozenset(h_mud),
-        v_mud=frozenset(v_mud)
+        v_mud=frozenset(v_mud),
     )
 
 
@@ -121,7 +117,7 @@ def get_cell_content(
     y: int,
     rat_pos: Tuple[int, int],
     python_pos: Tuple[int, int],
-    cheese_set: Set[Tuple[int, int]]
+    cheese_set: Set[Tuple[int, int]],
 ) -> str:
     """Get the display content for a specific cell.
 
@@ -137,8 +133,8 @@ def get_cell_content(
     Returns:
         String representation of cell content with ANSI colors
     """
-    at_rat = (rat_pos[0] == x and rat_pos[1] == y)
-    at_python = (python_pos[0] == x and python_pos[1] == y)
+    at_rat = rat_pos[0] == x and rat_pos[1] == y
+    at_python = python_pos[0] == x and python_pos[1] == y
     at_cheese = (x, y) in cheese_set
 
     # Determine cell content based on occupancy
@@ -208,7 +204,7 @@ def render_board(
     rat_pos: Tuple[int, int],
     python_pos: Tuple[int, int],
     cheese_set: Set[Tuple[int, int]],
-    structures: MazeStructures
+    structures: MazeStructures,
 ) -> str:
     """Render the game board as a string.
 
@@ -263,7 +259,7 @@ def render_board(
     # Bottom border
     lines.append(horizontal_border)
 
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 
 def render_header(
@@ -273,7 +269,7 @@ def render_header(
     python_pos: Tuple[int, int],
     python_score: float,
     python_move: Optional[Direction],
-    turn: int
+    turn: int,
 ) -> str:
     """Render the game header with player information.
 
@@ -292,9 +288,15 @@ def render_header(
         Multi-line string containing the header
     """
     lines = []
-    lines.append(f"\n{COLOR_RED}╔═══════════════════════════════════════════════════════════╗{COLOR_RESET}")
-    lines.append(f"{COLOR_RED}║{COLOR_RESET}                    PyRat Game Viewer                    {COLOR_RED}║{COLOR_RESET}")
-    lines.append(f"{COLOR_RED}╚═══════════════════════════════════════════════════════════╝{COLOR_RESET}\n")
+    lines.append(
+        f"\n{COLOR_RED}╔═══════════════════════════════════════════════════════════╗{COLOR_RESET}"
+    )
+    lines.append(
+        f"{COLOR_RED}║{COLOR_RESET}                    PyRat Game Viewer                    {COLOR_RED}║{COLOR_RESET}"
+    )
+    lines.append(
+        f"{COLOR_RED}╚═══════════════════════════════════════════════════════════╝{COLOR_RESET}\n"
+    )
 
     # Player 1 (Rat) info
     lines.append(f"{COLOR_RED}Player 1 (Rat):{COLOR_RESET}")
@@ -315,14 +317,14 @@ def render_header(
     lines.append(f"Turn: {turn}")
     lines.append("")
 
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 
 def render_game_state(
     game,
     structures: MazeStructures,
     rat_move: Optional[Direction] = None,
-    python_move: Optional[Direction] = None
+    python_move: Optional[Direction] = None,
 ) -> str:
     """Render the complete game state as a string.
 
@@ -354,7 +356,7 @@ def render_game_state(
         python_pos=python_pos,
         python_score=scores[1],
         python_move=python_move,
-        turn=turn
+        turn=turn,
     )
 
     board = render_board(
@@ -363,7 +365,7 @@ def render_game_state(
         rat_pos=rat_pos,
         python_pos=python_pos,
         cheese_set=cheese_set,
-        structures=structures
+        structures=structures,
     )
 
     return header + board + "\n"
@@ -384,13 +386,21 @@ def render_winner_screen(winner: str, rat_score: float, python_score: float) -> 
     """
     lines = []
     lines.append("")
-    lines.append(f"{COLOR_YELLOW}╔═══════════════════════════════════════════════════════════╗{COLOR_RESET}")
-    lines.append(f"{COLOR_YELLOW}║{COLOR_RESET}                        GAME OVER                          {COLOR_YELLOW}║{COLOR_RESET}")
-    lines.append(f"{COLOR_YELLOW}╚═══════════════════════════════════════════════════════════╝{COLOR_RESET}")
+    lines.append(
+        f"{COLOR_YELLOW}╔═══════════════════════════════════════════════════════════╗{COLOR_RESET}"
+    )
+    lines.append(
+        f"{COLOR_YELLOW}║{COLOR_RESET}                        GAME OVER                          {COLOR_YELLOW}║{COLOR_RESET}"
+    )
+    lines.append(
+        f"{COLOR_YELLOW}╚═══════════════════════════════════════════════════════════╝{COLOR_RESET}"
+    )
     lines.append("")
 
     lines.append(f"{COLOR_RED}Rat (Player 1):{COLOR_RESET}    {rat_score:.1f} points")
-    lines.append(f"{COLOR_GREEN}Python (Player 2):{COLOR_RESET} {python_score:.1f} points")
+    lines.append(
+        f"{COLOR_GREEN}Python (Player 2):{COLOR_RESET} {python_score:.1f} points"
+    )
     lines.append("")
 
     if winner == "draw":
@@ -402,7 +412,7 @@ def render_winner_screen(winner: str, rat_score: float, python_score: float) -> 
 
     lines.append("")
 
-    return '\n'.join(lines)
+    return "\n".join(lines)
 
 
 def render_error_message(player: str, error: str) -> str:
@@ -446,10 +456,12 @@ class Display:
     @staticmethod
     def clear():
         """Clear the terminal screen."""
-        os.system('cls' if os.name == 'nt' else 'clear')
+        os.system("cls" if os.name == "nt" else "clear")
 
     # Expose pure functions as instance methods for backward compatibility with tests
-    def _get_cell_content(self, x: int, y: int, cheese_set: Set[Tuple[int, int]]) -> str:
+    def _get_cell_content(
+        self, x: int, y: int, cheese_set: Set[Tuple[int, int]]
+    ) -> str:
         """Get display content for a cell (delegates to pure function)."""
         rat_pos = (self.game.player1_pos[0], self.game.player1_pos[1])
         python_pos = (self.game.player2_pos[0], self.game.player2_pos[1])
@@ -465,26 +477,30 @@ class Display:
 
     # For backward compatibility with tests, expose structure sets as properties
     @property
-    def h_walls(self) -> Set[Tuple[int, int]]:
+    def h_walls(self) -> FrozenSet[Tuple[int, int]]:
         """Horizontal walls set."""
         return self.structures.h_walls
 
     @property
-    def v_walls(self) -> Set[Tuple[int, int]]:
+    def v_walls(self) -> FrozenSet[Tuple[int, int]]:
         """Vertical walls set."""
         return self.structures.v_walls
 
     @property
-    def h_mud(self) -> Set[Tuple[int, int]]:
+    def h_mud(self) -> FrozenSet[Tuple[int, int]]:
         """Horizontal mud set."""
         return self.structures.h_mud
 
     @property
-    def v_mud(self) -> Set[Tuple[int, int]]:
+    def v_mud(self) -> FrozenSet[Tuple[int, int]]:
         """Vertical mud set."""
         return self.structures.v_mud
 
-    def render(self, rat_move: Optional[Direction] = None, python_move: Optional[Direction] = None):
+    def render(
+        self,
+        rat_move: Optional[Direction] = None,
+        python_move: Optional[Direction] = None,
+    ):
         """
         Render the current game state with enhanced visualization.
 
@@ -502,11 +518,11 @@ class Display:
             game=self.game,
             structures=self.structures,
             rat_move=rat_move,
-            python_move=python_move
+            python_move=python_move,
         )
 
         # Handle side effect (printing)
-        print(output, end='')
+        print(output, end="")
 
     def show_winner(self, winner: str, rat_score: float, python_score: float):
         """

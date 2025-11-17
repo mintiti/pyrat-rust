@@ -81,7 +81,7 @@ def test_cli_handles_timeout():
     timeout_ai = Path(__file__).parent / "slow_ai.py"
     timeout_ai.write_text("""
 from pyrat_base import PyRatAI
-from pyrat_engine.game import Direction
+from pyrat_engine.core import Direction
 import time
 
 class SlowAI(PyRatAI):
