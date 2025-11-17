@@ -477,22 +477,22 @@ class Display:
 
     # For backward compatibility with tests, expose structure sets as properties
     @property
-    def h_walls(self) -> Set[Tuple[int, int]]:
+    def h_walls(self) -> FrozenSet[Tuple[int, int]]:
         """Horizontal walls set."""
         return self.structures.h_walls
 
     @property
-    def v_walls(self) -> Set[Tuple[int, int]]:
+    def v_walls(self) -> FrozenSet[Tuple[int, int]]:
         """Vertical walls set."""
         return self.structures.v_walls
 
     @property
-    def h_mud(self) -> Set[Tuple[int, int]]:
+    def h_mud(self) -> FrozenSet[Tuple[int, int]]:
         """Horizontal mud set."""
         return self.structures.h_mud
 
     @property
-    def v_mud(self) -> Set[Tuple[int, int]]:
+    def v_mud(self) -> FrozenSet[Tuple[int, int]]:
         """Vertical mud set."""
         return self.structures.v_mud
 

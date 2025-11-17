@@ -32,7 +32,6 @@ files = ["pyrat_runner"]
 # TODO: Fix type errors - temporarily disabled for CI reorganization
 disable_error_code = [
     "call-overload",
-    "return-value",
     "union-attr",
     "attr-defined"
 ]
