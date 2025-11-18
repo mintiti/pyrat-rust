@@ -16,10 +16,8 @@ The PyRat Engine is the core game implementation, providing:
 ### Setup (Standalone)
 ```bash
 # From engine directory
-uv venv
-source .venv/bin/activate
-uv pip install -e ".[dev]"
-maturin develop --release
+uv sync
+uv run maturin develop --release
 ```
 
 ### Setup (Workspace - Recommended)
@@ -27,7 +25,7 @@ maturin develop --release
 # From repository root
 uv sync --all-extras  # This installs engine and all dependencies including dev tools
 cd engine
-maturin develop --release  # Build Rust extension
+uv run maturin develop --release  # Build Rust extension
 ```
 
 ### Testing

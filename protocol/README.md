@@ -45,9 +45,7 @@ uv sync
 
 # Or standalone
 cd protocol/pyrat_base
-uv venv
-source .venv/bin/activate
-uv pip install -e .
+uv sync
 ```
 
 ### Quick Start

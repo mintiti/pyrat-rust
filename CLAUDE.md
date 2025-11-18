@@ -81,32 +81,29 @@ uv sync --all-extras  # Sync all workspace dependencies with dev tools
 # - Installs dev dependencies like maturin, pytest, ruff, etc.
 
 # Install pre-commit hooks (required for all developers)
-source .venv/bin/activate
-pre-commit install
-pre-commit install --hook-type pre-push
+uv run pre-commit install
+uv run pre-commit install --hook-type pre-push
 ```
 
 ### Engine Development
 ```bash
-# Navigate to engine directory
+# Recommended: Use workspace setup from repository root
+# Run `uv sync --all-extras` from root - this handles all components
+
+# Or, for engine-specific development:
 cd engine
 
 # Install uv (if not already installed)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Create Python virtual environment
-uv venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+# Install Python dependencies and build Rust extension
+uv sync
+uv run maturin develop --release
 
-# Install Python dependencies
-uv pip install -e ".[dev]"
-
-# Build and install the Rust extension
-maturin develop --release
-
-# Install pre-commit hooks (automatic formatting and linting)
-pre-commit install
-pre-commit install --hook-type pre-push
+# Install pre-commit hooks (from repository root)
+cd ..
+uv run pre-commit install
+uv run pre-commit install --hook-type pre-push
 ```
 
 ### Code Quality Checks

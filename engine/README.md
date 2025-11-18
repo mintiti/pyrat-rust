@@ -114,17 +114,9 @@ cd pyrat-engine
 # Install uv (if not already installed)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Create virtual environment
-uv venv
-
-# Activate virtual environment
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install development dependencies from pyproject.toml
-uv pip install -e ".[dev]"
-
-# Build and install the Rust extension
-maturin develop --release
+# Install dependencies and build
+uv sync
+uv run maturin develop --release
 ```
 
 ### Running Tests

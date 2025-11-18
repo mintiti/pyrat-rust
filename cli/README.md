@@ -9,12 +9,9 @@ From the repository root:
 ```bash
 # Sync all workspace dependencies
 uv sync --all-extras
-
-# Activate the virtual environment
-source .venv/bin/activate
 ```
 
-The `pyrat-game` command will be available in your virtual environment.
+The `pyrat-game` command will be available via `uv run` or in your environment's PATH.
 
 ## Basic Usage
 

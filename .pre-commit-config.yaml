@@ -28,7 +28,7 @@ repos:
         -   id: mypy-protocol
             name: mypy protocol
             description: Type check protocol package (matches CI)
-            entry: bash -c 'source .venv/bin/activate && cd protocol/pyrat_base && mypy pyrat_base --ignore-missing-imports'
+            entry: uv run --directory protocol/pyrat_base mypy pyrat_base --ignore-missing-imports
             language: system
             pass_filenames: false
             files: ^protocol/pyrat_base/
@@ -37,7 +37,7 @@ repos:
         -   id: mypy-engine
             name: mypy engine
             description: Type check engine package (matches CI)
-            entry: bash -c 'source .venv/bin/activate && cd engine && mypy python/pyrat_engine --ignore-missing-imports'
+            entry: uv run --directory engine mypy python/pyrat_engine --ignore-missing-imports
             language: system
             pass_filenames: false
             files: ^engine/python/
@@ -46,7 +46,7 @@ repos:
         -   id: mypy-cli
             name: mypy CLI
             description: Type check CLI package (matches CI)
-            entry: bash -c 'source .venv/bin/activate && cd cli && mypy pyrat_runner --ignore-missing-imports'
+            entry: uv run --directory cli mypy pyrat_runner --ignore-missing-imports
             language: system
             pass_filenames: false
             files: ^cli/
@@ -76,7 +76,7 @@ repos:
       hooks:
         -   id: pytest-engine
             name: pytest engine
-            entry: bash -c 'source .venv/bin/activate && cd engine && pytest python/tests'
+            entry: uv run --directory engine pytest python/tests
             language: system
             pass_filenames: false
             always_run: true
@@ -84,7 +84,7 @@ repos:
 
         -   id: pytest-protocol
             name: pytest protocol
-            entry: bash -c 'source .venv/bin/activate && cd protocol/pyrat_base && pytest tests -n auto -m "not slow" || echo "No tests yet"'
+            entry: uv run --directory protocol/pyrat_base pytest tests -n auto -m "not slow"
             language: system
             pass_filenames: false
             always_run: true
@@ -92,7 +92,7 @@ repos:
 
         -   id: pytest-cli
             name: pytest CLI
-            entry: bash -c 'source .venv/bin/activate && pytest cli/tests'
+            entry: uv run pytest cli/tests
             language: system
             pass_filenames: false
             always_run: true
