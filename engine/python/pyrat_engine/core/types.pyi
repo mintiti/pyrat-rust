@@ -178,3 +178,39 @@ class Mud:
     def __repr__(self) -> str: ...
     def __eq__(self, other: object) -> bool: ...
     def __ne__(self, other: object) -> bool: ...
+
+def direction_to_name(direction: int) -> str:
+    """Convert a Direction value to its string name.
+
+    Args:
+        direction: Direction value (Direction.UP, Direction.DOWN, etc.)
+
+    Returns:
+        String name of the direction ("UP", "DOWN", "LEFT", "RIGHT", "STAY")
+        Returns "STAY" for invalid direction values.
+    """
+    ...
+
+def name_to_direction(name: str) -> int:
+    """Convert a direction name string to a Direction value.
+
+    Args:
+        name: Direction name string (case-sensitive uppercase: "UP", "DOWN", etc.)
+
+    Returns:
+        Direction value (Direction.UP, Direction.DOWN, etc.)
+        Returns Direction.STAY for invalid names.
+    """
+    ...
+
+def is_valid_direction(direction: int | None) -> bool:
+    """Check if a direction value is valid.
+
+    Args:
+        direction: Direction value to validate
+
+    Returns:
+        True if the direction is valid (UP, DOWN, LEFT, RIGHT, or STAY),
+        False otherwise.
+    """
+    ...
