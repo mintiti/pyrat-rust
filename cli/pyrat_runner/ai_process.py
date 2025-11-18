@@ -10,29 +10,25 @@ from enum import Enum
 from typing import Optional
 
 from pyrat_engine.core import Direction
-
-
-# Direction name mapping
-DIRECTION_NAMES = {0: "UP", 1: "RIGHT", 2: "DOWN", 3: "LEFT", 4: "STAY"}
-
-# Reverse mapping for parsing
-DIRECTION_FROM_NAME = {
-    "UP": Direction.UP,
-    "DOWN": Direction.DOWN,
-    "LEFT": Direction.LEFT,
-    "RIGHT": Direction.RIGHT,
-    "STAY": Direction.STAY,
-}
+from pyrat_engine.core.types import direction_to_name, name_to_direction
 
 
 def get_direction_name(direction: Direction) -> str:
-    """Get the string name of a Direction."""
-    return DIRECTION_NAMES.get(int(direction), "STAY")
+    """Get the string name of a Direction.
+
+    Deprecated: Use direction_to_name() from pyrat_engine.core.types instead.
+    This function is kept for backward compatibility.
+    """
+    return direction_to_name(direction)
 
 
 def parse_direction(name: str) -> Direction:
-    """Parse a Direction from its string name."""
-    return DIRECTION_FROM_NAME.get(name, Direction.STAY)
+    """Parse a Direction from its string name.
+
+    Deprecated: Use name_to_direction() from pyrat_engine.core.types instead.
+    This function is kept for backward compatibility.
+    """
+    return name_to_direction(name)
 
 
 class AIState(Enum):

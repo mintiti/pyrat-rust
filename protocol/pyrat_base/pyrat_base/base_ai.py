@@ -25,11 +25,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from pyrat_engine.core import DirectionType
 from pyrat_engine.core.game import GameState as PyGameState
-from pyrat_engine.core.types import Direction
+from pyrat_engine.core.types import Direction, direction_to_name, name_to_direction
 
 from .enums import CommandType, GameResult, Player, ResponseType
 from .io_handler import IOHandler
-from .protocol import DIRECTION_INT_TO_NAME, Protocol
+from .protocol import Protocol
 from .protocol_state import ProtocolState
 
 
@@ -598,7 +598,7 @@ class PyRatAI:
                 move = self.get_move(state)
 
                 # Convert Direction to string
-                return DIRECTION_INT_TO_NAME[move]
+                return direction_to_name(move)
 
             except Exception as e:
                 if self.debug:
@@ -643,20 +643,13 @@ class PyRatAI:
             self._io.write_response("move STAY")
 
     def _parse_direction(self, move_str: str) -> DirectionType:
-        """Parse a move string to direction value."""
+        """Parse a move string to direction value.
+
+        Deprecated: This method now uses name_to_direction() from pyrat_engine.core.types.
+        """
         if not move_str:
             return Direction.STAY
-        move_str = str(move_str).upper()
-        if move_str == "UP":
-            return Direction.UP
-        elif move_str == "DOWN":
-            return Direction.DOWN
-        elif move_str == "LEFT":
-            return Direction.LEFT
-        elif move_str == "RIGHT":
-            return Direction.RIGHT
-        else:
-            return Direction.STAY
+        return name_to_direction(str(move_str).upper())
 
     def _parse_game_result(self, result_str: str) -> GameResult:
         """Parse a game result string to GameResult enum."""
