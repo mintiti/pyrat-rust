@@ -27,10 +27,10 @@ from pyrat_engine.core import DirectionType
 from pyrat_engine.core.game import GameState as PyGameState
 from pyrat_engine.core.types import Direction, direction_to_name, name_to_direction
 
-from .enums import CommandType, GameResult, Player, ResponseType
-from .io_handler import IOHandler
-from .protocol import Protocol
-from .protocol_state import ProtocolState
+from pyrat_base.enums import CommandType, GameResult, Player, ResponseType
+from pyrat_base.io_handler import IOHandler
+from pyrat_base.protocol import Protocol
+from pyrat_base.protocol_state import ProtocolState
 
 
 class PyRatAI:
@@ -643,10 +643,7 @@ class PyRatAI:
             self._io.write_response("move STAY")
 
     def _parse_direction(self, move_str: str) -> DirectionType:
-        """Parse a move string to direction value.
-
-        Deprecated: This method now uses name_to_direction() from pyrat_engine.core.types.
-        """
+        """Parse a move string to direction value."""
         if not move_str:
             return Direction.STAY
         return name_to_direction(str(move_str).upper())

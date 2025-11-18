@@ -9,23 +9,6 @@ from pyrat_engine.core import Direction
 from pyrat_engine.core.types import direction_to_name
 
 
-def get_direction_name(direction: Optional[Direction]) -> str:
-    """Get the string name of a Direction.
-
-    Deprecated: Use direction_to_name() from pyrat_engine.core.types instead.
-    This function is kept for backward compatibility and adds special handling for None.
-
-    Args:
-        direction: Direction value or None
-
-    Returns:
-        String name of the direction, or "NONE" if direction is None
-    """
-    if direction is None:
-        return "NONE"
-    return direction_to_name(direction)
-
-
 @dataclass(frozen=True)
 class MazeStructures:
     """Immutable structure holding pre-computed wall and mud positions."""
@@ -310,7 +293,7 @@ def render_header(
     lines.append(f"    Position : ({rat_pos[0]}, {rat_pos[1]})")
     lines.append(f"    Score    : {rat_score:.1f}")
     if rat_move is not None:
-        lines.append(f"    Last move: {get_direction_name(rat_move)}")
+        lines.append(f"    Last move: {direction_to_name(rat_move)}")
     lines.append("")
 
     # Player 2 (Python) info
@@ -318,7 +301,7 @@ def render_header(
     lines.append(f"    Position : ({python_pos[0]}, {python_pos[1]})")
     lines.append(f"    Score    : {python_score:.1f}")
     if python_move is not None:
-        lines.append(f"    Last move: {get_direction_name(python_move)}")
+        lines.append(f"    Last move: {direction_to_name(python_move)}")
     lines.append("")
 
     lines.append(f"Turn: {turn}")

@@ -13,24 +13,6 @@ from pyrat_engine.core import Direction
 from pyrat_engine.core.types import direction_to_name, name_to_direction
 
 
-def get_direction_name(direction: Direction) -> str:
-    """Get the string name of a Direction.
-
-    Deprecated: Use direction_to_name() from pyrat_engine.core.types instead.
-    This function is kept for backward compatibility.
-    """
-    return direction_to_name(direction)
-
-
-def parse_direction(name: str) -> Direction:
-    """Parse a Direction from its string name.
-
-    Deprecated: Use name_to_direction() from pyrat_engine.core.types instead.
-    This function is kept for backward compatibility.
-    """
-    return name_to_direction(name)
-
-
 class AIState(Enum):
     """AI process state."""
 
@@ -246,8 +228,8 @@ class AIProcess:
             return None
 
         # Send previous moves
-        rat_move_name = get_direction_name(rat_move)
-        python_move_name = get_direction_name(python_move)
+        rat_move_name = direction_to_name(rat_move)
+        python_move_name = direction_to_name(python_move)
         self._write_line(f"moves rat:{rat_move_name} python:{python_move_name}")
 
         # Send "go" command
@@ -262,13 +244,7 @@ class AIProcess:
 
             if line.startswith("move "):
                 move_str = line[5:].strip()
-                direction = parse_direction(move_str)
-                if direction is None:
-                    print(
-                        f"Invalid move from {self.player_name}: {move_str}",
-                        file=sys.stderr,
-                    )
-                    return Direction.STAY
+                direction = name_to_direction(move_str)
                 return direction
             elif line.startswith("info "):
                 # AI is sending info during move calculation, ignore for now

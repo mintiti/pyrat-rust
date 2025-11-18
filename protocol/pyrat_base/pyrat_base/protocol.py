@@ -26,34 +26,8 @@ from pyrat_base.enums import (
     player_from_string,
 )
 
-# Direction constants for validation - using canonical source from types module
-# Kept for backward compatibility
+# Direction constants for validation
 VALID_DIRECTION_NAMES = ["UP", "RIGHT", "DOWN", "LEFT", "STAY"]
-
-
-# Deprecated: Use direction_to_name() from pyrat_engine.core.types instead
-def _direction_int_to_name(direction: int) -> str:
-    """Convert direction int to name. Deprecated - use direction_to_name()."""
-    return direction_to_name(direction)
-
-
-# For backward compatibility, expose as dict-like lookup
-class _DirectionIntToNameDict:
-    """Backward compatibility wrapper for DIRECTION_INT_TO_NAME dict."""
-
-    def get(self, key: int, default: Optional[str] = None) -> str:
-        """Get direction name by int key."""
-        try:
-            return direction_to_name(key)
-        except Exception:
-            return default if default is not None else "STAY"
-
-    def __getitem__(self, key: int) -> str:
-        """Get direction name by int key."""
-        return direction_to_name(key)
-
-
-DIRECTION_INT_TO_NAME = _DirectionIntToNameDict()
 
 
 @dataclass
@@ -400,7 +374,7 @@ class Protocol:
             move = data["move"]
             if isinstance(move, int):
                 # Direction constants are exposed as plain ints from Rust
-                move = DIRECTION_INT_TO_NAME.get(move, str(move))
+                move = direction_to_name(move)
             return f"move {move}"
 
         elif response_type == ResponseType.POSTPROCESSINGDONE:
