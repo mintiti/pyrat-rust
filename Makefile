@@ -13,7 +13,7 @@ sync:
 # Build the engine component
 engine: sync
 	@echo "Building PyRat Engine..."
-	source .venv/bin/activate && cd engine && maturin develop --release
+	cd engine && uv run maturin develop --release
 
 # Build the protocol component
 protocol: sync
@@ -37,7 +37,7 @@ dev-setup:
 	@echo "Prerequisites: uv, rust toolchain"
 	uv sync --all-extras
 	@echo "Installing pre-commit hooks..."
-	source .venv/bin/activate && pre-commit install && pre-commit install --hook-type pre-push
+	uv run pre-commit install && uv run pre-commit install --hook-type pre-push
 
 # Testing
 test: test-engine test-protocol test-cli
@@ -45,19 +45,19 @@ test: test-engine test-protocol test-cli
 test-engine:
 	@echo "Running engine tests..."
 	cd engine && cargo test --lib --no-default-features
-	source .venv/bin/activate && cd engine && pytest python/tests -v
+	cd engine && uv run pytest python/tests -v
 
 test-protocol:
 	@echo "Running protocol tests..."
-	source .venv/bin/activate && cd protocol/pyrat_base && pytest tests -v -n auto || echo "No tests yet"
+	cd protocol/pyrat_base && uv run pytest tests -v -n auto || echo "No tests yet"
 
 test-cli:
 	@echo "Running CLI tests..."
-	source .venv/bin/activate && pytest cli/tests -v
+	uv run pytest cli/tests -v
 
 test-integration:
 	@echo "Running integration tests..."
-	source .venv/bin/activate && pytest tests/integration -v
+	uv run pytest tests/integration -v
 
 # Benchmarking
 bench:
@@ -69,33 +69,33 @@ bench:
 fmt:
 	@echo "Formatting code..."
 	cd engine && cargo fmt
-	source .venv/bin/activate && ruff format engine/python protocol/pyrat_base cli
+	uv run ruff format engine/python protocol/pyrat_base cli
 
 check:
 	@echo "Running checks..."
 	cd engine && cargo fmt --all -- --check
 	cd engine && cargo clippy --all-targets --no-default-features -- -D warnings
 	cd engine && cargo clippy --all-targets --all-features -- -D warnings -A non-local-definitions
-	source .venv/bin/activate && ruff check engine/python protocol/pyrat_base cli
-	source .venv/bin/activate && mypy engine/python/pyrat_engine protocol/pyrat_base/pyrat_base cli/pyrat_runner --ignore-missing-imports
+	uv run ruff check engine/python protocol/pyrat_base cli
+	uv run mypy engine/python/pyrat_engine protocol/pyrat_base/pyrat_base cli/pyrat_runner --ignore-missing-imports
 
 # Linting targets
 lint: lint-engine lint-protocol lint-cli
 
 lint-engine:
 	@echo "Linting engine Python code..."
-	source .venv/bin/activate && ruff check engine/python
-	source .venv/bin/activate && mypy engine/python/pyrat_engine --ignore-missing-imports
+	uv run ruff check engine/python
+	uv run mypy engine/python/pyrat_engine --ignore-missing-imports
 
 lint-protocol:
 	@echo "Linting protocol code..."
-	source .venv/bin/activate && ruff check protocol/pyrat_base
-	source .venv/bin/activate && mypy protocol/pyrat_base/pyrat_base --ignore-missing-imports
+	uv run ruff check protocol/pyrat_base
+	uv run mypy protocol/pyrat_base/pyrat_base --ignore-missing-imports
 
 lint-cli:
 	@echo "Linting CLI code..."
-	source .venv/bin/activate && ruff check cli
-	source .venv/bin/activate && mypy cli/pyrat_runner --ignore-missing-imports
+	uv run ruff check cli
+	uv run mypy cli/pyrat_runner --ignore-missing-imports
 
 # Clean build artifacts
 clean:

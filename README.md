@@ -31,9 +31,8 @@ cd pyrat-rust
 uv sync --all-extras
 
 # Build the Rust engine
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 cd engine
-maturin develop --release
+uv run maturin develop --release
 ```
 
 ### Run a Game

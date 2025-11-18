@@ -35,9 +35,7 @@ uv sync  # Installs pyrat_base as part of workspace
 Or standalone:
 ```bash
 cd protocol/pyrat_base
-uv venv
-source .venv/bin/activate
-uv pip install -e .
+uv sync
 ```
 
 ## Testing
