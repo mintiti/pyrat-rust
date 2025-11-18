@@ -1,13 +1,14 @@
 """Unit tests for move provider abstraction."""
 
 from typing import Optional
+from unittest.mock import MagicMock, patch
 
 from pyrat_engine import PyRat
 from pyrat_engine.core import Direction
 
 from pyrat_runner.ai_process import AIInfo
 from pyrat_runner.game_runner import run_game
-from pyrat_runner.move_providers import MoveProvider
+from pyrat_runner.move_providers import MoveProvider, SubprocessMoveProvider
 
 
 class MockMoveProvider:
@@ -71,6 +72,107 @@ class TestMoveProviderProtocol:
         assert provider.info.name == "Test"
         assert provider.start()
         assert provider.is_alive()
+
+    def test_protocol_has_all_required_methods(self):
+        """Verify MoveProvider protocol defines all required methods."""
+        # Check that the protocol has all expected attributes
+        from pyrat_runner.move_providers import MoveProvider
+
+        # These should all exist on the protocol
+        assert hasattr(MoveProvider, "info")
+        assert hasattr(MoveProvider, "start")
+        assert hasattr(MoveProvider, "send_game_start")
+        assert hasattr(MoveProvider, "get_move")
+        assert hasattr(MoveProvider, "send_game_over")
+        assert hasattr(MoveProvider, "stop")
+        assert hasattr(MoveProvider, "is_alive")
+
+    def test_mock_provider_has_all_protocol_methods(self):
+        """Verify MockMoveProvider has all methods defined by the protocol."""
+        provider = MockMoveProvider("Test", [Direction.UP])
+
+        # Verify all methods exist and are callable
+        assert hasattr(provider, "info")
+        assert hasattr(provider, "start")
+        assert callable(provider.start)
+        assert hasattr(provider, "send_game_start")
+        assert callable(provider.send_game_start)
+        assert hasattr(provider, "get_move")
+        assert callable(provider.get_move)
+        assert hasattr(provider, "send_game_over")
+        assert callable(provider.send_game_over)
+        assert hasattr(provider, "stop")
+        assert callable(provider.stop)
+        assert hasattr(provider, "is_alive")
+        assert callable(provider.is_alive)
+
+    def test_mock_provider_info_property(self):
+        """Test MockMoveProvider info property."""
+        provider = MockMoveProvider("TestBot", [Direction.STAY])
+
+        assert isinstance(provider.info, AIInfo)
+        assert provider.info.name == "TestBot"
+        assert provider.info.author == "Test Author"
+
+    def test_mock_provider_lifecycle(self):
+        """Test MockMoveProvider lifecycle methods."""
+        provider = MockMoveProvider("TestBot", [Direction.UP, Direction.DOWN])
+
+        # Test start
+        assert provider.start() is True
+        assert provider._started is True
+
+        # Test send_game_start
+        game = PyRat(width=5, height=5, cheese_count=1, seed=42)
+        provider.send_game_start(game, 3.0)
+        assert provider._game_started is True
+
+        # Test get_move
+        move = provider.get_move(Direction.STAY, Direction.STAY)
+        assert move == Direction.UP
+        move = provider.get_move(Direction.UP, Direction.STAY)
+        assert move == Direction.DOWN
+
+        # Test is_alive
+        assert provider.is_alive() is True
+
+        # Test send_game_over
+        provider.send_game_over("rat", 5.0, 3.0)
+        assert provider._game_over_called is True
+
+        # Test stop
+        provider.stop()  # Should not raise
+
+    def test_mock_provider_moves_exhausted(self):
+        """Test MockMoveProvider behavior when moves are exhausted."""
+        provider = MockMoveProvider("TestBot", [Direction.UP])
+
+        # First move from list
+        move = provider.get_move(Direction.STAY, Direction.STAY)
+        assert move == Direction.UP
+
+        # Subsequent moves default to STAY
+        move = provider.get_move(Direction.UP, Direction.STAY)
+        assert move == Direction.STAY
+
+    def test_mock_provider_with_none_move(self):
+        """Test MockMoveProvider can return None (simulating timeout)."""
+        provider = MockMoveProvider("TestBot", [Direction.UP, None, Direction.DOWN])
+
+        move1 = provider.get_move(Direction.STAY, Direction.STAY)
+        assert move1 == Direction.UP
+
+        move2 = provider.get_move(Direction.UP, Direction.STAY)
+        assert move2 is None
+
+        move3 = provider.get_move(Direction.UP, Direction.STAY)
+        assert move3 == Direction.DOWN
+
+    def test_mock_provider_dead_state(self):
+        """Test MockMoveProvider when marked as not alive."""
+        provider = MockMoveProvider("TestBot", [Direction.UP], alive=False)
+
+        assert provider.is_alive() is False
 
 
 class TestRunGameFunction:
@@ -166,6 +268,138 @@ class TestSubprocessMoveProvider:
             script_path="/fake/path.py", player_name="rat", timeout=1.0
         )
         assert provider is not None
+
+    def test_subprocess_provider_implements_protocol(self):
+        """Test that SubprocessMoveProvider satisfies MoveProvider protocol."""
+        provider: MoveProvider = SubprocessMoveProvider(
+            script_path="/fake/path.py", player_name="rat", timeout=1.0
+        )
+        # If this compiles without type errors, the protocol is satisfied
+        assert hasattr(provider, "info")
+        assert hasattr(provider, "start")
+        assert hasattr(provider, "send_game_start")
+        assert hasattr(provider, "get_move")
+        assert hasattr(provider, "send_game_over")
+        assert hasattr(provider, "stop")
+        assert hasattr(provider, "is_alive")
+
+    @patch("pyrat_runner.move_providers.AIProcess")
+    def test_subprocess_provider_delegates_info(self, mock_ai_process_class):
+        """Test that info property delegates to AIProcess."""
+        mock_ai_instance = MagicMock()
+        mock_info = AIInfo(name="TestAI", author="Test Author")
+        mock_ai_instance.info = mock_info
+        mock_ai_process_class.return_value = mock_ai_instance
+
+        provider = SubprocessMoveProvider(
+            script_path="/fake/path.py", player_name="rat", timeout=1.0
+        )
+
+        assert provider.info == mock_info
+        assert provider.info.name == "TestAI"
+        assert provider.info.author == "Test Author"
+
+    @patch("pyrat_runner.move_providers.AIProcess")
+    def test_subprocess_provider_delegates_start(self, mock_ai_process_class):
+        """Test that start() delegates to AIProcess.start()."""
+        mock_ai_instance = MagicMock()
+        mock_ai_instance.start.return_value = True
+        mock_ai_process_class.return_value = mock_ai_instance
+
+        provider = SubprocessMoveProvider(
+            script_path="/fake/path.py", player_name="rat", timeout=1.0
+        )
+
+        result = provider.start()
+
+        assert result is True
+        mock_ai_instance.start.assert_called_once()
+
+    @patch("pyrat_runner.move_providers.AIProcess")
+    def test_subprocess_provider_delegates_send_game_start(self, mock_ai_process_class):
+        """Test that send_game_start() delegates to AIProcess."""
+        mock_ai_instance = MagicMock()
+        mock_ai_process_class.return_value = mock_ai_instance
+
+        provider = SubprocessMoveProvider(
+            script_path="/fake/path.py", player_name="rat", timeout=1.0
+        )
+
+        game = PyRat(width=5, height=5, cheese_count=1, seed=42)
+        provider.send_game_start(game, preprocessing_time=3.0)
+
+        mock_ai_instance.send_game_start.assert_called_once_with(game, 3.0)
+
+    @patch("pyrat_runner.move_providers.AIProcess")
+    def test_subprocess_provider_delegates_get_move(self, mock_ai_process_class):
+        """Test that get_move() delegates to AIProcess.get_move()."""
+        mock_ai_instance = MagicMock()
+        mock_ai_instance.get_move.return_value = Direction.UP
+        mock_ai_process_class.return_value = mock_ai_instance
+
+        provider = SubprocessMoveProvider(
+            script_path="/fake/path.py", player_name="rat", timeout=1.0
+        )
+
+        move = provider.get_move(Direction.STAY, Direction.LEFT)
+
+        assert move == Direction.UP
+        mock_ai_instance.get_move.assert_called_once_with(Direction.STAY, Direction.LEFT)
+
+    @patch("pyrat_runner.move_providers.AIProcess")
+    def test_subprocess_provider_delegates_send_game_over(self, mock_ai_process_class):
+        """Test that send_game_over() delegates to AIProcess."""
+        mock_ai_instance = MagicMock()
+        mock_ai_process_class.return_value = mock_ai_instance
+
+        provider = SubprocessMoveProvider(
+            script_path="/fake/path.py", player_name="rat", timeout=1.0
+        )
+
+        provider.send_game_over("rat", 10.0, 5.0)
+
+        mock_ai_instance.send_game_over.assert_called_once_with("rat", 10.0, 5.0)
+
+    @patch("pyrat_runner.move_providers.AIProcess")
+    def test_subprocess_provider_delegates_stop(self, mock_ai_process_class):
+        """Test that stop() delegates to AIProcess.stop()."""
+        mock_ai_instance = MagicMock()
+        mock_ai_process_class.return_value = mock_ai_instance
+
+        provider = SubprocessMoveProvider(
+            script_path="/fake/path.py", player_name="rat", timeout=1.0
+        )
+
+        provider.stop()
+
+        mock_ai_instance.stop.assert_called_once()
+
+    @patch("pyrat_runner.move_providers.AIProcess")
+    def test_subprocess_provider_delegates_is_alive(self, mock_ai_process_class):
+        """Test that is_alive() delegates to AIProcess.is_alive()."""
+        mock_ai_instance = MagicMock()
+        mock_ai_instance.is_alive.return_value = True
+        mock_ai_process_class.return_value = mock_ai_instance
+
+        provider = SubprocessMoveProvider(
+            script_path="/fake/path.py", player_name="rat", timeout=1.0
+        )
+
+        result = provider.is_alive()
+
+        assert result is True
+        mock_ai_instance.is_alive.assert_called_once()
+
+    @patch("pyrat_runner.move_providers.AIProcess")
+    def test_subprocess_provider_passes_init_params(self, mock_ai_process_class):
+        """Test that SubprocessMoveProvider passes correct params to AIProcess."""
+        SubprocessMoveProvider(
+            script_path="/path/to/script.py", player_name="python", timeout=2.5
+        )
+
+        mock_ai_process_class.assert_called_once_with(
+            "/path/to/script.py", "python", 2.5
+        )
 
 
 class TestGameRunnerRefactoring:
