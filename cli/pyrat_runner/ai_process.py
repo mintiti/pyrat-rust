@@ -10,29 +10,7 @@ from enum import Enum
 from typing import Optional
 
 from pyrat_engine.core import Direction
-
-
-# Direction name mapping
-DIRECTION_NAMES = {0: "UP", 1: "RIGHT", 2: "DOWN", 3: "LEFT", 4: "STAY"}
-
-# Reverse mapping for parsing
-DIRECTION_FROM_NAME = {
-    "UP": Direction.UP,
-    "DOWN": Direction.DOWN,
-    "LEFT": Direction.LEFT,
-    "RIGHT": Direction.RIGHT,
-    "STAY": Direction.STAY,
-}
-
-
-def get_direction_name(direction: Direction) -> str:
-    """Get the string name of a Direction."""
-    return DIRECTION_NAMES.get(int(direction), "STAY")
-
-
-def parse_direction(name: str) -> Direction:
-    """Parse a Direction from its string name."""
-    return DIRECTION_FROM_NAME.get(name, Direction.STAY)
+from pyrat_engine.core.types import direction_to_name, name_to_direction
 
 
 class AIState(Enum):
@@ -250,8 +228,8 @@ class AIProcess:
             return None
 
         # Send previous moves
-        rat_move_name = get_direction_name(rat_move)
-        python_move_name = get_direction_name(python_move)
+        rat_move_name = direction_to_name(rat_move)
+        python_move_name = direction_to_name(python_move)
         self._write_line(f"moves rat:{rat_move_name} python:{python_move_name}")
 
         # Send "go" command
@@ -266,13 +244,7 @@ class AIProcess:
 
             if line.startswith("move "):
                 move_str = line[5:].strip()
-                direction = parse_direction(move_str)
-                if direction is None:
-                    print(
-                        f"Invalid move from {self.player_name}: {move_str}",
-                        file=sys.stderr,
-                    )
-                    return Direction.STAY
+                direction = name_to_direction(move_str)
                 return direction
             elif line.startswith("info "):
                 # AI is sending info during move calculation, ignore for now

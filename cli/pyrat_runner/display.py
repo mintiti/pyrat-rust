@@ -6,17 +6,7 @@ from dataclasses import dataclass
 from typing import Dict, FrozenSet, List, Optional, Set, Tuple
 
 from pyrat_engine.core import Direction
-
-
-# Direction name mapping
-DIRECTION_NAMES = {0: "UP", 1: "RIGHT", 2: "DOWN", 3: "LEFT", 4: "STAY"}
-
-
-def get_direction_name(direction: Direction) -> str:
-    """Get the string name of a Direction."""
-    if direction is None:
-        return "NONE"
-    return DIRECTION_NAMES.get(int(direction), "STAY")
+from pyrat_engine.core.types import direction_to_name
 
 
 @dataclass(frozen=True)
@@ -303,7 +293,7 @@ def render_header(
     lines.append(f"    Position : ({rat_pos[0]}, {rat_pos[1]})")
     lines.append(f"    Score    : {rat_score:.1f}")
     if rat_move is not None:
-        lines.append(f"    Last move: {get_direction_name(rat_move)}")
+        lines.append(f"    Last move: {direction_to_name(rat_move)}")
     lines.append("")
 
     # Player 2 (Python) info
@@ -311,7 +301,7 @@ def render_header(
     lines.append(f"    Position : ({python_pos[0]}, {python_pos[1]})")
     lines.append(f"    Score    : {python_score:.1f}")
     if python_move is not None:
-        lines.append(f"    Last move: {get_direction_name(python_move)}")
+        lines.append(f"    Last move: {direction_to_name(python_move)}")
     lines.append("")
 
     lines.append(f"Turn: {turn}")

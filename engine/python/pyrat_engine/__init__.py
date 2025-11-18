@@ -21,7 +21,15 @@ Example:
 """
 
 from pyrat_engine.core.game import GameState, MoveUndo
-from pyrat_engine.core.types import Coordinates, Direction, Mud, Wall
+from pyrat_engine.core.types import (
+    Coordinates,
+    Direction,
+    Mud,
+    Wall,
+    direction_to_name,
+    is_valid_direction,
+    name_to_direction,
+)
 from pyrat_engine.game import GameResult, PyRat
 
 __version__ = "0.1.0"
@@ -34,4 +42,7 @@ __all__ = [
     "Mud",
     "PyRat",
     "Wall",
+    "direction_to_name",
+    "is_valid_direction",
+    "name_to_direction",
 ]

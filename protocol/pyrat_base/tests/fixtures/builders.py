@@ -3,9 +3,9 @@
 from typing import List, Optional, Tuple
 
 from pyrat_engine.core import Direction
+from pyrat_engine.core.types import direction_to_name
 
 from pyrat_base.enums import Player
-from pyrat_base.protocol import DIRECTION_INT_TO_NAME
 
 # Note: We now use PyGameConfigBuilder directly instead of a custom MazeBuilder
 # Example usage:
@@ -114,7 +114,7 @@ class CommandSequenceBuilder:
     ) -> "CommandSequenceBuilder":
         """Add move broadcast."""
         self.add(
-            f"moves rat:{DIRECTION_INT_TO_NAME[rat_move]} python:{DIRECTION_INT_TO_NAME[python_move]}"
+            f"moves rat:{direction_to_name(rat_move)} python:{direction_to_name(python_move)}"
         )
         return self
 
@@ -167,9 +167,9 @@ class ProtocolExchangeBuilder:
     ) -> "ProtocolExchangeBuilder":
         """Add complete move exchange."""
         self.engine("go")
-        self.ai(f"move {DIRECTION_INT_TO_NAME[ai_move]}")
+        self.ai(f"move {direction_to_name(ai_move)}")
         self.engine(
-            f"moves rat:{DIRECTION_INT_TO_NAME[rat_move]} python:{DIRECTION_INT_TO_NAME[python_move]}"
+            f"moves rat:{direction_to_name(rat_move)} python:{direction_to_name(python_move)}"
         )
         return self
 

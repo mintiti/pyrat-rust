@@ -10,10 +10,9 @@ This AI demonstrates:
 import random
 
 from pyrat_engine.core import DirectionType
-from pyrat_engine.core.types import Direction
+from pyrat_engine.core.types import Direction, direction_to_name
 
 from pyrat_base import ProtocolState, PyRatAI
-from pyrat_base.protocol import DIRECTION_INT_TO_NAME
 
 
 class RandomAI(PyRatAI):
@@ -37,7 +36,7 @@ class RandomAI(PyRatAI):
 
         # Log our choice if in debug mode
         self.log(
-            f"Position: {state.my_position}, Choosing: {DIRECTION_INT_TO_NAME[move]}"
+            f"Position: {state.my_position}, Choosing: {direction_to_name(move)}"
         )
 
         return move

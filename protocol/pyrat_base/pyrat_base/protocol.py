@@ -15,6 +15,8 @@ Note on linting exceptions:
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
+from pyrat_engine.core.types import direction_to_name
+
 from pyrat_base.enums import (
     CommandType,
     Player,
@@ -24,10 +26,8 @@ from pyrat_base.enums import (
     player_from_string,
 )
 
-# Direction constants for validation and formatting
-# Direction from Rust is exposed as integer constants, not an iterable enum
+# Direction constants for validation
 VALID_DIRECTION_NAMES = ["UP", "RIGHT", "DOWN", "LEFT", "STAY"]
-DIRECTION_INT_TO_NAME = {0: "UP", 1: "RIGHT", 2: "DOWN", 3: "LEFT", 4: "STAY"}
 
 
 @dataclass
@@ -374,7 +374,7 @@ class Protocol:
             move = data["move"]
             if isinstance(move, int):
                 # Direction constants are exposed as plain ints from Rust
-                move = DIRECTION_INT_TO_NAME.get(move, str(move))
+                move = direction_to_name(move)
             return f"move {move}"
 
         elif response_type == ResponseType.POSTPROCESSINGDONE:
