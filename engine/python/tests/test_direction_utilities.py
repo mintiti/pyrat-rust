@@ -6,7 +6,6 @@ is_valid_direction().
 """
 
 import pytest
-
 from pyrat_engine.core.types import (
     Direction,
     direction_to_name,

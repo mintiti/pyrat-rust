@@ -103,6 +103,6 @@ __all__ = [
     "Mud",
     "Wall",
     "direction_to_name",
-    "name_to_direction",
     "is_valid_direction",
+    "name_to_direction",
 ]
