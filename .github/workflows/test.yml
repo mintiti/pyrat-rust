@@ -65,16 +65,10 @@ jobs:
       run: uv sync --all-extras
 
     - name: Build Rust extension
-      run: |
-        source .venv/bin/activate
-        cd engine
-        maturin develop --release
+      run: uv run --directory engine maturin develop --release
 
     - name: Run Engine tests
-      run: |
-        source .venv/bin/activate
-        cd engine
-        pytest python/tests -v
+      run: uv run --directory engine pytest python/tests -v
 
   test-protocol:
     name: Protocol Tests (Python ${{ matrix.python-version }})
@@ -127,16 +121,10 @@ jobs:
       run: uv sync --all-extras
 
     - name: Build Rust extension
-      run: |
-        source .venv/bin/activate
-        cd engine
-        maturin develop --release
+      run: uv run --directory engine maturin develop --release
 
     - name: Run Protocol tests
-      run: |
-        source .venv/bin/activate
-        cd protocol/pyrat_base
-        pytest tests -v -n auto
+      run: uv run --directory protocol/pyrat_base pytest tests -v -n auto
 
   test-cli:
     name: CLI Tests (Python ${{ matrix.python-version }})
@@ -189,12 +177,7 @@ jobs:
       run: uv sync --all-extras
 
     - name: Build Rust extension
-      run: |
-        source .venv/bin/activate
-        cd engine
-        maturin develop --release
+      run: uv run --directory engine maturin develop --release
 
     - name: Run CLI tests
-      run: |
-        source .venv/bin/activate
-        pytest cli/tests -v
+      run: uv run pytest cli/tests -v

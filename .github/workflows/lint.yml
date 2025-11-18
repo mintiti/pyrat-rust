@@ -43,37 +43,19 @@ jobs:
       run: uv sync --all-extras
 
     - name: Check Engine Python formatting
-      run: |
-        source .venv/bin/activate
-        cd engine
-        ruff check python/
+      run: uv run --directory engine ruff check python/
 
     - name: Type check Engine Python
-      run: |
-        source .venv/bin/activate
-        cd engine
-        mypy python/pyrat_engine --ignore-missing-imports
+      run: uv run --directory engine mypy python/pyrat_engine --ignore-missing-imports
 
     - name: Check Protocol formatting
-      run: |
-        source .venv/bin/activate
-        cd protocol/pyrat_base
-        ruff check pyrat_base
+      run: uv run --directory protocol/pyrat_base ruff check pyrat_base
 
     - name: Type check Protocol
-      run: |
-        source .venv/bin/activate
-        cd protocol/pyrat_base
-        mypy pyrat_base --ignore-missing-imports
+      run: uv run --directory protocol/pyrat_base mypy pyrat_base --ignore-missing-imports
 
     - name: Check CLI formatting
-      run: |
-        source .venv/bin/activate
-        cd cli
-        ruff check pyrat_runner
+      run: uv run --directory cli ruff check pyrat_runner
 
     - name: Type check CLI
-      run: |
-        source .venv/bin/activate
-        cd cli
-        mypy pyrat_runner --ignore-missing-imports
+      run: uv run --directory cli mypy pyrat_runner --ignore-missing-imports

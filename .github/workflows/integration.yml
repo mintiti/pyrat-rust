@@ -64,12 +64,7 @@ jobs:
       run: uv sync --all-extras
 
     - name: Build Rust extension
-      run: |
-        source .venv/bin/activate
-        cd engine
-        maturin develop --release
+      run: uv run --directory engine maturin develop --release
 
     - name: Run integration tests
-      run: |
-        source .venv/bin/activate
-        pytest tests/integration -v
+      run: uv run pytest tests/integration -v
