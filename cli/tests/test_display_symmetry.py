@@ -150,6 +150,12 @@ def extract_entity_positions(board: str) -> Dict[str, Set[Tuple[int, int]]]:
 
     Parses the board to find where R, P, and C appear.
 
+    The board format is:
+    - Each cell is 5 characters wide
+    - Cells are separated by vertical separators (│, ┊, or space)
+    - Y coordinates are labeled at the start of each row
+    - X coordinates are labeled in the header
+
     Args:
         board: Rendered board string
 
@@ -169,8 +175,7 @@ def extract_entity_positions(board: str) -> Dict[str, Set[Tuple[int, int]]]:
 
     # Process board from top to bottom
     # Each cell row is followed by a separator row
-    y = None
-    for i, line in enumerate(board_lines):
+    for line in board_lines:
         # Cell rows have y-coordinate at start and walls '│' at edges
         if "│" in line and not all(c in "─┈ ┼+│" for c in line.strip()):
             # Extract y-coordinate from the start of the line
@@ -178,27 +183,186 @@ def extract_entity_positions(board: str) -> Dict[str, Set[Tuple[int, int]]]:
             if y_match:
                 y = int(y_match.group(1))
 
-                # Find entities in this row
-                # Each cell is 5 chars wide, separated by wall chars
-                # Remove the y-label and borders
+                # Remove the y-label and left border
+                content = re.sub(r"^\s*\d+\s*│", "", line)
+                content = content.rstrip("│")  # Remove right border
+
+                # Each cell is 5 chars wide, with separators between them
+                # Pattern: [5 chars][separator][5 chars][separator]...
+                # Separators are │, ┊, or space (single char)
+
+                x = 0
+                pos = 0
+                while pos < len(content):
+                    # Extract next 5 characters (cell content)
+                    cell = content[pos : pos + 5]
+
+                    # Check for entities in this cell
+                    if "R" in cell:
+                        positions["R"].add((x, y))
+                    if "P" in cell:
+                        positions["P"].add((x, y))
+                    if "C" in cell:
+                        positions["C"].add((x, y))
+
+                    # Move to next cell (5 chars + 1 separator)
+                    pos += 6
+                    x += 1
+
+    return positions
+
+
+def extract_wall_positions(board: str) -> Set[Tuple[Tuple[int, int], Tuple[int, int]]]:
+    """Extract wall positions from a rendered board.
+
+    Walls appear as:
+    - Vertical walls: │ character between cells (at x position)
+    - Horizontal walls: ───── (solid line) between rows (at y position)
+
+    Args:
+        board: Rendered board string
+
+    Returns:
+        Set of walls as ((x1, y1), (x2, y2)) tuples
+    """
+    walls = set()
+
+    clean_board = strip_ansi_codes(board)
+    lines = clean_board.strip().split("\n")
+
+    # Skip header
+    board_lines = lines[2:]
+
+    # Track current y coordinate
+    current_y = None
+
+    for line in board_lines:
+        # Cell rows (with y-coordinate label)
+        if "│" in line and not all(c in "─┈ ┼+│" for c in line.strip()):
+            y_match = re.match(r"\s*(\d+)\s*│", line)
+            if y_match:
+                current_y = int(y_match.group(1))
+
+                # Extract vertical walls
                 content = re.sub(r"^\s*\d+\s*│", "", line)
                 content = content.rstrip("│")
 
-                # Split by separators (│, ┊, or space)
-                cells = re.split(r"[│┊ ]", content)
-
                 x = 0
-                for cell in cells:
-                    if cell.strip():  # Non-empty cell content
-                        if "R" in cell:
-                            positions["R"].add((x, y))
-                        if "P" in cell:
-                            positions["P"].add((x, y))
-                        if "C" in cell:
-                            positions["C"].add((x, y))
+                pos = 0
+                while pos < len(content):
+                    # Check separator after this cell
+                    if pos + 5 < len(content):
+                        separator = content[pos + 5]
+                        if separator == "│":
+                            # The separator after rendering cell x is obtained by calling
+                            # get_vertical_separator(x+1, y) which checks if (x+1, y) in v_walls
+                            # So this wall is stored at (x+1, y) and connects cells (x+1, y) and (x+2, y)
+                            walls.add(((x + 1, current_y), (x + 2, current_y)))
+
+                    pos += 6
+                    x += 1
+
+        # Separator rows (horizontal walls/mud)
+        elif "┼" in line and "─" in line:
+            # This is a horizontal separator row
+            # It separates row current_y from row current_y - 1
+            if current_y is not None and current_y > 0:
+                # Parse horizontal walls
+                # Skip the leading spaces and ┼
+                content_start = line.find("┼")
+                if content_start >= 0:
+                    content = line[content_start + 1 :]
+
+                    x = 0
+                    pos = 0
+                    while pos < len(content):
+                        # Extract next 5 characters (cell separator)
+                        segment = content[pos : pos + 5]
+                        if segment == "─────":
+                            # Horizontal separators are obtained by calling
+                            # get_horizontal_separator(x, y-1) which checks if (x, y-1) in h_walls
+                            # So this wall connects cells (x, current_y-1) and (x, current_y)
+                            walls.add(((x, current_y - 1), (x, current_y)))
+
+                        # Move to next position (5 chars + 1 separator)
+                        pos += 6
                         x += 1
 
-    return positions
+    return walls
+
+
+def extract_mud_positions(board: str) -> Set[Tuple[Tuple[int, int], Tuple[int, int]]]:
+    """Extract mud positions from a rendered board.
+
+    Mud appears as:
+    - Vertical mud: ┊ character between cells (at x position)
+    - Horizontal mud: ┈┈┈┈┈ (dotted line) between rows (at y position)
+
+    Args:
+        board: Rendered board string
+
+    Returns:
+        Set of mud passages as ((x1, y1), (x2, y2)) tuples
+    """
+    mud = set()
+
+    clean_board = strip_ansi_codes(board)
+    lines = clean_board.strip().split("\n")
+
+    # Skip header
+    board_lines = lines[2:]
+
+    # Track current y coordinate
+    current_y = None
+
+    for line in board_lines:
+        # Cell rows (with y-coordinate label)
+        if "│" in line and not all(c in "─┈ ┼+│" for c in line.strip()):
+            y_match = re.match(r"\s*(\d+)\s*│", line)
+            if y_match:
+                current_y = int(y_match.group(1))
+
+                # Extract vertical mud
+                content = re.sub(r"^\s*\d+\s*│", "", line)
+                content = content.rstrip("│")
+
+                x = 0
+                pos = 0
+                while pos < len(content):
+                    # Check separator after this cell
+                    if pos + 5 < len(content):
+                        separator = content[pos + 5]
+                        if separator == "┊":
+                            # Same logic as vertical walls
+                            # Vertical mud stored at (x+1, y) connects cells (x+1, y) and (x+2, y)
+                            mud.add(((x + 1, current_y), (x + 2, current_y)))
+
+                    pos += 6
+                    x += 1
+
+        # Separator rows (horizontal walls/mud)
+        elif "┼" in line and ("─" in line or "┈" in line):
+            # This is a horizontal separator row
+            if current_y is not None and current_y > 0:
+                # Parse horizontal mud
+                content_start = line.find("┼")
+                if content_start >= 0:
+                    content = line[content_start + 1 :]
+
+                    x = 0
+                    pos = 0
+                    while pos < len(content):
+                        # Extract next 5 characters (cell separator)
+                        segment = content[pos : pos + 5]
+                        if segment == "┈┈┈┈┈":
+                            # Horizontal mud between (x, current_y-1) and (x, current_y)
+                            mud.add(((x, current_y - 1), (x, current_y)))
+
+                        # Move to next position (5 chars + 1 separator)
+                        pos += 6
+                        x += 1
+
+    return mud
 
 
 # ===========================
@@ -870,3 +1034,188 @@ class TestEdgeCases:
         # Render and verify both show as mud
         board = render_board(width, height, (0, 0), (4, 4), set(), structures)
         assert "┊" in board  # Vertical mud character
+
+
+# ===========================
+# Direct Rendering Verification Tests
+# ===========================
+
+
+class TestDirectRenderingVerification:
+    """Direct verification that rendered output matches input game state.
+
+    These tests create games with known configurations, render them,
+    parse the output, and verify that what we parse matches what we put in.
+    This directly verifies rendering correctness.
+    """
+
+    def test_render_5x5_minimal(self):
+        """Test 5×5 board with minimal elements."""
+        width, height = 5, 5
+
+        # Known configuration
+        rat_pos = (1, 1)
+        python_pos = (3, 3)
+        cheese = [(2, 2)]
+        walls = [
+            ((1, 2), (2, 2)),  # Vertical wall
+            ((3, 1), (3, 2)),  # Horizontal wall
+        ]
+
+        # Render
+        structures = build_maze_structures(walls, {})
+        board = render_board(
+            width, height, rat_pos, python_pos, set(cheese), structures
+        )
+
+        # Parse
+        positions = extract_entity_positions(board)
+        extracted_walls = extract_wall_positions(board)
+
+        # Verify entities
+        assert positions["R"] == {rat_pos}, "Rat position mismatch"
+        assert positions["P"] == {python_pos}, "Python position mismatch"
+        assert positions["C"] == set(cheese), "Cheese positions mismatch"
+
+        # Verify walls
+        assert set(extracted_walls) == set(walls), "Wall positions mismatch"
+
+    def test_render_7x7_with_multiple_elements(self):
+        """Test 7×7 board with multiple walls, mud, and cheese."""
+        width, height = 7, 7
+
+        # Known configuration
+        rat_pos = (0, 0)
+        python_pos = (6, 6)
+        cheese = [(1, 2), (3, 3), (5, 4)]
+        walls = [
+            ((2, 1), (3, 1)),  # Vertical wall
+            ((4, 3), (5, 3)),  # Vertical wall
+            ((1, 2), (1, 3)),  # Horizontal wall
+            ((5, 4), (5, 5)),  # Horizontal wall
+        ]
+        mud = [
+            ((1, 1), (2, 1), 2),  # Vertical mud
+            ((3, 2), (3, 3), 3),  # Horizontal mud
+        ]
+
+        # Render
+        mud_dict = {(cell1, cell2): turns for (cell1, cell2, turns) in mud}
+        structures = build_maze_structures(walls, mud_dict)
+        board = render_board(
+            width, height, rat_pos, python_pos, set(cheese), structures
+        )
+
+        # Parse
+        positions = extract_entity_positions(board)
+        extracted_walls = extract_wall_positions(board)
+        extracted_mud = extract_mud_positions(board)
+
+        # Verify entities
+        assert positions["R"] == {rat_pos}
+        assert positions["P"] == {python_pos}
+        assert positions["C"] == set(cheese)
+
+        # Verify walls
+        assert set(extracted_walls) == set(walls)
+
+        # Verify mud (only check positions, not turn counts)
+        expected_mud_positions = {(cell1, cell2) for (cell1, cell2, turns) in mud}
+        assert extracted_mud == expected_mud_positions
+
+    def test_render_different_sizes(self):
+        """Test rendering with different board dimensions."""
+        test_cases = [
+            (3, 3, (0, 0), (2, 2), [(1, 1)]),
+            (8, 6, (0, 0), (7, 5), [(2, 2), (5, 3)]),
+            (11, 9, (1, 1), (9, 7), [(3, 3), (5, 5), (7, 6)]),
+        ]
+
+        for width, height, rat_pos, python_pos, cheese in test_cases:
+            structures = build_maze_structures([], {})
+            board = render_board(
+                width, height, rat_pos, python_pos, set(cheese), structures
+            )
+
+            positions = extract_entity_positions(board)
+
+            assert positions["R"] == {rat_pos}, f"Rat mismatch at {width}×{height}"
+            assert positions["P"] == {
+                python_pos
+            }, f"Python mismatch at {width}×{height}"
+            assert positions["C"] == set(cheese), f"Cheese mismatch at {width}×{height}"
+
+    def test_render_boundary_positions(self):
+        """Test entities at board boundaries."""
+        width, height = 5, 5
+
+        # Test all four corners
+        corners = [(0, 0), (4, 0), (0, 4), (4, 4)]
+
+        for corner in corners:
+            structures = build_maze_structures([], {})
+            board = render_board(width, height, corner, (2, 2), {corner}, structures)
+
+            positions = extract_entity_positions(board)
+
+            assert positions["R"] == {
+                corner
+            }, f"Rat at corner {corner} not rendered correctly"
+            assert positions["C"] == {
+                corner
+            }, f"Cheese at corner {corner} not rendered correctly"
+
+    def test_render_overlapping_entities(self):
+        """Test entities at the same position."""
+        width, height = 5, 5
+
+        # Rat, Python, and Cheese all at (2, 2)
+        pos = (2, 2)
+
+        structures = build_maze_structures([], {})
+        board = render_board(width, height, pos, pos, {pos}, structures)
+
+        positions = extract_entity_positions(board)
+
+        # All three should be detected at the same position
+        assert positions["R"] == {pos}, "Rat not detected when overlapping"
+        assert positions["P"] == {pos}, "Python not detected when overlapping"
+        assert positions["C"] == {pos}, "Cheese not detected when overlapping"
+
+    def test_render_walls_at_all_edges(self):
+        """Test walls at all four edges of the board."""
+        width, height = 5, 5
+
+        walls = [
+            ((0, 2), (0, 3)),  # Left edge horizontal
+            ((4, 2), (4, 3)),  # Right edge horizontal
+            ((2, 0), (3, 0)),  # Bottom edge vertical
+            ((2, 4), (3, 4)),  # Top edge vertical
+        ]
+
+        structures = build_maze_structures(walls, {})
+        board = render_board(width, height, (1, 1), (3, 3), set(), structures)
+
+        extracted_walls = extract_wall_positions(board)
+
+        assert set(extracted_walls) == set(
+            walls
+        ), "Boundary walls not rendered correctly"
+
+    def test_render_center_position_odd_dimensions(self):
+        """Test center position in odd-dimension board."""
+        width, height = 7, 7
+        center = (3, 3)
+
+        structures = build_maze_structures([], {})
+        board = render_board(width, height, (0, 0), center, {center}, structures)
+
+        positions = extract_entity_positions(board)
+
+        # Verify center is self-symmetric
+        sym_x, sym_y = get_symmetric_position(center[0], center[1], width, height)
+        assert (sym_x, sym_y) == center, "Center should be self-symmetric"
+
+        # Verify rendering
+        assert positions["P"] == {center}
+        assert positions["C"] == {center}
