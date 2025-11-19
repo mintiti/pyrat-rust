@@ -255,9 +255,9 @@ def extract_wall_positions(board: str) -> Set[Tuple[Tuple[int, int], Tuple[int, 
                         separator = content[pos + 5]
                         if separator == "│":
                             # The separator after rendering cell x is obtained by calling
-                            # get_vertical_separator(x+1, y) which checks if (x+1, y) in v_walls
-                            # So this wall is stored at (x+1, y) and connects cells (x+1, y) and (x+2, y)
-                            walls.add(((x + 1, current_y), (x + 2, current_y)))
+                            # get_vertical_separator(x, y) which checks if (x, y) in v_walls
+                            # So this wall is stored at (x, y) and connects cells (x, y) and (x+1, y)
+                            walls.add(((x, current_y), (x + 1, current_y)))
 
                     pos += 6
                     x += 1
@@ -334,8 +334,8 @@ def extract_mud_positions(board: str) -> Set[Tuple[Tuple[int, int], Tuple[int, i
                         separator = content[pos + 5]
                         if separator == "┊":
                             # Same logic as vertical walls
-                            # Vertical mud stored at (x+1, y) connects cells (x+1, y) and (x+2, y)
-                            mud.add(((x + 1, current_y), (x + 2, current_y)))
+                            # Vertical mud stored at (x, y) connects cells (x, y) and (x+1, y)
+                            mud.add(((x, current_y), (x + 1, current_y)))
 
                     pos += 6
                     x += 1
