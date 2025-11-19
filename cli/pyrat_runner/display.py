@@ -233,7 +233,7 @@ def render_board(
         for x in range(width):
             cells_row += get_cell_content(x, y, rat_pos, python_pos, cheese_set)
             if x < width - 1:
-                cells_row += get_vertical_separator(x + 1, y, structures)
+                cells_row += get_vertical_separator(x, y, structures)
             else:
                 cells_row += VERTICAL_WALL
         lines.append(cells_row)
