@@ -1,30 +1,6 @@
-"""Compositional tests for display symmetry and coordinate transformations.
+"""Tests that symmetric games render with 180° rotational symmetry.
 
-This test suite verifies that PyRat's display system correctly preserves
-180° rotational symmetry through each transformation level:
-
-Level 0: GameState (Rust/Engine)
-         ↓ [extract: wall_entries(), mud_positions, cheese_positions]
-Level 1: Raw Data (Python tuples/dicts)
-         ↓ [transform: build_maze_structures()]
-Level 2: MazeStructures (normalized sets: h_walls, v_walls, h_mud, v_mud)
-         ↓ [render: get_cell_content(), get_*_separator()]
-Level 3: Rendering primitives (individual strings)
-         ↓ [compose: render_board()]
-Level 4: Complete board (multi-line string)
-
-For each transformation T and symmetry operation S (180° rotation):
-    T(S(input)) = S(T(output))
-
-If symmetry is preserved at each level, it's preserved through the entire composition.
-
-Coordinate System Specification:
-- Origin (0,0) is at bottom-left corner
-- X-axis increases rightward
-- Y-axis increases upward
-- Wall between (x,y) and (x+1,y) appears RIGHT of cell (x,y)
-- Wall between (x,y) and (x,y+1) appears ABOVE cell (x,y)
-- 180° rotation: (x,y) → (width-1-x, height-1-y)
+Coordinate system: (0,0) at bottom-left, 180° rotation: (x,y) → (width-1-x, height-1-y)
 """
 
 import re
@@ -52,19 +28,7 @@ from pyrat_runner.display import (
 
 
 def get_symmetric_position(x: int, y: int, width: int, height: int) -> Tuple[int, int]:
-    """Get 180° rotated position around maze center.
-
-    This uses the same formula as the engine's Rust implementation.
-
-    Args:
-        x: X coordinate
-        y: Y coordinate
-        width: Board width
-        height: Board height
-
-    Returns:
-        Symmetric position as (x', y')
-    """
+    """Get 180° rotated position around maze center."""
     return (width - 1 - x, height - 1 - y)
 
 
@@ -74,39 +38,20 @@ def is_symmetric_wall_pair(
     width: int,
     height: int,
 ) -> bool:
-    """Check if two walls are 180° rotationally symmetric.
-
-    Args:
-        wall1: First wall as ((x1, y1), (x2, y2))
-        wall2: Second wall as ((x1, y1), (x2, y2))
-        width: Board width
-        height: Board height
-
-    Returns:
-        True if walls are symmetric pairs
-    """
+    """Check if two walls are 180° rotationally symmetric."""
     (x1a, y1a), (x2a, y2a) = wall1
     (x1b, y1b), (x2b, y2b) = wall2
 
-    # Get symmetric positions for wall1's endpoints
     sym1a = get_symmetric_position(x1a, y1a, width, height)
     sym2a = get_symmetric_position(x2a, y2a, width, height)
 
-    # Check if wall2's endpoints match (order-independent)
     return ((x1b, y1b) == sym1a and (x2b, y2b) == sym2a) or (
         (x1b, y1b) == sym2a and (x2b, y2b) == sym1a
     )
 
 
 def strip_ansi_codes(text: str) -> str:
-    """Remove ANSI color codes from text.
-
-    Args:
-        text: Text potentially containing ANSI codes
-
-    Returns:
-        Text with ANSI codes removed
-    """
+    """Remove ANSI color codes from text."""
     ansi_escape = re.compile(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])")
     return ansi_escape.sub("", text)
 
@@ -146,58 +91,27 @@ def rotate_board_string_180(board: str, width: int, height: int) -> str:
 
 
 def extract_entity_positions(board: str) -> Dict[str, Set[Tuple[int, int]]]:
-    """Extract entity positions from a rendered board.
-
-    Parses the board to find where R, P, and C appear.
-
-    The board format is:
-    - Each cell is 5 characters wide
-    - Cells are separated by vertical separators (│, ┊, or space)
-    - Y coordinates are labeled at the start of each row
-    - X coordinates are labeled in the header
-
-    Args:
-        board: Rendered board string
-
-    Returns:
-        Dictionary mapping entity type to set of positions:
-        {"R": {(x, y), ...}, "P": {(x, y), ...}, "C": {(x, y), ...}}
-    """
+    """Parse rendered board to find positions of R, P, and C."""
     positions = {"R": set(), "P": set(), "C": set()}
 
-    # Strip ANSI codes for easier parsing
     clean_board = strip_ansi_codes(board)
     lines = clean_board.strip().split("\n")
+    board_lines = lines[2:]  # Skip header
 
-    # Skip header lines (x-axis labels and top border)
-    # Board starts at line 2 (0-indexed)
-    board_lines = lines[2:]
-
-    # Process board from top to bottom
-    # Each cell row is followed by a separator row
     for line in board_lines:
-        # Cell rows have y-coordinate at start and walls '│' at edges
         if "│" in line and not all(c in "─┈ ┼+│" for c in line.strip()):
-            # Extract y-coordinate from the start of the line
             y_match = re.match(r"\s*(\d+)\s*│", line)
             if y_match:
                 y = int(y_match.group(1))
 
-                # Remove the y-label and left border
                 content = re.sub(r"^\s*\d+\s*│", "", line)
-                content = content.rstrip("│")  # Remove right border
-
-                # Each cell is 5 chars wide, with separators between them
-                # Pattern: [5 chars][separator][5 chars][separator]...
-                # Separators are │, ┊, or space (single char)
+                content = content.rstrip("│")
 
                 x = 0
                 pos = 0
                 while pos < len(content):
-                    # Extract next 5 characters (cell content)
-                    cell = content[pos : pos + 5]
+                    cell = content[pos : pos + 5]  # Each cell is 5 chars wide
 
-                    # Check for entities in this cell
                     if "R" in cell:
                         positions["R"].add((x, y))
                     if "P" in cell:
@@ -205,70 +119,43 @@ def extract_entity_positions(board: str) -> Dict[str, Set[Tuple[int, int]]]:
                     if "C" in cell:
                         positions["C"].add((x, y))
 
-                    # Move to next cell (5 chars + 1 separator)
-                    pos += 6
+                    pos += 6  # 5 chars + 1 separator
                     x += 1
 
     return positions
 
 
 def extract_wall_positions(board: str) -> Set[Tuple[Tuple[int, int], Tuple[int, int]]]:
-    """Extract wall positions from a rendered board.
-
-    Walls appear as:
-    - Vertical walls: │ character between cells (at x position)
-    - Horizontal walls: ───── (solid line) between rows (at y position)
-
-    Args:
-        board: Rendered board string
-
-    Returns:
-        Set of walls as ((x1, y1), (x2, y2)) tuples
-    """
+    """Parse rendered board to find walls (│ and ─────)."""
     walls = set()
 
     clean_board = strip_ansi_codes(board)
     lines = clean_board.strip().split("\n")
-
-    # Skip header
     board_lines = lines[2:]
-
-    # Track current y coordinate
     current_y = None
 
     for line in board_lines:
-        # Cell rows (with y-coordinate label)
         if "│" in line and not all(c in "─┈ ┼+│" for c in line.strip()):
             y_match = re.match(r"\s*(\d+)\s*│", line)
             if y_match:
                 current_y = int(y_match.group(1))
 
-                # Extract vertical walls
                 content = re.sub(r"^\s*\d+\s*│", "", line)
                 content = content.rstrip("│")
 
                 x = 0
                 pos = 0
                 while pos < len(content):
-                    # Check separator after this cell
                     if pos + 5 < len(content):
                         separator = content[pos + 5]
                         if separator == "│":
-                            # The separator after rendering cell x is obtained by calling
-                            # get_vertical_separator(x, y) which checks if (x, y) in v_walls
-                            # So this wall is stored at (x, y) and connects cells (x, y) and (x+1, y)
                             walls.add(((x, current_y), (x + 1, current_y)))
 
                     pos += 6
                     x += 1
 
-        # Separator rows (horizontal walls/mud)
         elif "┼" in line and "─" in line:
-            # This is a horizontal separator row
-            # It separates row current_y from row current_y - 1
             if current_y is not None and current_y > 0:
-                # Parse horizontal walls
-                # Skip the leading spaces and ┼
                 content_start = line.find("┼")
                 if content_start >= 0:
                     content = line[content_start + 1 :]
@@ -276,15 +163,10 @@ def extract_wall_positions(board: str) -> Set[Tuple[Tuple[int, int], Tuple[int, 
                     x = 0
                     pos = 0
                     while pos < len(content):
-                        # Extract next 5 characters (cell separator)
                         segment = content[pos : pos + 5]
                         if segment == "─────":
-                            # Horizontal separators are obtained by calling
-                            # get_horizontal_separator(x, y-1) which checks if (x, y-1) in h_walls
-                            # So this wall connects cells (x, current_y-1) and (x, current_y)
                             walls.add(((x, current_y - 1), (x, current_y)))
 
-                        # Move to next position (5 chars + 1 separator)
                         pos += 6
                         x += 1
 
@@ -292,59 +174,36 @@ def extract_wall_positions(board: str) -> Set[Tuple[Tuple[int, int], Tuple[int, 
 
 
 def extract_mud_positions(board: str) -> Set[Tuple[Tuple[int, int], Tuple[int, int]]]:
-    """Extract mud positions from a rendered board.
-
-    Mud appears as:
-    - Vertical mud: ┊ character between cells (at x position)
-    - Horizontal mud: ┈┈┈┈┈ (dotted line) between rows (at y position)
-
-    Args:
-        board: Rendered board string
-
-    Returns:
-        Set of mud passages as ((x1, y1), (x2, y2)) tuples
-    """
+    """Parse rendered board to find mud (┊ and ┈┈┈┈┈)."""
     mud = set()
 
     clean_board = strip_ansi_codes(board)
     lines = clean_board.strip().split("\n")
-
-    # Skip header
     board_lines = lines[2:]
-
-    # Track current y coordinate
     current_y = None
 
     for line in board_lines:
-        # Cell rows (with y-coordinate label)
         if "│" in line and not all(c in "─┈ ┼+│" for c in line.strip()):
             y_match = re.match(r"\s*(\d+)\s*│", line)
             if y_match:
                 current_y = int(y_match.group(1))
 
-                # Extract vertical mud
                 content = re.sub(r"^\s*\d+\s*│", "", line)
                 content = content.rstrip("│")
 
                 x = 0
                 pos = 0
                 while pos < len(content):
-                    # Check separator after this cell
                     if pos + 5 < len(content):
                         separator = content[pos + 5]
                         if separator == "┊":
-                            # Same logic as vertical walls
-                            # Vertical mud stored at (x, y) connects cells (x, y) and (x+1, y)
                             mud.add(((x, current_y), (x + 1, current_y)))
 
                     pos += 6
                     x += 1
 
-        # Separator rows (horizontal walls/mud)
         elif "┼" in line and ("─" in line or "┈" in line):
-            # This is a horizontal separator row
             if current_y is not None and current_y > 0:
-                # Parse horizontal mud
                 content_start = line.find("┼")
                 if content_start >= 0:
                     content = line[content_start + 1 :]
@@ -352,13 +211,10 @@ def extract_mud_positions(board: str) -> Set[Tuple[Tuple[int, int], Tuple[int, i
                     x = 0
                     pos = 0
                     while pos < len(content):
-                        # Extract next 5 characters (cell separator)
                         segment = content[pos : pos + 5]
                         if segment == "┈┈┈┈┈":
-                            # Horizontal mud between (x, current_y-1) and (x, current_y)
                             mud.add(((x, current_y - 1), (x, current_y)))
 
-                        # Move to next position (5 chars + 1 separator)
                         pos += 6
                         x += 1
 
@@ -366,18 +222,15 @@ def extract_mud_positions(board: str) -> Set[Tuple[Tuple[int, int], Tuple[int, i
 
 
 # ===========================
-# Level 2: Structure Building Tests
+# Structure Building Tests
 # ===========================
 
 
 class TestMazeStructureNormalization:
-    """Test that build_maze_structures() preserves properties."""
+    """Test that build_maze_structures() normalizes walls consistently."""
 
     def test_structures_normalize_to_min_coordinate(self):
-        """Wall order should not affect normalization result.
-
-        Property: ((x1,y1), (x2,y2)) ≡ ((x2,y2), (x1,y1))
-        """
+        """Wall order should not affect normalization: ((x1,y1), (x2,y2)) ≡ ((x2,y2), (x1,y1))"""
         # Vertical wall in different orders
         walls1 = [((1, 2), (2, 2))]  # min_x first
         walls2 = [((2, 2), (1, 2))]  # max_x first
@@ -403,10 +256,7 @@ class TestMazeStructureNormalization:
         assert (3, 1) in struct3.h_walls, "Should store at min_y=1"
 
     def test_structures_correct_categorization(self):
-        """Walls should be categorized based on orientation.
-
-        Property: same x → horizontal, same y → vertical
-        """
+        """Walls categorized by orientation: same x → horizontal, same y → vertical"""
         walls = [
             ((1, 1), (2, 1)),  # Different x, same y → vertical
             ((3, 2), (3, 3)),  # Same x, different y → horizontal
@@ -480,18 +330,15 @@ class TestMazeStructureNormalization:
 
 
 # ===========================
-# Level 3: Rendering Primitives Tests
+# Rendering Primitives Tests
 # ===========================
 
 
 class TestRenderingPrimitiveSymmetry:
-    """Test that individual rendering functions preserve symmetry."""
+    """Test that rendering functions preserve symmetry."""
 
     def test_get_cell_content_symmetry(self):
-        """Symmetric cell positions should render with R↔P swapped.
-
-        Property: Content at (x,y) with players swapped = Content at symmetric position
-        """
+        """Symmetric positions render with R↔P swapped."""
         # Rat at (1, 1), Python at symmetric position (3, 3)
         rat_pos = (1, 1)
         python_pos = (3, 3)
@@ -625,18 +472,15 @@ class TestRenderingPrimitiveSymmetry:
 
 
 # ===========================
-# Level 1: Data Extraction Tests
+# Game State Extraction Tests
 # ===========================
 
 
 class TestGameStateExtractionSymmetry:
-    """Test that symmetric games produce symmetric data when extracted."""
+    """Test that symmetric games produce symmetric data."""
 
     def test_symmetric_game_wall_entries(self):
-        """Symmetric game should produce symmetric wall entries.
-
-        Uses engine's built-in symmetric game generation.
-        """
+        """Symmetric game produces symmetric wall entries."""
         # Create a symmetric game with reproducible seed
         game = PyGameState(width=11, height=9, symmetric=True, seed=42)
 
@@ -660,10 +504,7 @@ class TestGameStateExtractionSymmetry:
             ), f"Wall {wall} should have symmetric counterpart"
 
     def test_symmetric_game_mud_positions(self):
-        """Symmetric game should produce symmetric mud positions."""
-        # Create a symmetric game with mud
-        # Note: Current implementation might not have mud in presets
-        # So we create a custom symmetric game
+        """Symmetric game produces symmetric mud positions."""
         width, height = 7, 7
 
         # Create symmetric mud manually
@@ -710,8 +551,7 @@ class TestGameStateExtractionSymmetry:
             ), f"Mud {(cell1, cell2)} with {turns} turns should have symmetric counterpart"
 
     def test_symmetric_game_cheese_positions(self):
-        """Symmetric game should produce symmetric cheese positions."""
-        # Create a symmetric game with odd number of cheese (will place one at center)
+        """Symmetric game produces symmetric cheese positions."""
         game = PyGameState(width=11, height=9, cheese_count=11, symmetric=True, seed=42)
 
         cheese_positions = game.cheese_positions()
@@ -734,19 +574,15 @@ class TestGameStateExtractionSymmetry:
 
 
 # ===========================
-# Level 4: Full Board Rendering Tests
+# Full Board Rendering Tests
 # ===========================
 
 
 class TestFullBoardSymmetry:
-    """End-to-end tests for complete board rendering."""
+    """End-to-end board rendering tests."""
 
     def test_symmetric_game_renders_symmetrically(self):
-        """Complete symmetric game should produce visually symmetric display.
-
-        This is the end-to-end composition test.
-        """
-        # Use engine's built-in symmetric game generation for this test
+        """Symmetric game produces visually symmetric display."""
         game = PyGameState(width=7, height=7, cheese_count=9, symmetric=True, seed=42)
 
         wrapper = PyRat.__new__(PyRat)
@@ -1042,15 +878,10 @@ class TestEdgeCases:
 
 
 class TestDirectRenderingVerification:
-    """Direct verification that rendered output matches input game state.
-
-    These tests create games with known configurations, render them,
-    parse the output, and verify that what we parse matches what we put in.
-    This directly verifies rendering correctness.
-    """
+    """Verify rendered output matches input by parsing back what we rendered."""
 
     def test_render_5x5_minimal(self):
-        """Test 5×5 board with minimal elements."""
+        """Render and parse back a minimal 5×5 board."""
         width, height = 5, 5
 
         # Known configuration
@@ -1081,7 +912,7 @@ class TestDirectRenderingVerification:
         assert set(extracted_walls) == set(walls), "Wall positions mismatch"
 
     def test_render_7x7_with_multiple_elements(self):
-        """Test 7×7 board with multiple walls, mud, and cheese."""
+        """Render and parse back a 7×7 board with walls, mud, and cheese."""
         width, height = 7, 7
 
         # Known configuration
