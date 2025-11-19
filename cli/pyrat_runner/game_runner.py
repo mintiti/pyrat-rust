@@ -172,6 +172,17 @@ class GameRunner:
             ai.is_alive(), move
         )
 
+        # Handle timeout case with protocol notifications
+        if move is None and should_continue:
+            # Inform AI that we defaulted the move
+            ai.notify_timeout(Direction.STAY)
+            # Probe responsiveness quickly via isready/readyok
+            responsive = ai.ready_probe(timeout=0.5)
+            if not responsive:
+                # Add supplemental warning but keep playing
+                extra = "AI did not respond to isready after timeout"
+                self.display.show_error(player, extra)
+
         # Handle side effect (display error) if needed
         if error_message:
             self.display.show_error(player, error_message)
