@@ -9,6 +9,7 @@ from pyrat_engine.core import Direction
 
 from .ai_process import AIProcess
 from .display import Display
+from .logger import GameLogger
 
 
 # ===========================
@@ -75,6 +76,7 @@ class GameRunner:
         turn_timeout: float = 1.0,
         preprocessing_timeout: float = 3.0,
         display_delay: float = 0.3,
+        log_dir: Optional[str] = None,
     ):
         """
         Initialize game runner.
@@ -98,9 +100,16 @@ class GameRunner:
             width=width, height=height, cheese_count=cheese_count, seed=seed
         )
 
+        # Optional logger
+        self.logger: Optional[GameLogger] = GameLogger(log_dir) if log_dir else None
+
         # Create AI processes
-        self.rat_ai = AIProcess(rat_script, "rat", timeout=turn_timeout)
-        self.python_ai = AIProcess(python_script, "python", timeout=turn_timeout)
+        self.rat_ai = AIProcess(
+            rat_script, "rat", timeout=turn_timeout, logger=self.logger
+        )
+        self.python_ai = AIProcess(
+            python_script, "python", timeout=turn_timeout, logger=self.logger
+        )
 
         # Display
         self.display = Display(self.game, delay=display_delay)
@@ -117,13 +126,19 @@ class GameRunner:
             True if both processes started successfully, False otherwise
         """
         print("Starting AI processes...")
+        if self.logger:
+            self.logger.event("Starting AI processes")
 
         if not self.rat_ai.start():
             print(f"Failed to start Rat AI: {self.rat_script}", file=sys.stderr)
+            if self.logger:
+                self.logger.event("Failed to start Rat AI")
             return False
 
         if not self.python_ai.start():
             print(f"Failed to start Python AI: {self.python_script}", file=sys.stderr)
+            if self.logger:
+                self.logger.event("Failed to start Python AI")
             self.rat_ai.stop()
             return False
 
@@ -142,6 +157,8 @@ class GameRunner:
     def _initialize_game(self) -> None:
         """Initialize the game by sending game state to AIs and showing initial display."""
         print("Initializing game...")
+        if self.logger:
+            self.logger.event("Initializing game")
         time.sleep(1)
 
         # Send game start to both AIs
@@ -289,6 +306,10 @@ class GameRunner:
         # Send game over to AIs
         self.rat_ai.send_game_over(winner, rat_score, python_score)
         self.python_ai.send_game_over(winner, rat_score, python_score)
+        if self.logger:
+            self.logger.event(
+                f"Game over: winner={winner} score={rat_score}-{python_score}"
+            )
 
         # Display final result
         self.display.show_winner(winner, rat_score, python_score)
@@ -296,6 +317,8 @@ class GameRunner:
         # Stop AI processes
         self.rat_ai.stop()
         self.python_ai.stop()
+        if self.logger:
+            self.logger.close()
 
     def run(self) -> bool:
         """
