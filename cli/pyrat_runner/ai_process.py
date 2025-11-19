@@ -250,8 +250,7 @@ class AIProcess:
                 # AI is sending info during move calculation, ignore for now
                 pass
 
-        # Timeout
-        self.state = AIState.TIMED_OUT
+        # Timeout: treat as non-fatal; caller will default to STAY
         return None
 
     def send_game_over(self, winner: str, rat_score: float, python_score: float):
@@ -308,9 +307,5 @@ class AIProcess:
             return None
 
     def is_alive(self) -> bool:
-        """Check if AI process is still alive."""
-        return (
-            self.process is not None
-            and self.process.poll() is None
-            and self.state not in [AIState.CRASHED, AIState.TIMED_OUT]
-        )
+        """Check if AI process is still alive (OS-level)."""
+        return self.process is not None and self.process.poll() is None
