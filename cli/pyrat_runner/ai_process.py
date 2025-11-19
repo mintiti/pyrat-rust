@@ -11,6 +11,7 @@ from typing import Optional
 
 from pyrat_engine.core import Direction
 from pyrat_engine.core.types import direction_to_name, name_to_direction
+from .logger import GameLogger
 
 
 class AIState(Enum):
@@ -41,7 +42,13 @@ class AIInfo:
 class AIProcess:
     """Manages an AI subprocess and protocol communication."""
 
-    def __init__(self, script_path: str, player_name: str, timeout: float = 1.0):
+    def __init__(
+        self,
+        script_path: str,
+        player_name: str,
+        timeout: float = 1.0,
+        logger: Optional[GameLogger] = None,
+    ):
         """
         Initialize AI process manager.
 
@@ -58,6 +65,8 @@ class AIProcess:
         self.info = AIInfo()
         self._output_queue: queue.Queue[str] = queue.Queue()
         self._reader_thread: Optional[threading.Thread] = None
+        self._stderr_thread: Optional[threading.Thread] = None
+        self._logger = logger
 
     def _reader(self):
         """Background thread to read output from AI process."""
@@ -65,10 +74,27 @@ class AIProcess:
             while self.process and self.process.poll() is None:
                 line = self.process.stdout.readline()
                 if line:
-                    self._output_queue.put(line.strip())
+                    stripped = line.strip()
+                    if self._logger:
+                        self._logger.protocol(self.player_name, "←", stripped)
+                    self._output_queue.put(stripped)
                 else:
                     break
         except (ValueError, OSError):  # Stream closed or I/O error
+            pass
+
+    def _stderr_reader(self):
+        """Background thread to drain stderr and log it."""
+        try:
+            if not self.process or not self.process.stderr:
+                return
+            while self.process and self.process.poll() is None:
+                line = self.process.stderr.readline()
+                if not line:
+                    break
+                if self._logger:
+                    self._logger.stderr(self.player_name, line)
+        except (ValueError, OSError):
             pass
 
     def start(self) -> bool:
@@ -92,6 +118,11 @@ class AIProcess:
             # Start reader thread
             self._reader_thread = threading.Thread(target=self._reader, daemon=True)
             self._reader_thread.start()
+            # Start stderr drainer
+            self._stderr_thread = threading.Thread(
+                target=self._stderr_reader, daemon=True
+            )
+            self._stderr_thread.start()
 
             # Send initial "pyrat" command
             self._write_line("pyrat")
@@ -286,6 +317,8 @@ class AIProcess:
         """Write a line to AI stdin."""
         if self.process and self.process.stdin:
             try:
+                if self._logger:
+                    self._logger.protocol(self.player_name, "→", line)
                 self.process.stdin.write(line + "\n")
                 self.process.stdin.flush()
             except BrokenPipeError:
