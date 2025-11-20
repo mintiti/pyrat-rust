@@ -3,6 +3,8 @@
 Accepts tuple form from parser and string form for backward compatibility.
 """
 
+from __future__ import annotations
+
 from typing import Any
 
 import pytest

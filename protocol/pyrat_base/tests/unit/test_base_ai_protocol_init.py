@@ -6,6 +6,8 @@ Validates:
 - Game state is created once init is complete, with expected dimensions and walls/mud
 """
 
+from __future__ import annotations
+
 import pytest
 
 from pyrat_base.base_ai import PyRatAI
