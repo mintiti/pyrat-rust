@@ -342,9 +342,11 @@ class PyRatAI:
             self._game_config["width"] = cmd.data["width"]
             self._game_config["height"] = cmd.data["height"]
         elif cmd.type == CommandType.WALLS:
-            self._game_config["walls"] = cmd.data.get("positions", [])
+            # Protocol parser provides list under key 'walls'
+            self._game_config["walls"] = cmd.data.get("walls", [])
         elif cmd.type == CommandType.MUD:
-            self._game_config["mud"] = cmd.data.get("entries", [])
+            # Protocol parser provides list under key 'mud'
+            self._game_config["mud"] = cmd.data.get("mud", [])
         elif cmd.type == CommandType.CHEESE:
             self._game_config["cheese"] = cmd.data.get("cheese", [])
         elif cmd.type == CommandType.PLAYER1:
@@ -352,7 +354,8 @@ class PyRatAI:
         elif cmd.type == CommandType.PLAYER2:
             self._game_config["player2_pos"] = cmd.data["position"]
         elif cmd.type == CommandType.YOUARE:
-            self._player = Player.RAT if cmd.data["player"] == "rat" else Player.PYTHON
+            # Protocol parser returns Player enum directly
+            self._player = cmd.data["player"]
             # Check if we have all required data to create game state
             self._try_create_game_state()
         elif cmd.type == CommandType.TIMECONTROL:
@@ -467,10 +470,19 @@ class PyRatAI:
             # Game ended
             winner = cmd.data.get("winner", "draw")
             self._game_result = self._parse_game_result(winner)
-            score = cmd.data.get("score", "0-0")
-            score_parts = score.split("-")
-            if len(score_parts) == 2:  # noqa: PLR2004
-                self._final_score = (float(score_parts[0]), float(score_parts[1]))
+            score = cmd.data.get("score")
+            if isinstance(score, tuple):
+                # Protocol parser returns (rat, python)
+                try:
+                    rat_s, py_s = score
+                    self._final_score = (float(rat_s), float(py_s))
+                except Exception:
+                    # Fallback to string parse below
+                    pass
+            elif isinstance(score, str):
+                parts = score.split("-")
+                if len(parts) == 2:  # noqa: PLR2004
+                    self._final_score = (float(parts[0]), float(parts[1]))
             self._state = "READY"
         elif cmd.type == CommandType.STARTPOSTPROCESSING:
             self._state = "POSTPROCESSING"

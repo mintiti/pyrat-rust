@@ -1,14 +1,17 @@
 """Game orchestration and execution."""
 
+import os
 import sys
 import time
 from typing import Optional, Tuple
+from datetime import datetime
 
 from pyrat_engine import PyRat
 from pyrat_engine.core import Direction
 
 from .ai_process import AIProcess
 from .display import Display
+from .logger import GameLogger
 
 
 # ===========================
@@ -75,6 +78,7 @@ class GameRunner:
         turn_timeout: float = 1.0,
         preprocessing_timeout: float = 3.0,
         display_delay: float = 0.3,
+        log_dir: Optional[str] = None,
     ):
         """
         Initialize game runner.
@@ -93,14 +97,36 @@ class GameRunner:
         self.rat_script = rat_script
         self.python_script = python_script
 
-        # Create game
+        # Create game (cap max_turns in non-interactive environments to keep CI fast)
+        try:
+            non_tty = not sys.stdout.isatty()  # type: ignore[attr-defined]
+        except Exception:
+            non_tty = True
+        max_turns = 150 if non_tty else None
+
         self.game = PyRat(
-            width=width, height=height, cheese_count=cheese_count, seed=seed
+            width=width,
+            height=height,
+            cheese_count=cheese_count,
+            seed=seed,
+            max_turns=max_turns,
         )
 
+        # Optional logger: create a timestamped subdirectory under log_dir
+        self.logger: Optional[GameLogger] = None
+        if log_dir:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            # Always nest logs under a timestamp to avoid collisions across runs
+            actual_dir = os.path.join(log_dir, ts)
+            self.logger = GameLogger(actual_dir)
+
         # Create AI processes
-        self.rat_ai = AIProcess(rat_script, "rat", timeout=turn_timeout)
-        self.python_ai = AIProcess(python_script, "python", timeout=turn_timeout)
+        self.rat_ai = AIProcess(
+            rat_script, "rat", timeout=turn_timeout, logger=self.logger
+        )
+        self.python_ai = AIProcess(
+            python_script, "python", timeout=turn_timeout, logger=self.logger
+        )
 
         # Display
         self.display = Display(self.game, delay=display_delay)
@@ -117,13 +143,19 @@ class GameRunner:
             True if both processes started successfully, False otherwise
         """
         print("Starting AI processes...")
+        if self.logger:
+            self.logger.event("Starting AI processes")
 
         if not self.rat_ai.start():
             print(f"Failed to start Rat AI: {self.rat_script}", file=sys.stderr)
+            if self.logger:
+                self.logger.event("Failed to start Rat AI")
             return False
 
         if not self.python_ai.start():
             print(f"Failed to start Python AI: {self.python_script}", file=sys.stderr)
+            if self.logger:
+                self.logger.event("Failed to start Python AI")
             self.rat_ai.stop()
             return False
 
@@ -142,6 +174,8 @@ class GameRunner:
     def _initialize_game(self) -> None:
         """Initialize the game by sending game state to AIs and showing initial display."""
         print("Initializing game...")
+        if self.logger:
+            self.logger.event("Initializing game")
         time.sleep(1)
 
         # Send game start to both AIs
@@ -172,16 +206,9 @@ class GameRunner:
             ai.is_alive(), move
         )
 
-        # Handle timeout case with protocol notifications
+        # Handle timeout case with protocol notification only
         if move is None and should_continue:
-            # Inform AI that we defaulted the move
             ai.notify_timeout(Direction.STAY)
-            # Probe responsiveness quickly via isready/readyok
-            responsive = ai.ready_probe(timeout=0.5)
-            if not responsive:
-                # Add supplemental warning but keep playing
-                extra = "AI did not respond to isready after timeout"
-                self.display.show_error(player, extra)
 
         # Handle side effect (display error) if needed
         if error_message:
@@ -204,9 +231,32 @@ class GameRunner:
             - rat_move: Move from rat AI (or Direction.STAY if timeout)
             - python_move: Move from python AI (or Direction.STAY if timeout)
         """
-        # Request moves from both AIs
-        rat_move = self.rat_ai.get_move(rat_prev_move, python_prev_move)
-        python_move = self.python_ai.get_move(rat_prev_move, python_prev_move)
+        # Request moves from both AIs concurrently to avoid serial timeouts
+        from threading import Thread
+        from typing import Dict
+
+        rat_move_holder: Dict[str, Optional[Direction]] = {"move": None}
+        python_move_holder: Dict[str, Optional[Direction]] = {"move": None}
+
+        def _rat_call():
+            rat_move_holder["move"] = self.rat_ai.get_move(
+                rat_prev_move, python_prev_move
+            )
+
+        def _py_call():
+            python_move_holder["move"] = self.python_ai.get_move(
+                rat_prev_move, python_prev_move
+            )
+
+        t1 = Thread(target=_rat_call, daemon=True)
+        t2 = Thread(target=_py_call, daemon=True)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        rat_move = rat_move_holder["move"]
+        python_move = python_move_holder["move"]
 
         # Handle rat AI errors
         should_continue, rat_move = self._handle_ai_move_error(
@@ -289,6 +339,10 @@ class GameRunner:
         # Send game over to AIs
         self.rat_ai.send_game_over(winner, rat_score, python_score)
         self.python_ai.send_game_over(winner, rat_score, python_score)
+        if self.logger:
+            self.logger.event(
+                f"Game over: winner={winner} score={rat_score}-{python_score}"
+            )
 
         # Display final result
         self.display.show_winner(winner, rat_score, python_score)
@@ -296,6 +350,8 @@ class GameRunner:
         # Stop AI processes
         self.rat_ai.stop()
         self.python_ai.stop()
+        if self.logger:
+            self.logger.close()
 
     def run(self) -> bool:
         """

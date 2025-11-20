@@ -1,5 +1,6 @@
 """AI process management and protocol communication."""
 
+import os
 import queue
 import subprocess
 import sys
@@ -11,6 +12,7 @@ from typing import Optional
 
 from pyrat_engine.core import Direction
 from pyrat_engine.core.types import direction_to_name, name_to_direction
+from .logger import GameLogger
 
 
 class AIState(Enum):
@@ -41,7 +43,13 @@ class AIInfo:
 class AIProcess:
     """Manages an AI subprocess and protocol communication."""
 
-    def __init__(self, script_path: str, player_name: str, timeout: float = 1.0):
+    def __init__(
+        self,
+        script_path: str,
+        player_name: str,
+        timeout: float = 1.0,
+        logger: Optional[GameLogger] = None,
+    ):
         """
         Initialize AI process manager.
 
@@ -58,6 +66,8 @@ class AIProcess:
         self.info = AIInfo()
         self._output_queue: queue.Queue[str] = queue.Queue()
         self._reader_thread: Optional[threading.Thread] = None
+        self._stderr_thread: Optional[threading.Thread] = None
+        self._logger = logger
 
     def _reader(self):
         """Background thread to read output from AI process."""
@@ -65,10 +75,27 @@ class AIProcess:
             while self.process and self.process.poll() is None:
                 line = self.process.stdout.readline()
                 if line:
-                    self._output_queue.put(line.strip())
+                    stripped = line.strip()
+                    if self._logger:
+                        self._logger.protocol(self.player_name, "←", stripped)
+                    self._output_queue.put(stripped)
                 else:
                     break
         except (ValueError, OSError):  # Stream closed or I/O error
+            pass
+
+    def _stderr_reader(self):
+        """Background thread to drain stderr and log it."""
+        try:
+            if not self.process or not self.process.stderr:
+                return
+            while self.process and self.process.poll() is None:
+                line = self.process.stderr.readline()
+                if not line:
+                    break
+                if self._logger:
+                    self._logger.stderr(self.player_name, line)
+        except (ValueError, OSError):
             pass
 
     def start(self) -> bool:
@@ -79,19 +106,29 @@ class AIProcess:
             True if successful, False otherwise
         """
         try:
+            cmd = [sys.executable, "-u", self.script_path]
+            env = os.environ.copy()
+            env.setdefault("PYTHONUNBUFFERED", "1")
+            env.setdefault("PYTHONIOENCODING", "utf-8")
             self.process = subprocess.Popen(
-                [sys.executable, self.script_path],
+                cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 bufsize=1,
+                env=env,
             )
             self.state = AIState.HANDSHAKE
 
             # Start reader thread
             self._reader_thread = threading.Thread(target=self._reader, daemon=True)
             self._reader_thread.start()
+            # Start stderr drainer
+            self._stderr_thread = threading.Thread(
+                target=self._stderr_reader, daemon=True
+            )
+            self._stderr_thread.start()
 
             # Send initial "pyrat" command
             self._write_line("pyrat")
@@ -179,18 +216,18 @@ class AIProcess:
             cheese_str = " ".join(f"({c[0]},{c[1]})" for c in cheese)
             self._write_line(f"cheese {cheese_str}")
 
-        # Send player positions
+        # Send player positions (protocol-compliant)
         p1_pos = game_state.player1_pos
         p2_pos = game_state.player2_pos
-        self._write_line(f"rat position:({p1_pos[0]},{p1_pos[1]})")
-        self._write_line(f"python position:({p2_pos[0]},{p2_pos[1]})")
+        self._write_line(f"player1 rat ({p1_pos[0]},{p1_pos[1]})")
+        self._write_line(f"player2 python ({p2_pos[0]},{p2_pos[1]})")
 
         # Tell AI which player it is
         self._write_line(f"youare {self.player_name}")
 
-        # Time controls (using defaults from spec)
+        # Time controls (use move and preprocessing keys per spec)
         self._write_line(
-            f"timecontrol preprocessing:{int(preprocessing_time * 1000)} turn:{int(self.timeout * 1000)}"
+            f"timecontrol move:{int(self.timeout * 1000)} preprocessing:{int(preprocessing_time * 1000)}"
         )
 
         # Start preprocessing
@@ -250,6 +287,15 @@ class AIProcess:
                 # AI is sending info during move calculation, ignore for now
                 pass
 
+        # Small grace window to catch just-late responses
+        line = self._read_line(timeout=0.05)
+        if line and line.startswith("move "):
+            move_str = line[5:].strip()
+            try:
+                return name_to_direction(move_str)
+            except Exception:
+                pass
+
         # Timeout: treat as non-fatal; caller will default to STAY
         return None
 
@@ -286,6 +332,8 @@ class AIProcess:
         """Write a line to AI stdin."""
         if self.process and self.process.stdin:
             try:
+                if self._logger:
+                    self._logger.protocol(self.player_name, "→", line)
                 self.process.stdin.write(line + "\n")
                 self.process.stdin.flush()
             except BrokenPipeError:
