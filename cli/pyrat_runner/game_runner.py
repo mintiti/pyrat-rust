@@ -3,15 +3,15 @@
 import os
 import sys
 import time
-from typing import Optional, Tuple
 from datetime import datetime
+from typing import Optional, Tuple
 
 from pyrat_engine import PyRat
 from pyrat_engine.core import Direction
 
-from .ai_process import AIProcess
 from .display import Display
 from .logger import GameLogger
+from .move_providers import MoveProvider, SubprocessMoveProvider
 
 
 # ===========================
@@ -64,8 +64,116 @@ def classify_ai_move_error(
     return True, move, None
 
 
+# ===========================
+# Decoupled game execution
+# ===========================
+
+
+def run_game(
+    game: PyRat,
+    rat_provider: "MoveProvider",
+    python_provider: "MoveProvider",
+    display: Optional[Display] = None,
+    display_delay: float = 0.3,
+) -> Tuple[bool, str, float, float]:
+    """Run a PyRat game using move providers.
+
+    Decoupled game execution function that works with any MoveProvider
+    implementation, enabling headless execution, testing, and flexible
+    move acquisition strategies (subprocess, direct calls, network, etc.).
+
+    Args:
+        game: PyRat game instance
+        rat_provider: Move provider for rat player
+        python_provider: Move provider for python player
+        display: Optional display for visualization (None for headless)
+        display_delay: Delay between turns for visualization
+
+    Returns:
+        Tuple of (success, winner, rat_score, python_score)
+        - success: False if any AI crashed, True otherwise
+        - winner: "rat", "python", or "draw"
+        - rat_score: Rat's final score
+        - python_score: Python's final score
+    """
+    rat_move = Direction.STAY
+    python_move = Direction.STAY
+
+    while True:
+        # Get moves from both providers
+        rat_move_new = rat_provider.get_move(rat_move, python_move)
+        python_move_new = python_provider.get_move(rat_move, python_move)
+
+        # Notify providers of timeout to keep protocol in sync (if supported)
+        if (
+            rat_move_new is None
+            and rat_provider.is_alive()
+            and hasattr(rat_provider, "notify_timeout")
+        ):
+            try:
+                getattr(rat_provider, "notify_timeout")(Direction.STAY)
+            except Exception:
+                pass
+        if (
+            python_move_new is None
+            and python_provider.is_alive()
+            and hasattr(python_provider, "notify_timeout")
+        ):
+            try:
+                getattr(python_provider, "notify_timeout")(Direction.STAY)
+            except Exception:
+                pass
+
+        # Handle rat provider errors
+        should_continue, rat_move_processed, error_msg = classify_ai_move_error(
+            rat_provider.is_alive(), rat_move_new
+        )
+        if error_msg and display:
+            display.show_error("rat", error_msg)
+        if not should_continue:
+            # Rat AI crashed - determine final state and return
+            scores = game.scores
+            winner = determine_winner_from_scores(scores[0], scores[1])
+            return False, winner, scores[0], scores[1]
+
+        # Handle python provider errors
+        should_continue, python_move_processed, error_msg = classify_ai_move_error(
+            python_provider.is_alive(), python_move_new
+        )
+        if error_msg and display:
+            display.show_error("python", error_msg)
+        if not should_continue:
+            # Python AI crashed - determine final state and return
+            scores = game.scores
+            winner = determine_winner_from_scores(scores[0], scores[1])
+            return False, winner, scores[0], scores[1]
+
+        # Update moves for next iteration
+        rat_move = rat_move_processed
+        python_move = python_move_processed
+
+        # Execute move in game
+        result = game.step(p1_move=rat_move, p2_move=python_move)
+
+        # Update display if provided
+        if display:
+            display.render(rat_move, python_move)
+            time.sleep(display_delay)
+
+        # Check for game over
+        if result.game_over:
+            scores = game.scores
+            winner = determine_winner_from_scores(scores[0], scores[1])
+            return True, winner, scores[0], scores[1]
+
+
 class GameRunner:
-    """Orchestrates a PyRat game between two AI processes."""
+    """Orchestrates a PyRat game between two AI processes.
+
+    This class provides a convenient high-level interface for running
+    subprocess-based AI games with visualization. It uses the MoveProvider
+    abstraction internally for flexibility.
+    """
 
     def __init__(
         self,
@@ -79,6 +187,7 @@ class GameRunner:
         preprocessing_timeout: float = 3.0,
         display_delay: float = 0.3,
         log_dir: Optional[str] = None,
+        headless: bool = False,
     ):
         """
         Initialize game runner.
@@ -93,6 +202,8 @@ class GameRunner:
             turn_timeout: Timeout for AI move in seconds
             preprocessing_timeout: Timeout for preprocessing in seconds
             display_delay: Delay between turns for visualization
+            log_dir: Directory to write logs (protocol, stderr, events)
+            headless: If True, run without visualization
         """
         self.rat_script = rat_script
         self.python_script = python_script
@@ -120,236 +231,102 @@ class GameRunner:
             actual_dir = os.path.join(log_dir, ts)
             self.logger = GameLogger(actual_dir)
 
-        # Create AI processes
-        self.rat_ai = AIProcess(
+        # Create move providers (using subprocess implementation)
+        self.rat_provider: MoveProvider = SubprocessMoveProvider(
             rat_script, "rat", timeout=turn_timeout, logger=self.logger
         )
-        self.python_ai = AIProcess(
+        self.python_provider: MoveProvider = SubprocessMoveProvider(
             python_script, "python", timeout=turn_timeout, logger=self.logger
         )
 
-        # Display
-        self.display = Display(self.game, delay=display_delay)
+        # Display (optional for headless mode)
+        self.display: Optional[Display] = (
+            None if headless else Display(self.game, delay=display_delay)
+        )
 
         # Configuration
         self.turn_timeout = turn_timeout
         self.preprocessing_timeout = preprocessing_timeout
         self.display_delay = display_delay
+        self.headless = headless
 
     def _start_ai_processes(self) -> bool:
-        """Start both AI processes and display their information.
+        """Start both AI move providers and display their information.
 
         Returns:
-            True if both processes started successfully, False otherwise
+            True if both providers started successfully, False otherwise
         """
         print("Starting AI processes...")
         if self.logger:
             self.logger.event("Starting AI processes")
 
-        if not self.rat_ai.start():
+        if not self.rat_provider.start():
             print(f"Failed to start Rat AI: {self.rat_script}", file=sys.stderr)
             if self.logger:
                 self.logger.event("Failed to start Rat AI")
             return False
 
-        if not self.python_ai.start():
+        if not self.python_provider.start():
             print(f"Failed to start Python AI: {self.python_script}", file=sys.stderr)
+            # Ensure we stop the rat provider if python fails to start
+            self.rat_provider.stop()
             if self.logger:
                 self.logger.event("Failed to start Python AI")
-            self.rat_ai.stop()
             return False
 
         # Display AI information
-        print(f"Rat AI: {self.rat_ai.info.name}")
-        if self.rat_ai.info.author:
-            print(f"  Author: {self.rat_ai.info.author}")
+        print(f"Rat AI: {self.rat_provider.info.name}")
+        if self.rat_provider.info.author:
+            print(f"  Author: {self.rat_provider.info.author}")
 
-        print(f"Python AI: {self.python_ai.info.name}")
-        if self.python_ai.info.author:
-            print(f"  Author: {self.python_ai.info.author}")
+        print(f"Python AI: {self.python_provider.info.name}")
+        if self.python_provider.info.author:
+            print(f"  Author: {self.python_provider.info.author}")
 
         print()
         return True
 
     def _initialize_game(self) -> None:
-        """Initialize the game by sending game state to AIs and showing initial display."""
+        """Initialize the game by sending game state to providers and showing initial display."""
         print("Initializing game...")
         if self.logger:
             self.logger.event("Initializing game")
         time.sleep(1)
 
-        # Send game start to both AIs
-        self.rat_ai.send_game_start(self.game, self.preprocessing_timeout)
-        self.python_ai.send_game_start(self.game, self.preprocessing_timeout)
+        # Send game start to both providers
+        self.rat_provider.send_game_start(self.game, self.preprocessing_timeout)
+        self.python_provider.send_game_start(self.game, self.preprocessing_timeout)
 
-        # Show initial state
-        self.display.render()
-        time.sleep(self.display_delay)
-
-    def _handle_ai_move_error(
-        self, player: str, ai: AIProcess, move: Optional[Direction]
-    ) -> Tuple[bool, Direction]:
-        """Handle AI move timeout or crash.
-
-        Args:
-            player: Player name ("rat" or "python")
-            ai: AIProcess instance
-            move: Move returned by AI (None if timeout/crash)
-
-        Returns:
-            Tuple of (should_continue, move_to_use)
-            - should_continue: False if AI crashed, True if just timeout
-            - move_to_use: Direction.STAY if timeout, original move otherwise
-        """
-        # Use pure function to classify error
-        should_continue, move_to_use, error_message = classify_ai_move_error(
-            ai.is_alive(), move
-        )
-
-        # Handle timeout case with protocol notification only
-        if move is None and should_continue:
-            ai.notify_timeout(Direction.STAY)
-
-        # Handle side effect (display error) if needed
-        if error_message:
-            self.display.show_error(player, error_message)
-
-        return should_continue, move_to_use
-
-    def _get_ai_moves(
-        self, rat_prev_move: Direction, python_prev_move: Direction
-    ) -> Tuple[bool, Optional[Direction], Optional[Direction]]:
-        """Get moves from both AIs with error handling.
-
-        Args:
-            rat_prev_move: Rat's previous move
-            python_prev_move: Python's previous move
-
-        Returns:
-            Tuple of (success, rat_move, python_move)
-            - success: False if any AI crashed
-            - rat_move: Move from rat AI (or Direction.STAY if timeout)
-            - python_move: Move from python AI (or Direction.STAY if timeout)
-        """
-        # Request moves from both AIs concurrently to avoid serial timeouts
-        from threading import Thread
-        from typing import Dict
-
-        rat_move_holder: Dict[str, Optional[Direction]] = {"move": None}
-        python_move_holder: Dict[str, Optional[Direction]] = {"move": None}
-
-        def _rat_call():
-            rat_move_holder["move"] = self.rat_ai.get_move(
-                rat_prev_move, python_prev_move
-            )
-
-        def _py_call():
-            python_move_holder["move"] = self.python_ai.get_move(
-                rat_prev_move, python_prev_move
-            )
-
-        t1 = Thread(target=_rat_call, daemon=True)
-        t2 = Thread(target=_py_call, daemon=True)
-        t1.start()
-        t2.start()
-        t1.join()
-        t2.join()
-
-        rat_move = rat_move_holder["move"]
-        python_move = python_move_holder["move"]
-
-        # Handle rat AI errors
-        should_continue, rat_move = self._handle_ai_move_error(
-            "rat", self.rat_ai, rat_move
-        )
-        if not should_continue:
-            return False, None, None
-
-        # Handle python AI errors
-        should_continue, python_move = self._handle_ai_move_error(
-            "python", self.python_ai, python_move
-        )
-        if not should_continue:
-            return False, None, None
-
-        return True, rat_move, python_move
-
-    def _execute_game_loop(self) -> bool:
-        """Execute the main game loop.
-
-        Returns:
-            True if game completed without errors, False if AI crashed
-        """
-        rat_move = Direction.STAY
-        python_move = Direction.STAY
-
-        while True:
-            # Get moves from both AIs
-            success, rat_move_new, python_move_new = self._get_ai_moves(
-                rat_move, python_move
-            )
-            if not success:
-                return False
-
-            # Type narrowing: success=True guarantees moves are not None
-            assert rat_move_new is not None
-            assert python_move_new is not None
-            rat_move = rat_move_new
-            python_move = python_move_new
-
-            # Execute move in game
-            result = self.game.step(p1_move=rat_move, p2_move=python_move)
-
-            # Update display
-            self.display.render(rat_move, python_move)
+        # Show initial state (if not headless)
+        if self.display:
+            self.display.render()
             time.sleep(self.display_delay)
-
-            # Check for game over
-            if result.game_over:
-                return True
-
-    def _determine_winner(self) -> Tuple[str, float, float]:
-        """Determine the winner based on final scores.
-
-        Returns:
-            Tuple of (winner, rat_score, python_score)
-            - winner: "rat", "python", or "draw"
-            - rat_score: Rat's final score
-            - python_score: Python's final score
-        """
-        scores = self.game.scores
-        rat_score = scores[0]
-        python_score = scores[1]
-
-        # Use pure function to determine winner
-        winner = determine_winner_from_scores(rat_score, python_score)
-
-        return winner, rat_score, python_score
 
     def _finalize_game(
         self, winner: str, rat_score: float, python_score: float
     ) -> None:
-        """Finalize the game by notifying AIs and displaying results.
+        """Finalize the game by notifying providers and displaying results.
 
         Args:
             winner: "rat", "python", or "draw"
             rat_score: Rat's final score
             python_score: Python's final score
         """
-        # Send game over to AIs
-        self.rat_ai.send_game_over(winner, rat_score, python_score)
-        self.python_ai.send_game_over(winner, rat_score, python_score)
+        # Send game over to providers
+        self.rat_provider.send_game_over(winner, rat_score, python_score)
+        self.python_provider.send_game_over(winner, rat_score, python_score)
         if self.logger:
             self.logger.event(
                 f"Game over: winner={winner} score={rat_score}-{python_score}"
             )
 
-        # Display final result
-        self.display.show_winner(winner, rat_score, python_score)
+        # Display final result (if not headless)
+        if self.display:
+            self.display.show_winner(winner, rat_score, python_score)
 
-        # Stop AI processes
-        self.rat_ai.stop()
-        self.python_ai.stop()
+        # Stop providers
+        self.rat_provider.stop()
+        self.python_provider.stop()
         if self.logger:
             self.logger.close()
 
@@ -360,18 +337,23 @@ class GameRunner:
         Returns:
             True if successful, False if errors occurred
         """
-        # Start AI processes
+        # Start move providers
         if not self._start_ai_processes():
             return False
 
         # Initialize game
         self._initialize_game()
 
-        # Execute game loop
-        success = self._execute_game_loop()
+        # Execute game loop using decoupled run_game function
+        success, winner, rat_score, python_score = run_game(
+            self.game,
+            self.rat_provider,
+            self.python_provider,
+            self.display,
+            self.display_delay,
+        )
 
-        # Determine winner and finalize
-        winner, rat_score, python_score = self._determine_winner()
+        # Finalize game
         self._finalize_game(winner, rat_score, python_score)
 
         return success

@@ -91,6 +91,11 @@ Examples:
         default=0.3,
         help="Delay between turns in seconds (default: 0.3)",
     )
+    display_group.add_argument(
+        "--headless",
+        action="store_true",
+        help="Run without visualization (headless mode)",
+    )
 
     # Logging options
     logging_group = parser.add_argument_group("logging")
@@ -131,6 +136,7 @@ Examples:
             preprocessing_timeout=args.preprocessing,
             display_delay=args.delay,
             log_dir=args.log_dir,
+            headless=args.headless,
         )
 
         success = runner.run()
