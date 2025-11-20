@@ -1,5 +1,6 @@
 """AI process management and protocol communication."""
 
+import os
 import queue
 import subprocess
 import sys
@@ -105,13 +106,18 @@ class AIProcess:
             True if successful, False otherwise
         """
         try:
+            cmd = [sys.executable, "-u", self.script_path]
+            env = os.environ.copy()
+            env.setdefault("PYTHONUNBUFFERED", "1")
+            env.setdefault("PYTHONIOENCODING", "utf-8")
             self.process = subprocess.Popen(
-                [sys.executable, self.script_path],
+                cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 bufsize=1,
+                env=env,
             )
             self.state = AIState.HANDSHAKE
 
