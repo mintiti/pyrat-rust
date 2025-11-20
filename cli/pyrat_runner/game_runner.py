@@ -1,8 +1,10 @@
 """Game orchestration and execution."""
 
+import os
 import sys
 import time
 from typing import Optional, Tuple
+from datetime import datetime
 
 from pyrat_engine import PyRat
 from pyrat_engine.core import Direction
@@ -100,8 +102,13 @@ class GameRunner:
             width=width, height=height, cheese_count=cheese_count, seed=seed
         )
 
-        # Optional logger
-        self.logger: Optional[GameLogger] = GameLogger(log_dir) if log_dir else None
+        # Optional logger: create a timestamped subdirectory under log_dir
+        self.logger: Optional[GameLogger] = None
+        if log_dir:
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            # Always nest logs under a timestamp to avoid collisions across runs
+            actual_dir = os.path.join(log_dir, ts)
+            self.logger = GameLogger(actual_dir)
 
         # Create AI processes
         self.rat_ai = AIProcess(
