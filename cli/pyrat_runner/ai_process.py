@@ -1,5 +1,6 @@
 """AI process management and protocol communication."""
 
+import os
 import queue
 import subprocess
 import sys
@@ -105,13 +106,18 @@ class AIProcess:
             True if successful, False otherwise
         """
         try:
+            cmd = [sys.executable, "-u", self.script_path]
+            env = os.environ.copy()
+            env.setdefault("PYTHONUNBUFFERED", "1")
+            env.setdefault("PYTHONIOENCODING", "utf-8")
             self.process = subprocess.Popen(
-                [sys.executable, self.script_path],
+                cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
                 bufsize=1,
+                env=env,
             )
             self.state = AIState.HANDSHAKE
 
@@ -279,6 +285,15 @@ class AIProcess:
                 return direction
             elif line.startswith("info "):
                 # AI is sending info during move calculation, ignore for now
+                pass
+
+        # Small grace window to catch just-late responses
+        line = self._read_line(timeout=0.05)
+        if line and line.startswith("move "):
+            move_str = line[5:].strip()
+            try:
+                return name_to_direction(move_str)
+            except Exception:
                 pass
 
         # Timeout: treat as non-fatal; caller will default to STAY

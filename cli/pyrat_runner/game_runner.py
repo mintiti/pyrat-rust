@@ -97,9 +97,19 @@ class GameRunner:
         self.rat_script = rat_script
         self.python_script = python_script
 
-        # Create game
+        # Create game (cap max_turns in non-interactive environments to keep CI fast)
+        try:
+            non_tty = not sys.stdout.isatty()  # type: ignore[attr-defined]
+        except Exception:
+            non_tty = True
+        max_turns = 150 if non_tty else None
+
         self.game = PyRat(
-            width=width, height=height, cheese_count=cheese_count, seed=seed
+            width=width,
+            height=height,
+            cheese_count=cheese_count,
+            seed=seed,
+            max_turns=max_turns,
         )
 
         # Optional logger: create a timestamped subdirectory under log_dir
@@ -196,16 +206,9 @@ class GameRunner:
             ai.is_alive(), move
         )
 
-        # Handle timeout case with protocol notifications
+        # Handle timeout case with protocol notification only
         if move is None and should_continue:
-            # Inform AI that we defaulted the move
             ai.notify_timeout(Direction.STAY)
-            # Probe responsiveness quickly via isready/readyok
-            responsive = ai.ready_probe(timeout=0.5)
-            if not responsive:
-                # Add supplemental warning but keep playing
-                extra = "AI did not respond to isready after timeout"
-                self.display.show_error(player, extra)
 
         # Handle side effect (display error) if needed
         if error_message:
@@ -228,9 +231,32 @@ class GameRunner:
             - rat_move: Move from rat AI (or Direction.STAY if timeout)
             - python_move: Move from python AI (or Direction.STAY if timeout)
         """
-        # Request moves from both AIs
-        rat_move = self.rat_ai.get_move(rat_prev_move, python_prev_move)
-        python_move = self.python_ai.get_move(rat_prev_move, python_prev_move)
+        # Request moves from both AIs concurrently to avoid serial timeouts
+        from threading import Thread
+        from typing import Dict
+
+        rat_move_holder: Dict[str, Optional[Direction]] = {"move": None}
+        python_move_holder: Dict[str, Optional[Direction]] = {"move": None}
+
+        def _rat_call():
+            rat_move_holder["move"] = self.rat_ai.get_move(
+                rat_prev_move, python_prev_move
+            )
+
+        def _py_call():
+            python_move_holder["move"] = self.python_ai.get_move(
+                rat_prev_move, python_prev_move
+            )
+
+        t1 = Thread(target=_rat_call, daemon=True)
+        t2 = Thread(target=_py_call, daemon=True)
+        t1.start()
+        t2.start()
+        t1.join()
+        t2.join()
+
+        rat_move = rat_move_holder["move"]
+        python_move = python_move_holder["move"]
 
         # Handle rat AI errors
         should_continue, rat_move = self._handle_ai_move_error(

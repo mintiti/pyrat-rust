@@ -442,10 +442,24 @@ class Display:
         walls = game_state._game.wall_entries()
         mud = game_state.mud_positions
         self.structures = build_maze_structures(walls, mud)
+        # Detect non-interactive environments to limit rendering in CI
+        try:
+            self._non_tty = not sys.stdout.isatty()  # type: ignore[attr-defined]
+        except Exception:
+            self._non_tty = True
+        self._printed_once = False
 
     @staticmethod
     def clear():
-        """Clear the terminal screen."""
+        """Clear the terminal screen when in a TTY.
+
+        Skip in non-interactive environments to avoid TERM errors and overhead.
+        """
+        try:
+            if not sys.stdout.isatty():  # type: ignore[attr-defined]
+                return
+        except Exception:
+            return
         os.system("cls" if os.name == "nt" else "clear")
 
     # Expose pure functions as instance methods for backward compatibility with tests
@@ -501,6 +515,9 @@ class Display:
             rat_move: Last move made by rat
             python_move: Last move made by python
         """
+        # Avoid excessive rendering in non-interactive environments
+        if self._non_tty and self._printed_once:
+            return
         self.clear()
 
         # Use pure function to generate complete output
@@ -513,6 +530,7 @@ class Display:
 
         # Handle side effect (printing)
         print(output, end="")
+        self._printed_once = True
 
     def show_winner(self, winner: str, rat_score: float, python_score: float):
         """
