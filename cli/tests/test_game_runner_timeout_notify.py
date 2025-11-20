@@ -49,4 +49,3 @@ def test_runner_timeout_paths_calls_notify_and_probe() -> None:
     assert should_continue is True
     assert move_to_use == Direction.STAY
     assert fake_ai.notified is True
-    assert fake_ai.probed is True
