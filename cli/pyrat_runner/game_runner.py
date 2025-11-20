@@ -97,9 +97,19 @@ class GameRunner:
         self.rat_script = rat_script
         self.python_script = python_script
 
-        # Create game
+        # Create game (reduce max_turns in non-interactive environments to keep CI fast)
+        try:
+            non_tty = not sys.stdout.isatty()  # type: ignore[attr-defined]
+        except Exception:
+            non_tty = True
+        max_turns = 150 if non_tty else None
+
         self.game = PyRat(
-            width=width, height=height, cheese_count=cheese_count, seed=seed
+            width=width,
+            height=height,
+            cheese_count=cheese_count,
+            seed=seed,
+            max_turns=max_turns,
         )
 
         # Optional logger: create a timestamped subdirectory under log_dir

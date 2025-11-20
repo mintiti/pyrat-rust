@@ -287,6 +287,14 @@ class AIProcess:
                 # AI is sending info during move calculation, ignore for now
                 pass
 
+        # Small grace window to catch just-late responses
+        line = self._read_line(timeout=0.05)
+        if line and line.startswith("move "):
+            move_str = line[5:].strip()
+            try:
+                return name_to_direction(move_str)
+            except Exception:
+                pass
         # Timeout: treat as non-fatal; caller will default to STAY
         return None
 
