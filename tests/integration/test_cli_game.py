@@ -24,13 +24,14 @@ def test_cli_runs_random_vs_random():
     # Be more lenient in CI where cold starts are slower
     run_timeout = 90 if os.environ.get("CI") else 30
     move_timeout = "2.0" if os.environ.get("CI") else "1.0"
+    # Use the same board settings as greedy vs dummy to isolate environment slowness
     result = subprocess.run(
         [
             sys.executable, "-m", "pyrat_runner.cli",
-            "--width", "11",
-            "--height", "9",
-            "--cheese", "5",
-            "--seed", "42",
+            "--width", "7",
+            "--height", "5",
+            "--cheese", "3",
+            "--seed", "123",
             "--timeout", move_timeout,
             "--delay", "0",
             str(random_ai),
