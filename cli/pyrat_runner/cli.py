@@ -92,6 +92,18 @@ Examples:
         help="Delay between turns in seconds (default: 0.3)",
     )
 
+    # Logging options
+    logging_group = parser.add_argument_group("logging")
+    logging_group.add_argument(
+        "--log-dir",
+        type=str,
+        default=None,
+        help=(
+            "Directory to write logs (protocol, stderr, events). "
+            "If unset, logging is disabled."
+        ),
+    )
+
     args = parser.parse_args()
 
     # Validate AI script paths
@@ -118,6 +130,7 @@ Examples:
             turn_timeout=args.timeout,
             preprocessing_timeout=args.preprocessing,
             display_delay=args.delay,
+            log_dir=args.log_dir,
         )
 
         success = runner.run()
@@ -129,6 +142,7 @@ Examples:
     except Exception as e:
         print(f"\nUnexpected error: {e}", file=sys.stderr)
         import traceback
+
         traceback.print_exc()
         return 1
 
