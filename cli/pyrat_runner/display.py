@@ -445,7 +445,16 @@ class Display:
 
     @staticmethod
     def clear():
-        """Clear the terminal screen."""
+        """Clear the terminal screen when running in a TTY.
+
+        Skip clearing in non-interactive environments (e.g., CI) to avoid
+        "TERM environment variable not set" noise and non-zero exit codes.
+        """
+        try:
+            if not sys.stdout.isatty():  # type: ignore[attr-defined]
+                return
+        except Exception:
+            return
         os.system("cls" if os.name == "nt" else "clear")
 
     # Expose pure functions as instance methods for backward compatibility with tests
