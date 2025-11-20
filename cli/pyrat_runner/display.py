@@ -442,6 +442,12 @@ class Display:
         walls = game_state._game.wall_entries()
         mud = game_state.mud_positions
         self.structures = build_maze_structures(walls, mud)
+        # Non-interactive detection to avoid heavy rendering every turn in CI
+        try:
+            self._non_tty = not sys.stdout.isatty()  # type: ignore[attr-defined]
+        except Exception:
+            self._non_tty = True
+        self._printed_once = False
 
     @staticmethod
     def clear():
@@ -510,6 +516,9 @@ class Display:
             rat_move: Last move made by rat
             python_move: Last move made by python
         """
+        # Avoid excessive rendering in non-interactive environments
+        if self._non_tty and self._printed_once:
+            return
         self.clear()
 
         # Use pure function to generate complete output
@@ -522,6 +531,7 @@ class Display:
 
         # Handle side effect (printing)
         print(output, end="")
+        self._printed_once = True
 
     def show_winner(self, winner: str, rat_score: float, python_score: float):
         """
