@@ -5,6 +5,7 @@ Tests that the CLI can successfully run games with the example AIs
 and that the game completes without errors.
 """
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -20,6 +21,8 @@ def test_cli_runs_random_vs_random():
         pytest.skip(f"Random AI not found at {random_ai}")
 
     # Run the CLI
+    # Be more lenient in CI where cold starts are slower
+    run_timeout = 90 if os.environ.get("CI") else 30
     result = subprocess.run(
         [
             sys.executable, "-m", "pyrat_runner.cli",
@@ -34,7 +37,7 @@ def test_cli_runs_random_vs_random():
         ],
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=run_timeout,
     )
 
     # Check that the game completed successfully
@@ -54,6 +57,7 @@ def test_cli_runs_greedy_vs_dummy():
         pytest.skip(f"Dummy AI not found at {dummy_ai}")
 
     # Run the CLI
+    run_timeout = 60 if os.environ.get("CI") else 30
     result = subprocess.run(
         [
             sys.executable, "-m", "pyrat_runner.cli",
@@ -68,7 +72,7 @@ def test_cli_runs_greedy_vs_dummy():
         ],
         capture_output=True,
         text=True,
-        timeout=30,
+        timeout=run_timeout,
     )
 
     # Check that the game completed successfully
@@ -99,6 +103,7 @@ if __name__ == "__main__":
 
     try:
         # Run CLI with very short timeout
+        run_timeout = 90 if os.environ.get("CI") else 30
         result = subprocess.run(
             [
                 sys.executable, "-m", "pyrat_runner.cli",
@@ -112,7 +117,7 @@ if __name__ == "__main__":
             ],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=run_timeout,
         )
 
         # CLI should complete even with timeouts (AIs default to STAY)
