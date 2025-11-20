@@ -250,8 +250,7 @@ class AIProcess:
                 # AI is sending info during move calculation, ignore for now
                 pass
 
-        # Timeout
-        self.state = AIState.TIMED_OUT
+        # Timeout: treat as non-fatal; caller will default to STAY
         return None
 
     def send_game_over(self, winner: str, rat_score: float, python_score: float):
@@ -307,10 +306,44 @@ class AIProcess:
         except queue.Empty:
             return None
 
+    def notify_timeout(self, default_move: Direction) -> None:
+        """Inform the AI process that a move timed out.
+
+        Sends a protocol timeout notification so the AI can adjust and
+        keep its internal state in sync.
+
+        Args:
+            default_move: The move the engine defaulted to (usually STAY)
+        """
+        move_name = direction_to_name(default_move)
+        self._write_line(f"timeout move:{move_name}")
+
+    def ready_probe(self, timeout: float = 0.5) -> bool:
+        """Probe the AI for responsiveness using isready/readyok.
+
+        This uses the synchronization primitive that AIs must respond to
+        even while calculating, providing a quick liveness check.
+
+        Args:
+            timeout: Maximum time to wait for 'readyok'
+
+        Returns:
+            True if 'readyok' is received, False otherwise
+        """
+        # Ask for readiness
+        self._write_line("isready")
+
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            remaining = max(0.0, deadline - time.time())
+            line = self._read_line(timeout=remaining)
+            if line is None:
+                continue
+            if line == "readyok":
+                return True
+            # Ignore other outputs (info/move) while probing
+        return False
+
     def is_alive(self) -> bool:
-        """Check if AI process is still alive."""
-        return (
-            self.process is not None
-            and self.process.poll() is None
-            and self.state not in [AIState.CRASHED, AIState.TIMED_OUT]
-        )
+        """Check if AI process is still alive (OS-level)."""
+        return self.process is not None and self.process.poll() is None
