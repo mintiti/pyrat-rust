@@ -210,18 +210,18 @@ class AIProcess:
             cheese_str = " ".join(f"({c[0]},{c[1]})" for c in cheese)
             self._write_line(f"cheese {cheese_str}")
 
-        # Send player positions
+        # Send player positions (protocol-compliant)
         p1_pos = game_state.player1_pos
         p2_pos = game_state.player2_pos
-        self._write_line(f"rat position:({p1_pos[0]},{p1_pos[1]})")
-        self._write_line(f"python position:({p2_pos[0]},{p2_pos[1]})")
+        self._write_line(f"player1 rat ({p1_pos[0]},{p1_pos[1]})")
+        self._write_line(f"player2 python ({p2_pos[0]},{p2_pos[1]})")
 
         # Tell AI which player it is
         self._write_line(f"youare {self.player_name}")
 
-        # Time controls (using defaults from spec)
+        # Time controls (use move and preprocessing keys per spec)
         self._write_line(
-            f"timecontrol preprocessing:{int(preprocessing_time * 1000)} turn:{int(self.timeout * 1000)}"
+            f"timecontrol move:{int(self.timeout * 1000)} preprocessing:{int(preprocessing_time * 1000)}"
         )
 
         # Start preprocessing
