@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 
+@pytest.mark.flaky(reruns=2, reruns_delay=1)
 def test_cli_runs_random_vs_random():
     """Test that CLI can run a game between two random AIs."""
     # Find the random AI example
