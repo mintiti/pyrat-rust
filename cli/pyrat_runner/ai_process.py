@@ -11,7 +11,7 @@ from typing import Optional
 
 from pyrat_engine.core import Direction
 from pyrat_engine.core.types import direction_to_name, name_to_direction
-from .logger import GameLogger
+from pyrat_runner.logger import GameLogger
 
 
 class AIState(Enum):

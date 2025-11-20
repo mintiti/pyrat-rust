@@ -9,9 +9,9 @@ from datetime import datetime
 from pyrat_engine import PyRat
 from pyrat_engine.core import Direction
 
-from .ai_process import AIProcess
-from .display import Display
-from .logger import GameLogger
+from pyrat_runner.ai_process import AIProcess
+from pyrat_runner.display import Display
+from pyrat_runner.logger import GameLogger
 
 
 # ===========================
