@@ -443,10 +443,17 @@ class Display:
         mud = game_state.mud_positions
         self.structures = build_maze_structures(walls, mud)
         # Detect non-interactive environments to limit rendering in CI
+        # Allow override via PYRAT_DEBUG to force full rendering for troubleshooting
         try:
             self._non_tty = not sys.stdout.isatty()  # type: ignore[attr-defined]
         except Exception:
             self._non_tty = True
+        try:
+            debug_env = os.environ.get("PYRAT_DEBUG", "").lower()
+            if debug_env in ("1", "true", "yes"):
+                self._non_tty = False
+        except Exception:
+            pass
         self._printed_once = False
 
     @staticmethod
@@ -456,7 +463,10 @@ class Display:
         Skip in non-interactive environments to avoid TERM errors and overhead.
         """
         try:
-            if not sys.stdout.isatty():  # type: ignore[attr-defined]
+            # Respect debug override for full rendering even if not a TTY
+            debug_env = os.environ.get("PYRAT_DEBUG", "").lower()
+            debug_override = debug_env in ("1", "true", "yes")
+            if not debug_override and not sys.stdout.isatty():  # type: ignore[attr-defined]
                 return
         except Exception:
             return
@@ -515,9 +525,11 @@ class Display:
             rat_move: Last move made by rat
             python_move: Last move made by python
         """
-        # Avoid excessive rendering in non-interactive environments
+        # Avoid excessive rendering in non-interactive environments unless debug override is set
         if self._non_tty and self._printed_once:
-            return
+            debug_env = os.environ.get("PYRAT_DEBUG", "").lower()
+            if debug_env not in ("1", "true", "yes"):
+                return
         self.clear()
 
         # Use pure function to generate complete output
@@ -528,8 +540,8 @@ class Display:
             python_move=python_move,
         )
 
-        # Handle side effect (printing)
-        print(output, end="")
+        # Handle side effect (printing). Force flush so updates appear even when stdout is not a TTY.
+        print(output, end="", flush=True)
         self._printed_once = True
 
     def show_winner(self, winner: str, rat_score: float, python_score: float):

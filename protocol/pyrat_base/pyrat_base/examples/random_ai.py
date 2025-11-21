@@ -35,9 +35,7 @@ class RandomAI(PyRatAI):
         move = random.choice(effective_moves)
 
         # Log our choice if in debug mode
-        self.log(
-            f"Position: {state.my_position}, Choosing: {direction_to_name(move)}"
-        )
+        self.log(f"Position: {state.my_position}, Choosing: {direction_to_name(move)}")
 
         return move
 

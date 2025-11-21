@@ -4,7 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from .game_runner import GameRunner
+from pyrat_runner.game_runner import GameRunner
 
 
 def main():
@@ -82,6 +82,12 @@ Examples:
         default=3.0,
         help="Preprocessing time in seconds (default: 3.0)",
     )
+    time_group.add_argument(
+        "--max-turns",
+        type=int,
+        default=None,
+        help="Maximum number of turns (default: unlimited)",
+    )
 
     # Display options
     display_group = parser.add_argument_group("display options")
@@ -90,6 +96,11 @@ Examples:
         type=float,
         default=0.3,
         help="Delay between turns in seconds (default: 0.3)",
+    )
+    display_group.add_argument(
+        "--headless",
+        action="store_true",
+        help="Run without visualization (headless mode)",
     )
 
     # Logging options
@@ -131,6 +142,8 @@ Examples:
             preprocessing_timeout=args.preprocessing,
             display_delay=args.delay,
             log_dir=args.log_dir,
+            headless=args.headless,
+            max_turns=args.max_turns,
         )
 
         success = runner.run()
