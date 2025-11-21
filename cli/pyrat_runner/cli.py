@@ -4,7 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from .game_runner import GameRunner
+from pyrat_runner.game_runner import GameRunner
 
 
 def main():

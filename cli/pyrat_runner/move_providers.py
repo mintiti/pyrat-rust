@@ -4,8 +4,8 @@ from typing import Optional, Protocol
 
 from pyrat_engine.core import Direction
 
-from .ai_process import AIInfo, AIProcess
-from .logger import GameLogger
+from pyrat_runner.ai_process import AIInfo, AIProcess
+from pyrat_runner.logger import GameLogger
 
 
 class MoveProvider(Protocol):

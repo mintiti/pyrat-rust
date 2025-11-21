@@ -10,9 +10,9 @@ from typing import Optional, Tuple
 from pyrat_engine import PyRat
 from pyrat_engine.core import Direction
 
-from .display import Display
-from .logger import GameLogger
-from .move_providers import MoveProvider, SubprocessMoveProvider
+from pyrat_runner.display import Display
+from pyrat_runner.logger import GameLogger
+from pyrat_runner.move_providers import MoveProvider, SubprocessMoveProvider
 
 
 # ===========================
