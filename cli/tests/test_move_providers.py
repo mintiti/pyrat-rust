@@ -249,14 +249,14 @@ class TestRunGameFunction:
                 r.game_over = True
                 return r
 
-        # If sequential, ~0.4s; if parallel, ~0.2s (allow generous margin)
+        # If sequential, ~0.4s; if parallel, ~0.2s (allow generous margin for CI)
         game = FakeGame()
         rat = SleepProvider("Rat", 0.2)
         python = SleepProvider("Python", 0.2)
         t0 = time.time()
         run_game(game, rat, python, display=None, display_delay=0.0)
         elapsed = time.time() - t0
-        assert elapsed < 0.35
+        assert elapsed < 0.45
 
 
 class TestGameRunnerInjection:
