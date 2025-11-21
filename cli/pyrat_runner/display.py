@@ -540,8 +540,8 @@ class Display:
             python_move=python_move,
         )
 
-        # Handle side effect (printing)
-        print(output, end="")
+        # Handle side effect (printing). Force flush so updates appear even when stdout is not a TTY.
+        print(output, end="", flush=True)
         self._printed_once = True
 
     def show_winner(self, winner: str, rat_score: float, python_score: float):
