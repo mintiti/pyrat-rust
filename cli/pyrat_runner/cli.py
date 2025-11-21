@@ -82,6 +82,12 @@ Examples:
         default=3.0,
         help="Preprocessing time in seconds (default: 3.0)",
     )
+    time_group.add_argument(
+        "--max-turns",
+        type=int,
+        default=None,
+        help="Maximum number of turns (default: unlimited)",
+    )
 
     # Display options
     display_group = parser.add_argument_group("display options")
@@ -137,6 +143,7 @@ Examples:
             display_delay=args.delay,
             log_dir=args.log_dir,
             headless=args.headless,
+            max_turns=args.max_turns,
         )
 
         success = runner.run()

@@ -3,6 +3,7 @@
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Optional, Tuple
 
@@ -99,10 +100,14 @@ def run_game(
     rat_move = Direction.STAY
     python_move = Direction.STAY
 
-    while True:
-        # Get moves from both providers
-        rat_move_new = rat_provider.get_move(rat_move, python_move)
-        python_move_new = python_provider.get_move(rat_move, python_move)
+    # Request both providers' moves in parallel each turn to keep per-turn wall time bounded
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        while True:
+            # Get moves from both providers concurrently
+            fut_rat = pool.submit(rat_provider.get_move, rat_move, python_move)
+            fut_py = pool.submit(python_provider.get_move, rat_move, python_move)
+            rat_move_new = fut_rat.result()
+            python_move_new = fut_py.result()
 
         # Notify providers of timeout to keep protocol in sync (if supported)
         if (
@@ -188,6 +193,7 @@ class GameRunner:
         display_delay: float = 0.3,
         log_dir: Optional[str] = None,
         headless: bool = False,
+        max_turns: Optional[int] = None,
     ):
         """
         Initialize game runner.
@@ -204,16 +210,10 @@ class GameRunner:
             display_delay: Delay between turns for visualization
             log_dir: Directory to write logs (protocol, stderr, events)
             headless: If True, run without visualization
+            max_turns: Optional cap on game turns (default: unlimited)
         """
         self.rat_script = rat_script
         self.python_script = python_script
-
-        # Create game (cap max_turns in non-interactive environments to keep CI fast)
-        try:
-            non_tty = not sys.stdout.isatty()  # type: ignore[attr-defined]
-        except Exception:
-            non_tty = True
-        max_turns = 150 if non_tty else None
 
         self.game = PyRat(
             width=width,
