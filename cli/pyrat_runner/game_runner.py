@@ -109,67 +109,67 @@ def run_game(
             rat_move_new = fut_rat.result()
             python_move_new = fut_py.result()
 
-        # Notify providers of timeout to keep protocol in sync (if supported)
-        if (
-            rat_move_new is None
-            and rat_provider.is_alive()
-            and hasattr(rat_provider, "notify_timeout")
-        ):
-            try:
-                getattr(rat_provider, "notify_timeout")(Direction.STAY)
-            except Exception:
-                pass
-        if (
-            python_move_new is None
-            and python_provider.is_alive()
-            and hasattr(python_provider, "notify_timeout")
-        ):
-            try:
-                getattr(python_provider, "notify_timeout")(Direction.STAY)
-            except Exception:
-                pass
+            # Notify providers of timeout to keep protocol in sync (if supported)
+            if (
+                rat_move_new is None
+                and rat_provider.is_alive()
+                and hasattr(rat_provider, "notify_timeout")
+            ):
+                try:
+                    getattr(rat_provider, "notify_timeout")(Direction.STAY)
+                except Exception:
+                    pass
+            if (
+                python_move_new is None
+                and python_provider.is_alive()
+                and hasattr(python_provider, "notify_timeout")
+            ):
+                try:
+                    getattr(python_provider, "notify_timeout")(Direction.STAY)
+                except Exception:
+                    pass
 
-        # Handle rat provider errors
-        should_continue, rat_move_processed, error_msg = classify_ai_move_error(
-            rat_provider.is_alive(), rat_move_new
-        )
-        if error_msg and display:
-            display.show_error("rat", error_msg)
-        if not should_continue:
-            # Rat AI crashed - determine final state and return
-            scores = game.scores
-            winner = determine_winner_from_scores(scores[0], scores[1])
-            return False, winner, scores[0], scores[1]
+            # Handle rat provider errors
+            should_continue, rat_move_processed, error_msg = classify_ai_move_error(
+                rat_provider.is_alive(), rat_move_new
+            )
+            if error_msg and display:
+                display.show_error("rat", error_msg)
+            if not should_continue:
+                # Rat AI crashed - determine final state and return
+                scores = game.scores
+                winner = determine_winner_from_scores(scores[0], scores[1])
+                return False, winner, scores[0], scores[1]
 
-        # Handle python provider errors
-        should_continue, python_move_processed, error_msg = classify_ai_move_error(
-            python_provider.is_alive(), python_move_new
-        )
-        if error_msg and display:
-            display.show_error("python", error_msg)
-        if not should_continue:
-            # Python AI crashed - determine final state and return
-            scores = game.scores
-            winner = determine_winner_from_scores(scores[0], scores[1])
-            return False, winner, scores[0], scores[1]
+            # Handle python provider errors
+            should_continue, python_move_processed, error_msg = classify_ai_move_error(
+                python_provider.is_alive(), python_move_new
+            )
+            if error_msg and display:
+                display.show_error("python", error_msg)
+            if not should_continue:
+                # Python AI crashed - determine final state and return
+                scores = game.scores
+                winner = determine_winner_from_scores(scores[0], scores[1])
+                return False, winner, scores[0], scores[1]
 
-        # Update moves for next iteration
-        rat_move = rat_move_processed
-        python_move = python_move_processed
+            # Update moves for next iteration
+            rat_move = rat_move_processed
+            python_move = python_move_processed
 
-        # Execute move in game
-        result = game.step(p1_move=rat_move, p2_move=python_move)
+            # Execute move in game
+            result = game.step(p1_move=rat_move, p2_move=python_move)
 
-        # Update display if provided
-        if display:
-            display.render(rat_move, python_move)
-            time.sleep(display_delay)
+            # Update display if provided
+            if display:
+                display.render(rat_move, python_move)
+                time.sleep(display_delay)
 
-        # Check for game over
-        if result.game_over:
-            scores = game.scores
-            winner = determine_winner_from_scores(scores[0], scores[1])
-            return True, winner, scores[0], scores[1]
+            # Check for game over
+            if result.game_over:
+                scores = game.scores
+                winner = determine_winner_from_scores(scores[0], scores[1])
+                return True, winner, scores[0], scores[1]
 
 
 class GameRunner:
