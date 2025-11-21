@@ -109,25 +109,11 @@ def run_game(
             rat_move_new = fut_rat.result()
             python_move_new = fut_py.result()
 
-            # Notify providers of timeout to keep protocol in sync (if supported)
-            if (
-                rat_move_new is None
-                and rat_provider.is_alive()
-                and hasattr(rat_provider, "notify_timeout")
-            ):
-                try:
-                    getattr(rat_provider, "notify_timeout")(Direction.STAY)
-                except Exception:
-                    pass
-            if (
-                python_move_new is None
-                and python_provider.is_alive()
-                and hasattr(python_provider, "notify_timeout")
-            ):
-                try:
-                    getattr(python_provider, "notify_timeout")(Direction.STAY)
-                except Exception:
-                    pass
+            # Notify providers of timeout to keep protocol in sync
+            if rat_move_new is None and rat_provider.is_alive():
+                rat_provider.notify_timeout(Direction.STAY)
+            if python_move_new is None and python_provider.is_alive():
+                python_provider.notify_timeout(Direction.STAY)
 
             # Handle rat provider errors
             should_continue, rat_move_processed, error_msg = classify_ai_move_error(
@@ -194,6 +180,8 @@ class GameRunner:
         log_dir: Optional[str] = None,
         headless: bool = False,
         max_turns: Optional[int] = None,
+        rat_provider: Optional[MoveProvider] = None,
+        python_provider: Optional[MoveProvider] = None,
     ):
         """
         Initialize game runner.
@@ -211,6 +199,8 @@ class GameRunner:
             log_dir: Directory to write logs (protocol, stderr, events)
             headless: If True, run without visualization
             max_turns: Optional cap on game turns (default: unlimited)
+            rat_provider: Optional MoveProvider to inject (overrides script path)
+            python_provider: Optional MoveProvider to inject (overrides script path)
         """
         self.rat_script = rat_script
         self.python_script = python_script
@@ -231,13 +221,17 @@ class GameRunner:
             actual_dir = os.path.join(log_dir, ts)
             self.logger = GameLogger(actual_dir)
 
-        # Create move providers (using subprocess implementation)
-        self.rat_provider: MoveProvider = SubprocessMoveProvider(
-            rat_script, "rat", timeout=turn_timeout, logger=self.logger
-        )
-        self.python_provider: MoveProvider = SubprocessMoveProvider(
-            python_script, "python", timeout=turn_timeout, logger=self.logger
-        )
+        # Create or use injected move providers
+        if rat_provider is not None and python_provider is not None:
+            self.rat_provider = rat_provider
+            self.python_provider = python_provider
+        else:
+            self.rat_provider = SubprocessMoveProvider(
+                rat_script, "rat", timeout=turn_timeout, logger=self.logger
+            )
+            self.python_provider = SubprocessMoveProvider(
+                python_script, "python", timeout=turn_timeout, logger=self.logger
+            )
 
         # Display (optional for headless mode)
         self.display: Optional[Display] = (

@@ -50,6 +50,10 @@ class MockMoveProvider:
     def is_alive(self) -> bool:
         return self._alive
 
+    def notify_timeout(self, default_move: Direction) -> None:
+        # No-op for mock
+        pass
+
 
 class TestSubprocessMoveProvider:
     """Test that SubprocessMoveProvider correctly delegates to AIProcess."""

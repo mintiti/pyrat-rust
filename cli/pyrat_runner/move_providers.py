@@ -75,6 +75,13 @@ class MoveProvider(Protocol):
         """
         ...
 
+    def notify_timeout(self, default_move: Direction) -> None:
+        """Inform the provider that a move timed out and which default was used.
+
+        Providers that do not maintain protocol state may implement this as a no-op.
+        """
+        ...
+
 
 class SubprocessMoveProvider:
     """Move provider that uses subprocess-based AI via protocol communication.
