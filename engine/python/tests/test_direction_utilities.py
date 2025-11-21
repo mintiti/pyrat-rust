@@ -75,7 +75,13 @@ class TestDirectionToName:
 
     def test_idempotency(self):
         """Test that calling the function multiple times gives same result."""
-        for direction in [Direction.UP, Direction.DOWN, Direction.LEFT, Direction.RIGHT, Direction.STAY]:
+        for direction in [
+            Direction.UP,
+            Direction.DOWN,
+            Direction.LEFT,
+            Direction.RIGHT,
+            Direction.STAY,
+        ]:
             first_call = direction_to_name(direction)
             second_call = direction_to_name(direction)
             assert first_call == second_call
@@ -146,7 +152,13 @@ class TestNameToDirection:
 
     def test_roundtrip(self):
         """Test that direction -> name -> direction roundtrip works."""
-        for direction in [Direction.UP, Direction.DOWN, Direction.LEFT, Direction.RIGHT, Direction.STAY]:
+        for direction in [
+            Direction.UP,
+            Direction.DOWN,
+            Direction.LEFT,
+            Direction.RIGHT,
+            Direction.STAY,
+        ]:
             name = direction_to_name(direction)
             parsed = name_to_direction(name)
             assert int(parsed) == int(direction)
@@ -252,7 +264,13 @@ class TestDirectionUtilitiesIntegration:
 
     def test_complete_roundtrip_all_directions(self):
         """Test complete roundtrip for all directions."""
-        directions = [Direction.UP, Direction.DOWN, Direction.LEFT, Direction.RIGHT, Direction.STAY]
+        directions = [
+            Direction.UP,
+            Direction.DOWN,
+            Direction.LEFT,
+            Direction.RIGHT,
+            Direction.STAY,
+        ]
 
         for original_direction in directions:
             # Direction -> name
@@ -294,7 +312,13 @@ class TestDirectionUtilitiesIntegration:
 
     def test_all_valid_names_are_valid_directions(self):
         """Test that all names produced by direction_to_name() are valid inputs for name_to_direction()."""
-        for direction in [Direction.UP, Direction.DOWN, Direction.LEFT, Direction.RIGHT, Direction.STAY]:
+        for direction in [
+            Direction.UP,
+            Direction.DOWN,
+            Direction.LEFT,
+            Direction.RIGHT,
+            Direction.STAY,
+        ]:
             name = direction_to_name(direction)
             parsed = name_to_direction(name)
             # Should be able to parse back to a valid direction
