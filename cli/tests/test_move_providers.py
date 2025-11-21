@@ -7,8 +7,9 @@ from pyrat_engine import PyRat
 from pyrat_engine.core import Direction
 
 from pyrat_runner.ai_process import AIInfo
-from pyrat_runner.game_runner import run_game
+from pyrat_runner.game_runner import run_game, GameRunner
 from pyrat_runner.move_providers import SubprocessMoveProvider
+import time
 
 
 class MockMoveProvider:
@@ -186,3 +187,147 @@ class TestRunGameFunction:
         assert rat_score >= 0
         assert python_score >= 0
         assert rat_score + python_score <= 1.0
+
+    def test_notifies_timeout_when_provider_returns_none(self):
+        """Provider.notify_timeout should be called when get_move returns None and provider is alive."""
+
+        class SpyProvider(MockMoveProvider):
+            def __init__(self, name, moves, alive=True):
+                super().__init__(name, moves, alive)
+                self.timeout_notified = 0
+
+            def notify_timeout(self, default_move: Direction) -> None:
+                self.timeout_notified += 1
+
+        # Minimal fake game that ends after a single step
+        class FakeGame:
+            def __init__(self):
+                self._done = False
+
+            @property
+            def scores(self):
+                return (0.0, 0.0)
+
+            def step(self, p1_move: Direction, p2_move: Direction):
+                class R:
+                    pass
+
+                r = R()
+                r.game_over = True  # end after first step
+                return r
+
+        game = FakeGame()
+        rat = SpyProvider("Rat", [None], alive=True)
+        python = SpyProvider("Python", [Direction.STAY], alive=True)
+
+        success, _, _, _ = run_game(game, rat, python, display=None, display_delay=0.0)
+        assert success is True
+        assert rat.timeout_notified >= 1  # timeout reported to provider
+
+    def test_requests_moves_concurrently(self):
+        """Both providers are queried in parallel to bound per-turn wall time."""
+
+        class SleepProvider(MockMoveProvider):
+            def __init__(self, name, sleep_s: float):
+                super().__init__(name, [Direction.STAY])
+                self._sleep = sleep_s
+
+            def get_move(self, rat_move: Direction, python_move: Direction):
+                time.sleep(self._sleep)
+                return Direction.STAY
+
+        class FakeGame:
+            @property
+            def scores(self):
+                return (0.0, 0.0)
+
+            def step(self, p1_move: Direction, p2_move: Direction):
+                class R:
+                    pass
+
+                r = R()
+                r.game_over = True
+                return r
+
+        # If sequential, ~0.4s; if parallel, ~0.2s (allow generous margin)
+        game = FakeGame()
+        rat = SleepProvider("Rat", 0.2)
+        python = SleepProvider("Python", 0.2)
+        t0 = time.time()
+        run_game(game, rat, python, display=None, display_delay=0.0)
+        elapsed = time.time() - t0
+        assert elapsed < 0.35
+
+
+class TestGameRunnerInjection:
+    def test_provider_injection_in_game_runner(self, monkeypatch):
+        """GameRunner should use injected providers instead of constructing subprocess providers."""
+
+        # Fake providers that record calls
+        class FakeProvider:
+            def __init__(self, name):
+                from pyrat_runner.ai_process import AIInfo
+
+                self._info = AIInfo(name=name, author="Test")
+                self.started = False
+                self.started_game = False
+                self.game_over = False
+                self.stopped = False
+
+            @property
+            def info(self):
+                return self._info
+
+            def start(self):
+                self.started = True
+                return True
+
+            def send_game_start(self, game, preprocessing_time):
+                self.started_game = True
+
+            def get_move(self, rat_move, python_move):
+                return Direction.STAY
+
+            def send_game_over(self, winner, rat_score, python_score):
+                self.game_over = True
+
+            def stop(self):
+                self.stopped = True
+
+            def is_alive(self):
+                return True
+
+            def notify_timeout(self, default_move: Direction) -> None:
+                pass
+
+        rat = FakeProvider("InjectedRat")
+        python = FakeProvider("InjectedPython")
+
+        # Stub run_game to avoid running the engine; return a fixed outcome
+        import pyrat_runner.game_runner as gr_mod
+
+        def fake_run_game(game, rp, pp, display, display_delay):
+            return True, "draw", 0.0, 0.0
+
+        monkeypatch.setattr(gr_mod, "run_game", fake_run_game)
+
+        runner = GameRunner(
+            rat_script="/ignored.py",
+            python_script="/ignored.py",
+            width=5,
+            height=5,
+            cheese_count=1,
+            seed=42,
+            headless=True,
+            rat_provider=rat,
+            python_provider=python,
+        )
+
+        assert runner.rat_provider is rat
+        assert runner.python_provider is python
+
+        assert runner.run() is True
+        assert rat.started and python.started
+        assert rat.started_game and python.started_game
+        assert rat.game_over and python.game_over
+        assert rat.stopped and python.stopped
