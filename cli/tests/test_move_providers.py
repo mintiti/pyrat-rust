@@ -1,6 +1,6 @@
 """Unit tests for move provider abstraction."""
 
-from typing import Optional
+from typing import Optional, List
 from unittest.mock import MagicMock, patch
 
 from pyrat_engine import PyRat
@@ -15,7 +15,7 @@ import time
 class MockMoveProvider:
     """Mock move provider for testing game logic."""
 
-    def __init__(self, name: str, moves: list[Optional[Direction]], alive: bool = True):
+    def __init__(self, name: str, moves: List[Optional[Direction]], alive: bool = True):
         self._info = AIInfo(name=name, author="Test")
         self._moves = moves
         self._move_index = 0
