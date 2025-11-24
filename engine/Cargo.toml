@@ -21,7 +21,7 @@ pyo3 = { version = "0.25", features = ["extension-module"], optional = true }
 numpy = { version = "0.25", optional = true }
 flame = { version = "0.2.2", optional = true }
 serde = { version = "1.0.214", features = ["derive"] }
-ndarray = { version = "0.15", optional = true }
+ndarray = { version = "0.17", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
