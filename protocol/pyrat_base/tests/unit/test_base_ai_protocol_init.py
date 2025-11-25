@@ -58,8 +58,25 @@ def test_init_builds_game_state_with_correct_keys(ai: _TestAI) -> None:
     assert ai._player == Player.RAT
 
     # Walls and mud should be present and match inputs (order-insensitive)
-    walls = set(ai._game_state.wall_entries())  # type: ignore[attr-defined]
-    mud = set(ai._game_state.mud_entries())  # type: ignore[attr-defined]
-    assert ((0, 0), (0, 1)) in walls or ((0, 1), (0, 0)) in walls
-    assert ((1, 1), (2, 1)) in walls or ((2, 1), (1, 1)) in walls
-    assert (((0, 1), (0, 2), 3)) in mud or (((0, 2), (0, 1), 3)) in mud
+    walls = ai._game_state.wall_entries()  # type: ignore[attr-defined]
+    mud = ai._game_state.mud_entries()  # type: ignore[attr-defined]
+    # Convert Wall objects to tuple pairs for comparison
+    wall_tuples = {
+        (
+            min((w.pos1.x, w.pos1.y), (w.pos2.x, w.pos2.y)),
+            max((w.pos1.x, w.pos1.y), (w.pos2.x, w.pos2.y)),
+        )
+        for w in walls
+    }
+    assert ((0, 0), (0, 1)) in wall_tuples or ((0, 1), (0, 0)) in wall_tuples
+    assert ((1, 1), (2, 1)) in wall_tuples or ((2, 1), (1, 1)) in wall_tuples
+    # Convert Mud objects to tuple format for comparison
+    mud_tuples = {
+        (
+            min((m.pos1.x, m.pos1.y), (m.pos2.x, m.pos2.y)),
+            max((m.pos1.x, m.pos1.y), (m.pos2.x, m.pos2.y)),
+            m.value,
+        )
+        for m in mud
+    }
+    assert ((0, 1), (0, 2), 3) in mud_tuples or ((0, 2), (0, 1), 3) in mud_tuples

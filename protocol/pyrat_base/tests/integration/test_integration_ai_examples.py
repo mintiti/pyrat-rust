@@ -162,8 +162,8 @@ async def test_ai_with_large_maze():
     game = PyGameState(width=21, height=15)
     walls = game.wall_entries()
 
-    # Format walls for protocol
-    wall_strings = [f"({x1},{y1})-({x2},{y2})" for (x1, y1), (x2, y2) in walls]
+    # Format walls for protocol (Wall objects have pos1, pos2 attributes)
+    wall_strings = [f"({w.pos1.x},{w.pos1.y})-({w.pos2.x},{w.pos2.y})" for w in walls]
     walls_command = f"walls {' '.join(wall_strings)}"
 
     print(f"Testing with {len(walls)} walls, command length: {len(walls_command)}")

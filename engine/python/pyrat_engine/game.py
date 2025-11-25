@@ -170,10 +170,7 @@ class PyRat:
     @property
     def mud_positions(self) -> Dict[Tuple[Coordinates, Coordinates], int]:
         """Get mud positions and their values."""
-        return {
-            (Coordinates(x1, y1), Coordinates(x2, y2)): value
-            for ((x1, y1), (x2, y2), value) in self._game.mud_entries()
-        }
+        return {(mud.pos1, mud.pos2): mud.value for mud in self._game.mud_entries()}
 
     def step(self, p1_move: DirectionType, p2_move: DirectionType) -> GameResult:
         """Execute one game step."""
