@@ -185,10 +185,13 @@ class TestProtocolState:
 
         state = ProtocolState(game, Player.RAT)
 
-        # Check mud entries
+        # Check mud entries (now returns Mud objects)
         mud_entries = state.mud
         assert len(mud_entries) == 1
-        assert mud_entries[0] == ((0, 0), (1, 0), 2)
+        mud = mud_entries[0]
+        assert (mud.pos1.x, mud.pos1.y) == (0, 0)
+        assert (mud.pos2.x, mud.pos2.y) == (1, 0)
+        assert mud.value == 2
 
         # Check movement cost reflects mud
         assert state.get_move_cost(Direction.RIGHT) == 2  # Mud cost

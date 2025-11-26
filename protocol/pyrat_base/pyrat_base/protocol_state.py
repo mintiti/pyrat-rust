@@ -7,12 +7,15 @@ underlying Rust implementation.
 """
 # ruff: noqa: F821
 
-from typing import List, Optional, Tuple
+from typing import TYPE_CHECKING, List, Optional
 
 from pyrat_engine.core import DirectionType
 from pyrat_engine.core.game import GameState as PyGameState
 from pyrat_engine.core.observation import GameObservation as PyGameObservation
 from pyrat_engine.core.types import Coordinates, Direction
+
+if TYPE_CHECKING:
+    from pyrat_engine.core.types import Mud
 
 from pyrat_base.enums import Player
 
@@ -80,8 +83,8 @@ class ProtocolState:
         return self._game.cheese_positions()
 
     @property
-    def mud(self) -> List[Tuple[Tuple[int, int], Tuple[int, int], int]]:
-        """List of mud entries as ((x1, y1), (x2, y2), mud_value) tuples."""
+    def mud(self) -> "List[Mud]":
+        """List of mud entries as Mud objects with pos1, pos2, and value attributes."""
         return self._game.mud_entries()
 
     # Protocol-oriented properties using cached observation

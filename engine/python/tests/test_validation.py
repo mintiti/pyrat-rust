@@ -255,4 +255,4 @@ class TestValidInputs:
         )
         mud_entries = game.mud_entries()
         max_mud_value = 255
-        assert any(entry[2] == max_mud_value for entry in mud_entries)
+        assert any(m.value == max_mud_value for m in mud_entries)

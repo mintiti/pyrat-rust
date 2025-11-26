@@ -299,24 +299,19 @@ class GameState:
         """
         ...
 
-    def mud_entries(self) -> list[tuple[tuple[int, int], tuple[int, int], int]]:
+    def mud_entries(self) -> list[Mud]:
         """Get all mud patches in the maze.
 
         Returns:
-            List of mud entries, each containing:
-            - Starting position (x1,y1)
-            - Ending position (x2,y2)
-            - Number of turns required to cross the mud
+            List of Mud objects, each with pos1, pos2, and value attributes
         """
         ...
 
-    def wall_entries(self) -> list[tuple[tuple[int, int], tuple[int, int]]]:
+    def wall_entries(self) -> list[Wall]:
         """Get all walls in the maze.
 
         Returns:
-            List of wall entries, each containing:
-            - Starting position (x1,y1)
-            - Ending position (x2,y2)
+            List of Wall objects, each with pos1 and pos2 attributes
         """
         ...
 

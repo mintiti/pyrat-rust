@@ -3,7 +3,7 @@
 import os
 import sys
 from dataclasses import dataclass
-from typing import Dict, FrozenSet, List, Optional, Set, Tuple
+from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
 from pyrat_engine.core import Direction
 from pyrat_engine.core.types import direction_to_name
@@ -55,16 +55,16 @@ CORNER = "+"
 
 
 def build_maze_structures(
-    walls: List[Tuple[Tuple[int, int], Tuple[int, int]]],
-    mud: Dict[Tuple[Tuple[int, int], Tuple[int, int]], int],
+    walls: List[Any],
+    mud: Dict[Tuple[Any, Any], int],
 ) -> MazeStructures:
     """Build wall and mud lookup structures from raw data.
 
     This is a pure function - no side effects, same inputs always produce same outputs.
 
     Args:
-        walls: List of wall entries, each is ((x1, y1), (x2, y2))
-        mud: Dict mapping cell pairs to mud turns
+        walls: List of Wall objects (with pos1, pos2 attributes) or tuples ((x1, y1), (x2, y2))
+        mud: Dict mapping (Coordinates, Coordinates) pairs to mud turns
 
     Returns:
         MazeStructures containing sets for efficient lookup
@@ -74,8 +74,15 @@ def build_maze_structures(
     h_mud = set()
     v_mud = set()
 
-    # Process walls
-    for (x1, y1), (x2, y2) in walls:
+    # Process walls - handle both Wall objects and tuples
+    for wall in walls:
+        if hasattr(wall, "pos1"):
+            # Wall object
+            x1, y1 = wall.pos1.x, wall.pos1.y
+            x2, y2 = wall.pos2.x, wall.pos2.y
+        else:
+            # Tuple format ((x1, y1), (x2, y2))
+            (x1, y1), (x2, y2) = wall
         if x1 == x2:  # Same column, different row (horizontal wall)
             min_y = min(y1, y2)
             h_walls.add((x1, min_y))
@@ -83,10 +90,16 @@ def build_maze_structures(
             min_x = min(x1, x2)
             v_walls.add((min_x, y1))
 
-    # Process mud
+    # Process mud - handle both Coordinates and tuple keys
     for (cell1, cell2), turns in mud.items():
-        x1, y1 = cell1[0], cell1[1]
-        x2, y2 = cell2[0], cell2[1]
+        if hasattr(cell1, "x"):
+            # Coordinates objects
+            x1, y1 = cell1.x, cell1.y
+            x2, y2 = cell2.x, cell2.y
+        else:
+            # Tuple format
+            x1, y1 = cell1[0], cell1[1]
+            x2, y2 = cell2[0], cell2[1]
         if x1 == x2:  # Same column, different row (horizontal mud)
             min_y = min(y1, y2)
             h_mud.add((x1, min_y))
@@ -331,10 +344,10 @@ def render_game_state(
         Multi-line string containing the complete game visualization
     """
     # Extract data from game state (read-only operations)
-    rat_pos = (game.player1_pos[0], game.player1_pos[1])
-    python_pos = (game.player2_pos[0], game.player2_pos[1])
+    rat_pos = (game.player1_pos.x, game.player1_pos.y)
+    python_pos = (game.player2_pos.x, game.player2_pos.y)
     scores = game.scores
-    cheese_set = set((c[0], c[1]) for c in game.cheese_positions)
+    cheese_set = set((c.x, c.y) for c in game.cheese_positions)
     width = game._game.width
     height = game._game.height
     turn = game.turn
@@ -477,8 +490,8 @@ class Display:
         self, x: int, y: int, cheese_set: Set[Tuple[int, int]]
     ) -> str:
         """Get display content for a cell (delegates to pure function)."""
-        rat_pos = (self.game.player1_pos[0], self.game.player1_pos[1])
-        python_pos = (self.game.player2_pos[0], self.game.player2_pos[1])
+        rat_pos = (self.game.player1_pos.x, self.game.player1_pos.y)
+        python_pos = (self.game.player2_pos.x, self.game.player2_pos.y)
         return get_cell_content(x, y, rat_pos, python_pos, cheese_set)
 
     def _get_vertical_separator(self, x: int, y: int) -> str:

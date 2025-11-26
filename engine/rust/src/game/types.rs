@@ -294,20 +294,23 @@ pub struct Wall {
 #[pymethods]
 impl Wall {
     #[new]
-    fn new(pos1: Coordinates, pos2: Coordinates) -> PyResult<Self> {
-        if !pos1.is_adjacent_to(&pos2) {
+    fn new(pos1: CoordinatesInput, pos2: CoordinatesInput) -> PyResult<Self> {
+        let coord1: Coordinates = PyResult::<Coordinates>::from(pos1)?;
+        let coord2: Coordinates = PyResult::<Coordinates>::from(pos2)?;
+
+        if !coord1.is_adjacent_to(&coord2) {
             return Err(PyValueError::new_err(format!(
                 "Wall positions must be adjacent: {} and {}",
-                pos1.__str__(),
-                pos2.__str__()
+                coord1.__str__(),
+                coord2.__str__()
             )));
         }
 
         // Normalize order (smaller position first)
-        let (p1, p2) = if pos1 < pos2 {
-            (pos1, pos2)
+        let (p1, p2) = if coord1 < coord2 {
+            (coord1, coord2)
         } else {
-            (pos2, pos1)
+            (coord2, coord1)
         };
         Ok(Self { pos1: p1, pos2: p2 })
     }
@@ -324,6 +327,13 @@ impl Wall {
 
     fn __repr__(&self) -> String {
         format!("Wall({}, {})", self.pos1.__repr__(), self.pos2.__repr__())
+    }
+
+    fn __hash__(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.hash(&mut hasher);
+        hasher.finish()
     }
 
     fn __eq__(&self, other: &Self) -> bool {
@@ -351,12 +361,15 @@ pub struct Mud {
 #[pymethods]
 impl Mud {
     #[new]
-    fn new(pos1: Coordinates, pos2: Coordinates, value: u8) -> PyResult<Self> {
-        if !pos1.is_adjacent_to(&pos2) {
+    fn new(pos1: CoordinatesInput, pos2: CoordinatesInput, value: u8) -> PyResult<Self> {
+        let coord1: Coordinates = PyResult::<Coordinates>::from(pos1)?;
+        let coord2: Coordinates = PyResult::<Coordinates>::from(pos2)?;
+
+        if !coord1.is_adjacent_to(&coord2) {
             return Err(PyValueError::new_err(format!(
                 "Mud positions must be adjacent: {} and {}",
-                pos1.__str__(),
-                pos2.__str__()
+                coord1.__str__(),
+                coord2.__str__()
             )));
         }
         if value < 2 {
@@ -364,10 +377,10 @@ impl Mud {
         }
 
         // Normalize order
-        let (p1, p2) = if pos1 < pos2 {
-            (pos1, pos2)
+        let (p1, p2) = if coord1 < coord2 {
+            (coord1, coord2)
         } else {
-            (pos2, pos1)
+            (coord2, coord1)
         };
         Ok(Self {
             pos1: p1,
@@ -391,6 +404,13 @@ impl Mud {
             self.pos2.__repr__(),
             self.value
         )
+    }
+
+    fn __hash__(&self) -> u64 {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.hash(&mut hasher);
+        hasher.finish()
     }
 
     fn __eq__(&self, other: &Self) -> bool {
@@ -738,7 +758,10 @@ mod python_tests {
         let pos1 = Coordinates::new(0, 0);
         let pos2 = Coordinates::new(0, 1);
 
-        let wall = Wall::new(pos1, pos2);
+        let wall = Wall::new(
+            CoordinatesInput::Object(pos1),
+            CoordinatesInput::Object(pos2),
+        );
         assert!(wall.is_ok());
         let wall = wall.unwrap();
         assert_eq!(wall.pos1, pos1);
@@ -751,22 +774,37 @@ mod python_tests {
         let pos1 = Coordinates::new(0, 0);
         let pos2 = Coordinates::new(2, 2);
 
-        let wall = Wall::new(pos1, pos2);
+        let wall = Wall::new(
+            CoordinatesInput::Object(pos1),
+            CoordinatesInput::Object(pos2),
+        );
         assert!(wall.is_err());
     }
 
     #[test]
     fn test_wall_normalization() {
         // Order should be normalized (smaller position first)
-        let wall1 = Wall::new(Coordinates::new(1, 0), Coordinates::new(0, 0)).unwrap();
-        let wall2 = Wall::new(Coordinates::new(0, 0), Coordinates::new(1, 0)).unwrap();
+        let wall1 = Wall::new(
+            CoordinatesInput::Object(Coordinates::new(1, 0)),
+            CoordinatesInput::Object(Coordinates::new(0, 0)),
+        )
+        .unwrap();
+        let wall2 = Wall::new(
+            CoordinatesInput::Object(Coordinates::new(0, 0)),
+            CoordinatesInput::Object(Coordinates::new(1, 0)),
+        )
+        .unwrap();
         assert_eq!(wall1.pos1, wall2.pos1);
         assert_eq!(wall1.pos2, wall2.pos2);
     }
 
     #[test]
     fn test_wall_blocks_movement() {
-        let wall = Wall::new(Coordinates::new(0, 0), Coordinates::new(0, 1)).unwrap();
+        let wall = Wall::new(
+            CoordinatesInput::Object(Coordinates::new(0, 0)),
+            CoordinatesInput::Object(Coordinates::new(0, 1)),
+        )
+        .unwrap();
 
         // Should block movement between the two positions
         assert!(wall.blocks_movement(Coordinates::new(0, 0), Coordinates::new(0, 1)));
@@ -783,7 +821,11 @@ mod python_tests {
         let pos1 = Coordinates::new(0, 0);
         let pos2 = Coordinates::new(0, 1);
 
-        let mud = Mud::new(pos1, pos2, 3);
+        let mud = Mud::new(
+            CoordinatesInput::Object(pos1),
+            CoordinatesInput::Object(pos2),
+            3,
+        );
         assert!(mud.is_ok());
         let mud = mud.unwrap();
         assert_eq!(mud.pos1, pos1);
@@ -797,10 +839,20 @@ mod python_tests {
         let pos2 = Coordinates::new(0, 1);
 
         // Mud value too low
-        assert!(Mud::new(pos1, pos2, 1).is_err());
+        assert!(Mud::new(
+            CoordinatesInput::Object(pos1),
+            CoordinatesInput::Object(pos2),
+            1
+        )
+        .is_err());
 
         // Non-adjacent positions
         let pos3 = Coordinates::new(2, 2);
-        assert!(Mud::new(pos1, pos3, 3).is_err());
+        assert!(Mud::new(
+            CoordinatesInput::Object(pos1),
+            CoordinatesInput::Object(pos3),
+            3
+        )
+        .is_err());
     }
 }

@@ -488,10 +488,13 @@ class TestGameStateExtractionSymmetry:
 
         # For each wall, verify its symmetric counterpart exists
         width, height = 11, 9
-        walls_set = set(walls)
+        # Convert Wall objects to tuple pairs for comparison
+        walls_tuples = [((w.pos1.x, w.pos1.y), (w.pos2.x, w.pos2.y)) for w in walls]
+        walls_set = set(walls_tuples)
 
         for wall in walls:
-            (x1, y1), (x2, y2) = wall
+            x1, y1 = wall.pos1.x, wall.pos1.y
+            x2, y2 = wall.pos2.x, wall.pos2.y
             sym1 = get_symmetric_position(x1, y1, width, height)
             sym2 = get_symmetric_position(x2, y2, width, height)
 
@@ -527,11 +530,12 @@ class TestGameStateExtractionSymmetry:
 
         mud_entries = game_state.mud_entries()
 
-        # Build dict from mud entries list (mud_entries returns list of tuples)
+        # Build dict from mud entries list (mud_entries returns list of Mud objects)
         mud_dict = {}
         for entry in mud_entries:
-            (x1, y1), (x2, y2), turns = entry
-            mud_dict[((x1, y1), (x2, y2))] = turns
+            x1, y1 = entry.pos1.x, entry.pos1.y
+            x2, y2 = entry.pos2.x, entry.pos2.y
+            mud_dict[((x1, y1), (x2, y2))] = entry.value
 
         # For each mud entry, verify its symmetric counterpart exists
         for (cell1, cell2), turns in mud_dict.items():
@@ -614,9 +618,12 @@ class TestFullBoardSymmetry:
         assert "P" in clean_board, "Python should appear in board"
         assert "C" in clean_board, "Cheese should appear in board"
 
-        # Verify symmetric walls exist
+        # Verify symmetric walls exist - convert to tuple set for comparison
+        walls_tuples = [((w.pos1.x, w.pos1.y), (w.pos2.x, w.pos2.y)) for w in walls]
+        walls_set = set(walls_tuples)
         for wall in walls:
-            (x1, y1), (x2, y2) = wall
+            x1, y1 = wall.pos1.x, wall.pos1.y
+            x2, y2 = wall.pos2.x, wall.pos2.y
             sym1 = get_symmetric_position(x1, y1, 7, 7)
             sym2 = get_symmetric_position(x2, y2, 7, 7)
 
@@ -624,7 +631,7 @@ class TestFullBoardSymmetry:
             symmetric_wall_reversed = (sym2, sym1)
 
             assert (
-                symmetric_wall in walls or symmetric_wall_reversed in walls
+                symmetric_wall in walls_set or symmetric_wall_reversed in walls_set
             ), f"Symmetric game should have symmetric wall for {wall}"
 
     def test_boundary_walls_render_correctly(self):
@@ -782,10 +789,12 @@ class TestEdgeCases:
         walls = game.wall_entries()
         cheese = {(c.x, c.y) for c in game.cheese_positions()}
 
-        # Verify symmetry of walls
-        walls_set = set(walls)
+        # Verify symmetry of walls - convert to tuple set for comparison
+        walls_tuples = [((w.pos1.x, w.pos1.y), (w.pos2.x, w.pos2.y)) for w in walls]
+        walls_set = set(walls_tuples)
         for wall in walls:
-            (x1, y1), (x2, y2) = wall
+            x1, y1 = wall.pos1.x, wall.pos1.y
+            x2, y2 = wall.pos2.x, wall.pos2.y
             sym1 = get_symmetric_position(x1, y1, width, height)
             sym2 = get_symmetric_position(x2, y2, width, height)
 
