@@ -509,6 +509,7 @@ class PyRatAI:
         }
         if required.issubset(self._game_config.keys()) and self._player:
             # Create the game state
+            # Note: symmetric=False because protocol data may not be symmetric
             self._game_state = PyGameState.create_custom(
                 width=self._game_config["width"],
                 height=self._game_config["height"],
@@ -517,6 +518,7 @@ class PyRatAI:
                 cheese=self._game_config["cheese"],
                 player1_pos=self._game_config["player1_pos"],
                 player2_pos=self._game_config["player2_pos"],
+                symmetric=False,
             )
             self._state = "READY"
 

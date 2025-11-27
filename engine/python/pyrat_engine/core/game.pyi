@@ -141,6 +141,7 @@ class GameState:
         player1_pos: Coordinates | tuple[int, int] | None = None,
         player2_pos: Coordinates | tuple[int, int] | None = None,
         max_turns: int = 300,
+        symmetric: bool = True,
     ) -> GameState:
         """Create a game with a fully specified maze configuration.
 
@@ -153,6 +154,8 @@ class GameState:
             player1_pos: Starting position for player 1 (default: (0,0))
             player2_pos: Starting position for player 2 (default: (width-1, height-1))
             max_turns: Maximum number of turns before game ends
+            symmetric: If True (default), validate that walls, mud, cheese, and
+                player positions are 180° rotationally symmetric.
 
         Returns:
             A new GameState instance with the specified configuration
@@ -167,6 +170,7 @@ class GameState:
         *,
         seed: int | None = None,
         max_turns: int = 300,
+        symmetric: bool = True,
     ) -> GameState:
         """Create a game with a specific maze layout and random cheese placement.
 
@@ -180,6 +184,8 @@ class GameState:
             walls: List of wall pairs, each defined by two (x,y) positions
             seed: Random seed for reproducible cheese placement
             max_turns: Maximum number of turns before game ends
+            symmetric: If True (default), validate walls are symmetric and
+                generate symmetric cheese/player positions.
 
         Returns:
             A new GameState instance with the specified maze and random cheese
@@ -194,6 +200,7 @@ class GameState:
         *,
         seed: int | None = None,
         max_turns: int = 300,
+        symmetric: bool = True,
     ) -> GameState:
         """Create a game from a list of validated Wall objects.
 
@@ -206,6 +213,8 @@ class GameState:
             walls: List of Wall objects defining the maze structure
             seed: Random seed for reproducible cheese placement
             max_turns: Maximum number of turns before game ends
+            symmetric: If True (default), validate walls are symmetric and
+                generate symmetric cheese/player positions.
 
         Returns:
             A new GameState instance with the specified walls and random cheese

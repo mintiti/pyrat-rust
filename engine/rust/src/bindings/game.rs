@@ -11,8 +11,9 @@ use pyo3::Python;
 use std::collections::HashMap;
 
 use super::validation::{
-    validate_cheese_positions, validate_mud, validate_optional_position, validate_wall, PyMudEntry,
-    PyPosition, PyWall,
+    validate_cheese_positions, validate_cheese_symmetric, validate_mud, validate_mud_symmetric,
+    validate_optional_position, validate_players_symmetric, validate_wall,
+    validate_walls_symmetric, PyMudEntry, PyPosition, PyWall,
 };
 
 // Type aliases for internal Rust API (using u8)
@@ -215,6 +216,7 @@ impl PyMoveUndo {
 pub struct PyGameState {
     game: GameState,
     observation_handler: ObservationHandler,
+    symmetric: bool,
 }
 
 #[pymethods]
@@ -252,6 +254,7 @@ impl PyGameState {
         Self {
             game,
             observation_handler,
+            symmetric,
         }
     }
 
@@ -427,12 +430,21 @@ impl PyGameState {
     /// Reset the game state
     #[pyo3(signature = (seed=None))]
     fn reset(&mut self, seed: Option<u64>) {
-        self.game = GameState::new_symmetric(
-            Some(self.game.width()),
-            Some(self.game.height()),
-            Some(self.game.total_cheese()),
-            seed,
-        );
+        self.game = if self.symmetric {
+            GameState::new_symmetric(
+                Some(self.game.width()),
+                Some(self.game.height()),
+                Some(self.game.total_cheese()),
+                seed,
+            )
+        } else {
+            GameState::new_asymmetric(
+                Some(self.game.width()),
+                Some(self.game.height()),
+                Some(self.game.total_cheese()),
+                seed,
+            )
+        };
         // Need full refresh after reset
         self.observation_handler.refresh_cheese(&self.game);
     }
@@ -484,7 +496,8 @@ impl PyGameState {
         cheese = vec![],
         player1_pos = None,
         player2_pos = None,
-        max_turns = 300
+        max_turns = 300,
+        symmetric = true
     ))]
     #[allow(clippy::too_many_arguments)]
     fn create_custom(
@@ -496,6 +509,7 @@ impl PyGameState {
         player1_pos: Option<PyPosition>,
         player2_pos: Option<PyPosition>,
         max_turns: u16,
+        symmetric: bool,
     ) -> PyResult<Self> {
         // Validate and convert all inputs
         let validated_walls: Vec<Wall> = walls
@@ -561,6 +575,25 @@ impl PyGameState {
             return Err(PyValueError::new_err("Game must have at least one cheese"));
         }
 
+        // Determine player positions for symmetry validation
+        let p1_pos = validated_player1_pos
+            .map(|(x, y)| Coordinates::new(x, y))
+            .unwrap_or_else(|| Coordinates::new(0, 0));
+        let p2_pos = validated_player2_pos
+            .map(|(x, y)| Coordinates::new(x, y))
+            .unwrap_or_else(|| Coordinates::new(width - 1, height - 1));
+
+        // Validate symmetry if required
+        if symmetric {
+            validate_walls_symmetric(&validated_walls, width, height)
+                .map_err(PyValueError::new_err)?;
+            validate_mud_symmetric(&validated_mud, width, height).map_err(PyValueError::new_err)?;
+            validate_cheese_symmetric(&validated_cheese, width, height)
+                .map_err(PyValueError::new_err)?;
+            validate_players_symmetric(p1_pos, p2_pos, width, height)
+                .map_err(PyValueError::new_err)?;
+        }
+
         // Now use the builder with validated data
         let mut builder = PyGameConfigBuilder::new(width, height);
         builder.walls = validated_walls;
@@ -569,6 +602,7 @@ impl PyGameState {
         builder.player1_pos = validated_player1_pos.map(|(x, y)| Coordinates::new(x, y));
         builder.player2_pos = validated_player2_pos.map(|(x, y)| Coordinates::new(x, y));
         builder.max_turns = max_turns;
+        builder.symmetric = symmetric;
 
         // Build the game
         builder.build()
@@ -606,6 +640,7 @@ impl PyGameState {
         Ok(Self {
             game,
             observation_handler,
+            symmetric: config.symmetric,
         })
     }
 
@@ -616,7 +651,8 @@ impl PyGameState {
         walls,
         *,
         seed = None,
-        max_turns = 300
+        max_turns = 300,
+        symmetric = true
     ))]
     fn create_from_maze(
         width: u8,
@@ -624,12 +660,19 @@ impl PyGameState {
         walls: Vec<PyWall>,
         seed: Option<u64>,
         max_turns: u16,
+        symmetric: bool,
     ) -> PyResult<Self> {
         // Validate and convert walls
         let validated_walls: Vec<Wall> = walls
             .into_iter()
             .map(|w| validate_wall(w, width, height))
             .collect::<PyResult<Vec<_>>>()?;
+
+        // Validate wall symmetry if required
+        if symmetric {
+            validate_walls_symmetric(&validated_walls, width, height)
+                .map_err(PyValueError::new_err)?;
+        }
 
         // Convert walls to adjacency list format
         let mut walls_map: HashMap<Coordinates, Vec<Coordinates>> = HashMap::new();
@@ -683,7 +726,7 @@ impl PyGameState {
         use crate::game::maze_generation::{CheeseConfig, CheeseGenerator};
         let cheese_config = CheeseConfig {
             count: cheese_count,
-            symmetry: true,
+            symmetry: symmetric,
         };
 
         let mut cheese_gen = CheeseGenerator::new(cheese_config, width, height, Some(rng_seed));
@@ -714,19 +757,26 @@ impl PyGameState {
         Ok(Self {
             game,
             observation_handler,
+            symmetric,
         })
     }
 
     /// Create a game from a list of validated Wall objects
     #[staticmethod]
-    #[pyo3(signature = (width, height, walls, *, seed=None, max_turns=300))]
+    #[pyo3(signature = (width, height, walls, *, seed=None, max_turns=300, symmetric=true))]
     fn create_from_walls(
         width: u8,
         height: u8,
         walls: Vec<crate::Wall>,
         seed: Option<u64>,
         max_turns: u16,
+        symmetric: bool,
     ) -> PyResult<Self> {
+        // Validate wall symmetry if required
+        if symmetric {
+            validate_walls_symmetric(&walls, width, height).map_err(PyValueError::new_err)?;
+        }
+
         // Convert walls to adjacency list format
         let mut walls_map: HashMap<Coordinates, Vec<Coordinates>> = HashMap::new();
 
@@ -773,7 +823,7 @@ impl PyGameState {
         use crate::game::maze_generation::{CheeseConfig, CheeseGenerator};
         let cheese_config = CheeseConfig {
             count: ((width as u16 * height as u16) * 13 / 100).max(1),
-            symmetry: true,
+            symmetry: symmetric,
         };
         let mut cheese_gen = CheeseGenerator::new(cheese_config, width, height, Some(rng_seed));
         let p1_pos = Coordinates { x: 0, y: 0 };
@@ -798,6 +848,7 @@ impl PyGameState {
         Ok(Self {
             game,
             observation_handler,
+            symmetric,
         })
     }
 
@@ -890,6 +941,7 @@ impl PyGameState {
         Ok(Self {
             game,
             observation_handler,
+            symmetric: config.symmetric,
         })
     }
 }
@@ -1019,6 +1071,7 @@ pub struct PyGameConfigBuilder {
     player1_pos: Option<Coordinates>,
     player2_pos: Option<Coordinates>,
     max_turns: u16,
+    symmetric: bool,
 }
 
 #[pymethods]
@@ -1034,6 +1087,7 @@ impl PyGameConfigBuilder {
             player1_pos: None,
             player2_pos: None,
             max_turns: 300,
+            symmetric: true,
         }
     }
 
@@ -1260,6 +1314,7 @@ impl PyGameConfigBuilder {
         Ok(PyGameState {
             game,
             observation_handler,
+            symmetric: self.symmetric,
         })
     }
 }

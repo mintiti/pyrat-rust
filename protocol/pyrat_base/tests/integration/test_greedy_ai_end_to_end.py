@@ -45,6 +45,7 @@ class TestGreedyAIEndToEnd:
             cheese=[(1, 0), (4, 4)],  # Close cheese and far cheese
             player1_pos=(0, 0),  # Rat starts at bottom-left
             player2_pos=(0, 4),  # Python starts at top-left (away from cheese)
+            symmetric=False,
         )
 
         greedy = DirectAIRunner(GreedyAI, Player.RAT)
@@ -87,6 +88,7 @@ class TestGreedyAIEndToEnd:
             cheese=[(4, 0)],  # Cheese on other side of wall
             player1_pos=(0, 0),  # Rat starts bottom-left
             player2_pos=(5, 4),  # Python starts top-right
+            symmetric=False,
         )
 
         greedy = DirectAIRunner(GreedyAI, Player.RAT)
@@ -136,6 +138,7 @@ class TestGreedyAIEndToEnd:
             cheese=[(2, 0), (0, 2)],  # One through mud, one around
             player1_pos=(0, 0),
             player2_pos=(5, 2),
+            symmetric=False,
         )
 
         greedy = DirectAIRunner(GreedyAI, Player.RAT)
@@ -190,6 +193,7 @@ class TestGreedyAIEndToEnd:
             cheese=[(3, 3), (6, 6), (1, 1)],
             player1_pos=(0, 0),
             player2_pos=(6, 0),
+            symmetric=False,
         )
 
         greedy = DirectAIRunner(GreedyAI, Player.RAT)
@@ -260,6 +264,7 @@ class TestGreedyAIEndToEnd:
             cheese=[(1, 0), (2, 0), (3, 0)],
             player1_pos=(0, 0),
             player2_pos=(4, 4),
+            symmetric=False,
         )
 
         greedy = DirectAIRunner(GreedyAI, Player.RAT)
@@ -302,6 +307,7 @@ class TestGreedyAIEndToEnd:
             cheese=[(1, 0)],  # One cheese in the middle
             player1_pos=(0, 0),  # Rat on left
             player2_pos=(2, 0),  # Python on right
+            symmetric=False,
         )
 
         greedy = DirectAIRunner(GreedyAI, Player.RAT)
@@ -347,6 +353,7 @@ class TestGreedyVsGreedy:
             cheese=[(1, 0), (2, 0), (3, 0)],
             player1_pos=(0, 0),  # Rat starts left
             player2_pos=(4, 0),  # Python starts right
+            symmetric=False,
         )
 
         greedy_rat = DirectAIRunner(GreedyAI, Player.RAT)
@@ -408,6 +415,7 @@ class TestGreedyVsGreedy:
             cheese=[(1, 0), (2, 0)],
             player1_pos=(0, 0),  # Rat starts left
             player2_pos=(6, 0),  # Python starts far right
+            symmetric=False,
         )
 
         greedy_rat = DirectAIRunner(GreedyAI, Player.RAT)
@@ -469,6 +477,7 @@ class TestGreedyVsGreedy:
             cheese=[(2, 1)],  # Center cheese
             player1_pos=(0, 1),  # Rat starts left middle
             player2_pos=(4, 1),  # Python starts right middle
+            symmetric=False,
         )
 
         greedy_rat = DirectAIRunner(GreedyAI, Player.RAT)
@@ -537,6 +546,7 @@ class TestGreedyVsGreedy:
             ],  # 5 cheese distributed
             player1_pos=(0, 0),  # Rat bottom-left
             player2_pos=(6, 0),  # Python bottom-right
+            symmetric=False,
         )
 
         greedy_rat = DirectAIRunner(GreedyAI, Player.RAT)
@@ -620,6 +630,7 @@ class TestGreedyVsGreedy:
             cheese=[(1, 2), (5, 2)],  # One cheese on each side of wall
             player1_pos=(0, 0),  # Rat on left side
             player2_pos=(6, 0),  # Python on right side
+            symmetric=False,
         )
 
         greedy_rat = DirectAIRunner(GreedyAI, Player.RAT)

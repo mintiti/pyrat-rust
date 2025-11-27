@@ -176,6 +176,7 @@ class TestMudValidation:
             walls=[((0, 0), (0, 1))],
             mud=[((0, 0), (0, 1), 3)],
             cheese=[(5, 5)],
+            symmetric=False,
         )
         assert game is not None  # Should create successfully
 
@@ -218,6 +219,7 @@ class TestValidInputs:
             player1_pos=(0, 0),
             player2_pos=(9, 9),
             max_turns=100,
+            symmetric=False,
         )
         expected_width = 10
         expected_height = 10
@@ -252,6 +254,7 @@ class TestValidInputs:
             height=10,
             mud=[((0, 0), (0, 1), 255)],
             cheese=[(5, 5)],
+            symmetric=False,
         )
         mud_entries = game.mud_entries()
         max_mud_value = 255

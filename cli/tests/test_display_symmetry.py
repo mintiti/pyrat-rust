@@ -526,6 +526,7 @@ class TestGameStateExtractionSymmetry:
             cheese=[(3, 3)],  # Center cheese
             player1_pos=(0, 0),
             player2_pos=(6, 6),
+            symmetric=False,
         )
 
         mud_entries = game_state.mud_entries()
@@ -677,6 +678,7 @@ class TestFullBoardSymmetry:
             cheese=[(center_x, center_y)],
             player1_pos=(0, 0),
             player2_pos=(4, 4),
+            symmetric=False,
         )
 
         structures = build_maze_structures([], {})
@@ -706,6 +708,7 @@ class TestFullBoardSymmetry:
             cheese=[(5, 5)],  # Dummy cheese far away
             player1_pos=(1, 1),  # Rat here
             player2_pos=(6, 6),  # Python elsewhere
+            symmetric=False,
         )
 
         structures = build_maze_structures([], {})
@@ -764,6 +767,7 @@ class TestEdgeCases:
             cheese=[(1, 1)],
             player1_pos=(0, 0),
             player2_pos=(2, 2),
+            symmetric=False,
         )
 
         structures = build_maze_structures([], {})
