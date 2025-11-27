@@ -36,6 +36,7 @@ def create_game_state():
             cheese=cheese or [],
             player1_pos=player1_pos,
             player2_pos=player2_pos,
+            symmetric=False,
         )
         return ProtocolState(game, Player.RAT)
 

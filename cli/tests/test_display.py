@@ -4,22 +4,23 @@ import pytest
 
 from pyrat_engine.game import PyRat
 from pyrat_engine.core import GameState as PyGameState
-from pyrat_engine.core.types import Coordinates
 
 from pyrat_runner.display import (
     Display,
-    MazeStructures,
-    build_maze_structures,
-    get_cell_content,
-    get_vertical_separator,
-    get_horizontal_separator,
-    render_board,
-    render_header,
-    render_winner_screen,
-    RAT, PYTHON, RAT_AND_PYTHON, CHEESE,
-    RAT_AND_CHEESE, PYTHON_AND_CHEESE, RAT_AND_PYTHON_AND_CHEESE, EMPTY,
-    VERTICAL_WALL, VERTICAL_MUD, VERTICAL_NOTHING,
-    HORIZONTAL_WALL, HORIZONTAL_MUD, HORIZONTAL_NOTHING
+    RAT,
+    PYTHON,
+    RAT_AND_PYTHON,
+    CHEESE,
+    RAT_AND_CHEESE,
+    PYTHON_AND_CHEESE,
+    RAT_AND_PYTHON_AND_CHEESE,
+    EMPTY,
+    VERTICAL_WALL,
+    VERTICAL_MUD,
+    VERTICAL_NOTHING,
+    HORIZONTAL_WALL,
+    HORIZONTAL_MUD,
+    HORIZONTAL_NOTHING,
 )
 
 
@@ -38,6 +39,7 @@ def empty_game():
         cheese=[(0, 4)],  # One cheese at corner to satisfy validation
         player1_pos=(0, 0),
         player2_pos=(4, 4),
+        symmetric=False,
     )
     wrapper = PyRat.__new__(PyRat)
     wrapper._game = game_state
@@ -63,6 +65,7 @@ def game_with_walls():
         cheese=[(0, 4)],  # One cheese at corner to satisfy validation
         player1_pos=(0, 0),
         player2_pos=(4, 4),
+        symmetric=False,
     )
     wrapper = PyRat.__new__(PyRat)
     wrapper._game = game_state
@@ -88,6 +91,7 @@ def game_with_mud():
         cheese=[(0, 4)],  # One cheese at corner to satisfy validation
         player1_pos=(0, 0),
         player2_pos=(4, 4),
+        symmetric=False,
     )
     wrapper = PyRat.__new__(PyRat)
     wrapper._game = game_state
@@ -97,25 +101,30 @@ def game_with_mud():
 class TestCellContent:
     """Test cell content determination logic."""
 
-    @pytest.mark.parametrize("x,y,rat_pos,python_pos,cheese_set,expected", [
-        # Empty cell - no players, no cheese
-        (2, 2, (0, 0), (4, 4), set(), EMPTY),
-        # Rat only at (1, 1)
-        (1, 1, (1, 1), (4, 4), set(), RAT),
-        # Python only at (3, 3)
-        (3, 3, (0, 0), (3, 3), set(), PYTHON),
-        # Cheese only at (2, 2)
-        (2, 2, (0, 0), (4, 4), {(2, 2)}, CHEESE),
-        # Rat and cheese at (1, 1)
-        (1, 1, (1, 1), (4, 4), {(1, 1)}, RAT_AND_CHEESE),
-        # Python and cheese at (3, 3)
-        (3, 3, (0, 0), (3, 3), {(3, 3)}, PYTHON_AND_CHEESE),
-        # Both players at (2, 2), no cheese
-        (2, 2, (2, 2), (2, 2), set(), RAT_AND_PYTHON),
-        # Both players and cheese at (2, 2)
-        (2, 2, (2, 2), (2, 2), {(2, 2)}, RAT_AND_PYTHON_AND_CHEESE),
-    ])
-    def test_cell_content_combinations(self, x, y, rat_pos, python_pos, cheese_set, expected):
+    @pytest.mark.parametrize(
+        "x,y,rat_pos,python_pos,cheese_set,expected",
+        [
+            # Empty cell - no players, no cheese
+            (2, 2, (0, 0), (4, 4), set(), EMPTY),
+            # Rat only at (1, 1)
+            (1, 1, (1, 1), (4, 4), set(), RAT),
+            # Python only at (3, 3)
+            (3, 3, (0, 0), (3, 3), set(), PYTHON),
+            # Cheese only at (2, 2)
+            (2, 2, (0, 0), (4, 4), {(2, 2)}, CHEESE),
+            # Rat and cheese at (1, 1)
+            (1, 1, (1, 1), (4, 4), {(1, 1)}, RAT_AND_CHEESE),
+            # Python and cheese at (3, 3)
+            (3, 3, (0, 0), (3, 3), {(3, 3)}, PYTHON_AND_CHEESE),
+            # Both players at (2, 2), no cheese
+            (2, 2, (2, 2), (2, 2), set(), RAT_AND_PYTHON),
+            # Both players and cheese at (2, 2)
+            (2, 2, (2, 2), (2, 2), {(2, 2)}, RAT_AND_PYTHON_AND_CHEESE),
+        ],
+    )
+    def test_cell_content_combinations(
+        self, x, y, rat_pos, python_pos, cheese_set, expected
+    ):
         """Test all combinations of cell occupancy."""
         # Create a game with specific player and cheese positions
         # Add a dummy cheese at (0,4) if cheese_set is empty (engine requires at least one)
@@ -129,6 +138,7 @@ class TestCellContent:
             cheese=cheese_list,
             player1_pos=rat_pos,
             player2_pos=python_pos,
+            symmetric=False,
         )
         game = PyRat.__new__(PyRat)
         game._game = game_state
@@ -142,51 +152,63 @@ class TestCellContent:
 class TestSeparators:
     """Test wall and mud separator determination logic."""
 
-    @pytest.mark.parametrize("x,y,expected", [
-        # Wall position from fixture: vertical wall between (1,1) and (2,1)
-        # Stored at min_x = 1
-        (1, 1, VERTICAL_WALL),
-        # Position with no wall or mud
-        (0, 0, VERTICAL_NOTHING),
-        (3, 3, VERTICAL_NOTHING),
-    ])
+    @pytest.mark.parametrize(
+        "x,y,expected",
+        [
+            # Wall position from fixture: vertical wall between (1,1) and (2,1)
+            # Stored at min_x = 1
+            (1, 1, VERTICAL_WALL),
+            # Position with no wall or mud
+            (0, 0, VERTICAL_NOTHING),
+            (3, 3, VERTICAL_NOTHING),
+        ],
+    )
     def test_vertical_separator_with_walls(self, game_with_walls, x, y, expected):
         """Test vertical separators with known wall positions."""
         display = Display(game_with_walls, delay=0)
         assert display._get_vertical_separator(x, y) == expected
 
-    @pytest.mark.parametrize("x,y,expected", [
-        # Mud position from fixture: vertical mud between (1,2) and (2,2)
-        # Stored at min_x = 1
-        (1, 2, VERTICAL_MUD),
-        # Position with no wall or mud
-        (0, 0, VERTICAL_NOTHING),
-        (4, 4, VERTICAL_NOTHING),
-    ])
+    @pytest.mark.parametrize(
+        "x,y,expected",
+        [
+            # Mud position from fixture: vertical mud between (1,2) and (2,2)
+            # Stored at min_x = 1
+            (1, 2, VERTICAL_MUD),
+            # Position with no wall or mud
+            (0, 0, VERTICAL_NOTHING),
+            (4, 4, VERTICAL_NOTHING),
+        ],
+    )
     def test_vertical_separator_with_mud(self, game_with_mud, x, y, expected):
         """Test vertical separators with known mud positions."""
         display = Display(game_with_mud, delay=0)
         assert display._get_vertical_separator(x, y) == expected
 
-    @pytest.mark.parametrize("x,y,expected", [
-        # Wall position from fixture: horizontal wall between (3,2) and (3,3)
-        (3, 2, HORIZONTAL_WALL),
-        # Position with no wall or mud
-        (0, 0, HORIZONTAL_NOTHING),
-        (1, 1, HORIZONTAL_NOTHING),
-    ])
+    @pytest.mark.parametrize(
+        "x,y,expected",
+        [
+            # Wall position from fixture: horizontal wall between (3,2) and (3,3)
+            (3, 2, HORIZONTAL_WALL),
+            # Position with no wall or mud
+            (0, 0, HORIZONTAL_NOTHING),
+            (1, 1, HORIZONTAL_NOTHING),
+        ],
+    )
     def test_horizontal_separator_with_walls(self, game_with_walls, x, y, expected):
         """Test horizontal separators with known wall positions."""
         display = Display(game_with_walls, delay=0)
         assert display._get_horizontal_separator(x, y) == expected
 
-    @pytest.mark.parametrize("x,y,expected", [
-        # Mud position from fixture: horizontal mud between (3,1) and (3,2)
-        (3, 1, HORIZONTAL_MUD),
-        # Position with no wall or mud
-        (0, 0, HORIZONTAL_NOTHING),
-        (2, 2, HORIZONTAL_NOTHING),
-    ])
+    @pytest.mark.parametrize(
+        "x,y,expected",
+        [
+            # Mud position from fixture: horizontal mud between (3,1) and (3,2)
+            (3, 1, HORIZONTAL_MUD),
+            # Position with no wall or mud
+            (0, 0, HORIZONTAL_NOTHING),
+            (2, 2, HORIZONTAL_NOTHING),
+        ],
+    )
     def test_horizontal_separator_with_mud(self, game_with_mud, x, y, expected):
         """Test horizontal separators with known mud positions."""
         display = Display(game_with_mud, delay=0)
@@ -237,6 +259,7 @@ class TestMazeStructureBuilding:
             cheese=[(0, 4)],  # One cheese at corner to satisfy validation
             player1_pos=(0, 0),
             player2_pos=(4, 4),
+            symmetric=False,
         )
         game = PyRat.__new__(PyRat)
         game._game = game_state

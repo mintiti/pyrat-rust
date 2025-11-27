@@ -240,7 +240,12 @@ class TestTupleInputSupport:
         walls = [((0, 0), (0, 1)), ((1, 1), (2, 1))]
 
         game = PyGameState.create_custom(
-            width=5, height=5, walls=walls, cheese=[(2, 2)], max_turns=100
+            width=5,
+            height=5,
+            walls=walls,
+            cheese=[(2, 2)],
+            max_turns=100,
+            symmetric=False,
         )
 
         assert game is not None
@@ -267,7 +272,7 @@ class TestTupleInputSupport:
         walls = [((0, 0), (0, 1)), ((1, 1), (2, 1))]
 
         game = PyGameState.create_from_maze(
-            width=5, height=5, walls=walls, seed=42, max_turns=100
+            width=5, height=5, walls=walls, seed=42, max_turns=100, symmetric=False
         )
 
         assert game is not None

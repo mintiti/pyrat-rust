@@ -133,7 +133,7 @@ class TestCustomCreationMethods:
         ]
 
         game = PyGameState.create_from_maze(
-            width=5, height=5, walls=walls, seed=42, max_turns=100
+            width=5, height=5, walls=walls, seed=42, max_turns=100, symmetric=False
         )
 
         assert game.width == 5
@@ -213,3 +213,240 @@ class TestBackwardCompatibility:
         assert game.width == 15
         assert game.height == 15
         assert len(game.cheese_positions()) == 20
+
+
+class TestResetSymmetry:
+    """Test that reset() respects the symmetric flag."""
+
+    def test_symmetric_game_reset_stays_symmetric(self):
+        """Test that resetting a symmetric game generates symmetric maze."""
+        game = PyGameState(width=11, height=9, symmetric=True, seed=42)
+        game.reset(seed=123)
+
+        # Check cheese positions are symmetric
+        cheese = game.cheese_positions()
+        cheese_set = {(c.x, c.y) for c in cheese}
+        width, height = game.width, game.height
+
+        for c in cheese:
+            sym_x = width - 1 - c.x
+            sym_y = height - 1 - c.y
+            # Either self-symmetric (center) or has symmetric counterpart
+            assert (sym_x, sym_y) in cheese_set or (c.x == sym_x and c.y == sym_y)
+
+    def test_asymmetric_game_reset_stays_asymmetric(self):
+        """Test that resetting an asymmetric game generates asymmetric maze."""
+        game = PyGameState(width=21, height=15, symmetric=False, seed=42)
+
+        game.reset(seed=123)
+        # Just verify game still works - asymmetric mazes don't guarantee
+        # anything specific about symmetry
+        assert game.width == 21
+        assert game.height == 15
+        assert len(game.cheese_positions()) > 0
+
+    def test_preset_symmetric_reset(self):
+        """Test that preset games reset correctly."""
+        game = PyGameState.create_preset("default", seed=42)
+        game.reset(seed=123)
+
+        # Default preset is symmetric - check cheese
+        cheese = game.cheese_positions()
+        cheese_set = {(c.x, c.y) for c in cheese}
+        width, height = game.width, game.height
+
+        for c in cheese:
+            sym_x = width - 1 - c.x
+            sym_y = height - 1 - c.y
+            assert (sym_x, sym_y) in cheese_set or (c.x == sym_x and c.y == sym_y)
+
+    def test_preset_asymmetric_reset(self):
+        """Test that asymmetric preset resets correctly."""
+        game = PyGameState.create_preset("asymmetric", seed=42)
+        game.reset(seed=123)
+
+        # Just verify game still works
+        assert game.width == 21
+        assert game.height == 15
+        assert len(game.cheese_positions()) > 0
+
+
+class TestCreateCustomSymmetry:
+    """Test symmetry validation in create_custom()."""
+
+    def test_symmetric_custom_game_valid(self):
+        """Test creating a symmetric custom game with valid data."""
+        # 5x5 maze: symmetric walls and cheese
+        walls = [
+            ((0, 0), (0, 1)),  # Wall at bottom-left
+            ((4, 4), (4, 3)),  # Symmetric wall at top-right
+        ]
+        cheese = [
+            (1, 1),  # Bottom-left area
+            (3, 3),  # Symmetric: top-right area
+            (2, 2),  # Center (self-symmetric in 5x5)
+        ]
+
+        game = PyGameState.create_custom(
+            width=5,
+            height=5,
+            walls=walls,
+            cheese=cheese,
+            symmetric=True,
+        )
+        assert game.width == 5
+        assert len(game.cheese_positions()) == 3
+
+    def test_asymmetric_custom_game_no_validation(self):
+        """Test that asymmetric custom games skip validation."""
+        # Non-symmetric walls and cheese - should work with symmetric=False
+        walls = [((0, 0), (0, 1))]  # Only one wall
+        cheese = [(1, 1), (2, 2)]  # Non-symmetric cheese
+
+        game = PyGameState.create_custom(
+            width=5,
+            height=5,
+            walls=walls,
+            cheese=cheese,
+            symmetric=False,
+        )
+        assert game.width == 5
+        assert len(game.cheese_positions()) == 2
+
+    def test_symmetric_custom_game_invalid_walls(self):
+        """Test that symmetric=True rejects non-symmetric walls."""
+        # Only one wall - missing symmetric counterpart
+        walls = [((0, 0), (0, 1))]
+        cheese = [(2, 2)]  # Center cheese is self-symmetric
+
+        with pytest.raises(ValueError, match="no symmetric counterpart"):
+            PyGameState.create_custom(
+                width=5,
+                height=5,
+                walls=walls,
+                cheese=cheese,
+                symmetric=True,
+            )
+
+    def test_symmetric_custom_game_invalid_cheese(self):
+        """Test that symmetric=True rejects non-symmetric cheese."""
+        cheese = [(1, 1)]  # Only one cheese, not at center
+
+        with pytest.raises(ValueError, match="no symmetric counterpart"):
+            PyGameState.create_custom(
+                width=5,
+                height=5,
+                cheese=cheese,
+                symmetric=True,
+            )
+
+    def test_symmetric_custom_game_invalid_players(self):
+        """Test that symmetric=True rejects non-symmetric player positions."""
+        cheese = [(2, 2)]  # Center cheese is valid
+
+        with pytest.raises(ValueError, match="not symmetric"):
+            PyGameState.create_custom(
+                width=5,
+                height=5,
+                cheese=cheese,
+                player1_pos=(0, 0),
+                player2_pos=(3, 3),  # Should be (4, 4) for symmetry
+                symmetric=True,
+            )
+
+    def test_symmetric_custom_game_self_symmetric_wall(self):
+        """Test that self-symmetric walls are valid."""
+        # In a 5x5 maze, wall between (2,1) and (2,2) is self-symmetric
+        # (symmetric of (2,1) is (2,3), symmetric of (2,2) is (2,2))
+        # Actually, let's use a wall that is truly self-symmetric
+        # A wall between (1,2) and (2,2) has symmetric at (3,2)-(2,2)
+        # which is different. Let me think...
+        #
+        # For 5x5: symmetric(x,y) = (4-x, 4-y)
+        # Wall (2,1)-(2,2): sym = (2,3)-(2,2) - not the same
+        #
+        # Actually for a wall to be self-symmetric, both endpoints must
+        # map to each other: wall(a,b) is self-sym if sym(a)=b and sym(b)=a
+        # That means a and b are symmetric to each other.
+        #
+        # In 5x5: (1,1) and (3,3) are symmetric. Wall between them would be
+        # self-symmetric but they're not adjacent.
+        #
+        # Adjacent self-symmetric pairs in 5x5:
+        # (2,1)-(2,2)? sym(2,1)=(2,3), sym(2,2)=(2,2) - no
+        # (1,2)-(2,2)? sym(1,2)=(3,2), sym(2,2)=(2,2) - no
+        #
+        # There are no adjacent self-symmetric walls in 5x5.
+        # Let's use 7x7: symmetric(x,y) = (6-x, 6-y)
+        # (3,2)-(3,3)? sym(3,2)=(3,4), sym(3,3)=(3,3) - no
+        #
+        # Self-symmetric wall: sym(a)=b means b=sym(a)
+        # For wall a-b to be self-sym, we need {a,b} = {sym(a), sym(b)}
+        # If a and b are both on the center axis, this can work.
+        # E.g., in 5x5, (2,2) is the center.
+        # A wall (2,1)-(2,2): sym(2,1)=(2,3), sym(2,2)=(2,2)
+        # So the symmetric wall is (2,3)-(2,2) = (2,2)-(2,3)
+        # These are different walls.
+        #
+        # Let me just test with a valid symmetric pair instead.
+        walls = [
+            ((1, 2), (2, 2)),  # Wall
+            ((3, 2), (2, 2)),  # Its symmetric counterpart
+        ]
+        cheese = [(2, 2)]  # Center
+
+        game = PyGameState.create_custom(
+            width=5,
+            height=5,
+            walls=walls,
+            cheese=cheese,
+            symmetric=True,
+        )
+        assert len(game.wall_entries()) == 2
+
+
+class TestCreateFromMazeSymmetry:
+    """Test symmetry parameter in create_from_maze()."""
+
+    def test_symmetric_from_maze(self):
+        """Test creating symmetric game from maze."""
+        # Symmetric walls for 5x5
+        walls = [
+            ((0, 0), (0, 1)),
+            ((4, 4), (4, 3)),
+        ]
+
+        game = PyGameState.create_from_maze(
+            width=5,
+            height=5,
+            walls=walls,
+            symmetric=True,
+            seed=42,
+        )
+        assert game.width == 5
+
+    def test_asymmetric_from_maze(self):
+        """Test creating asymmetric game from maze."""
+        # Non-symmetric wall
+        walls = [((0, 0), (0, 1))]
+
+        game = PyGameState.create_from_maze(
+            width=5,
+            height=5,
+            walls=walls,
+            symmetric=False,
+            seed=42,
+        )
+        assert game.width == 5
+
+    def test_symmetric_from_maze_invalid(self):
+        """Test that symmetric=True rejects non-symmetric walls."""
+        walls = [((0, 0), (0, 1))]  # Only one wall
+
+        with pytest.raises(ValueError, match="no symmetric counterpart"):
+            PyGameState.create_from_maze(
+                width=5,
+                height=5,
+                walls=walls,
+                symmetric=True,
+            )

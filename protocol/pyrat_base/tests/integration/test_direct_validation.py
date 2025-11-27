@@ -12,6 +12,7 @@ def test_negative_positions():
             width=10,
             height=10,
             cheese=[(-1, 0)],
+            symmetric=False,
         )
         raise AssertionError("Should have raised ValueError")
     except ValueError as e:
@@ -24,6 +25,7 @@ def test_negative_positions():
             height=10,
             cheese=[(5, 5)],
             player1_pos=(-1, 0),
+            symmetric=False,
         )
         raise AssertionError("Should have raised ValueError")
     except ValueError as e:
@@ -38,6 +40,7 @@ def test_negative_mud():
             height=10,
             cheese=[(5, 5)],
             mud=[((0, 0), (0, 1), -1)],
+            symmetric=False,
         )
         raise AssertionError("Should have raised ValueError")
     except ValueError as e:
@@ -51,6 +54,7 @@ def test_out_of_bounds():
             width=10,
             height=10,
             cheese=[(10, 10)],  # Equal to width/height is out of bounds
+            symmetric=False,
         )
         raise AssertionError("Should have raised ValueError")
     except ValueError as e:
@@ -67,6 +71,7 @@ def test_valid_creation():
         cheese=[(5, 5), (7, 7)],
         player1_pos=(0, 0),
         player2_pos=(9, 9),
+        symmetric=False,
     )
     expected_width = 10
     expected_height = 10

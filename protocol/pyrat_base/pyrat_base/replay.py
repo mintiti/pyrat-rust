@@ -557,6 +557,7 @@ class ReplayPlayer:
             player1_pos=state.rat_position,
             player2_pos=state.python_position,
             max_turns=state.max_turns,
+            symmetric=False,  # Replay data may not be symmetric
         )
 
     def step_forward(self) -> Optional[GameResult]:

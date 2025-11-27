@@ -48,6 +48,7 @@ class TestPathfinding:
             cheese=[(4, 4)],
             player1_pos=(0, 0),
             player2_pos=(4, 0),
+            symmetric=False,
         )
         state = ProtocolState(game, Player.RAT)
 
@@ -84,6 +85,7 @@ class TestPathfinding:
             cheese=[(4, 1)],
             player1_pos=(0, 1),
             player2_pos=(4, 1),
+            symmetric=False,
         )
         state = ProtocolState(game, Player.RAT)
 
@@ -120,6 +122,7 @@ class TestPathfinding:
             cheese=[(4, 2)],
             player1_pos=(0, 2),
             player2_pos=(4, 4),
+            symmetric=False,
         )
         state = ProtocolState(game, Player.RAT)
 
@@ -165,6 +168,7 @@ class TestPathfinding:
             cheese=[(4, 2)],
             player1_pos=(0, 2),
             player2_pos=(4, 2),
+            symmetric=False,
         )
         state = ProtocolState(game, Player.RAT)
 
@@ -177,7 +181,7 @@ class TestPathfinding:
     def test_dijkstra_same_position(self):
         """Test Dijkstra when start equals goal."""
         game = PyGameState.create_custom(
-            width=5, height=5, walls=[], mud=[], cheese=[(2, 2)]
+            width=5, height=5, walls=[], mud=[], cheese=[(2, 2)], symmetric=False
         )
         state = ProtocolState(game, Player.RAT)
 
@@ -197,6 +201,7 @@ class TestPathfinding:
             cheese=[(1, 0), (4, 0), (2, 2)],  # Different distances
             player1_pos=(0, 0),
             player2_pos=(4, 4),
+            symmetric=False,
         )
         state = ProtocolState(game, Player.RAT)
 
@@ -222,6 +227,7 @@ class TestPathfinding:
             cheese=[(1, 0), (4, 0)],  # Two cheese at different distances
             player1_pos=(0, 0),
             player2_pos=(6, 2),
+            symmetric=False,
         )
         state = ProtocolState(game, Player.RAT)
 
@@ -257,6 +263,7 @@ class TestPathfinding:
             cheese=[(1, 4), (4, 0), (4, 4)],
             player1_pos=(0, 0),
             player2_pos=(2, 2),
+            symmetric=False,
         )
         state = ProtocolState(game, Player.RAT)
 
@@ -290,6 +297,7 @@ class TestPathfinding:
             cheese=[(2, 2)],  # Need at least one for creation
             player1_pos=(0, 0),
             player2_pos=(4, 4),
+            symmetric=False,
         )
 
         # Collect the cheese to empty the board
@@ -322,6 +330,7 @@ class TestPathfinding:
             cheese=[(4, 4)],  # Trapped cheese
             player1_pos=(0, 0),
             player2_pos=(2, 2),
+            symmetric=False,
         )
         state = ProtocolState(game, Player.RAT)
 
@@ -340,6 +349,7 @@ class TestPathfinding:
             cheese=[(4, 2)],
             player1_pos=(0, 2),
             player2_pos=(4, 4),
+            symmetric=False,
         )
         state = ProtocolState(game, Player.RAT)
 
@@ -362,6 +372,7 @@ class TestPathfinding:
             cheese=[(2, 0)],
             player1_pos=(0, 0),
             player2_pos=(2, 0),
+            symmetric=False,
         )
         state = ProtocolState(game, Player.RAT)
 

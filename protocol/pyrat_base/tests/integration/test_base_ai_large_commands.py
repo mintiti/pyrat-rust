@@ -171,6 +171,7 @@ class TestLargeCommandIntegration:
             cheese=[(25, 25)],
             player1_pos=(0, 0),
             player2_pos=(49, 49),
+            symmetric=False,
         )
 
         # Verify it was created successfully

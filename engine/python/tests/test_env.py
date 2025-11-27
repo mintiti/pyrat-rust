@@ -145,6 +145,7 @@ def test_custom_maze() -> None:
         cheese=[(1, 1)],  # One cheese in the middle
         player1_pos=(0, 0),
         player2_pos=(2, 2),
+        symmetric=False,
     )
 
     # Verify maze configuration
