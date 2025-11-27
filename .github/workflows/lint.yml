@@ -1,11 +1,7 @@
 name: Lint
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  workflow_call:  # Allow being called by other workflows
+  workflow_call:
 
 jobs:
   build:
