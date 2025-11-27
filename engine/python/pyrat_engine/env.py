@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 from gymnasium.spaces import Box, Discrete
@@ -9,7 +9,9 @@ from pettingzoo.utils.env import AgentID, ParallelEnv
 
 from pyrat_engine.core import GameState as PyGameState
 from pyrat_engine.core import ObservationHandler as PyObservationHandler
-from pyrat_engine.core.types import Direction  # noqa: TCH001 - used at runtime
+
+if TYPE_CHECKING:
+    from pyrat_engine.core.types import Direction
 
 
 class PyRatEnv(ParallelEnv):  # type: ignore[misc]
