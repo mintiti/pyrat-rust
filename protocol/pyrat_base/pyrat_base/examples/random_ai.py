@@ -9,8 +9,7 @@ This AI demonstrates:
 
 import random
 
-from pyrat_engine.core import DirectionType
-from pyrat_engine.core.types import Direction, direction_to_name
+from pyrat_engine.core.types import Direction
 
 from pyrat_base import ProtocolState, PyRatAI
 
@@ -21,7 +20,7 @@ class RandomAI(PyRatAI):
     def __init__(self) -> None:
         super().__init__("RandomBot v1.0", "PyRat Team")
 
-    def get_move(self, state: ProtocolState) -> DirectionType:
+    def get_move(self, state: ProtocolState) -> Direction:
         """Choose a random effective move."""
         # Get all moves that will actually change our position (or STAY)
         effective_moves = state.get_effective_moves()
@@ -35,7 +34,7 @@ class RandomAI(PyRatAI):
         move = random.choice(effective_moves)
 
         # Log our choice if in debug mode
-        self.log(f"Position: {state.my_position}, Choosing: {direction_to_name(move)}")
+        self.log(f"Position: {state.my_position}, Choosing: {Direction(move).name}")
 
         return move
 

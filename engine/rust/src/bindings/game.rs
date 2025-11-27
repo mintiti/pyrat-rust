@@ -1322,7 +1322,7 @@ impl PyGameConfigBuilder {
 /// Register types submodule
 pub(crate) fn register_types(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Coordinates>()?;
-    m.add_class::<Direction>()?;
+    // Direction is now a Python IntEnum defined in types.py, not exposed from Rust
     m.add_class::<crate::Wall>()?;
     m.add_class::<crate::Mud>()?;
     Ok(())

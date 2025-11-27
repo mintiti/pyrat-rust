@@ -113,10 +113,6 @@ impl Coordinates {
     }
 }
 
-#[cfg_attr(
-    feature = "python",
-    pyclass(module = "pyrat_engine._core.types", eq, eq_int)
-)]
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 #[repr(u8)]
 pub enum Direction {
@@ -153,38 +149,6 @@ impl Direction {
             },
             Self::Stay => pos,
         }
-    }
-}
-
-// Python conveniences for Direction
-#[cfg(feature = "python")]
-#[pymethods]
-impl Direction {
-    #[new]
-    fn py_new(value: u8) -> PyResult<Self> {
-        Self::try_from(value)
-            .map_err(|_| PyValueError::new_err("Invalid direction value (expected 0..4)"))
-    }
-
-    #[classattr]
-    pub const UP: u8 = Self::Up as u8;
-    #[classattr]
-    pub const RIGHT: u8 = Self::Right as u8;
-    #[classattr]
-    pub const DOWN: u8 = Self::Down as u8;
-    #[classattr]
-    pub const LEFT: u8 = Self::Left as u8;
-    #[classattr]
-    pub const STAY: u8 = Self::Stay as u8;
-
-    pub fn __int__(&self) -> u8 {
-        *self as u8
-    }
-    pub fn __repr__(&self) -> String {
-        format!("Direction::{self:?}")
-    }
-    pub fn __str__(&self) -> String {
-        format!("{self:?}")
     }
 }
 

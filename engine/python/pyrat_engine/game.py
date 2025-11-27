@@ -13,10 +13,9 @@ The game follows these basic rules:
 from dataclasses import dataclass
 from typing import Dict, List, NamedTuple, Optional, Tuple
 
-from pyrat_engine.core import DirectionType
 from pyrat_engine.core import GameState as _RustGameState
 from pyrat_engine.core import MoveUndo as _RustMoveUndo
-from pyrat_engine.core.types import Coordinates
+from pyrat_engine.core.types import Coordinates, Direction
 
 __all__ = ["GameResult", "MoveUndo", "PyRat"]
 
@@ -172,7 +171,7 @@ class PyRat:
         """Get mud positions and their values."""
         return {(mud.pos1, mud.pos2): mud.value for mud in self._game.mud_entries()}
 
-    def step(self, p1_move: DirectionType, p2_move: DirectionType) -> GameResult:
+    def step(self, p1_move: Direction, p2_move: Direction) -> GameResult:
         """Execute one game step."""
         game_over, collected = self._game.step(p1_move, p2_move)
         return GameResult(
@@ -186,7 +185,7 @@ class PyRat:
         """Reset the game."""
         self._game.reset(seed)
 
-    def make_move(self, p1_move: DirectionType, p2_move: DirectionType) -> MoveUndo:
+    def make_move(self, p1_move: Direction, p2_move: Direction) -> MoveUndo:
         """Make a move and return undo information."""
         undo = self._game.make_move(p1_move, p2_move)
         return MoveUndo(_undo=undo)

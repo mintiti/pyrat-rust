@@ -11,7 +11,6 @@ from enum import Enum
 from typing import Optional
 
 from pyrat_engine.core import Direction
-from pyrat_engine.core.types import direction_to_name, name_to_direction
 from pyrat_runner.logger import GameLogger
 
 
@@ -263,8 +262,8 @@ class AIProcess:
             return None
 
         # Send previous moves
-        rat_move_name = direction_to_name(rat_move)
-        python_move_name = direction_to_name(python_move)
+        rat_move_name = Direction(rat_move).name
+        python_move_name = Direction(python_move).name
         self._write_line(f"moves rat:{rat_move_name} python:{python_move_name}")
 
         # Send "go" command
@@ -278,9 +277,11 @@ class AIProcess:
                 continue
 
             if line.startswith("move "):
-                move_str = line[5:].strip()
-                direction = name_to_direction(move_str)
-                return direction
+                move_str = line[5:].strip().upper()
+                try:
+                    return Direction[move_str]
+                except KeyError:
+                    return Direction.STAY
             elif line.startswith("info "):
                 # AI is sending info during move calculation, ignore for now
                 pass
@@ -288,10 +289,10 @@ class AIProcess:
         # Small grace window to catch just-late responses
         line = self._read_line(timeout=0.05)
         if line and line.startswith("move "):
-            move_str = line[5:].strip()
+            move_str = line[5:].strip().upper()
             try:
-                return name_to_direction(move_str)
-            except Exception:
+                return Direction[move_str]
+            except KeyError:
                 pass
 
         # Timeout: treat as non-fatal; caller will default to STAY
@@ -361,7 +362,7 @@ class AIProcess:
         Args:
             default_move: The move the engine defaulted to (usually STAY)
         """
-        move_name = direction_to_name(default_move)
+        move_name = Direction(default_move).name
         self._write_line(f"timeout move:{move_name}")
 
     def ready_probe(self, timeout: float = 0.5) -> bool:

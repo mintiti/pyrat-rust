@@ -281,16 +281,16 @@ class TestTupleInputSupport:
 
 
 class TestDirectionEnum:
-    """Test the Direction enum from Rust."""
+    """Test the Direction IntEnum."""
 
     def test_direction_values(self):
         """Test that Direction enum is accessible."""
-        # Direction should be exposed as an enum
-        assert Direction.Up == 0
-        assert Direction.Right == 1
-        assert Direction.Down == 2
-        assert Direction.Left == 3
-        assert Direction.Stay == 4
+        # Direction is now a Python IntEnum
+        assert Direction.UP == 0
+        assert Direction.RIGHT == 1
+        assert Direction.DOWN == 2
+        assert Direction.LEFT == 3
+        assert Direction.STAY == 4
 
 
 class TestIntegrationWithGame:

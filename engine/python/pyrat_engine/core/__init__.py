@@ -16,16 +16,15 @@ game = _impl.game
 observation = _impl.observation
 builder = _impl.builder
 
-# Also re-export commonly used classes at package level
-# Since PyO3 submodules are just attributes, we access them this way
+# Re-export commonly used classes at package level
+# Rust types from PyO3
 Coordinates = _impl.types.Coordinates
-Direction = _impl.types.Direction
 Wall = _impl.types.Wall
 Mud = _impl.types.Mud
 
-# Type alias for direction values (Direction.UP, Direction.RIGHT, etc. are ints)
-# Use this in type hints when referring to direction values, not the Direction class
-DirectionType = int
+# Direction is a Python IntEnum (not from Rust)
+# Must be imported after _impl since types.py depends on it
+from pyrat_engine.core.types import Direction  # noqa: E402
 
 # Conditionally import types for type checking to avoid "not valid as a type" errors
 if TYPE_CHECKING:
@@ -50,7 +49,6 @@ __all__ = [
     # Types
     "Coordinates",
     "Direction",
-    "DirectionType",
     "Wall",
     "Mud",
     # Game

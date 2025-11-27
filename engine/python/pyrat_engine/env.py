@@ -1,15 +1,17 @@
 from __future__ import annotations
 
-from typing import Any, ClassVar
+from typing import TYPE_CHECKING, Any, ClassVar
 
 import numpy as np
 from gymnasium.spaces import Box, Discrete
 from gymnasium.spaces import Dict as SpaceDict
 from pettingzoo.utils.env import AgentID, ParallelEnv
 
-from pyrat_engine.core import DirectionType
 from pyrat_engine.core import GameState as PyGameState
 from pyrat_engine.core import ObservationHandler as PyObservationHandler
+
+if TYPE_CHECKING:
+    from pyrat_engine.core.types import Direction
 
 
 class PyRatEnv(ParallelEnv):  # type: ignore[misc]
@@ -112,7 +114,7 @@ class PyRatEnv(ParallelEnv):  # type: ignore[misc]
         return observations, infos
 
     def step(
-        self, actions: dict[AgentID, DirectionType]
+        self, actions: dict[AgentID, Direction]
     ) -> tuple[
         dict[str, Any],
         dict[str, float],

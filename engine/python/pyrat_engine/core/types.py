@@ -1,100 +1,57 @@
 """Core types for the PyRat game engine.
 
-This module re-exports types from the compiled Rust module and provides
-utility functions for working with directions.
+This module provides the fundamental types used throughout the engine:
+- Coordinates: Position on the game board (from Rust)
+- Direction: Movement directions (Python IntEnum)
+- Wall: Barriers between cells (from Rust)
+- Mud: Passages that slow movement (from Rust)
 """
 
-from typing import Optional
+from enum import IntEnum
 
 # Import the compiled module directly
 import pyrat_engine._core as _impl
 
-# Re-export all type classes
+# Re-export Rust type classes
 Coordinates = _impl.types.Coordinates
-Direction = _impl.types.Direction
 Wall = _impl.types.Wall
 Mud = _impl.types.Mud
 
-# Direction name mapping (canonical source of truth)
-_DIRECTION_TO_NAME = {
-    0: "UP",
-    1: "RIGHT",
-    2: "DOWN",
-    3: "LEFT",
-    4: "STAY",
-}
 
-_NAME_TO_DIRECTION = {
-    "UP": Direction.UP,
-    "RIGHT": Direction.RIGHT,
-    "DOWN": Direction.DOWN,
-    "LEFT": Direction.LEFT,
-    "STAY": Direction.STAY,
-}
+class Direction(IntEnum):
+    """Movement directions in the game.
 
+    This is an IntEnum with the following values:
+    - UP = 0: Move up (increase y)
+    - RIGHT = 1: Move right (increase x)
+    - DOWN = 2: Move down (decrease y)
+    - LEFT = 3: Move left (decrease x)
+    - STAY = 4: Don't move
 
-def direction_to_name(direction: int) -> str:
-    """Convert a Direction value to its string name.
-
-    Args:
-        direction: Direction value (Direction.UP, Direction.DOWN, etc.)
-
-    Returns:
-        String name of the direction ("UP", "DOWN", "LEFT", "RIGHT", "STAY")
-        Returns "STAY" for invalid direction values.
+    As an IntEnum, Direction members are also integers:
+    - Direction.UP == 0 is True
+    - isinstance(Direction.UP, int) is True
 
     Example:
-        >>> direction_to_name(Direction.UP)
+        >>> Direction.UP
+        <Direction.UP: 0>
+        >>> Direction.UP.name
         'UP'
-        >>> direction_to_name(Direction.STAY)
-        'STAY'
+        >>> Direction.UP.value
+        0
+        >>> Direction["UP"]
+        <Direction.UP: 0>
+        >>> Direction(0)
+        <Direction.UP: 0>
+        >>> list(Direction)
+        [<Direction.UP: 0>, <Direction.RIGHT: 1>, ...]
     """
-    return _DIRECTION_TO_NAME.get(int(direction), "STAY")
 
-
-def name_to_direction(name: str) -> int:
-    """Convert a direction name string to a Direction value.
-
-    Args:
-        name: Direction name string (case-sensitive uppercase: "UP", "DOWN", etc.)
-
-    Returns:
-        Direction value (Direction.UP, Direction.DOWN, etc.)
-        Returns Direction.STAY for invalid names.
-
-    Example:
-        >>> name_to_direction("UP")
-        0  # Direction.UP
-        >>> name_to_direction("invalid")
-        4  # Direction.STAY
-    """
-    return _NAME_TO_DIRECTION.get(name, Direction.STAY)
-
-
-def is_valid_direction(direction: Optional[int]) -> bool:
-    """Check if a direction value is valid.
-
-    Args:
-        direction: Direction value to validate
-
-    Returns:
-        True if the direction is valid (UP, DOWN, LEFT, RIGHT, or STAY),
-        False otherwise.
-
-    Example:
-        >>> is_valid_direction(Direction.UP)
-        True
-        >>> is_valid_direction(999)
-        False
-        >>> is_valid_direction(None)
-        False
-    """
-    if direction is None:
-        return False
-    try:
-        return int(direction) in _DIRECTION_TO_NAME
-    except (ValueError, TypeError):
-        return False
+    UP = 0
+    RIGHT = 1
+    DOWN = 2
+    LEFT = 3
+    STAY = 4
 
 
 __all__ = [
@@ -102,7 +59,4 @@ __all__ = [
     "Direction",
     "Mud",
     "Wall",
-    "direction_to_name",
-    "is_valid_direction",
-    "name_to_direction",
 ]
