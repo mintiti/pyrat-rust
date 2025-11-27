@@ -2,10 +2,12 @@
 
 This module contains the fundamental types used throughout the engine:
 - Coordinates: Position on the game board
-- Direction: Movement directions
+- Direction: Movement directions (IntEnum)
 - Wall: Barriers between cells
 - Mud: Passages that slow movement
 """
+
+from enum import IntEnum
 
 class Coordinates:
     """A position on the game board with x and y coordinates.
@@ -70,22 +72,26 @@ class Coordinates:
     def __eq__(self, other: object) -> bool: ...
     def __ne__(self, other: object) -> bool: ...
 
-class Direction:
+class Direction(IntEnum):
     """Movement directions in the game.
 
-    This is an enum with the following values:
+    This is an IntEnum with the following values:
     - UP = 0: Move up (increase y)
     - RIGHT = 1: Move right (increase x)
     - DOWN = 2: Move down (decrease y)
     - LEFT = 3: Move left (decrease x)
     - STAY = 4: Don't move
+
+    As an IntEnum, Direction members are also integers:
+    - Direction.UP == 0 is True
+    - isinstance(Direction.UP, int) is True
     """
 
-    UP: int = 0
-    RIGHT: int = 1
-    DOWN: int = 2
-    LEFT: int = 3
-    STAY: int = 4
+    UP = 0
+    RIGHT = 1
+    DOWN = 2
+    LEFT = 3
+    STAY = 4
 
 class Wall:
     """A wall between two adjacent cells that blocks movement.
@@ -180,39 +186,3 @@ class Mud:
     def __hash__(self) -> int: ...
     def __eq__(self, other: object) -> bool: ...
     def __ne__(self, other: object) -> bool: ...
-
-def direction_to_name(direction: int) -> str:
-    """Convert a Direction value to its string name.
-
-    Args:
-        direction: Direction value (Direction.UP, Direction.DOWN, etc.)
-
-    Returns:
-        String name of the direction ("UP", "DOWN", "LEFT", "RIGHT", "STAY")
-        Returns "STAY" for invalid direction values.
-    """
-    ...
-
-def name_to_direction(name: str) -> int:
-    """Convert a direction name string to a Direction value.
-
-    Args:
-        name: Direction name string (case-sensitive uppercase: "UP", "DOWN", etc.)
-
-    Returns:
-        Direction value (Direction.UP, Direction.DOWN, etc.)
-        Returns Direction.STAY for invalid names.
-    """
-    ...
-
-def is_valid_direction(direction: int | None) -> bool:
-    """Check if a direction value is valid.
-
-    Args:
-        direction: Direction value to validate
-
-    Returns:
-        True if the direction is valid (UP, DOWN, LEFT, RIGHT, or STAY),
-        False otherwise.
-    """
-    ...

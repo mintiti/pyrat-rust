@@ -1,12 +1,15 @@
-"""Unit tests for direction parsing functions."""
+"""Unit tests for direction parsing in CLI.
+
+Tests that Direction IntEnum is used correctly for parsing direction
+strings in the CLI context.
+"""
 
 import pytest
-from pyrat_engine.core import Direction
-from pyrat_engine.core.types import direction_to_name, name_to_direction
+from pyrat_engine.core.types import Direction
 
 
 class TestDirectionNameMapping:
-    """Test direction to name conversion."""
+    """Test direction to name conversion using IntEnum."""
 
     @pytest.mark.parametrize(
         "direction,expected_name",
@@ -19,17 +22,21 @@ class TestDirectionNameMapping:
         ],
     )
     def test_direction_to_name(self, direction, expected_name):
-        """Test direction enum to string conversion."""
-        assert direction_to_name(direction) == expected_name
+        """Test direction enum .name property."""
+        assert direction.name == expected_name
 
-    def test_direction_to_name_invalid_defaults_to_stay(self):
-        """Invalid direction values should default to STAY."""
+    def test_int_to_name(self):
+        """Test converting integer to direction name via Direction(int).name."""
+        assert Direction(0).name == "UP"
+        assert Direction(1).name == "RIGHT"
+        assert Direction(2).name == "DOWN"
+        assert Direction(3).name == "LEFT"
+        assert Direction(4).name == "STAY"
 
-        class FakeDirection:
-            def __int__(self):
-                return 999
-
-        assert direction_to_name(FakeDirection()) == "STAY"
+    def test_invalid_int_raises_error(self):
+        """Invalid direction integer values should raise ValueError."""
+        with pytest.raises(ValueError):
+            Direction(999)
 
 
 class TestDirectionParsing:
@@ -46,8 +53,8 @@ class TestDirectionParsing:
         ],
     )
     def test_name_to_direction(self, name, expected_direction):
-        """Test string to direction enum conversion."""
-        assert name_to_direction(name) == expected_direction
+        """Test string to direction enum conversion via Direction[name]."""
+        assert Direction[name] == expected_direction
 
     @pytest.mark.parametrize(
         "invalid_name",
@@ -60,9 +67,10 @@ class TestDirectionParsing:
             "North",
         ],
     )
-    def test_name_to_direction_invalid_defaults_to_stay(self, invalid_name):
-        """Invalid direction names should default to STAY."""
-        assert name_to_direction(invalid_name) == Direction.STAY
+    def test_invalid_name_raises_key_error(self, invalid_name):
+        """Invalid direction names should raise KeyError."""
+        with pytest.raises(KeyError):
+            Direction[invalid_name]
 
     @pytest.mark.parametrize(
         "direction",
@@ -76,6 +84,7 @@ class TestDirectionParsing:
     )
     def test_direction_roundtrip(self, direction):
         """Test that direction -> name -> direction roundtrip works."""
-        name = direction_to_name(direction)
-        parsed = name_to_direction(name)
+        name = direction.name
+        parsed = Direction[name]
+        assert parsed == direction
         assert int(parsed) == int(direction)

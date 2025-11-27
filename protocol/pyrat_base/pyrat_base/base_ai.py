@@ -23,9 +23,8 @@ import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from pyrat_engine.core import DirectionType
 from pyrat_engine.core.game import GameState as PyGameState
-from pyrat_engine.core.types import Direction, direction_to_name, name_to_direction
+from pyrat_engine.core.types import Direction
 
 from pyrat_base.enums import CommandType, GameResult, Player, ResponseType
 from pyrat_base.io_handler import IOHandler
@@ -86,7 +85,7 @@ class PyRatAI:
         self._final_score: Optional[Tuple[float, float]] = None
 
     # Abstract method - users must implement
-    def get_move(self, state: ProtocolState) -> DirectionType:
+    def get_move(self, state: ProtocolState) -> Direction:
         """Calculate the next move given the current game state.
 
         This is the main method users must implement. It receives the current
@@ -612,7 +611,7 @@ class PyRatAI:
                 move = self.get_move(state)
 
                 # Convert Direction to string
-                return direction_to_name(move)
+                return Direction(move).name
 
             except Exception as e:
                 if self.debug:
@@ -656,11 +655,14 @@ class PyRatAI:
         else:
             self._io.write_response("move STAY")
 
-    def _parse_direction(self, move_str: str) -> DirectionType:
+    def _parse_direction(self, move_str: str) -> Direction:
         """Parse a move string to direction value."""
         if not move_str:
             return Direction.STAY
-        return name_to_direction(str(move_str).upper())
+        try:
+            return Direction[str(move_str).upper()]
+        except KeyError:
+            return Direction.STAY
 
     def _parse_game_result(self, result_str: str) -> GameResult:
         """Parse a game result string to GameResult enum."""

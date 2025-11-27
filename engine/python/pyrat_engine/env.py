@@ -7,9 +7,9 @@ from gymnasium.spaces import Box, Discrete
 from gymnasium.spaces import Dict as SpaceDict
 from pettingzoo.utils.env import AgentID, ParallelEnv
 
-from pyrat_engine.core import DirectionType
 from pyrat_engine.core import GameState as PyGameState
 from pyrat_engine.core import ObservationHandler as PyObservationHandler
+from pyrat_engine.core.types import Direction  # noqa: TCH001 - used at runtime
 
 
 class PyRatEnv(ParallelEnv):  # type: ignore[misc]
@@ -112,7 +112,7 @@ class PyRatEnv(ParallelEnv):  # type: ignore[misc]
         return observations, infos
 
     def step(
-        self, actions: dict[AgentID, DirectionType]
+        self, actions: dict[AgentID, Direction]
     ) -> tuple[
         dict[str, Any],
         dict[str, float],

@@ -15,7 +15,7 @@ Note on linting exceptions:
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
 
-from pyrat_engine.core.types import direction_to_name
+from pyrat_engine.core.types import Direction
 
 from pyrat_base.enums import (
     CommandType,
@@ -373,8 +373,8 @@ class Protocol:
                 raise ValueError("MOVE response requires 'move' in data")
             move = data["move"]
             if isinstance(move, int):
-                # Direction constants are exposed as plain ints from Rust
-                move = direction_to_name(move)
+                # Convert integer to direction name
+                move = Direction(move).name
             return f"move {move}"
 
         elif response_type == ResponseType.POSTPROCESSINGDONE:

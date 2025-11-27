@@ -26,9 +26,6 @@ from pyrat_engine.core.types import (
     Direction,
     Mud,
     Wall,
-    direction_to_name,
-    is_valid_direction,
-    name_to_direction,
 )
 from pyrat_engine.game import GameResult, PyRat
 
@@ -42,7 +39,4 @@ __all__ = [
     "Mud",
     "PyRat",
     "Wall",
-    "direction_to_name",
-    "is_valid_direction",
-    "name_to_direction",
 ]

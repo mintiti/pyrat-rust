@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
 from pyrat_engine.core import Direction
-from pyrat_engine.core.types import direction_to_name
 
 
 @dataclass(frozen=True)
@@ -306,7 +305,7 @@ def render_header(
     lines.append(f"    Position : ({rat_pos[0]}, {rat_pos[1]})")
     lines.append(f"    Score    : {rat_score:.1f}")
     if rat_move is not None:
-        lines.append(f"    Last move: {direction_to_name(rat_move)}")
+        lines.append(f"    Last move: {Direction(rat_move).name}")
     lines.append("")
 
     # Player 2 (Python) info
@@ -314,7 +313,7 @@ def render_header(
     lines.append(f"    Position : ({python_pos[0]}, {python_pos[1]})")
     lines.append(f"    Score    : {python_score:.1f}")
     if python_move is not None:
-        lines.append(f"    Last move: {direction_to_name(python_move)}")
+        lines.append(f"    Last move: {Direction(python_move).name}")
     lines.append("")
 
     lines.append(f"Turn: {turn}")

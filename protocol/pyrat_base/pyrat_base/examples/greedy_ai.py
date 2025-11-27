@@ -17,7 +17,6 @@ This AI demonstrates:
 
 from typing import List, Optional
 
-from pyrat_engine.core import DirectionType
 from pyrat_engine.core.types import Coordinates, Direction
 
 from pyrat_base import ProtocolState, PyRatAI
@@ -46,7 +45,7 @@ class GreedyAI(PyRatAI):
     def __init__(self) -> None:
         super().__init__("GreedyBot v2.0", "PyRat Team")
         self._current_target: Optional[Coordinates] = None
-        self._path_to_target: Optional[List[DirectionType]] = None
+        self._path_to_target: Optional[List[Direction]] = None
         self._last_position: Optional[Coordinates] = None
 
     def preprocess(self, state: ProtocolState, time_limit_ms: int) -> None:
@@ -66,7 +65,7 @@ class GreedyAI(PyRatAI):
         # Each wall is counted twice (once from each side)
         self.log(f"Total walls: {wall_count // 2}")
 
-    def get_move(self, state: ProtocolState) -> DirectionType:
+    def get_move(self, state: ProtocolState) -> Direction:
         """Move toward the cheese that can be reached in minimum turns."""
         # Check if stuck in mud first
         if state.my_mud_turns > 0:

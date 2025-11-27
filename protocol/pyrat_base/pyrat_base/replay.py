@@ -417,7 +417,7 @@ class ReplayWriter:
         if isinstance(move, str):
             return move  # Special notation like '*'
 
-        move_map = {
+        move_map: Dict[int, str] = {
             Direction.STAY: "S",
             Direction.UP: "U",
             Direction.DOWN: "D",

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Example of using the PyRat replay system."""
 
-from pyrat_engine.core.types import Direction, direction_to_name
+from pyrat_engine.core.types import Direction
 
 from pyrat_base.replay import (
     InitialState,
@@ -79,12 +79,12 @@ def read_replay_example() -> None:
     print("\nMoves:")
     for move in replay.moves:
         rat_name = (
-            direction_to_name(move.rat_move)
+            Direction(move.rat_move).name
             if isinstance(move.rat_move, int)
             else move.rat_move
         )
         python_name = (
-            direction_to_name(move.python_move)
+            Direction(move.python_move).name
             if isinstance(move.python_move, int)
             else move.python_move
         )

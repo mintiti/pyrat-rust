@@ -2,8 +2,7 @@
 
 from typing import List, Optional, Tuple
 
-from pyrat_engine.core import Direction
-from pyrat_engine.core.types import direction_to_name
+from pyrat_engine.core.types import Direction
 
 from pyrat_base.enums import Player
 
@@ -114,7 +113,7 @@ class CommandSequenceBuilder:
     ) -> "CommandSequenceBuilder":
         """Add move broadcast."""
         self.add(
-            f"moves rat:{direction_to_name(rat_move)} python:{direction_to_name(python_move)}"
+            f"moves rat:{Direction(rat_move).name} python:{Direction(python_move).name}"
         )
         return self
 
@@ -167,9 +166,9 @@ class ProtocolExchangeBuilder:
     ) -> "ProtocolExchangeBuilder":
         """Add complete move exchange."""
         self.engine("go")
-        self.ai(f"move {direction_to_name(ai_move)}")
+        self.ai(f"move {Direction(ai_move).name}")
         self.engine(
-            f"moves rat:{direction_to_name(rat_move)} python:{direction_to_name(python_move)}"
+            f"moves rat:{Direction(rat_move).name} python:{Direction(python_move).name}"
         )
         return self
 

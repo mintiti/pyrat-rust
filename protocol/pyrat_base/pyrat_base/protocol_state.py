@@ -9,7 +9,6 @@ underlying Rust implementation.
 
 from typing import TYPE_CHECKING, List, Optional
 
-from pyrat_engine.core import DirectionType
 from pyrat_engine.core.game import GameState as PyGameState
 from pyrat_engine.core.observation import GameObservation as PyGameObservation
 from pyrat_engine.core.types import Coordinates, Direction
@@ -159,7 +158,7 @@ class ProtocolState:
         self._observation = None
 
     # Convenience methods
-    def get_effective_moves(self) -> List[DirectionType]:
+    def get_effective_moves(self) -> List[Direction]:
         """Get list of moves that will result in actual movement.
 
         Returns:
@@ -188,7 +187,7 @@ class ProtocolState:
 
         return effective_moves
 
-    def get_move_cost(self, direction: DirectionType) -> Optional[int]:
+    def get_move_cost(self, direction: Direction) -> Optional[int]:
         """Get the mud cost for moving in a given direction.
 
         Args:
