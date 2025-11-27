@@ -1,11 +1,7 @@
 name: Rust
 
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  workflow_call:  # Allow being called by other workflows
+  workflow_call:
 
 env:
   CARGO_TERM_COLOR: always
