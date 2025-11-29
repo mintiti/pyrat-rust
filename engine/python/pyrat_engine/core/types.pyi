@@ -7,6 +7,7 @@ This module contains the fundamental types used throughout the engine:
 - Mud: Passages that slow movement
 """
 
+from collections.abc import Iterator
 from enum import IntEnum
 
 class Coordinates:
@@ -71,6 +72,32 @@ class Coordinates:
     def __hash__(self) -> int: ...
     def __eq__(self, other: object) -> bool: ...
     def __ne__(self, other: object) -> bool: ...
+    def __add__(self, other: tuple[int, int] | int) -> Coordinates:
+        """Add a delta tuple or Direction to this position.
+
+        Args:
+            other: Either:
+                - tuple (dx, dy): Delta to add (can be negative)
+                - int (0-4): Direction value to move in
+
+        Returns:
+            New Coordinates after addition (saturates at 0 and 255)
+
+        Raises:
+            ValueError: If direction value is invalid (not 0-4)
+        """
+        ...
+
+    def __sub__(self, other: Coordinates | tuple[int, int]) -> tuple[int, int]:
+        """Calculate delta between this position and another.
+
+        Args:
+            other: Position to subtract (Coordinates or tuple)
+
+        Returns:
+            Signed tuple (dx, dy) representing the delta
+        """
+        ...
 
 class Direction(IntEnum):
     """Movement directions in the game.
@@ -135,6 +162,13 @@ class Wall:
     def __hash__(self) -> int: ...
     def __eq__(self, other: object) -> bool: ...
     def __ne__(self, other: object) -> bool: ...
+    def __iter__(self) -> Iterator[Coordinates]:
+        """Iterate over pos1 and pos2 for unpacking."""
+        ...
+
+    def __len__(self) -> int:
+        """Return 2 (number of positions)."""
+        ...
 
 class Mud:
     """A muddy passage between two cells that slows movement.
@@ -186,3 +220,10 @@ class Mud:
     def __hash__(self) -> int: ...
     def __eq__(self, other: object) -> bool: ...
     def __ne__(self, other: object) -> bool: ...
+    def __iter__(self) -> Iterator[Coordinates | int]:
+        """Iterate over pos1, pos2, and value for unpacking."""
+        ...
+
+    def __len__(self) -> int:
+        """Return 3 (number of elements)."""
+        ...

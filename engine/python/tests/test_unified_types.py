@@ -334,3 +334,148 @@ class TestIntegrationWithGame:
             x, y = pos
             assert x == pos.x
             assert y == pos.y
+
+
+class TestCoordinatesArithmetic:
+    """Test Coordinates arithmetic operations."""
+
+    def test_add_tuple_positive(self):
+        """Test adding positive tuple delta."""
+        coord = Coordinates(5, 5)
+        result = coord + (2, 3)  # noqa: RUF005 - this is delta addition, not tuple concatenation
+        assert result.x == 7
+        assert result.y == 8
+
+    def test_add_tuple_negative(self):
+        """Test adding negative tuple delta."""
+        coord = Coordinates(5, 5)
+        result = coord + (-2, -3)  # noqa: RUF005 - this is delta addition, not tuple concatenation
+        assert result.x == 3
+        assert result.y == 2
+
+    def test_add_tuple_saturates_at_zero(self):
+        """Test that subtraction saturates at 0."""
+        coord = Coordinates(5, 5)
+        result = coord + (-10, -10)  # noqa: RUF005 - this is delta addition, not tuple concatenation
+        assert result.x == 0
+        assert result.y == 0
+
+    def test_add_tuple_saturates_at_max(self):
+        """Test that addition saturates at 255."""
+        coord = Coordinates(250, 250)
+        result = coord + (10, 10)  # noqa: RUF005 - this is delta addition, not tuple concatenation
+        assert result.x == 255
+        assert result.y == 255
+
+    def test_add_direction(self):
+        """Test adding Direction."""
+        coord = Coordinates(5, 5)
+
+        # Using Direction enum
+        assert (coord + Direction.UP).y == 6
+        assert (coord + Direction.DOWN).y == 4
+        assert (coord + Direction.LEFT).x == 4
+        assert (coord + Direction.RIGHT).x == 6
+        assert (coord + Direction.STAY) == coord
+
+    def test_add_direction_at_boundary(self):
+        """Test Direction addition at boundaries saturates."""
+        # At bottom boundary
+        coord = Coordinates(5, 0)
+        result = coord + Direction.DOWN
+        assert result.y == 0  # Saturates
+
+        # At top boundary
+        coord = Coordinates(5, 255)
+        result = coord + Direction.UP
+        assert result.y == 255  # Saturates
+
+    def test_add_invalid_direction_raises(self):
+        """Test that invalid direction value raises ValueError."""
+        coord = Coordinates(5, 5)
+        with pytest.raises(ValueError, match="Invalid direction"):
+            coord + 5  # 5 is not a valid direction
+
+    def test_sub_coordinates(self):
+        """Test subtracting Coordinates returns signed tuple."""
+        coord1 = Coordinates(5, 5)
+        coord2 = Coordinates(3, 8)
+
+        delta = coord1 - coord2
+        assert delta == (2, -3)
+
+        delta = coord2 - coord1
+        assert delta == (-2, 3)
+
+    def test_sub_tuple(self):
+        """Test subtracting tuple from Coordinates."""
+        coord = Coordinates(5, 5)
+        delta = coord - (3, 8)
+        assert delta == (2, -3)
+
+    def test_sub_returns_tuple_not_coordinates(self):
+        """Verify subtraction returns tuple, not Coordinates."""
+        coord1 = Coordinates(5, 5)
+        coord2 = Coordinates(3, 3)
+        result = coord1 - coord2
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+
+
+class TestWallIteration:
+    """Test Wall iteration support."""
+
+    def test_wall_unpacking(self):
+        """Test that Wall can be unpacked."""
+        wall = Wall(Coordinates(0, 0), Coordinates(0, 1))
+        pos1, pos2 = wall
+
+        assert isinstance(pos1, Coordinates)
+        assert isinstance(pos2, Coordinates)
+        assert pos1 == Coordinates(0, 0)
+        assert pos2 == Coordinates(0, 1)
+
+    def test_wall_len(self):
+        """Test that len(wall) returns 2."""
+        wall = Wall(Coordinates(0, 0), Coordinates(0, 1))
+        assert len(wall) == 2
+
+    def test_wall_iteration(self):
+        """Test iterating over Wall."""
+        wall = Wall(Coordinates(0, 0), Coordinates(0, 1))
+        positions = list(wall)
+
+        assert len(positions) == 2
+        assert positions[0] == Coordinates(0, 0)
+        assert positions[1] == Coordinates(0, 1)
+
+
+class TestMudIteration:
+    """Test Mud iteration support."""
+
+    def test_mud_unpacking(self):
+        """Test that Mud can be unpacked."""
+        mud = Mud(Coordinates(0, 0), Coordinates(0, 1), 3)
+        pos1, pos2, value = mud
+
+        assert isinstance(pos1, Coordinates)
+        assert isinstance(pos2, Coordinates)
+        assert isinstance(value, int)
+        assert pos1 == Coordinates(0, 0)
+        assert pos2 == Coordinates(0, 1)
+        assert value == 3
+
+    def test_mud_len(self):
+        """Test that len(mud) returns 3."""
+        mud = Mud(Coordinates(0, 0), Coordinates(0, 1), 3)
+        assert len(mud) == 3
+
+    def test_mud_iteration(self):
+        """Test iterating over Mud."""
+        mud = Mud(Coordinates(0, 0), Coordinates(0, 1), 5)
+        items = list(mud)
+
+        assert len(items) == 3
+        assert items[0] == Coordinates(0, 0)
+        assert items[1] == Coordinates(0, 1)
+        assert items[2] == 5
