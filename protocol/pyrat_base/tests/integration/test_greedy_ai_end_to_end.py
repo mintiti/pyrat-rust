@@ -9,7 +9,7 @@ This test verifies that the greedy AI:
 # ruff: noqa: PLR2004
 
 import pytest
-from pyrat_engine.core.game import GameState as PyGameState
+from pyrat_engine import PyRat
 from pyrat_engine.core.types import Coordinates, Direction
 
 from pyrat_base import ProtocolState
@@ -25,7 +25,7 @@ class DirectAIRunner:
         self.ai = ai_class()
         self.player = player
 
-    def get_move(self, game_state: PyGameState) -> Direction:
+    def get_move(self, game_state: PyRat) -> Direction:
         """Get the AI's move for the current game state."""
         state = ProtocolState(game_state, self.player)
         return self.ai.get_move(state)
@@ -37,7 +37,7 @@ class TestGreedyAIEndToEnd:
     def test_greedy_finds_nearest_cheese_simple_maze(self):
         """Test greedy AI finds and collects the nearest cheese in a simple maze."""
         # Create a simple 5x5 game with cheese at different distances
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=5,
             height=5,
             walls=[],
@@ -80,7 +80,7 @@ class TestGreedyAIEndToEnd:
             ((2, y), (3, y)) for y in range(4)
         ]  # Vertical wall at x=2-3 boundary, gap at y=4
 
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=6,
             height=5,
             walls=walls,
@@ -127,7 +127,7 @@ class TestGreedyAIEndToEnd:
         """Test greedy AI considers mud costs when choosing paths."""
         # Create scenario where direct path has heavy mud
         # and longer path is faster
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=6,
             height=3,
             walls=[],
@@ -150,7 +150,7 @@ class TestGreedyAIEndToEnd:
     def test_greedy_vs_dummy_full_game(self):
         """Test greedy AI beats dummy AI in a full game."""
         # Create a standard game
-        game = PyGameState(width=11, height=9, seed=12345, cheese_count=5)
+        game = PyRat(width=11, height=9, seed=12345, cheese_count=5)
 
         greedy = DirectAIRunner(GreedyAI, Player.RAT)
         dummy = DirectAIRunner(DummyAI, Player.PYTHON)
@@ -185,7 +185,7 @@ class TestGreedyAIEndToEnd:
         This is a regression test for the command-dropping bug where
         game state would desync.
         """
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=7,
             height=7,
             walls=[],
@@ -234,7 +234,7 @@ class TestGreedyAIEndToEnd:
     @pytest.mark.parametrize("seed", [12345, 54321, 99999, 11111])
     def test_greedy_on_random_mazes(self, seed):
         """Test greedy AI performs well on various random mazes."""
-        game = PyGameState(width=15, height=11, seed=seed, cheese_count=10)
+        game = PyRat(width=15, height=11, seed=seed, cheese_count=10)
 
         greedy = DirectAIRunner(GreedyAI, Player.RAT)
 
@@ -256,7 +256,7 @@ class TestGreedyAIEndToEnd:
 
     def test_greedy_recalculates_when_cheese_collected(self):
         """Test greedy AI updates its target when cheese is collected."""
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=5,
             height=5,
             walls=[],
@@ -299,7 +299,7 @@ class TestGreedyAIEndToEnd:
 
     def test_greedy_handles_simultaneous_collection(self):
         """Test greedy AI handles simultaneous cheese collection correctly."""
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=3,
             height=1,
             walls=[],
@@ -345,7 +345,7 @@ class TestGreedyVsGreedy:
         - Turn 2: Both reach (2,0) simultaneously
         - Final: Rat=1.5, Python=1.5
         """
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=5,
             height=1,
             walls=[],
@@ -407,7 +407,7 @@ class TestGreedyVsGreedy:
         - Turn 2: Rat collects (2,0), Python still moving
         - Final: Rat=2.0, Python=0.0
         """
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=7,
             height=1,
             walls=[],
@@ -467,7 +467,7 @@ class TestGreedyVsGreedy:
         - Python goes direct LEFT (2 moves)
         - Python wins
         """
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=5,
             height=3,
             walls=[],
@@ -532,7 +532,7 @@ class TestGreedyVsGreedy:
         - Both AIs see same cheese list
         - Total cheese collected equals initial count
         """
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=7,
             height=7,
             walls=[],
@@ -622,7 +622,7 @@ class TestGreedyVsGreedy:
         # Create vertical wall blocking middle, with gap at top
         walls = [((3, y), (4, y)) for y in range(4)]  # Wall from y=0 to y=3
 
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=7,
             height=5,
             walls=walls,

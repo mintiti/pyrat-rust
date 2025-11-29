@@ -7,7 +7,7 @@ This module contains classes for observing and tracking game state:
 
 import numpy as np
 
-from pyrat_engine.core.game import GameState
+from pyrat_engine.core.game import PyRat
 from pyrat_engine.core.types import Coordinates
 
 class GameObservation:
@@ -126,7 +126,7 @@ class ObservationHandler:
     and movement constraints, providing efficient updates during gameplay.
     """
 
-    def __init__(self, game: GameState) -> None:
+    def __init__(self, game: PyRat) -> None:
         """Creates a new observation handler for tracking game state.
 
         Args:
@@ -156,7 +156,7 @@ class ObservationHandler:
         """
         ...
 
-    def get_observation(self, game: GameState, is_player_one: bool) -> GameObservation:
+    def get_observation(self, game: PyRat, is_player_one: bool) -> GameObservation:
         """Gets the current game observation from a player's perspective.
 
         Returns a complete observation of the game state, including player positions,

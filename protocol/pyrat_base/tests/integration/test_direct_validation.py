@@ -1,6 +1,6 @@
-"""Test validation directly with PyGameState."""
+"""Test validation directly with PyRat."""
 
-from pyrat_engine.core.game import GameState as PyGameState
+from pyrat_engine import PyRat
 from pyrat_engine.core.types import Coordinates
 
 
@@ -8,7 +8,7 @@ def test_negative_positions():
     """Test that negative positions give clear error messages."""
     # Test negative cheese position
     try:
-        PyGameState.create_custom(
+        PyRat.create_custom(
             width=10,
             height=10,
             cheese=[(-1, 0)],
@@ -20,7 +20,7 @@ def test_negative_positions():
 
     # Test negative player position
     try:
-        PyGameState.create_custom(
+        PyRat.create_custom(
             width=10,
             height=10,
             cheese=[(5, 5)],
@@ -35,7 +35,7 @@ def test_negative_positions():
 def test_negative_mud():
     """Test that negative mud values give clear error messages."""
     try:
-        PyGameState.create_custom(
+        PyRat.create_custom(
             width=10,
             height=10,
             cheese=[(5, 5)],
@@ -50,7 +50,7 @@ def test_negative_mud():
 def test_out_of_bounds():
     """Test that out of bounds positions give clear error messages."""
     try:
-        PyGameState.create_custom(
+        PyRat.create_custom(
             width=10,
             height=10,
             cheese=[(10, 10)],  # Equal to width/height is out of bounds
@@ -63,7 +63,7 @@ def test_out_of_bounds():
 
 def test_valid_creation():
     """Test that valid game creation still works."""
-    game = PyGameState.create_custom(
+    game = PyRat.create_custom(
         width=10,
         height=10,
         walls=[((0, 0), (0, 1)), ((1, 1), (1, 2))],

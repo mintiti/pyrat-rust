@@ -1,7 +1,7 @@
 """Core game state and management classes.
 
 This module contains the main game state management:
-- GameState: The core game engine
+- PyRat: The core game engine
 - MoveUndo: Undo information for game tree search
 """
 
@@ -74,19 +74,15 @@ class MoveUndo:
         """Turn number before the move was made."""
         ...
 
-class GameState:
-    """Core game state implementation in Rust.
+class PyRat:
+    """Core PyRat game engine implementation in Rust.
 
-    This class provides the low-level interface to the Rust game engine.
+    This class provides the main interface to the Rust game engine.
     It manages all game state including:
     - Player positions and scores
     - Cheese placement and collection
     - Mud effects and movement delays
     - Turn counting and game termination
-
-    Note:
-        This is an internal class. Users should typically use the PyRat class
-        instead, which provides a more Pythonic interface.
 
     Args:
         width: Board width (default: 21)
@@ -110,7 +106,7 @@ class GameState:
         preset: str = "default",
         *,
         seed: int | None = None,
-    ) -> GameState:
+    ) -> PyRat:
         """Create a game from a preset configuration.
 
         Available presets:
@@ -127,7 +123,7 @@ class GameState:
             seed: Random seed for reproducible games
 
         Returns:
-            A new GameState instance with the preset configuration
+            A new PyRat instance with the preset configuration
         """
         ...
 
@@ -142,7 +138,7 @@ class GameState:
         player2_pos: Coordinates | tuple[int, int] | None = None,
         max_turns: int = 300,
         symmetric: bool = True,
-    ) -> GameState:
+    ) -> PyRat:
         """Create a game with a fully specified maze configuration.
 
         Args:
@@ -158,7 +154,7 @@ class GameState:
                 player positions are 180° rotationally symmetric.
 
         Returns:
-            A new GameState instance with the specified configuration
+            A new PyRat instance with the specified configuration
         """
         ...
 
@@ -171,7 +167,7 @@ class GameState:
         seed: int | None = None,
         max_turns: int = 300,
         symmetric: bool = True,
-    ) -> GameState:
+    ) -> PyRat:
         """Create a game with a specific maze layout and random cheese placement.
 
         This method is useful for creating games with predefined maze structures
@@ -188,7 +184,7 @@ class GameState:
                 generate symmetric cheese/player positions.
 
         Returns:
-            A new GameState instance with the specified maze and random cheese
+            A new PyRat instance with the specified maze and random cheese
         """
         ...
 
@@ -201,7 +197,7 @@ class GameState:
         seed: int | None = None,
         max_turns: int = 300,
         symmetric: bool = True,
-    ) -> GameState:
+    ) -> PyRat:
         """Create a game from a list of validated Wall objects.
 
         Similar to create_from_maze but specifically accepts Wall objects
@@ -217,7 +213,7 @@ class GameState:
                 generate symmetric cheese/player positions.
 
         Returns:
-            A new GameState instance with the specified walls and random cheese
+            A new PyRat instance with the specified walls and random cheese
         """
         ...
 
@@ -230,7 +226,7 @@ class GameState:
         *,
         preset: str = "default",
         seed: int | None = None,
-    ) -> GameState:
+    ) -> PyRat:
         """Create a game with custom starting positions.
 
         This method generates a random maze using the specified preset configuration
@@ -246,7 +242,7 @@ class GameState:
             seed: Random seed for reproducible maze generation
 
         Returns:
-            A new GameState instance with custom starting positions
+            A new PyRat instance with custom starting positions
         """
         ...
 
@@ -380,6 +376,5 @@ class GameState:
         """
         ...
 
-# Rename the classes to match the Rust names
-PyGameState = GameState
+# Alias for the Rust MoveUndo type
 PyMoveUndo = MoveUndo

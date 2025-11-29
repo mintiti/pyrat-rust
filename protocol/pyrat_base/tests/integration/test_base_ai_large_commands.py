@@ -155,7 +155,7 @@ class TestLargeCommandIntegration:
 
     def test_create_game_with_many_walls(self):
         """Test creating a game state with many walls."""
-        from pyrat_engine.core.game import GameState as PyGameState
+        from pyrat_engine import PyRat
 
         # Create walls (but not too many to avoid performance issues)
         walls = []
@@ -163,7 +163,7 @@ class TestLargeCommandIntegration:
             walls.append(((i, 0), (i, 1)))
 
         # Create game state
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=50,
             height=50,
             walls=walls,

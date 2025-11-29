@@ -7,8 +7,7 @@ import re
 from typing import Dict, Set, Tuple
 
 
-from pyrat_engine.game import PyRat
-from pyrat_engine.core import GameState as PyGameState
+from pyrat_engine import PyRat
 
 from pyrat_runner.display import (
     MazeStructures,
@@ -482,7 +481,7 @@ class TestGameStateExtractionSymmetry:
     def test_symmetric_game_wall_entries(self):
         """Symmetric game produces symmetric wall entries."""
         # Create a symmetric game with reproducible seed
-        game = PyGameState(width=11, height=9, symmetric=True, seed=42)
+        game = PyRat(width=11, height=9, symmetric=True, seed=42)
 
         walls = game.wall_entries()
 
@@ -518,7 +517,7 @@ class TestGameStateExtractionSymmetry:
             ((4, 3), (4, 4), 3),  # Symmetric pair
         ]
 
-        game_state = PyGameState.create_custom(
+        game_state = PyRat.create_custom(
             width=width,
             height=height,
             walls=[],
@@ -557,7 +556,7 @@ class TestGameStateExtractionSymmetry:
 
     def test_symmetric_game_cheese_positions(self):
         """Symmetric game produces symmetric cheese positions."""
-        game = PyGameState(width=11, height=9, cheese_count=11, symmetric=True, seed=42)
+        game = PyRat(width=11, height=9, cheese_count=11, symmetric=True, seed=42)
 
         cheese_positions = game.cheese_positions()
         width, height = 11, 9
@@ -588,10 +587,7 @@ class TestFullBoardSymmetry:
 
     def test_symmetric_game_renders_symmetrically(self):
         """Symmetric game produces visually symmetric display."""
-        game = PyGameState(width=7, height=7, cheese_count=9, symmetric=True, seed=42)
-
-        wrapper = PyRat.__new__(PyRat)
-        wrapper._game = game
+        game = PyRat(width=7, height=7, cheese_count=9, symmetric=True, seed=42)
 
         # Get game data
         walls = game.wall_entries()
@@ -670,7 +666,7 @@ class TestFullBoardSymmetry:
         assert (sym_x, sym_y) == (center_x, center_y), "Center should be self-symmetric"
 
         # Place cheese at center
-        PyGameState.create_custom(
+        PyRat.create_custom(
             width=width,
             height=height,
             walls=[],
@@ -700,7 +696,7 @@ class TestFullBoardSymmetry:
         # since we can only have one rat and one python
 
         # Test 1: Rat only
-        PyGameState.create_custom(
+        PyRat.create_custom(
             width=width,
             height=height,
             walls=[],
@@ -759,7 +755,7 @@ class TestEdgeCases:
         """Minimum practical board size should work."""
         width, height = 3, 3
 
-        PyGameState.create_custom(
+        PyRat.create_custom(
             width=width,
             height=height,
             walls=[],
@@ -786,7 +782,7 @@ class TestEdgeCases:
         # No single cell is self-symmetric
 
         # Create symmetric game with EVEN cheese count (required for even dimensions)
-        game = PyGameState(
+        game = PyRat(
             width=width, height=height, cheese_count=10, symmetric=True, seed=42
         )
 
@@ -827,7 +823,7 @@ class TestEdgeCases:
         assert (sym_x, sym_y) == (center_x, center_y)
 
         # Create symmetric game with odd cheese count
-        game = PyGameState(
+        game = PyRat(
             width=width, height=height, cheese_count=9, symmetric=True, seed=42
         )
 

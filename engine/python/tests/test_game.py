@@ -1,6 +1,6 @@
-"""Tests for PyGameState from the Rust bindings.
+"""Tests for PyRat from the Rust bindings.
 
-This tests the low-level game state implementation including:
+This tests the game state implementation including:
 - Basic game creation
 - Constructor parameters
 - Preset configurations
@@ -9,8 +9,7 @@ This tests the low-level game state implementation including:
 # ruff: noqa: PLR2004
 
 import pytest
-from pyrat_engine.core.game import GameState as PyGameState
-from pyrat_engine.game import PyRat
+from pyrat_engine import PyRat
 
 
 class TestBasicGameCreation:
@@ -18,14 +17,14 @@ class TestBasicGameCreation:
 
     def test_game_creation(self) -> None:
         """Test basic game creation with minimal parameters."""
-        game = PyGameState(width=5, height=5, cheese_count=3)
+        game = PyRat(width=5, height=5, cheese_count=3)
         assert game.width == 5
         assert game.height == 5
         assert len(game.cheese_positions()) == 3
 
     def test_default_values(self) -> None:
         """Test game creation with default values."""
-        game = PyGameState()
+        game = PyRat()
         assert game.width == 21
         assert game.height == 15
         assert game.max_turns == 300
@@ -38,17 +37,17 @@ class TestEnhancedConstructor:
 
     def test_max_turns_parameter(self):
         """Test that max_turns can be set in main constructor."""
-        game = PyGameState(max_turns=500)
+        game = PyRat(max_turns=500)
         assert game.max_turns == 500
 
     def test_default_max_turns(self):
         """Test that default max_turns is still 300."""
-        game = PyGameState()
+        game = PyRat()
         assert game.max_turns == 300
 
     def test_all_parameters(self):
         """Test all parameters work together."""
-        game = PyGameState(
+        game = PyRat(
             width=15, height=11, cheese_count=21, symmetric=True, seed=42, max_turns=200
         )
         assert game.width == 15
@@ -65,7 +64,7 @@ class TestPresets:
         presets = ["tiny", "small", "default", "large", "huge", "empty", "asymmetric"]
 
         for preset in presets:
-            game = PyGameState.create_preset(preset)
+            game = PyRat.create_preset(preset)
             assert game is not None
 
     def test_preset_dimensions(self):
@@ -81,7 +80,7 @@ class TestPresets:
         }
 
         for preset, (width, height, cheese, turns) in expected.items():
-            game = PyGameState.create_preset(preset)
+            game = PyRat.create_preset(preset)
             assert game.width == width
             assert game.height == height
             assert game.max_turns == turns
@@ -90,8 +89,8 @@ class TestPresets:
 
     def test_preset_with_seed(self):
         """Test that presets with same seed are reproducible."""
-        game1 = PyGameState.create_preset("default", seed=42)
-        game2 = PyGameState.create_preset("default", seed=42)
+        game1 = PyRat.create_preset("default", seed=42)
+        game2 = PyRat.create_preset("default", seed=42)
 
         # Check that cheese positions are the same
         cheese1 = set(game1.cheese_positions())
@@ -100,7 +99,7 @@ class TestPresets:
 
     def test_empty_preset_has_no_walls(self):
         """Test that empty preset has no walls or mud."""
-        game = PyGameState.create_preset("empty")
+        game = PyRat.create_preset("empty")
 
         # Check walls by seeing if all moves are valid
         # In a maze with no walls, you can move in all 4 directions
@@ -119,7 +118,7 @@ class TestPresets:
     def test_invalid_preset_name(self):
         """Test that invalid preset names raise an error."""
         with pytest.raises(ValueError, match="Unknown preset"):
-            PyGameState.create_preset("invalid_preset")
+            PyRat.create_preset("invalid_preset")
 
 
 class TestCustomCreationMethods:
@@ -132,7 +131,7 @@ class TestCustomCreationMethods:
             ((1, 1), (2, 1)),  # Wall between (1,1) and (2,1)
         ]
 
-        game = PyGameState.create_from_maze(
+        game = PyRat.create_from_maze(
             width=5, height=5, walls=walls, seed=42, max_turns=100, symmetric=False
         )
 
@@ -144,7 +143,7 @@ class TestCustomCreationMethods:
 
     def test_create_with_starts(self):
         """Test creating a game with custom starting positions."""
-        game = PyGameState.create_with_starts(
+        game = PyRat.create_with_starts(
             width=15,
             height=11,
             player1_start=(3, 3),
@@ -164,7 +163,7 @@ class TestCustomCreationMethods:
 
 
 class TestPyRatIntegration:
-    """Test that the new API works with the high-level PyRat class."""
+    """Test that the PyRat API works correctly."""
 
     def test_pyrat_with_max_turns(self):
         """Test that PyRat class accepts max_turns parameter."""
@@ -175,7 +174,8 @@ class TestPyRatIntegration:
         """Test that PyRat defaults still work."""
         game = PyRat()
         assert game.max_turns == 300
-        assert game.dimensions == (21, 15)
+        assert game.width == 21
+        assert game.height == 15
 
     def test_pyrat_all_parameters(self):
         """Test PyRat with all parameters."""
@@ -187,10 +187,11 @@ class TestPyRatIntegration:
             seed=123,
             max_turns=400,
         )
-        assert game.dimensions == (25, 17)
+        assert game.width == 25
+        assert game.height == 17
         assert game.max_turns == 400
         # Cheese count might vary slightly
-        assert 48 <= len(game.cheese_positions) <= 52
+        assert 48 <= len(game.cheese_positions()) <= 52
 
 
 class TestBackwardCompatibility:
@@ -199,9 +200,7 @@ class TestBackwardCompatibility:
     def test_old_constructor_still_works(self):
         """Test that the old constructor signature still works."""
         # Old way without max_turns
-        game = PyGameState(
-            width=10, height=10, cheese_count=10, symmetric=True, seed=42
-        )
+        game = PyRat(width=10, height=10, cheese_count=10, symmetric=True, seed=42)
         assert game.width == 10
         assert game.height == 10
         assert game.max_turns == 300  # Default value
@@ -209,7 +208,7 @@ class TestBackwardCompatibility:
     def test_positional_arguments_work(self):
         """Test that positional arguments still work for backward compatibility."""
         # This is how some old code might call it
-        game = PyGameState(15, 15, 20, True, 42)
+        game = PyRat(15, 15, 20, True, 42)
         assert game.width == 15
         assert game.height == 15
         assert len(game.cheese_positions()) == 20
@@ -220,7 +219,7 @@ class TestResetSymmetry:
 
     def test_symmetric_game_reset_stays_symmetric(self):
         """Test that resetting a symmetric game generates symmetric maze."""
-        game = PyGameState(width=11, height=9, symmetric=True, seed=42)
+        game = PyRat(width=11, height=9, symmetric=True, seed=42)
         game.reset(seed=123)
 
         # Check cheese positions are symmetric
@@ -236,7 +235,7 @@ class TestResetSymmetry:
 
     def test_asymmetric_game_reset_stays_asymmetric(self):
         """Test that resetting an asymmetric game generates asymmetric maze."""
-        game = PyGameState(width=21, height=15, symmetric=False, seed=42)
+        game = PyRat(width=21, height=15, symmetric=False, seed=42)
 
         game.reset(seed=123)
         # Just verify game still works - asymmetric mazes don't guarantee
@@ -247,7 +246,7 @@ class TestResetSymmetry:
 
     def test_preset_symmetric_reset(self):
         """Test that preset games reset correctly."""
-        game = PyGameState.create_preset("default", seed=42)
+        game = PyRat.create_preset("default", seed=42)
         game.reset(seed=123)
 
         # Default preset is symmetric - check cheese
@@ -262,7 +261,7 @@ class TestResetSymmetry:
 
     def test_preset_asymmetric_reset(self):
         """Test that asymmetric preset resets correctly."""
-        game = PyGameState.create_preset("asymmetric", seed=42)
+        game = PyRat.create_preset("asymmetric", seed=42)
         game.reset(seed=123)
 
         # Just verify game still works
@@ -287,7 +286,7 @@ class TestCreateCustomSymmetry:
             (2, 2),  # Center (self-symmetric in 5x5)
         ]
 
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=5,
             height=5,
             walls=walls,
@@ -303,7 +302,7 @@ class TestCreateCustomSymmetry:
         walls = [((0, 0), (0, 1))]  # Only one wall
         cheese = [(1, 1), (2, 2)]  # Non-symmetric cheese
 
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=5,
             height=5,
             walls=walls,
@@ -320,7 +319,7 @@ class TestCreateCustomSymmetry:
         cheese = [(2, 2)]  # Center cheese is self-symmetric
 
         with pytest.raises(ValueError, match="no symmetric counterpart"):
-            PyGameState.create_custom(
+            PyRat.create_custom(
                 width=5,
                 height=5,
                 walls=walls,
@@ -333,7 +332,7 @@ class TestCreateCustomSymmetry:
         cheese = [(1, 1)]  # Only one cheese, not at center
 
         with pytest.raises(ValueError, match="no symmetric counterpart"):
-            PyGameState.create_custom(
+            PyRat.create_custom(
                 width=5,
                 height=5,
                 cheese=cheese,
@@ -345,7 +344,7 @@ class TestCreateCustomSymmetry:
         cheese = [(2, 2)]  # Center cheese is valid
 
         with pytest.raises(ValueError, match="not symmetric"):
-            PyGameState.create_custom(
+            PyRat.create_custom(
                 width=5,
                 height=5,
                 cheese=cheese,
@@ -395,7 +394,7 @@ class TestCreateCustomSymmetry:
         ]
         cheese = [(2, 2)]  # Center
 
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=5,
             height=5,
             walls=walls,
@@ -416,7 +415,7 @@ class TestCreateFromMazeSymmetry:
             ((4, 4), (4, 3)),
         ]
 
-        game = PyGameState.create_from_maze(
+        game = PyRat.create_from_maze(
             width=5,
             height=5,
             walls=walls,
@@ -430,7 +429,7 @@ class TestCreateFromMazeSymmetry:
         # Non-symmetric wall
         walls = [((0, 0), (0, 1))]
 
-        game = PyGameState.create_from_maze(
+        game = PyRat.create_from_maze(
             width=5,
             height=5,
             walls=walls,
@@ -444,7 +443,7 @@ class TestCreateFromMazeSymmetry:
         walls = [((0, 0), (0, 1))]  # Only one wall
 
         with pytest.raises(ValueError, match="no symmetric counterpart"):
-            PyGameState.create_from_maze(
+            PyRat.create_from_maze(
                 width=5,
                 height=5,
                 walls=walls,

@@ -10,7 +10,7 @@ Tests the new unified type system including:
 # ruff: noqa: PLR2004
 
 import pytest
-from pyrat_engine.core.game import GameState as PyGameState
+from pyrat_engine import PyRat
 from pyrat_engine.core.types import Coordinates, Direction, Mud, Wall
 
 
@@ -235,11 +235,11 @@ class TestTupleInputSupport:
     """Test that tuple input is supported for backward compatibility."""
 
     def test_game_accepts_tuple_walls(self):
-        """Test that PyGameState.create_custom accepts tuple walls."""
+        """Test that PyRat.create_custom accepts tuple walls."""
         # Should be able to pass tuples which get converted to Wall objects
         walls = [((0, 0), (0, 1)), ((1, 1), (2, 1))]
 
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=5,
             height=5,
             walls=walls,
@@ -253,7 +253,7 @@ class TestTupleInputSupport:
         assert game.height == 5
 
     def test_game_accepts_coordinates_walls(self):
-        """Test that PyGameState.create_custom accepts Coordinates-based walls."""
+        """Test that PyRat.create_custom accepts Coordinates-based walls."""
         # Can also pass Wall objects directly
         walls = [
             Wall(Coordinates(0, 0), Coordinates(0, 1)),
@@ -263,7 +263,7 @@ class TestTupleInputSupport:
         # This should fail for now since create_custom expects tuples
         # We'll update this test when we implement the FromPyObject trait
         with pytest.raises(TypeError):
-            PyGameState.create_custom(
+            PyRat.create_custom(
                 width=5, height=5, walls=walls, cheese=[(2, 2)], max_turns=100
             )
 
@@ -271,7 +271,7 @@ class TestTupleInputSupport:
         """Test create_from_maze accepts tuple walls."""
         walls = [((0, 0), (0, 1)), ((1, 1), (2, 1))]
 
-        game = PyGameState.create_from_maze(
+        game = PyRat.create_from_maze(
             width=5, height=5, walls=walls, seed=42, max_turns=100, symmetric=False
         )
 
@@ -299,7 +299,7 @@ class TestIntegrationWithGame:
     def test_game_returns_coordinates(self):
         """Test that game methods return Coordinates objects."""
         # Use even cheese count with even dimensions
-        game = PyGameState(width=10, height=10, cheese_count=6)
+        game = PyRat(width=10, height=10, cheese_count=6)
 
         # Get player positions - should return Coordinates objects
         p1_pos = game.player1_position
@@ -320,7 +320,7 @@ class TestIntegrationWithGame:
     def test_cheese_positions_are_coordinates(self):
         """Test that cheese positions return Coordinates objects."""
         # Use even cheese count with even dimensions
-        game = PyGameState(width=10, height=10, cheese_count=6)
+        game = PyRat(width=10, height=10, cheese_count=6)
 
         cheese_positions = game.cheese_positions()
         assert len(cheese_positions) == 6

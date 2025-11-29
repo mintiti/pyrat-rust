@@ -44,9 +44,9 @@ class TestModuleStructure:
 
     def test_game_submodule_imports(self):
         """Test importing from the game submodule."""
-        from pyrat_engine.core.game import GameState, MoveUndo
+        from pyrat_engine.core.game import MoveUndo, PyRat
 
-        assert GameState is not None
+        assert PyRat is not None
         assert MoveUndo is not None
 
     def test_observation_submodule_imports(self):
@@ -69,10 +69,10 @@ class TestModuleStructure:
             Direction,
             GameConfigBuilder,
             GameObservation,
-            GameState,
             MoveUndo,
             Mud,
             ObservationHandler,
+            PyRat,
             Wall,
         )
 
@@ -83,7 +83,7 @@ class TestModuleStructure:
                 Direction,
                 Wall,
                 Mud,
-                GameState,
+                PyRat,
                 MoveUndo,
                 GameObservation,
                 ObservationHandler,
@@ -92,11 +92,9 @@ class TestModuleStructure:
         )
 
     def test_backward_compatibility_names(self):
-        """Test that the Py-prefixed names are still available."""
+        """Test that the Py-prefixed names are still available for some types."""
         from pyrat_engine.core.builder import GameConfigBuilder, PyGameConfigBuilder
-
-        # These should be aliases to the cleaner names
-        from pyrat_engine.core.game import GameState, MoveUndo, PyGameState, PyMoveUndo
+        from pyrat_engine.core.game import MoveUndo, PyMoveUndo, PyRat
         from pyrat_engine.core.observation import (
             GameObservation,
             ObservationHandler,
@@ -104,7 +102,8 @@ class TestModuleStructure:
             PyObservationHandler,
         )
 
-        assert PyGameState is GameState
+        # PyRat is the primary name now (no GameState alias)
+        assert PyRat is not None
         assert PyMoveUndo is MoveUndo
         assert PyGameObservation is GameObservation
         assert PyObservationHandler is ObservationHandler
@@ -167,34 +166,34 @@ class TestTypesFunctionality:
         # For now, just check the type exists
 
 
-class TestGameStateFunctionality:
+class TestPyRatFunctionality:
     """Test that game module classes work correctly."""
 
-    def test_game_state_creation(self):
-        """Test creating GameState objects."""
-        from pyrat_engine.core.game import GameState
+    def test_pyrat_creation(self):
+        """Test creating PyRat objects."""
+        from pyrat_engine import PyRat
 
         # Use odd dimensions to avoid the symmetric maze issue
-        game = GameState(width=11, height=11)
+        game = PyRat(width=11, height=11)
         assert game.width == 11  # noqa: PLR2004
         assert game.height == 11  # noqa: PLR2004
 
-    def test_game_state_preset(self):
-        """Test creating GameState from preset."""
-        from pyrat_engine.core.game import GameState
+    def test_pyrat_preset(self):
+        """Test creating PyRat from preset."""
+        from pyrat_engine import PyRat
 
-        game = GameState.create_preset("tiny", seed=42)
+        game = PyRat.create_preset("tiny", seed=42)
         assert game.width == 11  # noqa: PLR2004
         assert game.height == 9  # noqa: PLR2004
         assert game.max_turns == 150  # noqa: PLR2004
 
     def test_game_state_properties(self):
-        """Test GameState properties return correct types."""
-        from pyrat_engine.core.game import GameState
+        """Test PyRat properties return correct types."""
+        from pyrat_engine import PyRat
         from pyrat_engine.core.types import Coordinates
 
         # Use odd dimensions to avoid the symmetric maze issue
-        game = GameState(width=11, height=11, seed=42)
+        game = PyRat(width=11, height=11, seed=42)
 
         # Position properties should return Coordinates
         pos1 = game.player1_position
@@ -220,9 +219,8 @@ class TestHighLevelAPI:
         from pyrat_engine import PyRat
 
         game = PyRat(width=15, height=15)
-        width, height = game.dimensions
-        assert width == 15  # noqa: PLR2004
-        assert height == 15  # noqa: PLR2004
+        assert game.width == 15  # noqa: PLR2004
+        assert game.height == 15  # noqa: PLR2004
 
     def test_env_import(self):
         """Test that the PettingZoo environment still works."""

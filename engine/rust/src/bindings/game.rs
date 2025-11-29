@@ -212,15 +212,15 @@ impl PyMoveUndo {
 }
 
 /// Python-facing PyRat game state
-#[pyclass]
-pub struct PyGameState {
+#[pyclass(name = "PyRat")]
+pub struct PyRat {
     game: GameState,
     observation_handler: ObservationHandler,
     symmetric: bool,
 }
 
 #[pymethods]
-impl PyGameState {
+impl PyRat {
     /// Create a new game state with random generation
     #[new]
     #[pyo3(signature = (
@@ -452,7 +452,7 @@ impl PyGameState {
     // String representation
     fn __repr__(&self) -> String {
         format!(
-            "PyGameState({}x{}, turn={}/{}, p1_score={:.1}, p2_score={:.1})",
+            "PyRat({}x{}, turn={}/{}, p1_score={:.1}, p2_score={:.1})",
             self.game.width(),
             self.game.height(),
             self.game.turns(),
@@ -1021,7 +1021,7 @@ pub struct PyObservationHandler {
 #[pymethods]
 impl PyObservationHandler {
     #[new]
-    fn new(game: &PyGameState) -> Self {
+    fn new(game: &PyRat) -> Self {
         Self {
             inner: ObservationHandler::new(&game.game),
         }
@@ -1035,14 +1035,14 @@ impl PyObservationHandler {
         self.inner.update_collected_cheese(&coords);
     }
 
-    fn refresh_cheese(&mut self, game: &PyGameState) {
+    fn refresh_cheese(&mut self, game: &PyRat) {
         self.inner.refresh_cheese(&game.game);
     }
 
     fn get_observation(
         &self,
         py: Python<'_>,
-        game: &PyGameState,
+        game: &PyRat,
         is_player_one: bool,
     ) -> PyResult<PyGameObservation> {
         let obs = self.inner.get_observation(py, &game.game, is_player_one);
@@ -1270,7 +1270,7 @@ impl PyGameConfigBuilder {
 
     /// Build the game state
     #[pyo3(name = "build")]
-    fn build(&self) -> PyResult<PyGameState> {
+    fn build(&self) -> PyResult<PyRat> {
         // Final validation of the complete configuration
         if self.cheese.is_empty() {
             return Err(PyValueError::new_err("Game must have at least one cheese"));
@@ -1311,7 +1311,7 @@ impl PyGameConfigBuilder {
 
         let observation_handler = ObservationHandler::new(&game);
 
-        Ok(PyGameState {
+        Ok(PyRat {
             game,
             observation_handler,
             symmetric: self.symmetric,
@@ -1330,7 +1330,7 @@ pub(crate) fn register_types(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
 /// Register game submodule
 pub(crate) fn register_game(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<PyGameState>()?;
+    m.add_class::<PyRat>()?;
     m.add_class::<PyMoveUndo>()?;
     Ok(())
 }

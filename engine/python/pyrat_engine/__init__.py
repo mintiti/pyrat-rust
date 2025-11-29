@@ -15,26 +15,25 @@ Example:
     >>> from pyrat_engine import PyRat, Direction
     >>> game = PyRat(width=15, height=15)
     >>> # Make moves
-    >>> result = game.step(Direction.RIGHT, Direction.LEFT)
+    >>> game_over, collected = game.step(Direction.RIGHT, Direction.LEFT)
     >>> # Check game state
-    >>> print(f"Player 1 score: {game.scores[0]}")
+    >>> print(f"Player 1 score: {game.player1_score}")
 """
 
-from pyrat_engine.core.game import GameState, MoveUndo
+from pyrat_engine.core import MoveUndo, PyRat
 from pyrat_engine.core.types import (
     Coordinates,
     Direction,
     Mud,
     Wall,
 )
-from pyrat_engine.game import GameResult, PyRat
+from pyrat_engine.game import GameResult
 
 __version__ = "0.1.0"
 __all__ = [
     "Coordinates",
     "Direction",
     "GameResult",
-    "GameState",
     "MoveUndo",
     "Mud",
     "PyRat",

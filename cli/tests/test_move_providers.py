@@ -205,18 +205,12 @@ class TestRunGameFunction:
         class FakeGame:
             def __init__(self):
                 self._done = False
-
-            @property
-            def scores(self):
-                return (0.0, 0.0)
+                self.player1_score = 0.0
+                self.player2_score = 0.0
 
             def step(self, p1_move: Direction, p2_move: Direction):
-                class R:
-                    pass
-
-                r = R()
-                r.game_over = True  # end after first step
-                return r
+                # New API returns (game_over: bool, collected: list)
+                return (True, [])
 
         game = FakeGame()
         rat = SpyProvider("Rat", [None], alive=True)
@@ -239,17 +233,13 @@ class TestRunGameFunction:
                 return Direction.STAY
 
         class FakeGame:
-            @property
-            def scores(self):
-                return (0.0, 0.0)
+            def __init__(self):
+                self.player1_score = 0.0
+                self.player2_score = 0.0
 
             def step(self, p1_move: Direction, p2_move: Direction):
-                class R:
-                    pass
-
-                r = R()
-                r.game_over = True
-                return r
+                # New API returns (game_over: bool, collected: list)
+                return (True, [])
 
         # If sequential, ~0.4s; if parallel, ~0.2s (allow generous margin for CI)
         game = FakeGame()

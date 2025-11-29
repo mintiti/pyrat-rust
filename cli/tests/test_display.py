@@ -2,8 +2,7 @@
 
 import pytest
 
-from pyrat_engine.game import PyRat
-from pyrat_engine.core import GameState as PyGameState
+from pyrat_engine import PyRat
 
 from pyrat_runner.display import (
     Display,
@@ -31,7 +30,7 @@ def empty_game():
     Creates a 5x5 game with players at opposite corners.
     Has one cheese at an out-of-the-way position (engine requires at least one).
     """
-    game_state = PyGameState.create_custom(
+    return PyRat.create_custom(
         width=5,
         height=5,
         walls=[],
@@ -41,9 +40,6 @@ def empty_game():
         player2_pos=(4, 4),
         symmetric=False,
     )
-    wrapper = PyRat.__new__(PyRat)
-    wrapper._game = game_state
-    return wrapper
 
 
 @pytest.fixture
@@ -54,7 +50,7 @@ def game_with_walls():
     - Vertical wall between (1,1) and (2,1)
     - Horizontal wall between (3,2) and (3,3)
     """
-    game_state = PyGameState.create_custom(
+    return PyRat.create_custom(
         width=5,
         height=5,
         walls=[
@@ -67,9 +63,6 @@ def game_with_walls():
         player2_pos=(4, 4),
         symmetric=False,
     )
-    wrapper = PyRat.__new__(PyRat)
-    wrapper._game = game_state
-    return wrapper
 
 
 @pytest.fixture
@@ -80,7 +73,7 @@ def game_with_mud():
     - Vertical mud (3 turns) between (1,2) and (2,2)
     - Horizontal mud (2 turns) between (3,1) and (3,2)
     """
-    game_state = PyGameState.create_custom(
+    return PyRat.create_custom(
         width=5,
         height=5,
         walls=[],
@@ -93,9 +86,6 @@ def game_with_mud():
         player2_pos=(4, 4),
         symmetric=False,
     )
-    wrapper = PyRat.__new__(PyRat)
-    wrapper._game = game_state
-    return wrapper
 
 
 class TestCellContent:
@@ -130,7 +120,7 @@ class TestCellContent:
         # Add a dummy cheese at (0,4) if cheese_set is empty (engine requires at least one)
         cheese_list = list(cheese_set) if cheese_set else [(0, 4)]
 
-        game_state = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=5,
             height=5,
             walls=[],
@@ -140,8 +130,6 @@ class TestCellContent:
             player2_pos=python_pos,
             symmetric=False,
         )
-        game = PyRat.__new__(PyRat)
-        game._game = game_state
 
         display = Display(game, delay=0)
         content = display._get_cell_content(x, y, cheese_set)
@@ -249,7 +237,7 @@ class TestMazeStructureBuilding:
     def test_wall_order_independence(self):
         """Wall parsing should work regardless of coordinate order."""
         # Test that ((x1, y1), (x2, y2)) and ((x2, y2), (x1, y1)) produce same result
-        game_state = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=5,
             height=5,
             walls=[
@@ -261,8 +249,6 @@ class TestMazeStructureBuilding:
             player2_pos=(4, 4),
             symmetric=False,
         )
-        game = PyRat.__new__(PyRat)
-        game._game = game_state
 
         display = Display(game, delay=0)
         # Should still be stored with min x

@@ -7,8 +7,8 @@ from gymnasium.spaces import Box, Discrete
 from gymnasium.spaces import Dict as SpaceDict
 from pettingzoo.utils.env import AgentID, ParallelEnv
 
-from pyrat_engine.core import GameState as PyGameState
 from pyrat_engine.core import ObservationHandler as PyObservationHandler
+from pyrat_engine.core import PyRat
 
 if TYPE_CHECKING:
     from pyrat_engine.core.types import Direction
@@ -62,7 +62,7 @@ class PyRatEnv(ParallelEnv):  # type: ignore[misc]
         self.possible_agents = ["player_1", "player_2"]
 
         # Create game state and observation handler
-        self.game = PyGameState(width, height, cheese_count, symmetric, seed)
+        self.game = PyRat(width, height, cheese_count, symmetric, seed)
         self.obs_handler = PyObservationHandler(self.game)
 
         # Define spaces

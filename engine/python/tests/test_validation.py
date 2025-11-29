@@ -1,7 +1,7 @@
 """Test input validation for PyRat engine."""
 
 import pytest
-from pyrat_engine.core.game import GameState as PyGameState
+from pyrat_engine import PyRat
 
 
 class TestPositionValidation:
@@ -10,7 +10,7 @@ class TestPositionValidation:
     def test_negative_position_cheese(self):
         """Test that negative cheese positions give clear error messages."""
         with pytest.raises(ValueError) as exc_info:
-            PyGameState.create_custom(
+            PyRat.create_custom(
                 width=10,
                 height=10,
                 cheese=[(-1, 0)],
@@ -20,7 +20,7 @@ class TestPositionValidation:
     def test_negative_position_player1(self):
         """Test that negative player1 position gives clear error message."""
         with pytest.raises(ValueError) as exc_info:
-            PyGameState.create_custom(
+            PyRat.create_custom(
                 width=10,
                 height=10,
                 cheese=[(5, 5)],
@@ -31,7 +31,7 @@ class TestPositionValidation:
     def test_negative_position_player2(self):
         """Test that negative player2 position gives clear error message."""
         with pytest.raises(ValueError) as exc_info:
-            PyGameState.create_custom(
+            PyRat.create_custom(
                 width=10,
                 height=10,
                 cheese=[(5, 5)],
@@ -42,7 +42,7 @@ class TestPositionValidation:
     def test_position_too_large(self):
         """Test that positions > 255 give clear error messages."""
         with pytest.raises(ValueError) as exc_info:
-            PyGameState.create_custom(
+            PyRat.create_custom(
                 width=10,
                 height=10,
                 cheese=[(256, 0)],
@@ -54,7 +54,7 @@ class TestPositionValidation:
     def test_position_out_of_bounds(self):
         """Test that out-of-bounds positions give clear error messages."""
         with pytest.raises(ValueError) as exc_info:
-            PyGameState.create_custom(
+            PyRat.create_custom(
                 width=10,
                 height=10,
                 cheese=[(10, 10)],  # Equal to width/height is out of bounds
@@ -70,7 +70,7 @@ class TestWallValidation:
     def test_negative_wall_position(self):
         """Test that negative wall positions give clear error messages."""
         with pytest.raises(ValueError) as exc_info:
-            PyGameState.create_custom(
+            PyRat.create_custom(
                 width=10,
                 height=10,
                 walls=[((-1, 0), (0, 0))],
@@ -81,7 +81,7 @@ class TestWallValidation:
     def test_wall_non_adjacent(self):
         """Test that non-adjacent wall positions give clear error messages."""
         with pytest.raises(ValueError) as exc_info:
-            PyGameState.create_custom(
+            PyRat.create_custom(
                 width=10,
                 height=10,
                 walls=[((0, 0), (2, 0))],  # Not adjacent
@@ -94,7 +94,7 @@ class TestWallValidation:
     def test_duplicate_walls(self):
         """Test that duplicate walls are detected."""
         with pytest.raises(ValueError) as exc_info:
-            PyGameState.create_custom(
+            PyRat.create_custom(
                 width=10,
                 height=10,
                 walls=[
@@ -112,7 +112,7 @@ class TestMudValidation:
     def test_negative_mud_value(self):
         """Test that negative mud values give clear error messages."""
         with pytest.raises(ValueError) as exc_info:
-            PyGameState.create_custom(
+            PyRat.create_custom(
                 width=10,
                 height=10,
                 mud=[((0, 0), (0, 1), -1)],
@@ -123,7 +123,7 @@ class TestMudValidation:
     def test_negative_mud_position(self):
         """Test that negative mud positions give clear error messages."""
         with pytest.raises(ValueError) as exc_info:
-            PyGameState.create_custom(
+            PyRat.create_custom(
                 width=10,
                 height=10,
                 mud=[((-1, 0), (0, 0), 3)],
@@ -134,7 +134,7 @@ class TestMudValidation:
     def test_mud_value_too_small(self):
         """Test that mud value < 2 gives clear error message."""
         with pytest.raises(ValueError) as exc_info:
-            PyGameState.create_custom(
+            PyRat.create_custom(
                 width=10,
                 height=10,
                 mud=[((0, 0), (0, 1), 1)],
@@ -145,7 +145,7 @@ class TestMudValidation:
     def test_mud_value_too_large(self):
         """Test that mud value > 255 gives clear error message."""
         with pytest.raises(ValueError) as exc_info:
-            PyGameState.create_custom(
+            PyRat.create_custom(
                 width=10,
                 height=10,
                 mud=[((0, 0), (0, 1), 256)],
@@ -156,7 +156,7 @@ class TestMudValidation:
     def test_mud_non_adjacent(self):
         """Test that non-adjacent mud positions give clear error messages."""
         with pytest.raises(ValueError) as exc_info:
-            PyGameState.create_custom(
+            PyRat.create_custom(
                 width=10,
                 height=10,
                 mud=[((0, 0), (2, 0), 3)],  # Not adjacent
@@ -170,7 +170,7 @@ class TestMudValidation:
         """Test that walls and mud can coexist (no longer an error)."""
         # This used to be an error, but the semantic fix clarifies that mud exists on passages
         # The maze generator ensures mud only exists on valid connections, not walls
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=10,
             height=10,
             walls=[((0, 0), (0, 1))],
@@ -187,7 +187,7 @@ class TestCheeseValidation:
     def test_empty_cheese_list(self):
         """Test that empty cheese list gives clear error message."""
         with pytest.raises(ValueError) as exc_info:
-            PyGameState.create_custom(
+            PyRat.create_custom(
                 width=10,
                 height=10,
                 cheese=[],
@@ -197,7 +197,7 @@ class TestCheeseValidation:
     def test_duplicate_cheese(self):
         """Test that duplicate cheese positions are detected."""
         with pytest.raises(ValueError) as exc_info:
-            PyGameState.create_custom(
+            PyRat.create_custom(
                 width=10,
                 height=10,
                 cheese=[(5, 5), (5, 5)],
@@ -210,7 +210,7 @@ class TestValidInputs:
 
     def test_valid_game_creation(self):
         """Test that valid game creation works."""
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=10,
             height=10,
             walls=[((0, 0), (0, 1)), ((1, 1), (1, 2))],
@@ -237,7 +237,7 @@ class TestValidInputs:
 
     def test_edge_positions(self):
         """Test that positions at the edges work correctly."""
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=10,
             height=10,
             cheese=[(0, 0), (9, 9), (0, 9), (9, 0)],
@@ -249,7 +249,7 @@ class TestValidInputs:
 
     def test_maximum_mud_value(self):
         """Test that maximum mud value (255) works."""
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=10,
             height=10,
             mud=[((0, 0), (0, 1), 255)],
