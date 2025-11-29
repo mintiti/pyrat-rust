@@ -29,12 +29,12 @@ from pyrat_engine.core.types import Direction  # noqa: E402
 # Conditionally import types for type checking to avoid "not valid as a type" errors
 if TYPE_CHECKING:
     from pyrat_engine.core.builder import PyGameConfigBuilder as GameConfigBuilder
-    from pyrat_engine.core.game import PyGameState as GameState
     from pyrat_engine.core.game import PyMoveUndo as MoveUndo
+    from pyrat_engine.core.game import PyRat
     from pyrat_engine.core.observation import PyGameObservation as GameObservation
     from pyrat_engine.core.observation import PyObservationHandler as ObservationHandler
 else:
-    GameState = _impl.game.PyGameState
+    PyRat = _impl.game.PyRat
     MoveUndo = _impl.game.PyMoveUndo
     GameObservation = _impl.observation.PyGameObservation
     ObservationHandler = _impl.observation.PyObservationHandler
@@ -52,7 +52,7 @@ __all__ = [
     "Wall",
     "Mud",
     # Game
-    "GameState",
+    "PyRat",
     "MoveUndo",
     # Observation
     "GameObservation",

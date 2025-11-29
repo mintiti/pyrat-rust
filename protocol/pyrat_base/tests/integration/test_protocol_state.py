@@ -3,16 +3,16 @@
 
 import numpy as np
 import pytest
+from pyrat_engine import PyRat
 from pyrat_engine.core import Direction
 from pyrat_engine.core.builder import GameConfigBuilder as PyGameConfigBuilder
-from pyrat_engine.core.game import GameState as PyGameState
 from pyrat_engine.core.types import Coordinates
 
 from pyrat_base import Player, ProtocolState
 
 
 @pytest.fixture
-def simple_game() -> PyGameState:
+def simple_game() -> PyRat:
     """Create a simple 5x5 game for testing."""
     return (
         PyGameConfigBuilder(5, 5)
@@ -44,7 +44,7 @@ class TestProtocolState:
         assert state_python._observation is None
 
     def test_direct_passthrough_properties(self, simple_game):
-        """Test properties that pass through directly to PyGameState."""
+        """Test properties that pass through directly to PyRat."""
         game = simple_game
         state = ProtocolState(game, Player.RAT)
 

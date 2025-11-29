@@ -7,7 +7,7 @@ to interact with the engine.
 """
 
 import pytest
-from pyrat_engine.game import PyRat
+from pyrat_engine import PyRat
 from pyrat_engine.core import Direction
 from pyrat_base.protocol_state import ProtocolState
 from pyrat_base.enums import Player
@@ -19,12 +19,13 @@ def test_engine_state_to_protocol():
     game = PyRat(width=7, height=5, cheese_count=1)
 
     # Wrap engine state for Player 1 perspective
-    protocol_state = ProtocolState(game._game, Player.RAT)
+    # PyRat IS the game state now (no _game wrapper)
+    protocol_state = ProtocolState(game, Player.RAT)
 
     # Verify protocol state provides correct player-perspective view
-    p1_score, p2_score = game.scores
-    assert protocol_state.my_position == game.player1_pos
-    assert protocol_state.opponent_position == game.player2_pos
+    p1_score, p2_score = game.player1_score, game.player2_score
+    assert protocol_state.my_position == game.player1_position
+    assert protocol_state.opponent_position == game.player2_position
     assert protocol_state.my_score == p1_score
     assert protocol_state.opponent_score == p2_score
     assert len(protocol_state.cheese) >= 1
@@ -36,13 +37,13 @@ def test_protocol_commands_update_engine():
     game = PyRat(width=7, height=5, cheese_count=1)
 
     # Simulate a move via protocol
-    initial_pos = game.player1_pos
+    initial_pos = game.player1_position
 
     # Apply a move
     game.step(Direction.UP, Direction.STAY)
 
     # Check that position changed (or stayed same if at boundary)
-    new_pos = game.player1_pos
+    new_pos = game.player1_position
 
     # Position should either move up or stay (if at top boundary or wall)
     # Coordinates objects can be compared directly
@@ -56,10 +57,11 @@ def test_game_simulation_consistency():
     game2 = PyRat(width=11, height=9, cheese_count=5, seed=123)
 
     # Verify both games have identical initial state
-    assert game1.player1_pos == game2.player1_pos
-    assert game1.player2_pos == game2.player2_pos
-    assert game1.cheese_positions == game2.cheese_positions
-    assert game1.scores == game2.scores
+    assert game1.player1_position == game2.player1_position
+    assert game1.player2_position == game2.player2_position
+    assert game1.cheese_positions() == game2.cheese_positions()
+    assert game1.player1_score == game2.player1_score
+    assert game1.player2_score == game2.player2_score
 
 
 def test_protocol_uses_engine_directions():
@@ -68,11 +70,11 @@ def test_protocol_uses_engine_directions():
     game = PyRat(width=7, height=5, cheese_count=1)
 
     # Verify Direction enum values work with game.step()
-    initial_pos = game.player1_pos
-    result = game.step(Direction.STAY, Direction.STAY)
+    initial_pos = game.player1_position
+    game_over, collected = game.step(Direction.STAY, Direction.STAY)
 
     # After STAY, this verifies Direction enum values are valid inputs
     # and the game progresses normally
-    assert isinstance(result.p1_score, float)
-    assert isinstance(result.p2_score, float)
-    assert result.game_over in [True, False]
+    assert isinstance(game.player1_score, float)
+    assert isinstance(game.player2_score, float)
+    assert game_over in [True, False]

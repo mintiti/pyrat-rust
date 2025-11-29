@@ -1,23 +1,20 @@
-"""High-level PyRat game interface.
+"""PyRat game helper types.
 
-This module provides the main game interface for PyRat, wrapping the Rust engine
-with a Pythonic API. It includes core game types and the main PyRat class.
+This module provides convenience types for working with the PyRat game engine.
+The main game interface is now `PyRat` from `pyrat_engine.core`.
 
-The game follows these basic rules:
-- Two players move simultaneously on a maze-like grid
-- Players collect cheese pieces to score points
-- Mud spaces can delay player movement
-- Game ends when a player collects majority of cheese or max turns reached
+Types:
+    - MoveUndo: Wrapper for undo information with convenient property access
+    - GameResult: Named tuple for step() results (optional convenience type)
 """
 
 from dataclasses import dataclass
-from typing import Dict, List, NamedTuple, Optional, Tuple
+from typing import List, NamedTuple, Tuple
 
-from pyrat_engine.core import GameState as _RustGameState
 from pyrat_engine.core import MoveUndo as _RustMoveUndo
-from pyrat_engine.core.types import Coordinates, Direction
+from pyrat_engine.core.types import Coordinates
 
-__all__ = ["GameResult", "MoveUndo", "PyRat"]
+__all__ = ["GameResult", "MoveUndo"]
 
 
 @dataclass(frozen=True)
@@ -30,12 +27,11 @@ class MoveUndo:
     and analyzing different game strategies.
 
     Example:
+        >>> from pyrat_engine import PyRat, Direction
         >>> game = PyRat(width=15, height=15)
         >>> # Make a move and store undo information
         >>> undo_info = game.make_move(Direction.RIGHT, Direction.LEFT)
-        >>> # Make another move
-        >>> game.make_move(Direction.UP, Direction.DOWN)
-        >>> # Undo the last move
+        >>> # Undo the move
         >>> game.unmake_move(undo_info)
     """
 
@@ -79,120 +75,25 @@ class GameResult(NamedTuple):
     """Result of a game step.
 
     Contains information about the outcome of a single game step.
+    This is an optional convenience type - you can also use the raw
+    tuple returned by PyRat.step() directly.
 
     Attributes:
         game_over: True if the game has ended
         collected_cheese: List of positions where cheese was collected this turn
         p1_score: Player 1's current score
         p2_score: Player 2's current score
+
+    Example:
+        >>> from pyrat_engine import PyRat, Direction
+        >>> from pyrat_engine.game import GameResult
+        >>> game = PyRat(width=15, height=15)
+        >>> game_over, collected = game.step(Direction.RIGHT, Direction.LEFT)
+        >>> # Or wrap in GameResult for named access:
+        >>> result = GameResult(game_over, collected, game.player1_score, game.player2_score)
     """
 
     game_over: bool
     collected_cheese: List[Coordinates]
     p1_score: float
     p2_score: float
-
-
-class PyRat:
-    """High-performance PyRat game implementation.
-
-    This class provides the main interface to the PyRat game engine. It wraps
-    the Rust implementation with a Pythonic API while maintaining high performance.
-
-    Args:
-        width: Width of the game board (default: 21)
-        height: Height of the game board (default: 15)
-        cheese_count: Number of cheese pieces to place (default: 41)
-        symmetric: If True, generate symmetric mazes (default: True)
-        seed: Random seed for reproducible games (default: None)
-        max_turns: Maximum number of turns before game ends (default: 300)
-
-    Example:
-        >>> game = PyRat(width=15, height=15)
-        >>> # Make a move
-        >>> result = game.step(Direction.RIGHT, Direction.LEFT)
-        >>> print(f"Cheese collected: {result.collected_cheese}")
-        >>> # Use undo/redo functionality
-        >>> undo_info = game.make_move(Direction.UP, Direction.DOWN)
-        >>> game.unmake_move(undo_info)  # Restore previous state
-    """
-
-    def __init__(
-        self,
-        width: Optional[int] = None,
-        height: Optional[int] = None,
-        cheese_count: Optional[int] = None,
-        symmetric: bool = True,
-        seed: Optional[int] = None,
-        max_turns: Optional[int] = None,
-    ):
-        """Initialize a new PyRat game."""
-        self._game = _RustGameState(
-            width, height, cheese_count, symmetric, seed, max_turns
-        )
-
-    @property
-    def dimensions(self) -> Tuple[int, int]:
-        """Get board dimensions."""
-        return self._game.width, self._game.height
-
-    @property
-    def turn(self) -> int:
-        """Current turn number."""
-        return self._game.turn
-
-    @property
-    def max_turns(self) -> int:
-        """Maximum number of turns."""
-        return self._game.max_turns
-
-    @property
-    def player1_pos(self) -> Coordinates:
-        """Get player 1's position."""
-        return self._game.player1_position
-
-    @property
-    def player2_pos(self) -> Coordinates:
-        """Get player 2's position."""
-        return self._game.player2_position
-
-    @property
-    def scores(self) -> Tuple[float, float]:
-        """Get current scores."""
-        return self._game.player1_score, self._game.player2_score
-
-    @property
-    def cheese_positions(self) -> List[Coordinates]:
-        """Get all cheese positions."""
-        return self._game.cheese_positions()
-
-    @property
-    def mud_positions(self) -> Dict[Tuple[Coordinates, Coordinates], int]:
-        """Get mud positions and their values."""
-        return {(mud.pos1, mud.pos2): mud.value for mud in self._game.mud_entries()}
-
-    def step(self, p1_move: Direction, p2_move: Direction) -> GameResult:
-        """Execute one game step."""
-        game_over, collected = self._game.step(p1_move, p2_move)
-        return GameResult(
-            game_over=game_over,
-            collected_cheese=list(collected),
-            p1_score=self._game.player1_score,
-            p2_score=self._game.player2_score,
-        )
-
-    def reset(self, seed: Optional[int] = None) -> None:
-        """Reset the game."""
-        self._game.reset(seed)
-
-    def make_move(self, p1_move: Direction, p2_move: Direction) -> MoveUndo:
-        """Make a move and return undo information."""
-        undo = self._game.make_move(p1_move, p2_move)
-        return MoveUndo(_undo=undo)
-
-    def unmake_move(self, undo: MoveUndo) -> None:
-        """Unmake a move using saved undo information."""
-        self._game.unmake_move(undo._undo)
-
-    def __repr__(self) -> str:
-        return str(self._game)

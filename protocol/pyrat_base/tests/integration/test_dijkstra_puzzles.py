@@ -6,8 +6,8 @@ makes optimal decisions considering walls, mud, and actual travel time.
 # ruff: noqa: PLR2004
 
 import pytest
+from pyrat_engine import PyRat
 from pyrat_engine.core import Direction
-from pyrat_engine.core.game import GameState as PyGameState
 from pyrat_engine.core.types import Coordinates
 
 from pyrat_base.enums import Player
@@ -28,7 +28,7 @@ def create_game_state():
         player1_pos=(0, 0),
         player2_pos=(4, 4),
     ):
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=width,
             height=height,
             walls=walls or [],
@@ -233,9 +233,9 @@ class TestRandomGames:
     def test_pathfinding_on_random_game(self, seed, width, height, cheese_count):
         """Test pathfinding works correctly on random games."""
         if cheese_count is None:
-            game = PyGameState(width=width, height=height, seed=seed)
+            game = PyRat(width=width, height=height, seed=seed)
         else:
-            game = PyGameState(
+            game = PyRat(
                 width=width, height=height, seed=seed, cheese_count=cheese_count
             )
         state = ProtocolState(game, Player.RAT)

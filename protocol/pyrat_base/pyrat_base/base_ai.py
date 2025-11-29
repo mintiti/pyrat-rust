@@ -23,7 +23,7 @@ import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from pyrat_engine.core.game import GameState as PyGameState
+from pyrat_engine import PyRat
 from pyrat_engine.core.types import Direction
 
 from pyrat_base.enums import CommandType, GameResult, Player, ResponseType
@@ -68,7 +68,7 @@ class PyRatAI:
         self._io = IOHandler(debug=self.debug)
         self._protocol = Protocol()
         self._state = "INITIAL"
-        self._game_state: Optional[PyGameState] = None
+        self._game_state: Optional[PyRat] = None
         self._player: Optional[Player] = None
         self._options: Dict[str, Any] = {}
         self._time_limits: Dict[str, int] = {
@@ -509,7 +509,7 @@ class PyRatAI:
         if required.issubset(self._game_config.keys()) and self._player:
             # Create the game state
             # Note: symmetric=False because protocol data may not be symmetric
-            self._game_state = PyGameState.create_custom(
+            self._game_state = PyRat.create_custom(
                 width=self._game_config["width"],
                 height=self._game_config["height"],
                 walls=self._game_config["walls"],

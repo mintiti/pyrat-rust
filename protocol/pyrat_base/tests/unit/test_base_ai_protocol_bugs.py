@@ -139,7 +139,7 @@ class TestProtocolBugFixes:
         Fix: MOVES commands are re-queued and processed after calculation.
         """
         # This test demonstrates the impact of the bug using a simple example
-        # We don't need full PyGameState for this - just show the concept
+        # We don't need full PyRat for this - just show the concept
 
         # Simulate game state update
         class SimpleGameState:

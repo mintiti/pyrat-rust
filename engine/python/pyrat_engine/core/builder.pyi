@@ -3,7 +3,7 @@
 This module contains the builder pattern for creating custom game configurations.
 """
 
-from pyrat_engine.core.game import GameState
+from pyrat_engine.core.game import PyRat
 from pyrat_engine.core.types import Coordinates, Mud, Wall
 
 class GameConfigBuilder:
@@ -133,11 +133,11 @@ class GameConfigBuilder:
         """
         ...
 
-    def build(self) -> GameState:
+    def build(self) -> PyRat:
         """Construct and return the final game state.
 
         Returns:
-            A new GameState instance with the configured parameters
+            A new PyRat instance with the configured parameters
 
         Raises:
             ValueError: If the configuration is invalid (e.g., invalid positions,

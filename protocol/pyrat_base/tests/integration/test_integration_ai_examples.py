@@ -156,10 +156,10 @@ async def test_ai_with_small_maze():
 @pytest.mark.asyncio
 async def test_ai_with_large_maze():
     """Test AIs can handle a large maze with many walls."""
-    from pyrat_engine.core.game import GameState as PyGameState
+    from pyrat_engine import PyRat
 
     # Create a real game to get realistic wall data
-    game = PyGameState(width=21, height=15)
+    game = PyRat(width=21, height=15)
     walls = game.wall_entries()
 
     # Format walls for protocol (Wall objects have pos1, pos2 attributes)

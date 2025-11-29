@@ -6,12 +6,11 @@ This module re-exports game classes from the compiled Rust module.
 # Import the compiled module directly
 import pyrat_engine._core as _impl
 
-# Re-export game classes with cleaner names
-GameState = _impl.game.PyGameState
+# Re-export game classes
+PyRat = _impl.game.PyRat
 MoveUndo = _impl.game.PyMoveUndo
 
-# Keep original names for backward compatibility if needed
-PyGameState = GameState
+# Alias for backward compatibility
 PyMoveUndo = MoveUndo
 
-__all__ = ["GameState", "MoveUndo", "PyGameState", "PyMoveUndo"]
+__all__ = ["MoveUndo", "PyMoveUndo", "PyRat"]

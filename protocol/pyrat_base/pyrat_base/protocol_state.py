@@ -1,6 +1,6 @@
-"""Protocol-oriented wrapper for PyGameState.
+"""Protocol-oriented wrapper for PyRat game state.
 
-This module provides a thin wrapper around PyGameState that adds player identity
+This module provides a thin wrapper around PyRat that adds player identity
 awareness, allowing AI developers to access game state from their perspective
 (my_position vs opponent_position) while delegating all game logic to the
 underlying Rust implementation.
@@ -9,7 +9,7 @@ underlying Rust implementation.
 
 from typing import TYPE_CHECKING, List, Optional
 
-from pyrat_engine.core.game import GameState as PyGameState
+from pyrat_engine import PyRat
 from pyrat_engine.core.observation import GameObservation as PyGameObservation
 from pyrat_engine.core.types import Coordinates, Direction
 
@@ -22,7 +22,7 @@ from pyrat_base.enums import Player
 class ProtocolState:
     """Ultra-thin wrapper providing protocol-oriented view of game state.
 
-    This class adds player identity awareness to PyGameState, providing
+    This class adds player identity awareness to PyRat, providing
     convenient my/opponent properties while delegating everything else
     to the underlying Rust implementation.
 
@@ -30,23 +30,23 @@ class ProtocolState:
     when accessing multiple player-perspective properties.
 
     Args:
-        game_state: The underlying PyGameState from the Rust engine
+        game_state: The underlying PyRat game instance from the Rust engine
         i_am: Which player this AI is (RAT or PYTHON)
 
     Example:
-        >>> from pyrat_engine import PyGameState
+        >>> from pyrat_engine import PyRat
         >>> from pyrat_base.enums import Player
-        >>> game = PyGameState(width=15, height=15)
+        >>> game = PyRat(width=15, height=15)
         >>> state = ProtocolState(game, Player.RAT)
         >>> print(f"My position: {state.my_position}")
         >>> print(f"Opponent position: {state.opponent_position}")
     """
 
-    def __init__(self, game_state: PyGameState, i_am: Player):
+    def __init__(self, game_state: PyRat, i_am: Player):
         """Initialize the protocol state wrapper.
 
         Args:
-            game_state: The underlying PyGameState instance
+            game_state: The underlying PyRat instance
             i_am: The player identity (RAT or PYTHON)
         """
         self._game = game_state

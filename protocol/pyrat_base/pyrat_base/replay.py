@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TextIO, Tuple, Union
 
-from pyrat_engine.core.game import GameState as PyGameState
+from pyrat_engine import PyRat
 from pyrat_engine.core.types import Coordinates as Position
 from pyrat_engine.core.types import Direction
 from pyrat_engine.game import GameResult
@@ -535,11 +535,11 @@ class ReplayPlayer:
         self.current_turn = 0
         self._move_index = 0
 
-    def _create_game(self) -> PyGameState:
-        """Create game from initial state using PyGameState.create_custom()."""
+    def _create_game(self) -> PyRat:
+        """Create game from initial state using PyRat.create_custom()."""
         state = self.replay.initial_state
 
-        # Convert walls and mud to the format expected by PyGameState
+        # Convert walls and mud to the format expected by PyRat
         walls = state.walls
         mud = [(cells[0], cells[1], value) for cells, value in state.mud]
 
@@ -548,7 +548,7 @@ class ReplayPlayer:
             state.cheese if state.cheese else [(state.width // 2, state.height // 2)]
         )
 
-        return PyGameState.create_custom(
+        return PyRat.create_custom(
             width=state.width,
             height=state.height,
             walls=walls,
@@ -604,7 +604,7 @@ class ReplayPlayer:
                 break
             self.step_forward()
 
-    def get_state(self) -> PyGameState:
+    def get_state(self) -> PyRat:
         """Get current game state."""
         return self.game
 

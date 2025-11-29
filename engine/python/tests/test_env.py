@@ -3,8 +3,7 @@
 import random
 
 import numpy as np
-from pyrat_engine import Direction
-from pyrat_engine.core.game import GameState as PyGameState
+from pyrat_engine import Direction, PyRat
 from pyrat_engine.env import PyRatEnv
 
 TEST_GAME_WIDTH = 5
@@ -132,7 +131,7 @@ def test_custom_maze() -> None:
     """Test environment with custom maze configuration."""
     game_width = 3
     game_height = 3
-    game = PyGameState.create_custom(
+    game = PyRat.create_custom(
         width=game_width,
         height=game_height,
         walls=[

@@ -343,20 +343,21 @@ def render_game_state(
         Multi-line string containing the complete game visualization
     """
     # Extract data from game state (read-only operations)
-    rat_pos = (game.player1_pos.x, game.player1_pos.y)
-    python_pos = (game.player2_pos.x, game.player2_pos.y)
-    scores = game.scores
-    cheese_set = set((c.x, c.y) for c in game.cheese_positions)
-    width = game._game.width
-    height = game._game.height
+    rat_pos = (game.player1_position.x, game.player1_position.y)
+    python_pos = (game.player2_position.x, game.player2_position.y)
+    rat_score = game.player1_score
+    python_score = game.player2_score
+    cheese_set = set((c.x, c.y) for c in game.cheese_positions())
+    width = game.width
+    height = game.height
     turn = game.turn
 
     header = render_header(
         rat_pos=rat_pos,
-        rat_score=scores[0],
+        rat_score=rat_score,
         rat_move=rat_move,
         python_pos=python_pos,
-        python_score=scores[1],
+        python_score=python_score,
         python_move=python_move,
         turn=turn,
     )
@@ -451,8 +452,9 @@ class Display:
         self.game = game_state
         self.delay = delay
         # Pre-compute immutable maze structures once
-        walls = game_state._game.wall_entries()
-        mud = game_state.mud_positions
+        walls = game_state.wall_entries()
+        # Convert mud_entries() list to dict format expected by build_maze_structures
+        mud = {(m.pos1, m.pos2): m.value for m in game_state.mud_entries()}
         self.structures = build_maze_structures(walls, mud)
         # Detect non-interactive environments to limit rendering in CI
         # Allow override via PYRAT_DEBUG to force full rendering for troubleshooting
@@ -489,8 +491,8 @@ class Display:
         self, x: int, y: int, cheese_set: Set[Tuple[int, int]]
     ) -> str:
         """Get display content for a cell (delegates to pure function)."""
-        rat_pos = (self.game.player1_pos.x, self.game.player1_pos.y)
-        python_pos = (self.game.player2_pos.x, self.game.player2_pos.y)
+        rat_pos = (self.game.player1_position.x, self.game.player1_position.y)
+        python_pos = (self.game.player2_position.x, self.game.player2_position.y)
         return get_cell_content(x, y, rat_pos, python_pos, cheese_set)
 
     def _get_vertical_separator(self, x: int, y: int) -> str:

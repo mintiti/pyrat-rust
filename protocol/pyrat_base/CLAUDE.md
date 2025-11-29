@@ -163,7 +163,7 @@ The protocol package has comprehensive test coverage with 177 tests covering:
 
 - **Threading**: IOHandler uses a background thread for continuous stdin reading
 - **Interruption**: Move calculations can be interrupted by 'stop' command
-- **State Management**: ProtocolState is a thin wrapper around PyGameState
+- **State Management**: ProtocolState is a thin wrapper around PyRat
 - **Coordinate System**: (0,0) is bottom-left, UP increases y
 - **Wall Format**: Walls are tuples of adjacent cells
 - **Mud Mechanics**: Mud value N means N turns to traverse

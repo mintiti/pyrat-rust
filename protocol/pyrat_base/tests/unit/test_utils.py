@@ -1,7 +1,7 @@
 """Tests for utility functions in pyrat_base.utils."""
 
+from pyrat_engine import PyRat
 from pyrat_engine.core import Direction
-from pyrat_engine.core.game import GameState as PyGameState
 from pyrat_engine.core.types import Coordinates
 
 from pyrat_base import Player, ProtocolState, utils
@@ -40,7 +40,7 @@ class TestPathfinding:
     def test_dijkstra_simple_path(self):
         """Test Dijkstra on a simple maze without mud."""
         # Create a 5x5 maze with no walls or mud
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=5,
             height=5,
             walls=[],
@@ -71,7 +71,7 @@ class TestPathfinding:
         """Test Dijkstra finding path around walls."""
         # Create a maze with walls blocking the direct horizontal path
         # We'll create a partial barrier that forces going around
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=5,
             height=3,
             walls=[
@@ -112,7 +112,7 @@ class TestPathfinding:
     def test_dijkstra_with_mud(self):
         """Test Dijkstra choosing longer path to avoid mud."""
         # Create a maze where direct path has mud
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=5,
             height=5,
             walls=[],
@@ -153,7 +153,7 @@ class TestPathfinding:
         """Test Dijkstra when no path exists."""
         # Create a maze with complete wall barrier
         # To create a vertical barrier at x=2, we need walls between x=1 and x=2
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=5,
             height=5,
             walls=[
@@ -180,7 +180,7 @@ class TestPathfinding:
 
     def test_dijkstra_same_position(self):
         """Test Dijkstra when start equals goal."""
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=5, height=5, walls=[], mud=[], cheese=[(2, 2)], symmetric=False
         )
         state = ProtocolState(game, Player.RAT)
@@ -193,7 +193,7 @@ class TestPathfinding:
     def test_find_nearest_cheese_by_time_simple(self):
         """Test finding nearest cheese by time in simple maze."""
         # Place multiple cheese at different distances
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=5,
             height=5,
             walls=[],
@@ -217,7 +217,7 @@ class TestPathfinding:
     def test_find_nearest_cheese_by_time_with_mud(self):
         """Test finding nearest cheese considering mud delays."""
         # Create scenario where closer cheese has mud
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=7,
             height=3,
             walls=[],
@@ -247,7 +247,7 @@ class TestPathfinding:
     def test_find_nearest_cheese_by_time_complex(self):
         """Test finding nearest cheese in complex maze."""
         # Create a maze where direct paths are blocked
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=5,
             height=5,
             walls=[
@@ -287,9 +287,9 @@ class TestPathfinding:
 
     def test_find_nearest_cheese_no_cheese(self):
         """Test finding cheese when none exist."""
-        # PyGameState requires at least one cheese, so we'll place one
+        # PyRat requires at least one cheese, so we'll place one
         # but then manually clear it to test the no-cheese case
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=5,
             height=5,
             walls=[],
@@ -316,7 +316,7 @@ class TestPathfinding:
     def test_find_nearest_cheese_unreachable(self):
         """Test finding cheese when all are unreachable."""
         # Create maze with cheese behind walls
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=5,
             height=5,
             walls=[
@@ -339,7 +339,7 @@ class TestPathfinding:
 
     def test_get_direction_toward_target(self):
         """Test getting direction toward target using pathfinding."""
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=5,
             height=5,
             walls=[
@@ -361,7 +361,7 @@ class TestPathfinding:
     def test_mud_cost_calculation(self):
         """Test that mud costs are calculated correctly."""
         # Create a path that must go through mud
-        game = PyGameState.create_custom(
+        game = PyRat.create_custom(
             width=3,
             height=1,
             walls=[],

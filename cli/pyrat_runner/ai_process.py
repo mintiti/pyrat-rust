@@ -187,12 +187,10 @@ class AIProcess:
         self._write_line("newgame")
 
         # Send maze dimensions
-        self._write_line(
-            f"maze height:{game_state._game.height} width:{game_state._game.width}"
-        )
+        self._write_line(f"maze height:{game_state.height} width:{game_state.width}")
 
         # Send walls
-        walls = game_state._game.wall_entries()
+        walls = game_state.wall_entries()
         if walls:
             walls_str = " ".join(
                 f"({w.pos1.x},{w.pos1.y})-({w.pos2.x},{w.pos2.y})" for w in walls
@@ -200,22 +198,24 @@ class AIProcess:
             self._write_line(f"walls {walls_str}")
 
         # Send mud
-        mud = game_state.mud_positions
-        if mud:
+        mud_entries = game_state.mud_entries()
+        if mud_entries:
             mud_parts = []
-            for (cell1, cell2), turns in mud.items():
-                mud_parts.append(f"({cell1.x},{cell1.y})-({cell2.x},{cell2.y}):{turns}")
+            for m in mud_entries:
+                mud_parts.append(
+                    f"({m.pos1.x},{m.pos1.y})-({m.pos2.x},{m.pos2.y}):{m.value}"
+                )
             self._write_line(f"mud {' '.join(mud_parts)}")
 
         # Send cheese
-        cheese = game_state.cheese_positions
+        cheese = game_state.cheese_positions()
         if cheese:
             cheese_str = " ".join(f"({c.x},{c.y})" for c in cheese)
             self._write_line(f"cheese {cheese_str}")
 
         # Send player positions (protocol-compliant)
-        p1_pos = game_state.player1_pos
-        p2_pos = game_state.player2_pos
+        p1_pos = game_state.player1_position
+        p2_pos = game_state.player2_position
         self._write_line(f"player1 rat ({p1_pos.x},{p1_pos.y})")
         self._write_line(f"player2 python ({p2_pos.x},{p2_pos.y})")
 
