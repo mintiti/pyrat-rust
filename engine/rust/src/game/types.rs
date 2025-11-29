@@ -2,6 +2,8 @@
 use pyo3::exceptions::PyValueError;
 #[cfg(feature = "python")]
 use pyo3::prelude::*;
+#[cfg(feature = "python")]
+use pyo3::types::PyTuple;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -110,6 +112,41 @@ impl Coordinates {
 
     fn __ne__(&self, other: &Self) -> bool {
         !self.__eq__(other)
+    }
+
+    fn __add__(&self, other: CoordinatesAddInput) -> PyResult<Self> {
+        match other {
+            CoordinatesAddInput::Tuple(dx, dy) => {
+                // Apply delta with saturation
+                let new_x = if dx >= 0 {
+                    self.x.saturating_add(dx as u8)
+                } else {
+                    self.x.saturating_sub((-dx) as u8)
+                };
+                let new_y = if dy >= 0 {
+                    self.y.saturating_add(dy as u8)
+                } else {
+                    self.y.saturating_sub((-dy) as u8)
+                };
+                Ok(Self::new(new_x, new_y))
+            },
+            CoordinatesAddInput::Direction(dir) => {
+                let direction = Direction::try_from(dir).map_err(|_| {
+                    PyValueError::new_err(format!(
+                        "Invalid direction value: {dir}. Expected 0-4 (UP, RIGHT, DOWN, LEFT, STAY)."
+                    ))
+                })?;
+                Ok(direction.apply_to(*self))
+            },
+        }
+    }
+
+    fn __sub__(&self, other: CoordinatesInput) -> PyResult<(i32, i32)> {
+        let other_coord: Coordinates = PyResult::<Coordinates>::from(other)?;
+        Ok((
+            self.x as i32 - other_coord.x as i32,
+            self.y as i32 - other_coord.y as i32,
+        ))
     }
 }
 
@@ -233,6 +270,17 @@ pub enum CoordinatesInput {
     Object(Coordinates),
 }
 
+/// Input type for Coordinates addition operations.
+/// Accepts tuple deltas or Direction values (not other Coordinates).
+#[cfg(feature = "python")]
+#[derive(FromPyObject)]
+pub enum CoordinatesAddInput {
+    /// Tuple delta (dx, dy) - can be negative
+    Tuple(i32, i32),
+    /// Direction value (0-4: UP, RIGHT, DOWN, LEFT, STAY)
+    Direction(u8),
+}
+
 #[cfg(feature = "python")]
 impl From<CoordinatesInput> for PyResult<Coordinates> {
     fn from(input: CoordinatesInput) -> PyResult<Coordinates> {
@@ -306,6 +354,15 @@ impl Wall {
 
     fn __ne__(&self, other: &Self) -> bool {
         !self.__eq__(other)
+    }
+
+    fn __iter__<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, pyo3::types::PyIterator>> {
+        let tuple = PyTuple::new(py, [self.pos1, self.pos2])?;
+        pyo3::types::PyIterator::from_object(&tuple)
+    }
+
+    fn __len__(&self) -> usize {
+        2
     }
 }
 
@@ -383,6 +440,18 @@ impl Mud {
 
     fn __ne__(&self, other: &Self) -> bool {
         !self.__eq__(other)
+    }
+
+    fn __iter__<'py>(&self, py: Python<'py>) -> PyResult<Bound<'py, pyo3::types::PyIterator>> {
+        let pos1 = self.pos1.into_pyobject(py)?;
+        let pos2 = self.pos2.into_pyobject(py)?;
+        let value = self.value.into_pyobject(py)?;
+        let tuple = PyTuple::new(py, [pos1.as_any(), pos2.as_any(), value.as_any()])?;
+        pyo3::types::PyIterator::from_object(&tuple)
+    }
+
+    fn __len__(&self) -> usize {
+        3
     }
 }
 
@@ -818,5 +887,94 @@ mod python_tests {
             3
         )
         .is_err());
+    }
+
+    // Tests for Coordinates arithmetic operations
+    #[test]
+    fn test_coordinates_add_tuple_positive() {
+        let pos = Coordinates::new(5, 5);
+
+        // Positive deltas
+        let result = pos.__add__(CoordinatesAddInput::Tuple(2, 3)).unwrap();
+        assert_eq!(result, Coordinates::new(7, 8));
+    }
+
+    #[test]
+    fn test_coordinates_add_tuple_negative() {
+        let pos = Coordinates::new(5, 5);
+
+        // Negative deltas
+        let result = pos.__add__(CoordinatesAddInput::Tuple(-2, -3)).unwrap();
+        assert_eq!(result, Coordinates::new(3, 2));
+    }
+
+    #[test]
+    fn test_coordinates_add_tuple_saturation() {
+        // Saturation at 0
+        let pos = Coordinates::new(5, 5);
+        let result = pos.__add__(CoordinatesAddInput::Tuple(-10, -10)).unwrap();
+        assert_eq!(result, Coordinates::new(0, 0));
+
+        // Saturation at 255
+        let pos = Coordinates::new(250, 250);
+        let result = pos.__add__(CoordinatesAddInput::Tuple(10, 10)).unwrap();
+        assert_eq!(result, Coordinates::new(255, 255));
+    }
+
+    #[test]
+    fn test_coordinates_add_direction() {
+        let pos = Coordinates::new(5, 5);
+
+        // UP (0)
+        let result = pos.__add__(CoordinatesAddInput::Direction(0)).unwrap();
+        assert_eq!(result, Coordinates::new(5, 6));
+
+        // RIGHT (1)
+        let result = pos.__add__(CoordinatesAddInput::Direction(1)).unwrap();
+        assert_eq!(result, Coordinates::new(6, 5));
+
+        // DOWN (2)
+        let result = pos.__add__(CoordinatesAddInput::Direction(2)).unwrap();
+        assert_eq!(result, Coordinates::new(5, 4));
+
+        // LEFT (3)
+        let result = pos.__add__(CoordinatesAddInput::Direction(3)).unwrap();
+        assert_eq!(result, Coordinates::new(4, 5));
+
+        // STAY (4)
+        let result = pos.__add__(CoordinatesAddInput::Direction(4)).unwrap();
+        assert_eq!(result, Coordinates::new(5, 5));
+    }
+
+    #[test]
+    fn test_coordinates_add_direction_invalid() {
+        let pos = Coordinates::new(5, 5);
+
+        // Invalid direction (5)
+        let result = pos.__add__(CoordinatesAddInput::Direction(5));
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_coordinates_sub() {
+        let pos1 = Coordinates::new(5, 5);
+        let pos2 = Coordinates::new(3, 8);
+
+        // Subtraction returns signed delta
+        let delta = pos1.__sub__(CoordinatesInput::Object(pos2)).unwrap();
+        assert_eq!(delta, (2, -3));
+
+        // Reverse subtraction
+        let delta = pos2.__sub__(CoordinatesInput::Object(pos1)).unwrap();
+        assert_eq!(delta, (-2, 3));
+    }
+
+    #[test]
+    fn test_coordinates_sub_tuple_input() {
+        let pos = Coordinates::new(5, 5);
+
+        // Subtraction with tuple input
+        let delta = pos.__sub__(CoordinatesInput::Tuple(3, 8)).unwrap();
+        assert_eq!(delta, (2, -3));
     }
 }
