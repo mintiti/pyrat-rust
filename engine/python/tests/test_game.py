@@ -449,3 +449,113 @@ class TestCreateFromMazeSymmetry:
                 walls=walls,
                 symmetric=True,
             )
+
+
+class TestGetValidMoves:
+    """Test the get_valid_moves() method.
+
+    Note: Returns list of integers matching Direction enum values:
+    UP=0, RIGHT=1, DOWN=2, LEFT=3
+    """
+
+    def test_corner_position_bottom_left(self):
+        """Test that corner positions have limited valid moves."""
+        from pyrat_engine import Direction
+
+        game = PyRat.create_preset("empty", seed=42)  # No walls
+        valid = game.get_valid_moves((0, 0))
+
+        # Bottom-left corner: can only go UP and RIGHT
+        assert Direction.UP in valid
+        assert Direction.RIGHT in valid
+        assert Direction.DOWN not in valid
+        assert Direction.LEFT not in valid
+
+    def test_corner_position_top_right(self):
+        """Test top-right corner has limited valid moves."""
+        from pyrat_engine import Direction
+
+        game = PyRat.create_preset("empty", seed=42)
+        valid = game.get_valid_moves((game.width - 1, game.height - 1))
+
+        assert Direction.DOWN in valid
+        assert Direction.LEFT in valid
+        assert Direction.UP not in valid
+        assert Direction.RIGHT not in valid
+
+    def test_center_position_no_walls(self):
+        """Test that center position in empty maze has all 4 moves."""
+        from pyrat_engine import Direction
+
+        game = PyRat.create_preset("empty", seed=42)
+        center_x = game.width // 2
+        center_y = game.height // 2
+        valid = game.get_valid_moves((center_x, center_y))
+
+        assert len(valid) == 4
+        assert Direction.UP in valid
+        assert Direction.DOWN in valid
+        assert Direction.LEFT in valid
+        assert Direction.RIGHT in valid
+
+    def test_position_with_wall(self):
+        """Test that walls block moves."""
+        from pyrat_engine import Direction
+
+        # Create a game with a wall blocking right movement from (0,0)
+        walls = [
+            ((0, 0), (1, 0)),  # Wall between (0,0) and (1,0)
+            # Add symmetric wall for validation
+            ((4, 4), (3, 4)),
+        ]
+        game = PyRat.create_custom(
+            width=5,
+            height=5,
+            walls=walls,
+            cheese=[(2, 2)],
+            symmetric=True,
+        )
+
+        valid = game.get_valid_moves((0, 0))
+
+        # Can go UP but not RIGHT (wall), DOWN (boundary), or LEFT (boundary)
+        assert Direction.UP in valid
+        assert Direction.RIGHT not in valid
+        assert Direction.DOWN not in valid
+        assert Direction.LEFT not in valid
+
+    def test_out_of_bounds_raises_error(self):
+        """Test that out-of-bounds positions raise ValueError."""
+        game = PyRat.create_preset("tiny", seed=42)
+
+        with pytest.raises(ValueError, match="outside board bounds"):
+            game.get_valid_moves((100, 100))
+
+    def test_accepts_coordinates_object(self):
+        """Test that get_valid_moves accepts Coordinates objects."""
+        from pyrat_engine import Coordinates
+
+        game = PyRat.create_preset("empty", seed=42)
+        pos = Coordinates(0, 0)
+        valid = game.get_valid_moves(pos)
+
+        # Should work the same as tuple
+        valid_tuple = game.get_valid_moves((0, 0))
+        assert set(valid) == set(valid_tuple)
+
+    def test_returns_direction_compatible_values(self):
+        """Test that returned values can be used as Direction enum."""
+        from pyrat_engine import Direction
+
+        game = PyRat.create_preset("empty", seed=42)
+        valid = game.get_valid_moves((5, 5))
+
+        # All returned values should be convertible to Direction
+        for v in valid:
+            direction = Direction(v)
+            assert direction in [
+                Direction.UP,
+                Direction.RIGHT,
+                Direction.DOWN,
+                Direction.LEFT,
+            ]
