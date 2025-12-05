@@ -318,6 +318,47 @@ impl PyRat {
         self.game.cheese_positions()
     }
 
+    /// Get valid movement directions from a position
+    ///
+    /// Returns a list of direction values (as integers matching Direction enum)
+    /// that would result in actual movement (not blocked by walls or board boundaries).
+    /// Does not include STAY.
+    ///
+    /// Direction values: UP=0, RIGHT=1, DOWN=2, LEFT=3
+    fn get_valid_moves(&self, pos: CoordinatesInput) -> PyResult<Vec<u8>> {
+        let coords: Coordinates = PyResult::<Coordinates>::from(pos)?;
+
+        // Bounds check
+        if coords.x >= self.game.width() || coords.y >= self.game.height() {
+            return Err(PyValueError::new_err(format!(
+                "Position ({}, {}) is outside board bounds ({}x{})",
+                coords.x,
+                coords.y,
+                self.game.width(),
+                self.game.height()
+            )));
+        }
+
+        let mask = self.game.move_table.get_valid_moves(coords);
+        let mut valid = Vec::with_capacity(4);
+
+        // Bitmask: bit 0 = UP(0), bit 1 = RIGHT(1), bit 2 = DOWN(2), bit 3 = LEFT(3)
+        if mask & 1 != 0 {
+            valid.push(0);
+        } // UP
+        if mask & 2 != 0 {
+            valid.push(1);
+        } // RIGHT
+        if mask & 4 != 0 {
+            valid.push(2);
+        } // DOWN
+        if mask & 8 != 0 {
+            valid.push(3);
+        } // LEFT
+
+        Ok(valid)
+    }
+
     fn mud_entries(&self) -> Vec<crate::Mud> {
         self.game
             .mud_positions()
