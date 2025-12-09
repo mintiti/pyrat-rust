@@ -503,6 +503,19 @@ impl PyRat {
         )
     }
 
+    // Copy protocol - enables copy.copy() and copy.deepcopy()
+    fn __copy__(&self) -> Self {
+        Self {
+            game: self.game.clone(),
+            observation_handler: self.observation_handler.clone(),
+            symmetric: self.symmetric,
+        }
+    }
+
+    fn __deepcopy__(&self, _memo: &Bound<'_, PyAny>) -> Self {
+        self.__copy__()
+    }
+
     /// Get current observation
     pub fn get_observation(
         &self,

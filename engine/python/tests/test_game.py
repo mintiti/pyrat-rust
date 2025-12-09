@@ -559,3 +559,115 @@ class TestGetValidMoves:
                 Direction.DOWN,
                 Direction.LEFT,
             ]
+
+
+class TestCopyProtocol:
+    """Test Python copy protocol support (copy.copy and copy.deepcopy)."""
+
+    def test_copy_creates_independent_state(self):
+        """Test that copy.copy() creates an independent game state."""
+        import copy
+
+        game = PyRat(width=11, height=9, seed=42)
+        game_copy = copy.copy(game)
+
+        # Mutate the copy
+        game_copy.step(0, 0)  # Both players stay
+
+        # Original should be unchanged
+        assert game.turn == 0
+        assert game_copy.turn == 1
+
+    def test_deepcopy_creates_independent_state(self):
+        """Test that copy.deepcopy() creates an independent game state."""
+        import copy
+
+        game = PyRat(width=11, height=9, seed=42)
+        game_copy = copy.deepcopy(game)
+
+        # Mutate the copy
+        game_copy.step(0, 0)
+
+        # Original should be unchanged
+        assert game.turn == 0
+        assert game_copy.turn == 1
+
+    def test_copy_preserves_game_state(self):
+        """Test that copy preserves all game state attributes."""
+        import copy
+
+        from pyrat_engine import Direction
+
+        game = PyRat(width=11, height=9, seed=42)
+
+        # Advance the game a few turns to build up state
+        game.step(Direction.UP, Direction.DOWN)
+        game.step(Direction.RIGHT, Direction.LEFT)
+
+        game_copy = copy.copy(game)
+
+        # Check all state is preserved
+        assert game_copy.width == game.width
+        assert game_copy.height == game.height
+        assert game_copy.turn == game.turn
+        assert game_copy.max_turns == game.max_turns
+        assert game_copy.player1_position == game.player1_position
+        assert game_copy.player2_position == game.player2_position
+        assert game_copy.player1_score == game.player1_score
+        assert game_copy.player2_score == game.player2_score
+        assert game_copy.player1_mud_turns == game.player1_mud_turns
+        assert game_copy.player2_mud_turns == game.player2_mud_turns
+        assert game_copy.cheese_positions() == game.cheese_positions()
+
+    def test_mutations_on_copy_dont_affect_original(self):
+        """Test that mutations on copy don't affect the original."""
+        import copy
+
+        from pyrat_engine import Direction
+
+        game = PyRat(width=11, height=9, seed=42)
+        original_turn = game.turn
+        original_p1_pos = game.player1_position
+        original_cheese = game.cheese_positions()
+
+        game_copy = copy.copy(game)
+
+        # Make several moves on the copy
+        for _ in range(5):
+            game_copy.step(Direction.UP, Direction.DOWN)
+
+        # Original should be completely unchanged
+        assert game.turn == original_turn
+        assert game.player1_position == original_p1_pos
+        assert game.cheese_positions() == original_cheese
+
+    def test_copy_for_mcts_simulation(self):
+        """Test the MCTS use case: simulate on copy, original unchanged."""
+        import copy
+
+        from pyrat_engine import Direction
+
+        game = PyRat(width=11, height=9, seed=42)
+
+        # Simulate what MCTS would do
+        simulator = copy.deepcopy(game)
+
+        # Run a full simulation
+        while not simulator.step(Direction.UP, Direction.DOWN)[0]:
+            if simulator.turn >= simulator.max_turns:
+                break
+
+        # Original game should be at turn 0
+        assert game.turn == 0
+        assert simulator.turn > 0
+
+    def test_copy_with_preset(self):
+        """Test copy works with preset-created games."""
+        import copy
+
+        game = PyRat.create_preset("small", seed=42)
+        game_copy = copy.copy(game)
+
+        assert game_copy.width == game.width
+        assert game_copy.height == game.height
+        assert game_copy.max_turns == game.max_turns
