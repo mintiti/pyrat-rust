@@ -68,6 +68,7 @@ impl MovementConstraints {
 }
 
 /// Manages game observations and their efficient updates
+#[derive(Clone)]
 pub struct ObservationHandler {
     movement_constraints: MovementConstraints,
     pub(crate) cheese_matrix: Array2<u8>,
