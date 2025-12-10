@@ -7,7 +7,7 @@ from pathlib import Path
 from pyrat_runner.game_runner import GameRunner
 
 
-def main():
+def main() -> int:
     """Main entry point for pyrat-game command."""
     parser = argparse.ArgumentParser(
         description="Run and visualize PyRat games between two AI processes",
