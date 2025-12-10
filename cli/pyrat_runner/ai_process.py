@@ -8,9 +8,12 @@ import threading
 import time
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional
+from typing import TYPE_CHECKING, Dict, Optional
 
 from pyrat_engine.core import Direction
+
+if TYPE_CHECKING:
+    from pyrat_engine.core import PyRat
 from pyrat_runner.logger import GameLogger
 
 
@@ -32,9 +35,9 @@ class AIInfo:
 
     name: str = "Unknown AI"
     author: Optional[str] = None
-    options: Optional[dict] = None
+    options: Optional[Dict[str, str]] = None
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if self.options is None:
             self.options = {}
 
@@ -60,7 +63,7 @@ class AIProcess:
         self.script_path = script_path
         self.player_name = player_name
         self.timeout = timeout
-        self.process: Optional[subprocess.Popen] = None
+        self.process: Optional[subprocess.Popen[str]] = None
         self.state = AIState.NOT_STARTED
         self.info = AIInfo()
         self._output_queue: queue.Queue[str] = queue.Queue()
@@ -68,10 +71,11 @@ class AIProcess:
         self._stderr_thread: Optional[threading.Thread] = None
         self._logger = logger
 
-    def _reader(self):
+    def _reader(self) -> None:
         """Background thread to read output from AI process."""
         try:
             while self.process and self.process.poll() is None:
+                assert self.process.stdout is not None
                 line = self.process.stdout.readline()
                 if line:
                     stripped = line.strip()
@@ -83,7 +87,7 @@ class AIProcess:
         except (ValueError, OSError):  # Stream closed or I/O error
             pass
 
-    def _stderr_reader(self):
+    def _stderr_reader(self) -> None:
         """Background thread to drain stderr and log it."""
         try:
             if not self.process or not self.process.stderr:
@@ -176,7 +180,9 @@ class AIProcess:
             self.state = AIState.CRASHED
             return False
 
-    def send_game_start(self, game_state, preprocessing_time: float = 3.0):
+    def send_game_start(
+        self, game_state: "PyRat", preprocessing_time: float = 3.0
+    ) -> None:
         """
         Send game initialization messages.
 
@@ -298,7 +304,9 @@ class AIProcess:
         # Timeout: treat as non-fatal; caller will default to STAY
         return None
 
-    def send_game_over(self, winner: str, rat_score: float, python_score: float):
+    def send_game_over(
+        self, winner: str, rat_score: float, python_score: float
+    ) -> None:
         """
         Notify AI that game is over.
 
@@ -317,7 +325,7 @@ class AIProcess:
             if line == "postprocessingdone":
                 break
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop the AI process."""
         if self.process:
             self._write_line("stop")
@@ -327,7 +335,7 @@ class AIProcess:
                 self.process.kill()
                 self.process.wait()
 
-    def _write_line(self, line: str):
+    def _write_line(self, line: str) -> None:
         """Write a line to AI stdin."""
         if self.process and self.process.stdin:
             try:

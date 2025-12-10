@@ -1,8 +1,11 @@
 """Move provider abstractions for decoupling game execution from move acquisition."""
 
-from typing import Optional, Protocol
+from typing import TYPE_CHECKING, Optional, Protocol
 
 from pyrat_engine.core import Direction
+
+if TYPE_CHECKING:
+    from pyrat_engine.core import PyRat
 
 from pyrat_runner.ai_process import AIInfo, AIProcess
 from pyrat_runner.logger import GameLogger
@@ -28,7 +31,7 @@ class MoveProvider(Protocol):
         """
         ...
 
-    def send_game_start(self, game, preprocessing_time: float) -> None:
+    def send_game_start(self, game: "PyRat", preprocessing_time: float) -> None:
         """Send game initialization to the provider.
 
         Args:
@@ -115,7 +118,7 @@ class SubprocessMoveProvider:
         """Start the AI subprocess."""
         return self._ai_process.start()
 
-    def send_game_start(self, game, preprocessing_time: float) -> None:
+    def send_game_start(self, game: "PyRat", preprocessing_time: float) -> None:
         """Send game initialization to AI."""
         self._ai_process.send_game_start(game, preprocessing_time)
 

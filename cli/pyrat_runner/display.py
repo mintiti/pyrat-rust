@@ -3,9 +3,12 @@
 import os
 import sys
 from dataclasses import dataclass
-from typing import Any, Dict, FrozenSet, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
 from pyrat_engine.core import Direction
+
+if TYPE_CHECKING:
+    from pyrat_engine.core import PyRat
 
 
 @dataclass(frozen=True)
@@ -323,7 +326,7 @@ def render_header(
 
 
 def render_game_state(
-    game,
+    game: "PyRat",
     structures: MazeStructures,
     rat_move: Optional[Direction] = None,
     python_move: Optional[Direction] = None,
@@ -441,7 +444,7 @@ class Display:
     making the rendering logic testable and reusable.
     """
 
-    def __init__(self, game_state, delay: float = 0.5):
+    def __init__(self, game_state: "PyRat", delay: float = 0.5) -> None:
         """
         Initialize display.
 
@@ -459,7 +462,7 @@ class Display:
         # Detect non-interactive environments to limit rendering in CI
         # Allow override via PYRAT_DEBUG to force full rendering for troubleshooting
         try:
-            self._non_tty = not sys.stdout.isatty()  # type: ignore[attr-defined]
+            self._non_tty = not sys.stdout.isatty()
         except Exception:
             self._non_tty = True
         try:
@@ -471,7 +474,7 @@ class Display:
         self._printed_once = False
 
     @staticmethod
-    def clear():
+    def clear() -> None:
         """Clear the terminal screen when in a TTY.
 
         Skip in non-interactive environments to avoid TERM errors and overhead.
@@ -480,7 +483,7 @@ class Display:
             # Respect debug override for full rendering even if not a TTY
             debug_env = os.environ.get("PYRAT_DEBUG", "").lower()
             debug_override = debug_env in ("1", "true", "yes")
-            if not debug_override and not sys.stdout.isatty():  # type: ignore[attr-defined]
+            if not debug_override and not sys.stdout.isatty():
                 return
         except Exception:
             return
@@ -528,7 +531,7 @@ class Display:
         self,
         rat_move: Optional[Direction] = None,
         python_move: Optional[Direction] = None,
-    ):
+    ) -> None:
         """
         Render the current game state with enhanced visualization.
 
@@ -558,7 +561,7 @@ class Display:
         print(output, end="", flush=True)
         self._printed_once = True
 
-    def show_winner(self, winner: str, rat_score: float, python_score: float):
+    def show_winner(self, winner: str, rat_score: float, python_score: float) -> None:
         """
         Display game over message with enhanced styling.
 
@@ -570,7 +573,7 @@ class Display:
         output = render_winner_screen(winner, rat_score, python_score)
         print(output)
 
-    def show_error(self, player: str, error: str):
+    def show_error(self, player: str, error: str) -> None:
         """
         Display an error message with color coding.
 
