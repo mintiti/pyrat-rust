@@ -56,6 +56,92 @@ class TestEnhancedConstructor:
         assert len(game.cheese_positions()) == 21
 
 
+class TestDensityParameters:
+    """Test wall_density and mud_density parameters."""
+
+    def test_zero_wall_density_creates_open_maze(self):
+        """wall_density=0.0 should create a maze with no walls."""
+        game = PyRat(width=11, height=11, cheese_count=10, wall_density=0.0, seed=42)
+        walls = game.wall_entries()
+        assert len(walls) == 0
+
+    def test_zero_mud_density_creates_no_mud(self):
+        """mud_density=0.0 should create a maze with no mud."""
+        game = PyRat(width=11, height=11, cheese_count=10, mud_density=0.0, seed=42)
+        mud = game.mud_entries()
+        assert len(mud) == 0
+
+    def test_open_maze_with_random_cheese(self):
+        """The main use case: open maze with random symmetric cheese."""
+        game = PyRat(
+            width=5,
+            height=5,
+            cheese_count=5,
+            wall_density=0.0,
+            mud_density=0.0,
+            seed=42,
+        )
+        assert len(game.wall_entries()) == 0
+        assert len(game.mud_entries()) == 0
+        assert len(game.cheese_positions()) == 5
+
+    def test_high_wall_density_creates_more_walls(self):
+        """Higher wall_density should create more walls."""
+        game_low = PyRat(
+            width=15, height=15, cheese_count=10, wall_density=0.3, seed=42
+        )
+        game_high = PyRat(
+            width=15, height=15, cheese_count=10, wall_density=0.9, seed=42
+        )
+
+        walls_low = len(game_low.wall_entries())
+        walls_high = len(game_high.wall_entries())
+
+        assert walls_high > walls_low
+
+    def test_high_mud_density_creates_more_mud(self):
+        """Higher mud_density should create more mud passages."""
+        game_low = PyRat(width=15, height=15, cheese_count=10, mud_density=0.1, seed=42)
+        game_high = PyRat(
+            width=15, height=15, cheese_count=10, mud_density=0.8, seed=42
+        )
+
+        mud_low = len(game_low.mud_entries())
+        mud_high = len(game_high.mud_entries())
+
+        assert mud_high > mud_low
+
+    def test_default_density_unchanged(self):
+        """Games without density params should use defaults (0.7 walls, 0.1 mud)."""
+        game_default = PyRat(width=15, height=15, cheese_count=10, seed=42)
+        game_explicit = PyRat(
+            width=15,
+            height=15,
+            cheese_count=10,
+            wall_density=0.7,
+            mud_density=0.1,
+            seed=42,
+        )
+
+        # Same seed + same density = same maze
+        assert len(game_default.wall_entries()) == len(game_explicit.wall_entries())
+        assert len(game_default.mud_entries()) == len(game_explicit.mud_entries())
+
+    def test_density_with_asymmetric(self):
+        """Density parameters should work with asymmetric games."""
+        game = PyRat(
+            width=11,
+            height=11,
+            cheese_count=10,
+            symmetric=False,
+            wall_density=0.0,
+            mud_density=0.0,
+            seed=42,
+        )
+        assert len(game.wall_entries()) == 0
+        assert len(game.mud_entries()) == 0
+
+
 class TestPresets:
     """Test the preset system."""
 

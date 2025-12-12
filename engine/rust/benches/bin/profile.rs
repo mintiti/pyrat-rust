@@ -35,6 +35,8 @@ fn main() {
         Some(15),
         Some(41),
         Some(42), // Fixed seed for reproducibility
+        None,
+        None,
     );
 
     // Pre-generate random moves

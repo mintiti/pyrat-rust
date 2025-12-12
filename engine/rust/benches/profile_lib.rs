@@ -66,6 +66,8 @@ pub fn run_profiling(config: ProfilingConfig) -> ProfilingStats {
                 Some(config.height),
                 Some(config.cheese_count),
                 Some(seed),
+                None,
+                None,
             )
         } else {
             GameState::new_asymmetric(
@@ -73,6 +75,8 @@ pub fn run_profiling(config: ProfilingConfig) -> ProfilingStats {
                 Some(config.height),
                 Some(config.cheese_count),
                 Some(seed),
+                None,
+                None,
             )
         };
 

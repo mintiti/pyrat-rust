@@ -241,6 +241,8 @@ impl GameState {
         height: Option<u8>,
         cheese_count: Option<u16>,
         seed: Option<u64>,
+        wall_density: Option<f32>,
+        mud_density: Option<f32>,
     ) -> Self {
         let width = width.unwrap_or(Self::DEFAULT_WIDTH);
         let height = height.unwrap_or(Self::DEFAULT_HEIGHT);
@@ -249,17 +251,17 @@ impl GameState {
         let maze_config = MazeConfig {
             width,
             height,
-            target_density: 0.7, // Common default
-            connected: true,     // Always want connected mazes
-            symmetry: true,      // Symmetric maze
-            mud_density: 0.1,    // 10% mud probability
-            mud_range: 3,        // Mud values 2-3
+            target_density: wall_density.unwrap_or(0.7),
+            connected: true,
+            symmetry: true,
+            mud_density: mud_density.unwrap_or(0.1),
+            mud_range: 3,
             seed,
         };
 
         let cheese_config = CheeseConfig {
             count: cheese_count,
-            symmetry: true, // Symmetric cheese placement
+            symmetry: true,
         };
 
         Self::new_random(width, height, maze_config, cheese_config)
@@ -272,6 +274,8 @@ impl GameState {
         height: Option<u8>,
         cheese_count: Option<u16>,
         seed: Option<u64>,
+        wall_density: Option<f32>,
+        mud_density: Option<f32>,
     ) -> Self {
         let width = width.unwrap_or(Self::DEFAULT_WIDTH);
         let height = height.unwrap_or(Self::DEFAULT_HEIGHT);
@@ -280,17 +284,17 @@ impl GameState {
         let maze_config = MazeConfig {
             width,
             height,
-            target_density: 0.7, // Common default
-            connected: true,     // Always want connected mazes
-            symmetry: false,     // Asymmetric maze
-            mud_density: 0.1,    // 10% mud probability
-            mud_range: 3,        // Mud values 2-3
+            target_density: wall_density.unwrap_or(0.7),
+            connected: true,
+            symmetry: false,
+            mud_density: mud_density.unwrap_or(0.1),
+            mud_range: 3,
             seed,
         };
 
         let cheese_config = CheeseConfig {
             count: cheese_count,
-            symmetry: false, // Asymmetric cheese placement
+            symmetry: false,
         };
 
         Self::new_random(width, height, maze_config, cheese_config)
@@ -743,7 +747,7 @@ mod tests {
 
     #[test]
     fn test_new_symmetric() {
-        let game = GameState::new_symmetric(Some(11), Some(11), Some(15), Some(42));
+        let game = GameState::new_symmetric(Some(11), Some(11), Some(15), Some(42), None, None);
 
         // Check if cheese placement is symmetric
         let cheese_positions = game.cheese.get_all_cheese_positions();
@@ -761,7 +765,7 @@ mod tests {
 
     #[test]
     fn test_new_asymmetric() {
-        let game = GameState::new_asymmetric(Some(8), Some(8), Some(10), Some(42));
+        let game = GameState::new_asymmetric(Some(8), Some(8), Some(10), Some(42), None, None);
 
         // Basic structure tests
         assert_eq!(game.width, 8);
@@ -772,13 +776,64 @@ mod tests {
     #[test]
     fn test_reproducibility() {
         let seed = Some(42);
-        let game1 = GameState::new_symmetric(Some(8), Some(8), Some(10), seed);
-        let game2 = GameState::new_symmetric(Some(8), Some(8), Some(10), seed);
+        let game1 = GameState::new_symmetric(Some(8), Some(8), Some(10), seed, None, None);
+        let game2 = GameState::new_symmetric(Some(8), Some(8), Some(10), seed, None, None);
 
         // Games should be identical with same seed
         assert_eq!(
             game1.cheese.get_all_cheese_positions(),
             game2.cheese.get_all_cheese_positions()
+        );
+    }
+
+    #[test]
+    fn test_zero_wall_density_creates_open_maze() {
+        let game = GameState::new_symmetric(
+            Some(11),
+            Some(11),
+            Some(10),
+            Some(42),
+            Some(0.0), // wall_density
+            Some(0.0), // mud_density
+        );
+
+        // With zero wall density, center positions should have all 4 directions valid
+        // get_valid_moves returns a bitmask: bit 0=Up, 1=Right, 2=Down, 3=Left
+        let center_moves = game.move_table.get_valid_moves(Coordinates::new(5, 5));
+        assert_eq!(
+            center_moves, 0b1111,
+            "Center should have all 4 directions valid in open maze"
+        );
+
+        // Mud map should be empty
+        assert!(game.mud.is_empty());
+    }
+
+    #[test]
+    fn test_density_parameters_affect_generation() {
+        // Low density game
+        let game_low =
+            GameState::new_symmetric(Some(15), Some(15), Some(10), Some(42), Some(0.3), Some(0.1));
+
+        // High density game
+        let game_high =
+            GameState::new_symmetric(Some(15), Some(15), Some(10), Some(42), Some(0.9), Some(0.8));
+
+        // Count valid moves in each game (fewer valid moves = more walls)
+        let mut valid_low = 0u32;
+        let mut valid_high = 0u32;
+        for x in 1..14 {
+            for y in 1..14 {
+                let pos = Coordinates::new(x, y);
+                valid_low += game_low.move_table.get_valid_moves(pos).count_ones();
+                valid_high += game_high.move_table.get_valid_moves(pos).count_ones();
+            }
+        }
+
+        // Higher wall density = fewer valid moves
+        assert!(
+            valid_low > valid_high,
+            "Expected low density ({valid_low} valid moves) > high density ({valid_high} valid moves)"
         );
     }
 

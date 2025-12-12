@@ -226,7 +226,7 @@ mod tests {
 
     #[test]
     fn test_observation_refresh() {
-        let game = GameState::new_symmetric(Some(4), Some(4), Some(2), Some(42));
+        let game = GameState::new_symmetric(Some(4), Some(4), Some(2), Some(42), None, None);
         let mut handler = ObservationHandler::new(&game);
 
         // Clear all cheese

@@ -181,6 +181,8 @@ fn bench_full_game(c: &mut Criterion) {
                         Some(size),
                         Some(((size as u16 * size as u16) as f32 * CHEESE_DENSITY) as u16), // Use 25% of cells for cheese
                         Some(random::<u64>()), // New random seed each time
+                        None,
+                        None,
                     )
                 },
                 |mut game| {

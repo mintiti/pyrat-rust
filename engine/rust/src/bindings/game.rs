@@ -229,8 +229,11 @@ impl PyRat {
         cheese_count=None,
         symmetric=true,
         seed=None,
-        max_turns=None
+        max_turns=None,
+        wall_density=None,
+        mud_density=None
     ))]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         width: Option<u8>,
         height: Option<u8>,
@@ -238,11 +241,13 @@ impl PyRat {
         symmetric: bool,
         seed: Option<u64>,
         max_turns: Option<u16>,
+        wall_density: Option<f32>,
+        mud_density: Option<f32>,
     ) -> Self {
         let mut game = if symmetric {
-            GameState::new_symmetric(width, height, cheese_count, seed)
+            GameState::new_symmetric(width, height, cheese_count, seed, wall_density, mud_density)
         } else {
-            GameState::new_asymmetric(width, height, cheese_count, seed)
+            GameState::new_asymmetric(width, height, cheese_count, seed, wall_density, mud_density)
         };
 
         // Override max_turns if provided
@@ -477,6 +482,8 @@ impl PyRat {
                 Some(self.game.height()),
                 Some(self.game.total_cheese()),
                 seed,
+                None,
+                None,
             )
         } else {
             GameState::new_asymmetric(
@@ -484,6 +491,8 @@ impl PyRat {
                 Some(self.game.height()),
                 Some(self.game.total_cheese()),
                 seed,
+                None,
+                None,
             )
         };
         // Need full refresh after reset

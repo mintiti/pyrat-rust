@@ -19,6 +19,8 @@ fn main() {
             Some(16),
             Some(40), // Realistic cheese count
             Some(42), // Same seed each time
+            None,
+            None,
         );
 
         let mut move_idx = 0;
