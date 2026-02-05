@@ -647,6 +647,194 @@ class TestGetValidMoves:
             ]
 
 
+class TestEffectiveActions:
+    """Test the effective_actions() methods for MCTS action equivalence.
+
+    These methods return [u8; 5] where result[action] = effective_action.
+    Direction values: UP=0, RIGHT=1, DOWN=2, LEFT=3, STAY=4
+    """
+
+    def test_corner_position_bottom_left(self):
+        """Test corner position where DOWN and LEFT are blocked."""
+        from pyrat_engine import Direction
+
+        game = PyRat.create_preset("empty", seed=42)
+        result = game.effective_actions((0, 0))
+
+        # At (0,0): UP and RIGHT are valid, DOWN and LEFT hit boundaries
+        assert result[Direction.UP] == Direction.UP  # Valid
+        assert result[Direction.RIGHT] == Direction.RIGHT  # Valid
+        assert result[Direction.DOWN] == Direction.STAY  # Blocked → STAY
+        assert result[Direction.LEFT] == Direction.STAY  # Blocked → STAY
+        assert result[Direction.STAY] == Direction.STAY  # STAY → STAY
+
+    def test_corner_position_top_right(self):
+        """Test corner position where UP and RIGHT are blocked."""
+        from pyrat_engine import Direction
+
+        game = PyRat.create_preset("empty", seed=42)
+        result = game.effective_actions((game.width - 1, game.height - 1))
+
+        # At top-right: DOWN and LEFT are valid, UP and RIGHT hit boundaries
+        assert result[Direction.UP] == Direction.STAY  # Blocked → STAY
+        assert result[Direction.RIGHT] == Direction.STAY  # Blocked → STAY
+        assert result[Direction.DOWN] == Direction.DOWN  # Valid
+        assert result[Direction.LEFT] == Direction.LEFT  # Valid
+        assert result[Direction.STAY] == Direction.STAY  # STAY → STAY
+
+    def test_center_position_all_valid(self):
+        """Test center position in empty maze has all moves valid."""
+        from pyrat_engine import Direction
+
+        game = PyRat.create_preset("empty", seed=42)
+        center_x = game.width // 2
+        center_y = game.height // 2
+        result = game.effective_actions((center_x, center_y))
+
+        # All 4 directions should map to themselves
+        assert result[Direction.UP] == Direction.UP
+        assert result[Direction.RIGHT] == Direction.RIGHT
+        assert result[Direction.DOWN] == Direction.DOWN
+        assert result[Direction.LEFT] == Direction.LEFT
+        assert result[Direction.STAY] == Direction.STAY
+
+    def test_position_with_wall(self):
+        """Test that walls cause actions to map to STAY."""
+        from pyrat_engine import Direction
+
+        # Create game with wall blocking RIGHT from (0,0)
+        walls = [
+            ((0, 0), (1, 0)),  # Wall between (0,0) and (1,0)
+            ((4, 4), (3, 4)),  # Symmetric wall
+        ]
+        game = PyRat.create_custom(
+            width=5,
+            height=5,
+            walls=walls,
+            cheese=[(2, 2)],
+            symmetric=True,
+        )
+
+        result = game.effective_actions((0, 0))
+
+        # UP is valid, RIGHT is blocked by wall, DOWN and LEFT by boundary
+        assert result[Direction.UP] == Direction.UP  # Valid
+        assert result[Direction.RIGHT] == Direction.STAY  # Wall → STAY
+        assert result[Direction.DOWN] == Direction.STAY  # Boundary → STAY
+        assert result[Direction.LEFT] == Direction.STAY  # Boundary → STAY
+        assert result[Direction.STAY] == Direction.STAY
+
+    def test_player_in_mud_all_stay(self):
+        """Test that player in mud has all actions map to STAY."""
+        from pyrat_engine import Direction
+
+        # Create game with mud
+        mud = [((1, 0), (1, 1), 3)]  # 3 turns to traverse
+        game = PyRat.create_custom(
+            width=5,
+            height=5,
+            mud=mud,
+            cheese=[(2, 2)],
+            player1_pos=(1, 0),
+            player2_pos=(3, 4),
+            symmetric=False,
+        )
+
+        # Before entering mud, normal behavior
+        result_before = game.effective_actions_p1()
+        assert result_before[Direction.UP] == Direction.UP  # Can move up into mud
+
+        # Move player 1 into mud
+        game.step(Direction.UP, Direction.STAY)
+
+        # Now in mud - all actions should map to STAY
+        result_in_mud = game.effective_actions_p1()
+        assert list(result_in_mud) == [
+            Direction.STAY,
+            Direction.STAY,
+            Direction.STAY,
+            Direction.STAY,
+            Direction.STAY,
+        ]
+
+        # Player 2 is not in mud, should have normal behavior
+        result_p2 = game.effective_actions_p2()
+        assert result_p2[Direction.DOWN] == Direction.DOWN  # Can move down
+
+    def test_player_not_in_mud_normal_behavior(self):
+        """Test that player not in mud uses position-based computation."""
+        from pyrat_engine import Direction
+
+        game = PyRat.create_preset("empty", seed=42)
+
+        # Player 1 starts at (0, 0)
+        result_p1 = game.effective_actions_p1()
+        assert result_p1[Direction.UP] == Direction.UP
+        assert result_p1[Direction.RIGHT] == Direction.RIGHT
+        assert result_p1[Direction.DOWN] == Direction.STAY  # Boundary
+        assert result_p1[Direction.LEFT] == Direction.STAY  # Boundary
+
+        # Player 2 starts at (width-1, height-1)
+        result_p2 = game.effective_actions_p2()
+        assert result_p2[Direction.UP] == Direction.STAY  # Boundary
+        assert result_p2[Direction.RIGHT] == Direction.STAY  # Boundary
+        assert result_p2[Direction.DOWN] == Direction.DOWN
+        assert result_p2[Direction.LEFT] == Direction.LEFT
+
+    def test_out_of_bounds_raises_error(self):
+        """Test that out-of-bounds position raises ValueError."""
+        game = PyRat.create_preset("tiny", seed=42)
+
+        with pytest.raises(ValueError, match="outside board bounds"):
+            game.effective_actions((100, 100))
+
+    def test_accepts_coordinates_object(self):
+        """Test that effective_actions accepts Coordinates objects."""
+        from pyrat_engine import Coordinates
+
+        game = PyRat.create_preset("empty", seed=42)
+        pos = Coordinates(0, 0)
+        result = game.effective_actions(pos)
+
+        # Should work the same as tuple
+        result_tuple = game.effective_actions((0, 0))
+        assert list(result) == list(result_tuple)
+
+    def test_return_type_is_list(self):
+        """Test that the return type is a list of 5 integers."""
+        game = PyRat.create_preset("empty", seed=42)
+        result = game.effective_actions((0, 0))
+
+        assert len(result) == 5
+        assert all(isinstance(v, int) for v in result)
+        assert all(0 <= v <= 4 for v in result)
+
+    def test_consistency_with_get_valid_moves(self):
+        """Test that effective_actions is consistent with get_valid_moves."""
+        from pyrat_engine import Direction
+
+        game = PyRat.create_preset("empty", seed=42)
+
+        for x in range(game.width):
+            for y in range(game.height):
+                valid_moves = game.get_valid_moves((x, y))
+                effective = game.effective_actions((x, y))
+
+                # Valid moves should map to themselves
+                for move in valid_moves:
+                    assert effective[move] == move
+
+                # Invalid moves should map to STAY
+                for move in [
+                    Direction.UP,
+                    Direction.RIGHT,
+                    Direction.DOWN,
+                    Direction.LEFT,
+                ]:
+                    if move not in valid_moves:
+                        assert effective[move] == Direction.STAY
+
+
 class TestCopyProtocol:
     """Test Python copy protocol support (copy.copy and copy.deepcopy)."""
 

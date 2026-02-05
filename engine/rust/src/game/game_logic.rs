@@ -610,6 +610,61 @@ impl GameState {
     pub const fn player2_mud_turns(&self) -> u8 {
         self.player2.mud_timer
     }
+
+    /// Get effective actions for a position (ignores mud state).
+    ///
+    /// Returns `[u8; 5]` where `result[action] = effective_action`.
+    /// Blocked actions (walls, boundaries) map to STAY (4).
+    /// Valid actions map to themselves.
+    ///
+    /// Direction values: UP=0, RIGHT=1, DOWN=2, LEFT=3, STAY=4
+    #[must_use]
+    pub fn effective_actions_at(&self, pos: Coordinates) -> [u8; 5] {
+        let mut result = [4u8; 5]; // Default to STAY
+        let mask = self.move_table.get_valid_moves(pos);
+
+        // Bitmask: bit 0=UP, bit 1=RIGHT, bit 2=DOWN, bit 3=LEFT
+        if mask & 1 != 0 {
+            result[0] = 0;
+        }
+        if mask & 2 != 0 {
+            result[1] = 1;
+        }
+        if mask & 4 != 0 {
+            result[2] = 2;
+        }
+        if mask & 8 != 0 {
+            result[3] = 3;
+        }
+        result[4] = 4; // STAY always maps to itself
+        result
+    }
+
+    /// Get effective actions for player 1, accounting for mud state.
+    ///
+    /// If player 1 is in mud, all actions map to STAY.
+    /// Otherwise, returns the same as `effective_actions_at(player1_position)`.
+    #[must_use]
+    #[inline]
+    pub fn effective_actions_p1(&self) -> [u8; 5] {
+        if self.player1.mud_timer > 0 {
+            return [4, 4, 4, 4, 4];
+        }
+        self.effective_actions_at(self.player1.current_pos)
+    }
+
+    /// Get effective actions for player 2, accounting for mud state.
+    ///
+    /// If player 2 is in mud, all actions map to STAY.
+    /// Otherwise, returns the same as `effective_actions_at(player2_position)`.
+    #[must_use]
+    #[inline]
+    pub fn effective_actions_p2(&self) -> [u8; 5] {
+        if self.player2.mud_timer > 0 {
+            return [4, 4, 4, 4, 4];
+        }
+        self.effective_actions_at(self.player2.current_pos)
+    }
 }
 
 pub struct TurnResult {
@@ -988,6 +1043,111 @@ mod tests {
             assert_eq!(game.player1.score, 0.5);
             assert_eq!(game.player2.score, 0.5);
             assert_eq!(game.cheese.remaining_cheese(), 0);
+        }
+    }
+
+    mod effective_actions {
+        use super::*;
+
+        #[test]
+        fn test_corner_bottom_left() {
+            let game = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
+
+            let result = game.effective_actions_at(Coordinates::new(0, 0));
+
+            // At (0,0): UP(0) and RIGHT(1) valid, DOWN(2) and LEFT(3) blocked
+            assert_eq!(result[0], 0); // UP maps to UP
+            assert_eq!(result[1], 1); // RIGHT maps to RIGHT
+            assert_eq!(result[2], 4); // DOWN maps to STAY (boundary)
+            assert_eq!(result[3], 4); // LEFT maps to STAY (boundary)
+            assert_eq!(result[4], 4); // STAY maps to STAY
+        }
+
+        #[test]
+        fn test_corner_top_right() {
+            let game = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
+
+            let result = game.effective_actions_at(Coordinates::new(2, 2));
+
+            // At (2,2) in 3x3: DOWN(2) and LEFT(3) valid, UP(0) and RIGHT(1) blocked
+            assert_eq!(result[0], 4); // UP maps to STAY (boundary)
+            assert_eq!(result[1], 4); // RIGHT maps to STAY (boundary)
+            assert_eq!(result[2], 2); // DOWN maps to DOWN
+            assert_eq!(result[3], 3); // LEFT maps to LEFT
+            assert_eq!(result[4], 4); // STAY maps to STAY
+        }
+
+        #[test]
+        fn test_center_all_valid() {
+            let game = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
+
+            let result = game.effective_actions_at(Coordinates::new(1, 1));
+
+            // At (1,1) in 3x3: all 4 directions valid
+            assert_eq!(result[0], 0); // UP
+            assert_eq!(result[1], 1); // RIGHT
+            assert_eq!(result[2], 2); // DOWN
+            assert_eq!(result[3], 3); // LEFT
+            assert_eq!(result[4], 4); // STAY
+        }
+
+        #[test]
+        fn test_with_wall() {
+            let mut walls = HashMap::new();
+            // Wall between (0,0) and (1,0) - blocks RIGHT from (0,0)
+            walls.insert(Coordinates::new(0, 0), vec![Coordinates::new(1, 0)]);
+            walls.insert(Coordinates::new(1, 0), vec![Coordinates::new(0, 0)]);
+
+            let game = GameState::new(3, 3, walls, 300);
+            let result = game.effective_actions_at(Coordinates::new(0, 0));
+
+            assert_eq!(result[0], 0); // UP valid
+            assert_eq!(result[1], 4); // RIGHT blocked by wall → STAY
+            assert_eq!(result[2], 4); // DOWN blocked by boundary → STAY
+            assert_eq!(result[3], 4); // LEFT blocked by boundary → STAY
+            assert_eq!(result[4], 4); // STAY
+        }
+
+        #[test]
+        fn test_player_in_mud() {
+            let mut game = create_test_game(Coordinates::new(1, 1), Coordinates::new(2, 2));
+            // Add mud and simulate player entering it
+            game.mud
+                .insert(Coordinates::new(1, 1), Coordinates::new(1, 2), 3);
+
+            // Move player 1 into mud
+            game.process_turn(Direction::Up, Direction::Stay);
+
+            // Player 1 should now be in mud
+            assert!(game.player1.mud_timer > 0);
+
+            // All actions should map to STAY
+            let result = game.effective_actions_p1();
+            assert_eq!(result, [4, 4, 4, 4, 4]);
+
+            // Player 2 is not in mud - normal behavior
+            let result_p2 = game.effective_actions_p2();
+            assert_eq!(result_p2[2], 2); // DOWN valid
+            assert_eq!(result_p2[3], 3); // LEFT valid
+        }
+
+        #[test]
+        fn test_player_not_in_mud() {
+            let game = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
+
+            // Player 1 at (0,0)
+            let result_p1 = game.effective_actions_p1();
+            assert_eq!(result_p1[0], 0); // UP valid
+            assert_eq!(result_p1[1], 1); // RIGHT valid
+            assert_eq!(result_p1[2], 4); // DOWN → STAY
+            assert_eq!(result_p1[3], 4); // LEFT → STAY
+
+            // Player 2 at (2,2)
+            let result_p2 = game.effective_actions_p2();
+            assert_eq!(result_p2[0], 4); // UP → STAY
+            assert_eq!(result_p2[1], 4); // RIGHT → STAY
+            assert_eq!(result_p2[2], 2); // DOWN valid
+            assert_eq!(result_p2[3], 3); // LEFT valid
         }
     }
 
