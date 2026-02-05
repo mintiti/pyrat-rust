@@ -364,6 +364,49 @@ impl PyRat {
         Ok(valid)
     }
 
+    /// Get effective actions for a position (ignores mud state).
+    ///
+    /// Returns a list of 5 integers where result[action] = effective_action.
+    /// Blocked actions (walls, boundaries) map to STAY (4).
+    /// Valid actions map to themselves.
+    ///
+    /// Direction values: UP=0, RIGHT=1, DOWN=2, LEFT=3, STAY=4
+    ///
+    /// Example: at corner (0,0) with no walls
+    ///   [0, 1, 4, 4, 4]  # UP=valid, RIGHT=valid, DOWN→STAY, LEFT→STAY, STAY→STAY
+    fn effective_actions(&self, pos: CoordinatesInput) -> PyResult<[u8; 5]> {
+        let coords: Coordinates = PyResult::<Coordinates>::from(pos)?;
+
+        // Bounds check
+        if coords.x >= self.game.width() || coords.y >= self.game.height() {
+            return Err(PyValueError::new_err(format!(
+                "Position ({}, {}) is outside board bounds ({}x{})",
+                coords.x,
+                coords.y,
+                self.game.width(),
+                self.game.height()
+            )));
+        }
+
+        Ok(self.game.effective_actions_at(coords))
+    }
+
+    /// Get effective actions for player 1, accounting for mud state.
+    ///
+    /// If player 1 is in mud, all actions map to STAY [4, 4, 4, 4, 4].
+    /// Otherwise, returns effective actions based on player 1's position.
+    fn effective_actions_p1(&self) -> [u8; 5] {
+        self.game.effective_actions_p1()
+    }
+
+    /// Get effective actions for player 2, accounting for mud state.
+    ///
+    /// If player 2 is in mud, all actions map to STAY [4, 4, 4, 4, 4].
+    /// Otherwise, returns effective actions based on player 2's position.
+    fn effective_actions_p2(&self) -> [u8; 5] {
+        self.game.effective_actions_p2()
+    }
+
     fn mud_entries(&self) -> Vec<crate::Mud> {
         self.game
             .mud_positions()
