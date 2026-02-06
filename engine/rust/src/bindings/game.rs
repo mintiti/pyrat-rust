@@ -407,6 +407,15 @@ impl PyRat {
         self.game.effective_actions_p2()
     }
 
+    /// Compute a hash of all mutable game state for transposition tables.
+    ///
+    /// Returns a u64 hash. Two states with identical mutable fields
+    /// (positions, scores, mud timers, turn, cheese) produce the same hash.
+    /// Walls and mud layout are excluded — they don't change during a game.
+    fn state_hash(&self) -> u64 {
+        self.game.state_hash()
+    }
+
     fn mud_entries(&self) -> Vec<crate::Mud> {
         self.game
             .mud_positions()

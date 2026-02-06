@@ -100,6 +100,8 @@ class PyRat:
         symmetric: bool = True,
         seed: int | None = None,
         max_turns: int | None = None,
+        wall_density: float | None = None,
+        mud_density: float | None = None,
     ) -> None: ...
     @staticmethod
     def create_preset(
@@ -375,6 +377,80 @@ class PyRat:
             GameObservation containing the game state from the player's perspective
         """
         ...
+
+    def get_valid_moves(self, pos: Coordinates | tuple[int, int]) -> list[int]:
+        """Get valid movement directions from a position.
+
+        Returns direction values that would result in actual movement
+        (not blocked by walls or board boundaries). Does not include STAY.
+
+        Direction values: UP=0, RIGHT=1, DOWN=2, LEFT=3
+
+        Args:
+            pos: Position to check
+
+        Returns:
+            List of valid direction values
+        """
+        ...
+
+    def effective_actions(self, pos: Coordinates | tuple[int, int]) -> list[int]:
+        """Get effective actions for a position (ignores mud state).
+
+        Returns a list of 5 integers where result[action] = effective_action.
+        Blocked actions (walls, boundaries) map to STAY (4).
+        Valid actions map to themselves.
+
+        Direction values: UP=0, RIGHT=1, DOWN=2, LEFT=3, STAY=4
+
+        Args:
+            pos: Position to check
+
+        Returns:
+            List of 5 integers mapping each action to its effective action
+        """
+        ...
+
+    def effective_actions_p1(self) -> list[int]:
+        """Get effective actions for player 1, accounting for mud state.
+
+        If player 1 is in mud, all actions map to STAY [4, 4, 4, 4, 4].
+        Otherwise, returns effective actions based on player 1's position.
+
+        Returns:
+            List of 5 integers mapping each action to its effective action
+        """
+        ...
+
+    def effective_actions_p2(self) -> list[int]:
+        """Get effective actions for player 2, accounting for mud state.
+
+        If player 2 is in mud, all actions map to STAY [4, 4, 4, 4, 4].
+        Otherwise, returns effective actions based on player 2's position.
+
+        Returns:
+            List of 5 integers mapping each action to its effective action
+        """
+        ...
+
+    def state_hash(self) -> int:
+        """Compute a hash of all mutable game state for transposition tables.
+
+        Hashes player positions, targets, mud timers, scores, turn count,
+        and cheese layout. Two states with identical mutable fields produce
+        the same hash.
+
+        Walls and mud layout are not included — they are fixed for the
+        lifetime of a game, so they don't help distinguish states within
+        the same game tree. Don't compare hashes across different mazes.
+
+        Returns:
+            A 64-bit integer hash of the current game state
+        """
+        ...
+
+    def __copy__(self) -> PyRat: ...
+    def __deepcopy__(self, memo: object) -> PyRat: ...
 
 # Alias for the Rust MoveUndo type
 PyMoveUndo = MoveUndo

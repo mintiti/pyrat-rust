@@ -2,6 +2,7 @@ use crate::game::maze_generation::{CheeseConfig, CheeseGenerator, MazeConfig, Ma
 use crate::{CheeseBoard, Coordinates, Direction, MoveTable};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 
 use crate::game::types::MudMap;
 
@@ -664,6 +665,32 @@ impl GameState {
             return [4, 4, 4, 4, 4];
         }
         self.effective_actions_at(self.player2.current_pos)
+    }
+
+    /// Compute a hash of all mutable game state for transposition tables.
+    ///
+    /// Hashes player positions, targets, mud timers, scores, turn count,
+    /// and the cheese bitboard. Two states with identical mutable fields
+    /// will produce the same hash.
+    ///
+    /// Walls and mud layout are deliberately excluded — they are fixed for
+    /// the lifetime of a game, so hashing them would add cost without
+    /// distinguishing states within the same game tree. If you compare
+    /// hashes across different mazes, you must account for this yourself.
+    #[must_use]
+    pub fn state_hash(&self) -> u64 {
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        self.player1.current_pos.hash(&mut hasher);
+        self.player2.current_pos.hash(&mut hasher);
+        self.player1.target_pos.hash(&mut hasher);
+        self.player2.target_pos.hash(&mut hasher);
+        self.player1.mud_timer.hash(&mut hasher);
+        self.player2.mud_timer.hash(&mut hasher);
+        ((self.player1.score * 2.0).round() as u32).hash(&mut hasher);
+        ((self.player2.score * 2.0).round() as u32).hash(&mut hasher);
+        self.turn.hash(&mut hasher);
+        self.cheese.bits().hash(&mut hasher);
+        hasher.finish()
     }
 }
 

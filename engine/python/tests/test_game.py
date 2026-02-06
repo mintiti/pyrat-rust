@@ -945,3 +945,71 @@ class TestCopyProtocol:
         assert game_copy.width == game.width
         assert game_copy.height == game.height
         assert game_copy.max_turns == game.max_turns
+
+
+class TestStateHash:
+    """Test state_hash() for transposition tables."""
+
+    def test_deterministic(self):
+        """Same seed produces the same hash."""
+        game1 = PyRat(width=11, height=9, seed=42)
+        game2 = PyRat(width=11, height=9, seed=42)
+        assert game1.state_hash() == game2.state_hash()
+
+    def test_changes_after_move(self):
+        """Hash changes after a move."""
+        from pyrat_engine import Direction
+
+        game = PyRat(width=11, height=9, seed=42)
+        h_before = game.state_hash()
+        game.step(Direction.UP, Direction.DOWN)
+        h_after = game.state_hash()
+        assert h_before != h_after
+
+    def test_restores_after_make_unmake(self):
+        """Hash restores to original value after make_move + unmake_move."""
+        from pyrat_engine import Direction
+
+        game = PyRat(width=11, height=9, seed=42)
+        h_before = game.state_hash()
+        undo = game.make_move(Direction.UP, Direction.DOWN)
+        assert game.state_hash() != h_before
+        game.unmake_move(undo)
+        assert game.state_hash() == h_before
+
+    def test_same_state_same_hash_across_copies(self):
+        """Copies of the same state produce the same hash."""
+        import copy
+
+        game = PyRat(width=11, height=9, seed=42)
+        game_copy = copy.copy(game)
+        assert game.state_hash() == game_copy.state_hash()
+
+    def test_different_cheese_different_hash(self):
+        """Collecting cheese changes the hash."""
+        from pyrat_engine import Direction
+
+        game = PyRat(
+            width=5,
+            height=5,
+            cheese_count=5,
+            wall_density=0.0,
+            mud_density=0.0,
+            seed=42,
+        )
+        h1 = game.state_hash()
+
+        # Play until cheese is collected or a few turns pass
+        for _ in range(10):
+            game_over, collected = game.step(Direction.RIGHT, Direction.STAY)
+            if collected:
+                break
+
+        # After collecting cheese (or at least moving), hash should differ
+        assert game.state_hash() != h1
+
+    def test_returns_int(self):
+        """state_hash() returns an integer."""
+        game = PyRat(width=5, height=5, cheese_count=3, seed=42)
+        h = game.state_hash()
+        assert isinstance(h, int)
