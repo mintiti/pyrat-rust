@@ -27,37 +27,59 @@ pip install pyrat-engine
 
 ## Usage
 
-The engine implements a PettingZoo Parallel environment interface. Here's how to use it:
+### Game Engine
 
-   ```python
-from pyrat_engine import PyRatEnv, Direction
-# Create environment
-env = PyRatEnv(
-width=21, # Default maze width
-height=15, # Default maze height
-cheese_count=41, # Number of cheese pieces
-symmetric=True, # Whether maze should be symmetric
-seed=42 # Random seed for reproducibility
+The primary API is the `PyRat` class, which exposes the Rust game engine directly:
+
+```python
+from pyrat_engine import PyRat, Direction
+
+# Create a game with default settings (21x15, 41 cheese)
+game = PyRat(seed=42)
+
+# Or customize the board
+game = PyRat(
+    width=31,
+    height=21,
+    cheese_count=85,
+    symmetric=True,
+    seed=42,
+    max_turns=400,
+    wall_density=0.5,   # Proportion of walls (default: 0.7)
+    mud_density=0.2,    # Proportion of mud passages (default: 0.1)
 )
-# Reset environment
+
+# Run the game loop
+while True:
+    game_over, collected = game.step(Direction.RIGHT, Direction.LEFT)
+    if game_over:
+        break
+
+print(f"Player 1: {game.player1_score}, Player 2: {game.player2_score}")
+```
+
+### Reinforcement Learning (PettingZoo)
+
+For RL workflows, use the `PyRatEnv` wrapper which implements the PettingZoo Parallel API:
+
+```python
+from pyrat_engine.env import PyRatEnv
+from pyrat_engine import Direction
+
+env = PyRatEnv(width=21, height=15, cheese_count=41, seed=42)
 observations, info = env.reset(seed=42)
-# Environment follows PettingZoo Parallel API
+
 terminated = truncated = False
 while not (terminated or truncated):
-# Make moves for both players
-actions = {
-"player_1": Direction.RIGHT, # Available: UP, RIGHT, DOWN, LEFT, STAY
-"player_2": Direction.LEFT
-}
-observations, rewards, terminations, truncations, infos = env.step(actions)
-terminated = any(terminations.values())
-truncated = any(truncations.values())
-# Access final scores
-final_scores = {# TODO : This is a wrong reward, need to change that
-"player_1": rewards["player_1"],
-"player_2": rewards["player_2"]
-}
-   ```
+    actions = {
+        "player_1": Direction.RIGHT,
+        "player_2": Direction.LEFT,
+    }
+    observations, rewards, terminations, truncations, infos = env.step(actions)
+    terminated = any(terminations.values())
+    truncated = any(truncations.values())
+```
+
 ### Observation Space
 
 Each observation is a dictionary containing:
@@ -72,8 +94,20 @@ Each observation is a dictionary containing:
 "current_turn": int, # Current game turn
 "max_turns": int, # Maximum turns allowed
 "cheese_matrix": np.ndarray, # Binary matrix showing cheese locations
-"movement_matrix": np.ndarray # Matrix encoding valid moves
+"movement_matrix": np.ndarray # Shape (width, height, 4), see below
 }
+```
+
+**`movement_matrix` format:** A 3D `int8` array of shape `(width, height, 4)`.
+- The third dimension corresponds to directions: `[UP, RIGHT, DOWN, LEFT]`.
+- Values:
+  - `-1`: Invalid move (wall or out of bounds)
+  - `0`: Valid immediate move
+  - `N > 0`: Valid move with N turns of mud delay
+
+```python
+# Example: check if moving UP from position (3, 5) is valid
+obs["movement_matrix"][3, 5, 0]  # 0 = valid, -1 = wall, N>0 = mud
 ```
 
 ## Game Rules
