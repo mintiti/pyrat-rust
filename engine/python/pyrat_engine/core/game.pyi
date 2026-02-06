@@ -91,6 +91,8 @@ class PyRat:
         symmetric: Whether to generate symmetric mazes (default: True)
         seed: Random seed for reproducible games (default: None)
         max_turns: Maximum number of turns before game ends (default: 300)
+        wall_density: Proportion of walls in the maze, 0.0 to 1.0 (default: 0.7)
+        mud_density: Proportion of passages with mud, 0.0 to 1.0 (default: 0.1)
     """
     def __init__(
         self,
@@ -100,6 +102,8 @@ class PyRat:
         symmetric: bool = True,
         seed: int | None = None,
         max_turns: int | None = None,
+        wall_density: float | None = None,
+        mud_density: float | None = None,
     ) -> None: ...
     @staticmethod
     def create_preset(
