@@ -1,6 +1,7 @@
 use crate::game::maze_generation::{CheeseConfig, CheeseGenerator, MazeConfig, MazeGenerator};
 use crate::{CheeseBoard, Coordinates, Direction, MoveTable};
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 
@@ -678,18 +679,20 @@ impl GameState {
     /// distinguishing states within the same game tree. If you compare
     /// hashes across different mazes, you must account for this yourself.
     #[must_use]
+    #[inline]
     pub fn state_hash(&self) -> u64 {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let mut hasher = DefaultHasher::new();
         self.player1.current_pos.hash(&mut hasher);
         self.player2.current_pos.hash(&mut hasher);
         self.player1.target_pos.hash(&mut hasher);
         self.player2.target_pos.hash(&mut hasher);
         self.player1.mud_timer.hash(&mut hasher);
         self.player2.mud_timer.hash(&mut hasher);
+        // Scores are multiples of 0.5; multiply by 2 to get integer keys
         ((self.player1.score * 2.0).round() as u32).hash(&mut hasher);
         ((self.player2.score * 2.0).round() as u32).hash(&mut hasher);
         self.turn.hash(&mut hasher);
-        self.cheese.bits().hash(&mut hasher);
+        self.cheese.hash(&mut hasher);
         hasher.finish()
     }
 }
@@ -1175,6 +1178,99 @@ mod tests {
             assert_eq!(result_p2[1], 4); // RIGHT → STAY
             assert_eq!(result_p2[2], 2); // DOWN valid
             assert_eq!(result_p2[3], 3); // LEFT valid
+        }
+    }
+
+    mod state_hash {
+        use super::*;
+
+        #[test]
+        fn test_deterministic() {
+            let game = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
+            let clone = game.clone();
+            assert_eq!(game.state_hash(), clone.state_hash());
+        }
+
+        #[test]
+        fn test_position_affects_hash() {
+            let game = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
+            let h1 = game.state_hash();
+
+            let mut game2 = game.clone();
+            game2.player1.current_pos = Coordinates::new(1, 0);
+            assert_ne!(game2.state_hash(), h1);
+        }
+
+        #[test]
+        fn test_target_affects_hash() {
+            let game = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
+            let h1 = game.state_hash();
+
+            let mut game2 = game.clone();
+            game2.player1.target_pos = Coordinates::new(0, 1);
+            assert_ne!(game2.state_hash(), h1);
+        }
+
+        #[test]
+        fn test_mud_timer_affects_hash() {
+            let game = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
+            let h1 = game.state_hash();
+
+            let mut game2 = game.clone();
+            game2.player1.mud_timer = 3;
+            assert_ne!(game2.state_hash(), h1);
+        }
+
+        #[test]
+        fn test_score_affects_hash() {
+            let game = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
+            let h1 = game.state_hash();
+
+            let mut game2 = game.clone();
+            game2.player1.score = 1.0;
+            assert_ne!(game2.state_hash(), h1);
+        }
+
+        #[test]
+        fn test_half_score_affects_hash() {
+            let game = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
+            let h1 = game.state_hash();
+
+            let mut game2 = game.clone();
+            game2.player1.score = 0.5;
+            assert_ne!(game2.state_hash(), h1);
+        }
+
+        #[test]
+        fn test_turn_affects_hash() {
+            let game = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
+            let h1 = game.state_hash();
+
+            let mut game2 = game.clone();
+            game2.turn = 1;
+            assert_ne!(game2.state_hash(), h1);
+        }
+
+        #[test]
+        fn test_cheese_affects_hash() {
+            let game = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
+            let h1 = game.state_hash();
+
+            let mut game2 = game.clone();
+            game2.cheese.place_cheese(Coordinates::new(1, 1));
+            assert_ne!(game2.state_hash(), h1);
+        }
+
+        #[test]
+        fn test_make_unmake_roundtrip() {
+            let mut game = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
+            game.cheese.place_cheese(Coordinates::new(1, 1));
+
+            let h_before = game.state_hash();
+            let undo = game.make_move(Direction::Right, Direction::Left);
+            assert_ne!(game.state_hash(), h_before);
+            game.unmake_move(undo);
+            assert_eq!(game.state_hash(), h_before);
         }
     }
 

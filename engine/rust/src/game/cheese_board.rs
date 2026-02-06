@@ -1,4 +1,5 @@
 use crate::Coordinates;
+use std::hash::{Hash, Hasher};
 
 /// Efficient cheese tracking using bitboards
 pub struct CheeseBoard {
@@ -100,13 +101,6 @@ impl CheeseBoard {
         self.remaining_cheese_count
     }
 
-    /// Returns the raw bitboard data for hashing
-    #[must_use]
-    #[inline(always)]
-    pub fn bits(&self) -> &[u64] {
-        &self.bits
-    }
-
     /// Returns a vector of all cheese positions.
     ///
     /// # Panics
@@ -172,6 +166,12 @@ impl Clone for CheeseBoard {
             initial_cheese_count: self.initial_cheese_count,
             remaining_cheese_count: self.remaining_cheese_count,
         }
+    }
+}
+
+impl Hash for CheeseBoard {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.bits.hash(state);
     }
 }
 

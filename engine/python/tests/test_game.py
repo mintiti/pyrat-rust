@@ -989,24 +989,58 @@ class TestStateHash:
         """Collecting cheese changes the hash."""
         from pyrat_engine import Direction
 
-        game = PyRat(
+        game = PyRat.create_custom(
             width=5,
             height=5,
-            cheese_count=5,
-            wall_density=0.0,
-            mud_density=0.0,
-            seed=42,
+            cheese=[(1, 0), (3, 4)],
+            player1_pos=(0, 0),
+            player2_pos=(4, 4),
+            symmetric=False,
         )
-        h1 = game.state_hash()
+        h_before = game.state_hash()
+        game_over, collected = game.step(Direction.RIGHT, Direction.STAY)
+        assert len(collected) > 0, "Expected cheese to be collected"
+        assert game.state_hash() != h_before
 
-        # Play until cheese is collected or a few turns pass
-        for _ in range(10):
-            game_over, collected = game.step(Direction.RIGHT, Direction.STAY)
-            if collected:
-                break
+    def test_different_positions_different_hash(self):
+        """Same board but different player positions produce different hashes."""
+        game_a = PyRat.create_custom(
+            width=5,
+            height=5,
+            cheese=[(2, 2)],
+            player1_pos=(0, 0),
+            player2_pos=(4, 4),
+            symmetric=False,
+        )
+        game_b = PyRat.create_custom(
+            width=5,
+            height=5,
+            cheese=[(2, 2)],
+            player1_pos=(1, 0),
+            player2_pos=(4, 4),
+            symmetric=False,
+        )
+        assert game_a.state_hash() != game_b.state_hash()
 
-        # After collecting cheese (or at least moving), hash should differ
-        assert game.state_hash() != h1
+    def test_extra_cheese_different_hash(self):
+        """Same board but one game has extra cheese produces different hash."""
+        game_a = PyRat.create_custom(
+            width=5,
+            height=5,
+            cheese=[(2, 2)],
+            player1_pos=(0, 0),
+            player2_pos=(4, 4),
+            symmetric=False,
+        )
+        game_b = PyRat.create_custom(
+            width=5,
+            height=5,
+            cheese=[(2, 2), (3, 3)],
+            player1_pos=(0, 0),
+            player2_pos=(4, 4),
+            symmetric=False,
+        )
+        assert game_a.state_hash() != game_b.state_hash()
 
     def test_returns_int(self):
         """state_hash() returns an integer."""

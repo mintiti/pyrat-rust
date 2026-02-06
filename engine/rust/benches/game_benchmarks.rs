@@ -486,6 +486,25 @@ fn bench_process_cheese_collection(c: &mut Criterion) {
     group.finish();
 }
 
+/// Benchmarks `state_hash()` computation.
+/// Tests performance across board sizes with cheese and mud present.
+fn bench_state_hash(c: &mut Criterion) {
+    let mut group = c.benchmark_group("state_hash");
+
+    for &size in BENCHMARK_BOARD_SIZES.iter() {
+        group.bench_with_input(BenchmarkId::from_parameter(size), &size, |b, &size| {
+            let game = create_benchmark_game(
+                size,
+                ((size as u16 * size as u16) as f32 * CHEESE_DENSITY) as u16,
+                ((size as usize * size as usize) as f32 * MUD_DENSITY) as usize,
+            );
+
+            b.iter(|| black_box(game.state_hash()));
+        });
+    }
+    group.finish();
+}
+
 criterion_group!(
     name = benches;
     config = Criterion::default()
@@ -501,5 +520,6 @@ criterion_group!(
         bench_process_moves_wall_collisions,
         bench_process_moves_mud_movement,
         bench_process_cheese_collection,
+        bench_state_hash,
 );
 criterion_main!(benches);
