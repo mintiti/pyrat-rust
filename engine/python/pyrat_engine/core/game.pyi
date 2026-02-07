@@ -324,40 +324,123 @@ class PyRat:
         """
         ...
 
+    def get_valid_moves(self, pos: Coordinates | tuple[int, int]) -> list[int]:
+        """Get valid movement directions from a position.
+
+        Returns direction values where movement is possible (not blocked by
+        walls or board boundaries). Does not include STAY. Does not account
+        for mud state.
+
+        Direction values: UP=0, RIGHT=1, DOWN=2, LEFT=3.
+        Convert to Direction enums with: ``[Direction(v) for v in valid]``
+
+        Args:
+            pos: Position to check, as Coordinates or (x, y) tuple
+
+        Returns:
+            List of direction integers for valid moves
+
+        Raises:
+            ValueError: If position is outside board bounds
+        """
+        ...
+
+    def effective_actions(self, pos: Coordinates | tuple[int, int]) -> list[int]:
+        """Get effective action mapping for a position (ignores mud state).
+
+        Returns a list of 5 integers where ``result[action] = effective_action``.
+        Blocked actions (walls, boundaries) map to STAY (4).
+        Valid actions map to themselves.
+
+        Direction values: UP=0, RIGHT=1, DOWN=2, LEFT=3, STAY=4.
+
+        Example: at corner (0,0) with no walls::
+
+            [0, 1, 4, 4, 4]  # UP=valid, RIGHT=valid, DOWN→STAY, LEFT→STAY, STAY→STAY
+
+        Useful for MCTS and tree search where you need to know which actions
+        are equivalent (blocked moves all reduce to STAY).
+
+        Args:
+            pos: Position to check, as Coordinates or (x, y) tuple
+
+        Returns:
+            List of 5 integers mapping each action to its effective action
+
+        Raises:
+            ValueError: If position is outside board bounds
+        """
+        ...
+
+    def effective_actions_p1(self) -> list[int]:
+        """Get effective action mapping for player 1, accounting for mud.
+
+        If player 1 is in mud, all actions map to STAY: ``[4, 4, 4, 4, 4]``.
+        Otherwise, returns the same as ``effective_actions(player1_position)``.
+
+        Returns:
+            List of 5 integers mapping each action to its effective action
+        """
+        ...
+
+    def effective_actions_p2(self) -> list[int]:
+        """Get effective action mapping for player 2, accounting for mud.
+
+        If player 2 is in mud, all actions map to STAY: ``[4, 4, 4, 4, 4]``.
+        Otherwise, returns the same as ``effective_actions(player2_position)``.
+
+        Returns:
+            List of 5 integers mapping each action to its effective action
+        """
+        ...
+
     def step(self, p1_move: int, p2_move: int) -> tuple[bool, list[Coordinates]]:
         """Execute one game step with the given moves.
+
+        Use this for straightforward game execution (playing games, collecting
+        data, running simulations). For game tree search where you need to
+        backtrack, use ``make_move()`` / ``unmake_move()`` instead.
 
         Args:
             p1_move: Direction for player 1 (0-4: UP, RIGHT, DOWN, LEFT, STAY)
             p2_move: Direction for player 2 (0-4: UP, RIGHT, DOWN, LEFT, STAY)
 
         Returns:
-            Tuple containing:
-            - Whether the game is over (bool)
-            - List of Coordinates where cheese was collected this turn
+            Tuple of (game_over, collected_cheese) where game_over is True
+            if the game ended this turn and collected_cheese lists positions
+            where cheese was picked up.
         """
         ...
 
     def make_move(self, p1_move: int, p2_move: int) -> MoveUndo:
-        """Make a move and return undo information.
+        """Execute a move and return undo information for backtracking.
 
-        Similar to step(), but returns information needed to undo the move.
-        Useful for game tree search algorithms.
+        Use this (with ``unmake_move()``) for game tree search algorithms
+        like MCTS or minimax where you need to explore branches and undo them.
+        For straightforward game execution, use ``step()`` instead.
 
         Args:
             p1_move: Direction for player 1 (0-4: UP, RIGHT, DOWN, LEFT, STAY)
             p2_move: Direction for player 2 (0-4: UP, RIGHT, DOWN, LEFT, STAY)
 
         Returns:
-            MoveUndo object containing state information for undoing the move
+            MoveUndo object that must be passed to ``unmake_move()`` to revert
+            this move. Undo objects must be applied in LIFO order (most recent
+            move undone first).
         """
         ...
 
     def unmake_move(self, undo: MoveUndo) -> None:
-        """Undo a move using saved undo information.
+        """Revert a move using saved undo information.
+
+        Restores all game state (positions, scores, cheese, mud timers, turn
+        counter) to what it was before the corresponding ``make_move()`` call.
+
+        Undo objects must be applied in LIFO order — always undo the most
+        recent ``make_move()`` first.
 
         Args:
-            undo: MoveUndo object from a previous make_move() call
+            undo: MoveUndo object from a previous ``make_move()`` call
         """
         ...
 
