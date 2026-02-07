@@ -112,7 +112,36 @@ obs["movement_matrix"][3, 5, 0]  # 0 = valid, -1 = wall, N>0 = mud
 
 ## Game Rules
 
-[Include a condensed version of the game rules from pyrat-game-specifications.txt]
+### Setup
+- **Grid**: Rectangular maze (default 21×15) with walls between cells
+- **Players**: Rat starts at (0, 0), Python starts at (width-1, height-1)
+- **Cheese**: Randomly placed on cells, symmetric by default
+- **Maze**: Fully connected — there's always a path between any two cells
+
+### Movement
+- **Actions**: UP, DOWN, LEFT, RIGHT, or STAY
+- **Invalid moves** (into walls or boundaries) count as STAY
+- **Simultaneous**: Both players move at the same time
+- **Collision**: Players can occupy the same cell (no blocking)
+
+### Mud
+- Some passages have mud with a value N (number of turns to cross)
+- Turn 1: Player commits to a direction, stays in starting cell
+- Turns 2 to N-1: Player is stuck, cannot collect cheese, all actions ignored
+- Turn N: Player arrives at destination
+
+### Scoring
+- **Normal collection**: 1 point when landing on a cheese
+- **Simultaneous collection**: 0.5 points each if both players land on the same cheese
+- **Cannot collect while stuck in mud**
+
+### Game Over
+The game ends immediately when:
+1. A player scores more than half the total cheese count
+2. All cheese is collected
+3. Maximum turns (default 300) reached
+
+Winner has the higher score. Draws are possible.
 
 ## Technical Details
 
@@ -130,6 +159,56 @@ The Rust engine achieves exceptional performance:
 - 10+ million moves/second on standard configurations
 - Efficient memory usage through optimized data structures
 - Zero-cost abstractions for core game mechanics
+
+## Using as a Rust Crate
+
+The engine can be used as a standalone Rust library without Python. Disable the default `python` feature to avoid the PyO3 dependency:
+
+```toml
+[dependencies]
+pyrat = { path = "engine", default-features = false }
+```
+
+### Minimal game loop
+
+```rust
+use pyrat::{GameState, Direction};
+
+fn main() {
+    let mut game = GameState::new_symmetric(
+        Some(21), Some(15), Some(41), Some(42), None, None,
+    );
+
+    loop {
+        let result = game.process_turn(Direction::Right, Direction::Left);
+        if result.game_over {
+            break;
+        }
+    }
+
+    println!(
+        "P1: {}, P2: {}",
+        game.player1_score(),
+        game.player2_score()
+    );
+}
+```
+
+### Key re-exported types
+
+| Type | Description |
+|------|-------------|
+| `GameState` | Core game state and logic |
+| `Direction` | Movement enum: Up, Down, Left, Right, Stay |
+| `Coordinates` | (x, y) board position |
+| `MoveTable` | Precomputed valid-move lookup table |
+| `CheeseBoard` | Bitboard tracking cheese positions |
+| `MazeConfig` | Maze generation parameters |
+| `CheeseConfig` | Cheese placement parameters |
+| `Wall` | Wall between two adjacent cells |
+| `Mud` | Mud passage with traversal cost |
+
+See `rust/src/lib.rs` for the full list of re-exports.
 
 ## Development
 

@@ -68,12 +68,21 @@ impl GameState {
     pub const DEFAULT_WIDTH: u8 = 21;
     pub const DEFAULT_HEIGHT: u8 = 15;
     pub const DEFAULT_CHEESE_COUNT: u16 = 41;
-    /// Creates a new game state with the given dimensions and walls
+    /// Creates a new game state with the given dimensions and walls.
+    ///
+    /// Players start at opposite corners: player 1 at (0, 0), player 2 at
+    /// (width-1, height-1). No cheese or mud is placed — add them separately
+    /// or use [`new_with_config`](Self::new_with_config).
     ///
     /// # Arguments
     /// * `width` - Width of the game board
     /// * `height` - Height of the game board
-    /// * `walls` - `HashMap` containing wall positions. Each key-value pair represents walls from a position
+    /// * `walls` - Maps each position to the neighbors it **cannot** reach
+    ///   (blocked by walls). Walls must be inserted in both directions:
+    ///   ```text
+    ///   walls.insert(Coordinates::new(0, 0), vec![Coordinates::new(1, 0)]);
+    ///   walls.insert(Coordinates::new(1, 0), vec![Coordinates::new(0, 0)]);
+    ///   ```
     /// * `max_turns` - Maximum number of turns before the game ends
     #[must_use]
     #[allow(clippy::needless_pass_by_value)] // We need to own the walls for MoveTable
@@ -116,8 +125,10 @@ impl GameState {
         }
     }
 
-    /// Creates a new game state with customized player positions
-    /// Useful for testing and specific scenarios
+    /// Creates a new game state with customized player positions.
+    ///
+    /// Same as [`new`](Self::new) but lets you place players at arbitrary
+    /// positions instead of the default corners.
     #[must_use]
     pub fn new_with_positions(
         width: u8,
@@ -135,8 +146,12 @@ impl GameState {
         game
     }
 
-    /// Creates a new game state with the given configuration
-    /// Useful when you want to specify everything at once
+    /// Creates a new game state with full control over all game elements.
+    ///
+    /// Use this when you need to specify walls, mud, cheese, and player
+    /// positions all at once. The `walls` parameter uses the same format
+    /// as [`new`](Self::new). The `mud` parameter maps position pairs to
+    /// the number of turns needed to traverse the passage.
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub fn new_with_config(
@@ -234,7 +249,19 @@ impl GameState {
         }
     }
 
-    /// Creates a new randomized symmetric game state with `PyRat` defaults
+    /// Creates a new randomized symmetric game state.
+    ///
+    /// Generates a 180° rotationally symmetric maze with symmetric cheese
+    /// placement. Player 1 starts at (0, 0) and player 2 at
+    /// (width-1, height-1).
+    ///
+    /// # Arguments
+    /// * `width` - Board width (default: 21)
+    /// * `height` - Board height (default: 15)
+    /// * `cheese_count` - Number of cheese pieces to place (default: 41)
+    /// * `seed` - Random seed for reproducible generation (`None` = random)
+    /// * `wall_density` - Proportion of walls, 0.0 to 1.0 (default: 0.7)
+    /// * `mud_density` - Proportion of passages with mud, 0.0 to 1.0 (default: 0.1)
     #[must_use]
     pub fn new_symmetric(
         width: Option<u8>,
@@ -267,7 +294,19 @@ impl GameState {
         Self::new_random(width, height, maze_config, cheese_config)
     }
 
-    /// Creates a new randomized asymmetric game state with `PyRat` defaults
+    /// Creates a new randomized asymmetric game state.
+    ///
+    /// Same as [`new_symmetric`](Self::new_symmetric) but generates a maze
+    /// without rotational symmetry constraints. Cheese placement is also
+    /// asymmetric.
+    ///
+    /// # Arguments
+    /// * `width` - Board width (default: 21)
+    /// * `height` - Board height (default: 15)
+    /// * `cheese_count` - Number of cheese pieces to place (default: 41)
+    /// * `seed` - Random seed for reproducible generation (`None` = random)
+    /// * `wall_density` - Proportion of walls, 0.0 to 1.0 (default: 0.7)
+    /// * `mud_density` - Proportion of passages with mud, 0.0 to 1.0 (default: 0.1)
     #[must_use]
     pub fn new_asymmetric(
         width: Option<u8>,
@@ -299,7 +338,15 @@ impl GameState {
 
         Self::new_random(width, height, maze_config, cheese_config)
     }
-    /// Process a single game turn
+    /// Process a single game turn.
+    ///
+    /// Advances the game by one step: applies moves, handles mud, collects
+    /// cheese, increments the turn counter, and checks win conditions.
+    ///
+    /// Use this for straightforward game execution. For game tree search
+    /// (MCTS, minimax) where you need to backtrack, use
+    /// [`make_move`](Self::make_move) / [`unmake_move`](Self::unmake_move)
+    /// instead.
     pub fn process_turn(&mut self, p1_move: Direction, p2_move: Direction) -> TurnResult {
         // Process player movements
         let (p1_moved, p2_moved) = self.process_moves(p1_move, p2_move);
@@ -323,7 +370,15 @@ impl GameState {
         }
     }
 
-    /// Process a move and create undo information
+    /// Execute a move and return undo information for backtracking.
+    ///
+    /// Calls [`process_turn`](Self::process_turn) internally but captures the
+    /// state needed to fully reverse the move via
+    /// [`unmake_move`](Self::unmake_move).
+    ///
+    /// Designed for game tree search (MCTS, minimax) where you explore
+    /// branches and need to undo them. Undo objects must be applied in LIFO
+    /// order — always undo the most recent `make_move` first.
     #[inline]
     pub fn make_move(&mut self, p1_move: Direction, p2_move: Direction) -> MoveUndo {
         // Save initial state
@@ -353,7 +408,14 @@ impl GameState {
         }
     }
 
-    /// Unmake a move using the saved undo information
+    /// Revert a move using saved undo information.
+    ///
+    /// Restores all game state (positions, scores, cheese, mud timers, turn
+    /// counter) to what it was before the corresponding
+    /// [`make_move`](Self::make_move) call.
+    ///
+    /// Undo objects must be applied in LIFO order — always undo the most
+    /// recent `make_move` first.
     #[inline]
     pub fn unmake_move(&mut self, undo: MoveUndo) {
         // Restore any collected cheese

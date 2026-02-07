@@ -480,7 +480,11 @@ impl PyRat {
     }
 
     // Game actions
-    /// Process a single game turn
+    /// Process a single game turn.
+    ///
+    /// Use this for straightforward game execution (playing games, collecting
+    /// data, running simulations). For game tree search where you need to
+    /// backtrack, use `make_move()` / `unmake_move()` instead.
     ///
     /// Returns (game_over: bool, collected_cheese: List[Coordinates])
     fn step(&mut self, p1_move: u8, p2_move: u8) -> PyResult<(bool, Vec<Coordinates>)> {
@@ -498,7 +502,11 @@ impl PyRat {
         Ok((result.game_over, result.collected_cheese))
     }
 
-    /// Make a move with undo capability
+    /// Execute a move and return undo information for backtracking.
+    ///
+    /// Use this (with `unmake_move()`) for game tree search algorithms
+    /// like MCTS or minimax. Undo objects must be applied in LIFO order —
+    /// always undo the most recent `make_move()` first.
     fn make_move(&mut self, p1_move: u8, p2_move: u8) -> PyResult<PyMoveUndo> {
         let p1_dir = Direction::try_from(p1_move)
             .map_err(|_| PyValueError::new_err("Invalid move for player 1"))?;
@@ -509,7 +517,10 @@ impl PyRat {
         Ok(PyMoveUndo { inner: undo })
     }
 
-    /// Unmake a move using saved undo data
+    /// Revert a move using saved undo information.
+    ///
+    /// Restores all game state to what it was before the corresponding
+    /// `make_move()` call. Undo objects must be applied in LIFO order.
     fn unmake_move(&mut self, undo: &PyMoveUndo) {
         self.game.unmake_move(undo.inner.clone());
         // Need full refresh after unmake
