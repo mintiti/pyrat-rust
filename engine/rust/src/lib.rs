@@ -8,6 +8,7 @@
 #![allow(clippy::cargo_common_metadata)]
 #![allow(non_local_definitions)] // pyo3 #[pymethods] expands to non-local impls
 
+pub mod bench_scenarios;
 #[cfg(feature = "python")]
 mod bindings;
 pub mod game;

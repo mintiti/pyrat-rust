@@ -55,7 +55,25 @@ make test-engine
 - `cargo bench` runs criterion benchmarks (game init + full game across preset sizes and wall/mud combos)
 - `cargo run --bin profile_game --release --no-default-features` prints a throughput table for all scenarios
 - `cargo run --bin profile_game --release --no-default-features -- <size>/<combo>` runs a single scenario in a tight loop for profiling (e.g. `default/default`, `large/walls_only`)
-- Use `cargo flamegraph --bin profile_game -- <size>/<combo>` or `samply record` for flamegraphs
+- The per-turn hot path is documented in `rust/src/game/game_logic.rs` (module-level doc comment)
+
+### Profiling with samply
+```bash
+# One-time setup
+cargo install samply
+
+# Add to ~/.cargo/config.toml (creates debug symbols without full debug overhead):
+# [profile.profiling]
+# inherits = "release"
+# debug = true
+
+# Build and profile (table mode — runs all scenarios, then open the profile)
+cargo build --profile profiling --bin profile_game --no-default-features
+samply record ./target/profiling/profile_game
+
+# Single-scenario mode — attach profiler, Ctrl+C when done
+samply record ./target/profiling/profile_game default/default
+```
 
 ## Common Tasks
 
@@ -79,7 +97,6 @@ The engine is tested on Python 3.8-3.11 with:
 
 ### Feature Flags
 - `python` (default): Enables Python bindings via PyO3
-- `flame`: Enables profiling with flame graphs
 
 Rust tests run without Python features to avoid linking issues.
 

@@ -1,116 +1,12 @@
-use pyrat::{Direction, GameState};
-use rand::Rng;
+use pyrat::bench_scenarios::{create_game, random_direction, COMBOS, SIZES};
 use std::time::{Duration, Instant};
 
-// ---------------------------------------------------------------------------
-// Scenario matrix (same as criterion benchmarks)
-// ---------------------------------------------------------------------------
-
-struct BoardSize {
-    name: &'static str,
-    width: u8,
-    height: u8,
-    cheese: u16,
-    max_turns: u16,
-}
-
-const SIZES: &[BoardSize] = &[
-    BoardSize {
-        name: "tiny",
-        width: 11,
-        height: 9,
-        cheese: 13,
-        max_turns: 150,
-    },
-    BoardSize {
-        name: "small",
-        width: 15,
-        height: 11,
-        cheese: 21,
-        max_turns: 200,
-    },
-    BoardSize {
-        name: "default",
-        width: 21,
-        height: 15,
-        cheese: 41,
-        max_turns: 300,
-    },
-    BoardSize {
-        name: "large",
-        width: 31,
-        height: 21,
-        cheese: 85,
-        max_turns: 400,
-    },
-    BoardSize {
-        name: "huge",
-        width: 41,
-        height: 31,
-        cheese: 165,
-        max_turns: 500,
-    },
-];
-
-struct FeatureCombo {
-    name: &'static str,
-    wall_density: f32,
-    mud_density: f32,
-}
-
-const COMBOS: &[FeatureCombo] = &[
-    FeatureCombo {
-        name: "empty",
-        wall_density: 0.0,
-        mud_density: 0.0,
-    },
-    FeatureCombo {
-        name: "walls_only",
-        wall_density: 0.7,
-        mud_density: 0.0,
-    },
-    FeatureCombo {
-        name: "mud_only",
-        wall_density: 0.0,
-        mud_density: 0.1,
-    },
-    FeatureCombo {
-        name: "default",
-        wall_density: 0.7,
-        mud_density: 0.1,
-    },
-];
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-#[inline]
-fn random_direction(rng: &mut impl Rng) -> Direction {
-    match rng.gen_range(0u8..5) {
-        0 => Direction::Up,
-        1 => Direction::Right,
-        2 => Direction::Down,
-        3 => Direction::Left,
-        _ => Direction::Stay,
-    }
-}
-
-fn create_game(size: &BoardSize, combo: &FeatureCombo, seed: u64) -> GameState {
-    let mut game = GameState::new_symmetric(
-        Some(size.width),
-        Some(size.height),
-        Some(size.cheese),
-        Some(seed),
-        Some(combo.wall_density),
-        Some(combo.mud_density),
-    );
-    game.max_turns = size.max_turns;
-    game
-}
-
 /// Run a scenario for `duration`, returns (total_turns, total_games).
-fn run_scenario(size: &BoardSize, combo: &FeatureCombo, duration: Duration) -> (u64, u64) {
+fn run_scenario(
+    size: &pyrat::bench_scenarios::BoardSize,
+    combo: &pyrat::bench_scenarios::FeatureCombo,
+    duration: Duration,
+) -> (u64, u64) {
     let mut rng = rand::thread_rng();
     let mut total_turns: u64 = 0;
     let mut total_games: u64 = 0;
@@ -131,10 +27,6 @@ fn run_scenario(size: &BoardSize, combo: &FeatureCombo, duration: Duration) -> (
     }
     (total_turns, total_games)
 }
-
-// ---------------------------------------------------------------------------
-// Modes
-// ---------------------------------------------------------------------------
 
 /// Runs all 20 scenarios and prints an aligned throughput table.
 fn run_all() {

@@ -1,3 +1,19 @@
+//! Per-turn hot path:
+//!
+//! ```text
+//! process_turn
+//!   ├── process_moves
+//!   │     └── compute_player_move   (×2, one per player)
+//!   ├── process_cheese_collection
+//!   └── check_game_over
+//! ```
+//!
+//! Key data structures on this path:
+//! - `MoveTable` — O(1) bitwise lookup for wall/boundary checks
+//! - `CheeseBoard` — O(1) bitwise check/collect per cell
+//! - `MudMap` — HashMap lookup per move into a muddy passage;
+//!   this is the most expensive per-turn operation
+
 use crate::game::maze_generation::{CheeseConfig, CheeseGenerator, MazeConfig, MazeGenerator};
 use crate::{CheeseBoard, Coordinates, Direction, MoveTable};
 use serde::{Deserialize, Serialize};
