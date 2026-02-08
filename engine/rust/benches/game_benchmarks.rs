@@ -1,4 +1,5 @@
 use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use pyrat::game::types::MudMap;
 use pyrat::{Coordinates, Direction, GameState};
 use rand::{random, Rng};
 use std::collections::HashMap;
@@ -398,9 +399,9 @@ fn bench_process_moves_mud_movement(c: &mut Criterion) {
         for &direction in &directions {
             for &mud_timer in &MUD_TIMER_RANGE {
                 // Create mud in the direction of movement
-                let mut mud = std::collections::HashMap::new();
+                let mut mud = MudMap::new();
                 let mud_pos = direction.apply_to(start_pos);
-                mud.insert((start_pos, mud_pos), mud_timer);
+                mud.insert(start_pos, mud_pos, mud_timer);
 
                 let game_state = GameState::new_with_config(
                     size,

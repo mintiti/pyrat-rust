@@ -158,7 +158,7 @@ impl GameState {
         width: u8,
         height: u8,
         walls: HashMap<Coordinates, Vec<Coordinates>>,
-        mud: HashMap<(Coordinates, Coordinates), u8>,
+        mud: MudMap,
         cheese_positions: &[Coordinates],
         player1_pos: Coordinates,
         player2_pos: Coordinates,
@@ -167,10 +167,7 @@ impl GameState {
         let mut game =
             Self::new_with_positions(width, height, walls, max_turns, player1_pos, player2_pos);
 
-        // Add mud - convert from HashMap to MudMap
-        for ((pos1, pos2), value) in mud {
-            game.mud.insert(pos1, pos2, value);
-        }
+        game.mud = mud;
 
         // Add cheese
         for &pos in cheese_positions {
@@ -804,8 +801,8 @@ mod tests {
         let mut walls = HashMap::new();
         walls.insert(Coordinates::new(0, 0), vec![Coordinates::new(1, 0)]);
 
-        let mut mud = HashMap::new();
-        mud.insert((Coordinates::new(1, 1), Coordinates::new(1, 2)), 2);
+        let mut mud = MudMap::new();
+        mud.insert(Coordinates::new(1, 1), Coordinates::new(1, 2), 2);
 
         let cheese_positions = vec![Coordinates::new(1, 1), Coordinates::new(2, 2)];
 
@@ -826,7 +823,7 @@ mod tests {
         assert_eq!(game.cheese.total_cheese(), 2);
         assert!(game
             .mud
-            .contains_key(&(Coordinates::new(1, 1), Coordinates::new(1, 2))));
+            .contains(Coordinates::new(1, 1), Coordinates::new(1, 2)));
         assert_eq!(game.mud.len(), 1);
     }
     #[test]

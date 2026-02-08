@@ -2,6 +2,7 @@
 use crate::game::game_logic::MoveUndo;
 use crate::game::observations::ObservationHandler;
 use crate::game::types::CoordinatesInput;
+use crate::game::types::MudMap;
 use crate::{Coordinates, Direction, GameState, Wall};
 use numpy::{PyArray2, PyArray3};
 use pyo3::exceptions::PyValueError;
@@ -860,7 +861,7 @@ impl PyRat {
             width,
             height,
             walls_map,
-            HashMap::new(), // No mud
+            MudMap::new(), // No mud
             &cheese_positions,
             Coordinates { x: 0, y: 0 }, // Default player 1 position
             Coordinates {
@@ -954,7 +955,7 @@ impl PyRat {
             width,
             height,
             walls_map,
-            HashMap::new(),
+            MudMap::new(),
             &cheese_positions,
             p1_pos,
             p2_pos,
@@ -1041,7 +1042,7 @@ impl PyRat {
             width,
             height,
             walls,
-            (*mud).clone(),
+            mud,
             &cheese_positions,
             Coordinates {
                 x: p1_pos.0,
@@ -1406,11 +1407,10 @@ impl PyGameConfigBuilder {
                 .push(wall.pos1);
         }
 
-        // Convert mud to HashMap
-        let mut mud_map = HashMap::new();
+        // Convert mud to MudMap
+        let mut mud_map = MudMap::new();
         for m in &self.mud {
-            mud_map.insert((m.pos1, m.pos2), m.value);
-            mud_map.insert((m.pos2, m.pos1), m.value); // Make mud symmetric
+            mud_map.insert(m.pos1, m.pos2, m.value);
         }
 
         // Create game state

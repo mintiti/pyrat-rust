@@ -252,13 +252,10 @@ impl MudMap {
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
-}
 
-impl std::ops::Deref for MudMap {
-    type Target = HashMap<(Coordinates, Coordinates), u8>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
+    /// Check if mud exists between two positions (order doesn't matter)
+    pub fn contains(&self, pos1: Coordinates, pos2: Coordinates) -> bool {
+        self.inner.contains_key(&(pos1, pos2)) || self.inner.contains_key(&(pos2, pos1))
     }
 }
 
