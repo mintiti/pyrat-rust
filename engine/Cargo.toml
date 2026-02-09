@@ -19,7 +19,6 @@ crate-type = ["cdylib", "rlib"]  # Both Python module and Rust library
 rand = "0.8"
 pyo3 = { version = "0.25", features = ["extension-module"], optional = true }
 numpy = { version = "0.25", optional = true }
-flame = { version = "0.2.2", optional = true }
 serde = { version = "1.0.214", features = ["derive"] }
 ndarray = { version = "0.15", optional = true }
 
@@ -35,25 +34,18 @@ lto = "fat"
 [profile.bench]
 debug = true  # Also keep debug info for bench profile
 
-# Just keep the bench target, remove the bin target
-[[bench]]
-name = "profile"
-path = "rust/benches/bin/profile.rs"
-harness = false
-
 [[bench]]
 name = "game_benchmarks"
 path = "rust/benches/game_benchmarks.rs"
 harness = false
 
 [[bin]]
-name = "profile_process_turn"
-path = "rust/benches/bin/profile_process_turn.rs"
+name = "profile_game"
+path = "rust/benches/bin/profile_game.rs"
 
 [features]
 default = ["python"]
 python = ["dep:pyo3", "dep:numpy", "dep:ndarray"]
-flame = ["dep:flame"]  # Changed from flame_it to flame
 
 [package.metadata.maturin]
 name = "pyrat_engine"
