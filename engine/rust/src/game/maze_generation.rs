@@ -1,7 +1,7 @@
 #![allow(clippy::uninlined_format_args)]
 
 use crate::Coordinates;
-use rand::prelude::IndexedRandom;
+use rand::prelude::{IndexedRandom, SliceRandom};
 use rand::RngExt;
 use std::collections::{HashMap, HashSet};
 
@@ -56,10 +56,11 @@ impl MazeGenerator {
 
         self.add_border_connections();
 
-        // Validate before converting
-        if let Err(e) = self.validate_output() {
-            panic!("Maze generation failed validation: {e}");
-        }
+        debug_assert!(
+            self.validate_output().is_ok(),
+            "Maze generation failed validation: {}",
+            self.validate_output().unwrap_err()
+        );
 
         // Convert connections to walls (blocked passages)
         let walls = self.connections_to_walls();
@@ -173,205 +174,91 @@ impl MazeGenerator {
         }
     }
 
-    /// Ensures the maze is fully connected by connecting all isolated regions
+    /// Ensures the maze is fully connected by connecting all isolated regions.
+    ///
+    /// Uses union-find with randomized Kruskal's: collect all candidate edges
+    /// (adjacent cells with no passage), shuffle, then greedily add edges that
+    /// bridge different components. O(W×H) total instead of O(components × W×H).
     fn ensure_full_connectivity(&mut self) {
-        loop {
-            // Find all connected components
-            let mut visited = HashSet::new();
-            let mut components = Vec::new();
+        let w = self.config.width;
+        let h = self.config.height;
+        let n = w as usize * h as usize;
 
-            for x in 0..self.config.width {
-                for y in 0..self.config.height {
-                    let pos = Coordinates::new(x, y);
-                    if !visited.contains(&pos) {
-                        // Found a new component, explore it
-                        let mut component = HashSet::new();
-                        let mut stack = vec![pos];
+        // Quick check: DFS from (0,0) to see if already connected.
+        // For mazes without walls (empty, mud_only), this returns immediately
+        // without building the union-find.
+        {
+            let mut visited = vec![false; n];
+            visited[0] = true;
+            let mut count = 1usize;
+            let mut stack = vec![Coordinates::new(0, 0)];
 
-                        while let Some(current) = stack.pop() {
-                            if component.insert(current) {
-                                visited.insert(current);
-
-                                // Add all connected neighbors to stack
-                                if let Some(connections) = self.connections.get(&current) {
-                                    for &next in connections {
-                                        if !component.contains(&next) {
-                                            stack.push(next);
-                                        }
-                                    }
-                                }
-                            }
+            while let Some(pos) = stack.pop() {
+                if let Some(neighbors) = self.connections.get(&pos) {
+                    for &next in neighbors {
+                        let idx = next.to_index(w);
+                        if !visited[idx] {
+                            visited[idx] = true;
+                            count += 1;
+                            stack.push(next);
                         }
-
-                        components.push(component);
                     }
                 }
             }
 
-            // If there's only one component, we're done
-            if components.len() <= 1 {
-                break;
+            if count == n {
+                return;
             }
+        }
 
-            // Connect the first component to another component
-            let component1 = &components[0];
-            let component2 = &components[1];
+        // Multiple components — use union-find for efficient merging
+        let mut uf = UnionFind::new(n);
+        for (&pos, neighbors) in &self.connections {
+            for &neighbor in neighbors {
+                uf.union(pos.to_index(w), neighbor.to_index(w));
+            }
+        }
 
-            // Find the closest pair of cells between the two components
-            let mut best_pair = None;
-            let mut min_distance = u32::MAX;
-
-            for &pos1 in component1 {
-                for &pos2 in component2 {
-                    // Check if they're adjacent
-                    let dx = (pos1.x as i32 - pos2.x as i32).unsigned_abs();
-                    let dy = (pos1.y as i32 - pos2.y as i32).unsigned_abs();
-
-                    if (dx == 1 && dy == 0) || (dx == 0 && dy == 1) {
-                        // They're adjacent, we can connect them directly
-                        best_pair = Some((pos1, pos2));
-                        min_distance = 1;
-                        break;
-                    }
-
-                    let distance = dx + dy;
-                    if distance < min_distance {
-                        min_distance = distance;
-                        best_pair = Some((pos1, pos2));
+        // Collect all adjacent cell pairs where no passage exists (walls we could remove)
+        let mut candidates: Vec<(Coordinates, Coordinates)> = Vec::new();
+        for x in 0..w {
+            for y in 0..h {
+                let pos = Coordinates::new(x, y);
+                if x + 1 < w {
+                    let right = Coordinates::new(x + 1, y);
+                    if !self.has_connection(pos, right) {
+                        candidates.push((pos, right));
                     }
                 }
-
-                if min_distance == 1 {
-                    break;
-                }
-            }
-
-            // Connect the two components
-            if let Some((from, to)) = best_pair {
-                if min_distance == 1 {
-                    // They're adjacent, connect directly
-                    self.add_passage(from, to);
-
-                    if self.config.symmetry {
-                        let sym_from = self.get_symmetric(from);
-                        let sym_to = self.get_symmetric(to);
-                        self.add_passage(sym_from, sym_to);
+                if y + 1 < h {
+                    let up = Coordinates::new(x, y + 1);
+                    if !self.has_connection(pos, up) {
+                        candidates.push((pos, up));
                     }
-                } else {
-                    // They're not adjacent, we need to find a path
-                    // For simplicity, just ensure the old algorithm runs
-                    self.ensure_connectivity();
                 }
             }
         }
-    }
 
-    /// Ensures the maze is fully connected using a modified DFS algorithm
-    fn ensure_connectivity(&mut self) {
-        let mut connected =
-            vec![vec![false; self.config.height as usize]; self.config.width as usize];
-        let mut possible_border = Vec::new();
+        // Shuffle for random selection
+        candidates.shuffle(&mut self.rng);
 
-        // Start from top-left corner (0,0)
-        let start = Coordinates::new(0, 0);
-        connected[0][0] = true;
-        possible_border.push(start);
+        // Randomized Kruskal's: add edges that bridge different components
+        for (from, to) in candidates {
+            if uf.find(from.to_index(w)) != uf.find(to.to_index(w)) {
+                self.add_passage(from, to);
+                uf.union(from.to_index(w), to.to_index(w));
 
-        self.connect_region(&mut connected, &mut possible_border);
-    }
-
-    /// Recursively connects regions of the maze using DFS
-    fn connect_region(
-        &mut self,
-        connected: &mut [Vec<bool>],
-        possible_border: &mut Vec<Coordinates>,
-    ) {
-        while !possible_border.is_empty() {
-            let mut border = Vec::new();
-            let mut new_possible_border = Vec::new();
-
-            // Match Python's border creation exactly
-            for &current in possible_border.iter() {
-                let mut is_candidate = false;
-                let x = current.x as usize;
-                let y = current.y as usize;
-
-                // Check each direction exactly as Python does
-                if current.x + 1 < self.config.width
-                    && !self.has_connection(current, Coordinates::new(current.x + 1, current.y))
-                    && !connected[(current.x + 1) as usize][y]
-                {
-                    border.push((current, Coordinates::new(current.x + 1, current.y)));
-                    is_candidate = true;
-                }
-                if current.x > 0
-                    && !self.has_connection(current, Coordinates::new(current.x - 1, current.y))
-                    && !connected[(current.x - 1) as usize][y]
-                {
-                    border.push((current, Coordinates::new(current.x - 1, current.y)));
-                    is_candidate = true;
-                }
-                if current.y + 1 < self.config.height
-                    && !self.has_connection(current, Coordinates::new(current.x, current.y + 1))
-                    && !connected[x][(current.y + 1) as usize]
-                {
-                    border.push((current, Coordinates::new(current.x, current.y + 1)));
-                    is_candidate = true;
-                }
-                if current.y > 0
-                    && !self.has_connection(current, Coordinates::new(current.x, current.y - 1))
-                    && !connected[x][(current.y - 1) as usize]
-                {
-                    border.push((current, Coordinates::new(current.x, current.y - 1)));
-                    is_candidate = true;
+                if self.config.symmetry {
+                    let sym_from = self.get_symmetric(from);
+                    let sym_to = self.get_symmetric(to);
+                    self.add_passage(sym_from, sym_to);
+                    uf.union(sym_from.to_index(w), sym_to.to_index(w));
                 }
 
-                if is_candidate {
-                    new_possible_border.push(current);
+                if uf.components <= 1 {
+                    break;
                 }
             }
-
-            if border.is_empty() {
-                break;
-            }
-
-            // Select random border exactly as Python
-            let idx = self.rng.random_range(0..border.len());
-            let (from, to) = border[idx];
-
-            // Generate mud exactly as Python
-            let mud_value = if self.rng.random::<f32>() < self.config.mud_density {
-                self.rng.random_range(2..=self.config.mud_range)
-            } else {
-                1
-            };
-
-            // Add connections
-            self.connections.entry(from).or_default().push(to);
-            self.connections.entry(to).or_default().push(from);
-
-            if mud_value > 1 {
-                self.mud.insert(from, to, mud_value);
-                self.mud.insert(to, from, mud_value);
-            }
-
-            // Handle symmetry exactly as Python
-            if self.config.symmetry {
-                let sym_from = self.get_symmetric(from);
-                let sym_to = self.get_symmetric(to);
-
-                self.connections.entry(sym_from).or_default().push(sym_to);
-                self.connections.entry(sym_to).or_default().push(sym_from);
-
-                if mud_value > 1 {
-                    self.mud.insert(sym_from, sym_to, mud_value);
-                    self.mud.insert(sym_to, sym_from, mud_value);
-                }
-            }
-
-            connected[to.x as usize][to.y as usize] = true;
-            possible_border.push(to);
-            *possible_border = new_possible_border;
         }
     }
     #[inline]
@@ -680,6 +567,59 @@ impl CheeseGenerator {
     #[inline(always)]
     const fn get_symmetric(&self, pos: Coordinates) -> Coordinates {
         Coordinates::new(self.width - 1 - pos.x, self.height - 1 - pos.y)
+    }
+}
+
+/// Disjoint-set / union-find with path compression and union by rank.
+///
+/// Used by `ensure_full_connectivity` to track connected components in O(α(n))
+/// per operation instead of re-running DFS from scratch after every merge.
+struct UnionFind {
+    parent: Vec<u16>,
+    rank: Vec<u8>,
+    components: usize,
+}
+
+impl UnionFind {
+    fn new(n: usize) -> Self {
+        Self {
+            parent: (0..n as u16).collect(),
+            rank: vec![0; n],
+            components: n,
+        }
+    }
+
+    fn find(&mut self, x: usize) -> usize {
+        let mut root = x;
+        while self.parent[root] as usize != root {
+            root = self.parent[root] as usize;
+        }
+        // Path compression
+        let mut current = x;
+        while current != root {
+            let next = self.parent[current] as usize;
+            self.parent[current] = root as u16;
+            current = next;
+        }
+        root
+    }
+
+    fn union(&mut self, x: usize, y: usize) -> bool {
+        let rx = self.find(x);
+        let ry = self.find(y);
+        if rx == ry {
+            return false;
+        }
+        match self.rank[rx].cmp(&self.rank[ry]) {
+            std::cmp::Ordering::Less => self.parent[rx] = ry as u16,
+            std::cmp::Ordering::Greater => self.parent[ry] = rx as u16,
+            std::cmp::Ordering::Equal => {
+                self.parent[ry] = rx as u16;
+                self.rank[rx] += 1;
+            },
+        }
+        self.components -= 1;
+        true
     }
 }
 
