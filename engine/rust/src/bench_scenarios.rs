@@ -3,7 +3,7 @@
 //! Used by both `cargo bench` (criterion) and the `profile_game` binary.
 
 use crate::{Direction, GameState};
-use rand::Rng;
+use rand::{Rng, RngExt};
 
 /// Board dimensions and game parameters for a benchmark scenario.
 pub struct BoardSize {
@@ -84,7 +84,7 @@ pub const COMBOS: &[FeatureCombo] = &[
 
 #[inline]
 pub fn random_direction(rng: &mut impl Rng) -> Direction {
-    match rng.gen_range(0u8..5) {
+    match rng.random_range(0u8..5) {
         0 => Direction::Up,
         1 => Direction::Right,
         2 => Direction::Down,

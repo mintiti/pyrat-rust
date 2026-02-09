@@ -1,8 +1,8 @@
 #![allow(clippy::uninlined_format_args)]
 
 use crate::Coordinates;
-use rand::prelude::SliceRandom;
-use rand::Rng;
+use rand::prelude::IndexedRandom;
+use rand::RngExt;
 use std::collections::{HashMap, HashSet};
 
 use crate::game::types::MudMap;
@@ -34,11 +34,9 @@ impl MazeGenerator {
     /// Creates a new maze generator with the given configuration
     #[must_use]
     pub fn new(config: MazeConfig) -> Self {
-        let rng = config
+        let rng: rand::rngs::StdRng = config
             .seed
-            .map_or_else(rand::SeedableRng::from_entropy, |seed| {
-                rand::SeedableRng::seed_from_u64(seed)
-            });
+            .map_or_else(rand::make_rng, rand::SeedableRng::seed_from_u64);
 
         Self {
             config,
@@ -88,11 +86,11 @@ impl MazeGenerator {
                 if !self.config.symmetry || not_considered.contains(&current) {
                     // Horizontal connections (exactly as Python)
                     if i + 1 < self.config.width
-                        && self.rng.gen::<f32>() >= self.config.target_density
+                        && self.rng.random::<f32>() >= self.config.target_density
                     {
                         let next = Coordinates::new(i + 1, j);
-                        let mud_value = if self.rng.gen::<f32>() < self.config.mud_density {
-                            self.rng.gen_range(2..=self.config.mud_range)
+                        let mud_value = if self.rng.random::<f32>() < self.config.mud_density {
+                            self.rng.random_range(2..=self.config.mud_range)
                         } else {
                             1 // Python uses 1 for no mud
                         };
@@ -129,11 +127,11 @@ impl MazeGenerator {
 
                     // Vertical connections (exactly as Python)
                     if j + 1 < self.config.height
-                        && self.rng.gen::<f32>() >= self.config.target_density
+                        && self.rng.random::<f32>() >= self.config.target_density
                     {
                         let next = Coordinates::new(i, j + 1);
-                        let mud_value = if self.rng.gen::<f32>() < self.config.mud_density {
-                            self.rng.gen_range(2..=self.config.mud_range)
+                        let mud_value = if self.rng.random::<f32>() < self.config.mud_density {
+                            self.rng.random_range(2..=self.config.mud_range)
                         } else {
                             1
                         };
@@ -338,12 +336,12 @@ impl MazeGenerator {
             }
 
             // Select random border exactly as Python
-            let idx = self.rng.gen_range(0..border.len());
+            let idx = self.rng.random_range(0..border.len());
             let (from, to) = border[idx];
 
             // Generate mud exactly as Python
-            let mud_value = if self.rng.gen::<f32>() < self.config.mud_density {
-                self.rng.gen_range(2..=self.config.mud_range)
+            let mud_value = if self.rng.random::<f32>() < self.config.mud_density {
+                self.rng.random_range(2..=self.config.mud_range)
             } else {
                 1
             };
@@ -412,8 +410,8 @@ impl MazeGenerator {
         self.connections.entry(to).or_default().push(from);
 
         // Then handle mud if needed
-        if self.rng.gen::<f32>() < self.config.mud_density {
-            let mud_value = self.rng.gen_range(2..=self.config.mud_range);
+        if self.rng.random::<f32>() < self.config.mud_density {
+            let mud_value = self.rng.random_range(2..=self.config.mud_range);
 
             // Add mud both ways for the passage
             self.mud.insert(from, to, mud_value);
@@ -596,9 +594,8 @@ pub struct CheeseGenerator {
 impl CheeseGenerator {
     #[must_use]
     pub fn new(config: CheeseConfig, width: u8, height: u8, seed: Option<u64>) -> Self {
-        let rng = seed.map_or_else(rand::SeedableRng::from_entropy, |seed| {
-            rand::SeedableRng::seed_from_u64(seed)
-        });
+        let rng: rand::rngs::StdRng =
+            seed.map_or_else(rand::make_rng, rand::SeedableRng::seed_from_u64);
 
         Self {
             config,
@@ -657,7 +654,7 @@ impl CheeseGenerator {
 
         // Place remaining pieces
         while remaining > 0 && !candidates.is_empty() {
-            let idx = self.rng.gen_range(0..candidates.len());
+            let idx = self.rng.random_range(0..candidates.len());
             let chosen = candidates.swap_remove(idx);
             pieces.push(chosen);
 
