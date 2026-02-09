@@ -13,6 +13,7 @@ fn bench_id(
 
 fn bench_game_init(c: &mut Criterion) {
     let mut group = c.benchmark_group("game_init");
+    group.throughput(criterion::Throughput::Elements(1));
 
     for size in SIZES {
         for combo in COMBOS {
