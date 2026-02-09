@@ -1,5 +1,6 @@
-use criterion::{black_box, criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use pyrat::bench_scenarios::{create_game, random_direction, COMBOS, SIZES};
+use std::hint::black_box;
 
 fn bench_id(
     size: &pyrat::bench_scenarios::BoardSize,
@@ -39,7 +40,7 @@ fn bench_process_turn(c: &mut Criterion) {
 
         for combo in COMBOS {
             group.bench_function(bench_id(size, combo), |b| {
-                let mut rng = rand::thread_rng();
+                let mut rng = rand::rng();
                 let mut seed: u64 = 0;
                 b.iter_with_setup(
                     || {
@@ -68,7 +69,7 @@ fn bench_full_game(c: &mut Criterion) {
     for size in SIZES {
         for combo in COMBOS {
             group.bench_function(bench_id(size, combo), |b| {
-                let mut rng = rand::thread_rng();
+                let mut rng = rand::rng();
                 let mut seed: u64 = 0;
                 b.iter_with_setup(
                     || {

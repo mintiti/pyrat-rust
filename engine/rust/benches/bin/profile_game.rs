@@ -7,7 +7,7 @@ fn run_scenario(
     combo: &pyrat::bench_scenarios::FeatureCombo,
     duration: Duration,
 ) -> (u64, u64) {
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut total_turns: u64 = 0;
     let mut total_games: u64 = 0;
     let mut seed: u64 = 0;
@@ -86,7 +86,7 @@ fn run_single(scenario: &str) -> ! {
         size.name, combo.name, size.width, size.height
     );
 
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
     let mut seed: u64 = 0;
     loop {
         seed = seed.wrapping_add(1);
