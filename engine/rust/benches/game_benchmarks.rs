@@ -28,6 +28,38 @@ fn bench_game_init(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_process_turn(c: &mut Criterion) {
+    let mut group = c.benchmark_group("process_turn");
+    group.sample_size(50);
+
+    for size in SIZES {
+        let turns = u64::from(size.max_turns / 2);
+        group.throughput(criterion::Throughput::Elements(turns));
+
+        for combo in COMBOS {
+            group.bench_function(bench_id(size, combo), |b| {
+                let mut rng = rand::thread_rng();
+                let mut seed: u64 = 0;
+                b.iter_with_setup(
+                    || {
+                        seed = seed.wrapping_add(1);
+                        create_game(size, combo, seed)
+                    },
+                    |mut game| {
+                        for _ in 0..turns {
+                            black_box(game.process_turn(
+                                random_direction(&mut rng),
+                                random_direction(&mut rng),
+                            ));
+                        }
+                    },
+                );
+            });
+        }
+    }
+    group.finish();
+}
+
 fn bench_full_game(c: &mut Criterion) {
     let mut group = c.benchmark_group("full_game");
     group.sample_size(50);
@@ -64,6 +96,6 @@ criterion_group!(
     config = Criterion::default()
         .warm_up_time(std::time::Duration::from_secs(1))
         .measurement_time(std::time::Duration::from_secs(2));
-    targets = bench_game_init, bench_full_game
+    targets = bench_game_init, bench_process_turn, bench_full_game
 );
 criterion_main!(benches);
