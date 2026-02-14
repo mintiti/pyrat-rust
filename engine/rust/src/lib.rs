@@ -10,10 +10,12 @@
 
 pub mod bench_scenarios;
 #[cfg(feature = "python")]
-mod bindings;
+pub mod bindings;
 pub mod game;
 
 // Re-export commonly used items for Rust users
+#[cfg(feature = "python")]
+pub use bindings::game::PyRat;
 pub use game::{
     board::MoveTable,
     cheese_board::CheeseBoard,

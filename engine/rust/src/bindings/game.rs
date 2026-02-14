@@ -1064,6 +1064,26 @@ impl PyRat {
     }
 }
 
+/// Rust-only accessors for cross-crate use (not exposed to Python)
+impl PyRat {
+    /// Borrow the inner `GameState`.
+    pub fn game_state(&self) -> &GameState {
+        &self.game
+    }
+
+    /// Wrap an existing `GameState` into a `PyRat`.
+    ///
+    /// `symmetric` controls how `reset()` regenerates the maze.
+    pub fn from_game_state(game: GameState, symmetric: bool) -> Self {
+        let observation_handler = ObservationHandler::new(&game);
+        Self {
+            game,
+            observation_handler,
+            symmetric,
+        }
+    }
+}
+
 #[pyclass]
 pub struct PyGameObservation {
     player_position: Coordinates,
@@ -1437,7 +1457,7 @@ impl PyGameConfigBuilder {
 }
 
 /// Register types submodule
-pub(crate) fn register_types(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn register_types(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Coordinates>()?;
     // Direction is now a Python IntEnum defined in types.py, not exposed from Rust
     m.add_class::<crate::Wall>()?;
@@ -1446,21 +1466,21 @@ pub(crate) fn register_types(m: &Bound<'_, PyModule>) -> PyResult<()> {
 }
 
 /// Register game submodule
-pub(crate) fn register_game(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn register_game(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyRat>()?;
     m.add_class::<PyMoveUndo>()?;
     Ok(())
 }
 
 /// Register observation submodule
-pub(crate) fn register_observation(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn register_observation(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyGameObservation>()?;
     m.add_class::<PyObservationHandler>()?;
     Ok(())
 }
 
 /// Register builder submodule
-pub(crate) fn register_builder(m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn register_builder(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyGameConfigBuilder>()?;
     Ok(())
 }
