@@ -577,7 +577,14 @@ impl GameState {
         collected
     }
 
-    fn check_game_over(&self) -> bool {
+    /// Check if the game is over.
+    ///
+    /// Returns `true` when any terminal condition is met:
+    /// 1. A player scored more than half the total cheese
+    /// 2. All cheese has been collected
+    /// 3. Maximum turns reached
+    #[must_use]
+    pub fn check_game_over(&self) -> bool {
         // Check win conditions:
         // 1. Player scored more than half the total cheese (not remaining)
         let total_cheese = f32::from(self.cheese.total_cheese());
