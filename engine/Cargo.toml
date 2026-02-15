@@ -20,7 +20,7 @@ rand = "0.10"
 pyo3 = { version = "0.25", features = ["extension-module"], optional = true }
 numpy = { version = "0.25", optional = true }
 serde = { version = "1.0.214", features = ["derive"] }
-ndarray = { version = "0.15", optional = true }
+ndarray = { version = "0.16", optional = true }
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
