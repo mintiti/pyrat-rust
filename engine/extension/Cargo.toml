@@ -1,0 +1,21 @@
+[package]
+name = "pyrat-extension"
+version = "0.1.0"
+edition = "2021"
+description = "PyO3 cdylib entry point for pyrat-engine"
+license = "MIT"
+repository = "https://github.com/mintiti/pyrat-rust"
+keywords = ["game", "maze", "reinforcement-learning", "python-bindings"]
+categories = ["games"]
+publish = false
+
+[lib]
+name = "pyrat_extension"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyrat = { path = "..", package = "pyrat-rust", features = ["python"] }
+pyo3 = { version = "0.25", features = ["extension-module"] }
+
+[lints.clippy]
+cargo_common_metadata = "allow"

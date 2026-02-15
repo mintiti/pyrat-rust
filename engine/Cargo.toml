@@ -13,11 +13,11 @@ license = "MIT"
 [lib]
 name = "pyrat"
 path = "rust/src/lib.rs"
-crate-type = ["cdylib", "rlib"]  # Both Python module and Rust library
+crate-type = ["rlib"]
 
 [dependencies]
 rand = "0.10"
-pyo3 = { version = "0.25", features = ["extension-module"], optional = true }
+pyo3 = { version = "0.25", optional = true }
 numpy = { version = "0.25", optional = true }
 serde = { version = "1.0.214", features = ["derive"] }
 ndarray = { version = "0.16", optional = true }
@@ -47,10 +47,8 @@ path = "rust/benches/bin/profile_game.rs"
 default = ["python"]
 python = ["dep:pyo3", "dep:numpy", "dep:ndarray"]
 
-[package.metadata.maturin]
-name = "pyrat_engine"
-module-name = "pyrat_engine._rust"  # Python module will be importable as pyrat_engine._rust
-python-source = "python"
+[workspace]
+members = ["extension"]
 
 [lints.clippy]
 # Enable useful lint groups but be selective
