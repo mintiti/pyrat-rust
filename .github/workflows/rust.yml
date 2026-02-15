@@ -43,7 +43,7 @@ jobs:
     - name: Run clippy (no features)
       run: cd engine && cargo clippy -p pyrat-rust --all-targets --no-default-features -- -D warnings
 
-    - name: Run clippy (all features)
+    - name: Run clippy (all features, full workspace)
       run: cd engine && cargo clippy --all-targets --all-features -- -D warnings -A non-local-definitions
 
     - name: Run tests

@@ -44,20 +44,24 @@ name = "profile_game"
 path = "rust/benches/bin/profile_game.rs"
 
 [features]
-default = ["python"]
+default = []
 python = ["dep:pyo3", "dep:numpy", "dep:ndarray"]
 
 [workspace]
 members = ["extension"]
 
-[lints.clippy]
-# Enable useful lint groups but be selective
-cargo = "warn"          # Basic cargo lints
-complexity = "warn"     # Complexity metrics
-correctness = "warn"    # Correctness checks
-perf = "warn"          # Performance optimizations
-suspicious = "warn"     # Suspicious code patterns
+[workspace.lints.clippy]
+# Lint groups at priority -1 so individual overrides take precedence
+cargo = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+correctness = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+pedantic = { level = "allow", priority = -1 }
+nursery = { level = "allow", priority = -1 }
 
-# Disable overly strict groups
-pedantic = "allow"      # Too strict for game engine code
-nursery = "allow"      # Experimental lints
+# Individual overrides
+cargo_common_metadata = "allow"  # root has full metadata; extension is publish = false
+
+[lints]
+workspace = true

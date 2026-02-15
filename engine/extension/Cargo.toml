@@ -17,5 +17,5 @@ crate-type = ["cdylib"]
 pyrat = { path = "..", package = "pyrat-rust", features = ["python"] }
 pyo3 = { version = "0.25", features = ["extension-module"] }
 
-[lints.clippy]
-cargo_common_metadata = "allow"
+[lints]
+workspace = true

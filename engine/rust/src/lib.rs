@@ -3,10 +3,9 @@
 #![allow(clippy::module_name_repetitions)] // Allow game_logic etc module names
 #![allow(clippy::inline_always)] // We want aggressive inlining for performance
 #![allow(clippy::trivially_copy_pass_by_ref)] // Trust the optimizer for small types
-#![allow(clippy::redundant_pub_crate)] // Suppress warning about pub(crate) in pymodule
+#![allow(clippy::redundant_pub_crate)] // pyo3 #[pymethods] generates pub(crate) items in bindings
 #![allow(clippy::must_use_candidate)]
-#![allow(clippy::cargo_common_metadata)]
-#![allow(non_local_definitions)] // pyo3 #[pymethods] expands to non-local impls
+#![allow(non_local_definitions)] // pyo3 #[pymethods] in bindings expands to non-local impls
 
 pub mod bench_scenarios;
 #[cfg(feature = "python")]

@@ -32,7 +32,6 @@ dependencies = [
 
 [tool.maturin]
 manifest-path = "extension/Cargo.toml"
-features = ["pyo3/extension-module"]
 python-source = "python"
 module-name = "pyrat_engine._core"
 
