@@ -602,6 +602,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "pyrat-extension"
+version = "0.1.0"
+dependencies = [
+ "pyo3",
+ "pyrat-rust",
+]
+
+[[package]]
 name = "pyrat-rust"
 version = "0.1.0"
 dependencies = [

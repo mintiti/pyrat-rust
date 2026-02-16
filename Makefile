@@ -44,7 +44,7 @@ test: test-engine test-protocol test-cli
 
 test-engine:
 	@echo "Running engine tests..."
-	cd engine && cargo test --lib --no-default-features
+	cd engine && cargo test -p pyrat-rust --lib --no-default-features
 	cd engine && uv run pytest python/tests -v
 
 test-protocol:
@@ -74,7 +74,7 @@ fmt:
 check:
 	@echo "Running checks..."
 	cd engine && cargo fmt --all -- --check
-	cd engine && cargo clippy --all-targets --no-default-features -- -D warnings
+	cd engine && cargo clippy -p pyrat-rust --all-targets --no-default-features -- -D warnings
 	cd engine && cargo clippy --all-targets --all-features -- -D warnings -A non-local-definitions
 	uv run ruff check engine/python protocol/pyrat_base cli
 	uv run mypy engine/python/pyrat_engine protocol/pyrat_base/pyrat_base cli/pyrat_runner --ignore-missing-imports

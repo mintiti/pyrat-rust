@@ -13,11 +13,11 @@ license = "MIT"
 [lib]
 name = "pyrat"
 path = "rust/src/lib.rs"
-crate-type = ["cdylib", "rlib"]  # Both Python module and Rust library
+crate-type = ["rlib"]
 
 [dependencies]
 rand = "0.10"
-pyo3 = { version = "0.25", features = ["extension-module"], optional = true }
+pyo3 = { version = "0.25", optional = true }
 numpy = { version = "0.25", optional = true }
 serde = { version = "1.0.214", features = ["derive"] }
 ndarray = { version = "0.16", optional = true }
@@ -44,22 +44,24 @@ name = "profile_game"
 path = "rust/benches/bin/profile_game.rs"
 
 [features]
-default = ["python"]
+default = []
 python = ["dep:pyo3", "dep:numpy", "dep:ndarray"]
 
-[package.metadata.maturin]
-name = "pyrat_engine"
-module-name = "pyrat_engine._rust"  # Python module will be importable as pyrat_engine._rust
-python-source = "python"
+[workspace]
+members = ["extension"]
 
-[lints.clippy]
-# Enable useful lint groups but be selective
-cargo = "warn"          # Basic cargo lints
-complexity = "warn"     # Complexity metrics
-correctness = "warn"    # Correctness checks
-perf = "warn"          # Performance optimizations
-suspicious = "warn"     # Suspicious code patterns
+[workspace.lints.clippy]
+# Lint groups at priority -1 so individual overrides take precedence
+cargo = { level = "warn", priority = -1 }
+complexity = { level = "warn", priority = -1 }
+correctness = { level = "warn", priority = -1 }
+perf = { level = "warn", priority = -1 }
+suspicious = { level = "warn", priority = -1 }
+pedantic = { level = "allow", priority = -1 }
+nursery = { level = "allow", priority = -1 }
 
-# Disable overly strict groups
-pedantic = "allow"      # Too strict for game engine code
-nursery = "allow"      # Experimental lints
+# Individual overrides
+cargo_common_metadata = "allow"  # root has full metadata; extension is publish = false
+
+[lints]
+workspace = true
