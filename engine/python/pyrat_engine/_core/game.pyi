@@ -68,16 +68,6 @@ class PyRat:
         symmetric: bool = True,
     ) -> PyRat: ...
     @staticmethod
-    def create_from_walls(
-        width: int,
-        height: int,
-        walls: list[Wall],
-        *,
-        seed: int | None = None,
-        max_turns: int = 300,
-        symmetric: bool = True,
-    ) -> PyRat: ...
-    @staticmethod
     def create_with_starts(
         width: int,
         height: int,

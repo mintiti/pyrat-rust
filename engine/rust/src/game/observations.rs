@@ -185,17 +185,21 @@ pub struct GameObservation<'py> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::GameState;
+    use crate::game::builder::GameBuilder;
+    use crate::game::types::MudMap;
     use std::collections::HashMap;
 
     #[test]
     fn test_movement_constraints() {
-        let walls = HashMap::new();
-        let mut game = GameState::new(3, 3, walls, 300);
+        let mut mud = MudMap::new();
+        mud.insert(Coordinates::new(0, 0), Coordinates::new(0, 1), 2);
 
-        // Add mud between (0,0) and (0,1) - should work in both directions
-        game.mud
-            .insert(Coordinates::new(0, 0), Coordinates::new(0, 1), 2);
+        let game = GameBuilder::new(3, 3)
+            .with_custom_maze(HashMap::new(), mud)
+            .with_corner_positions()
+            .with_custom_cheese(vec![])
+            .build()
+            .create(None);
 
         let constraints = MovementConstraints::new(&game);
 
