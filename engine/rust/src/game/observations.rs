@@ -226,7 +226,14 @@ mod tests {
 
     #[test]
     fn test_observation_refresh() {
-        let game = GameState::new_symmetric(Some(4), Some(4), Some(2), Some(42), None, None);
+        use crate::game::builder::{GameBuilder, MazeParams};
+
+        let config = GameBuilder::new(5, 5)
+            .with_random_maze(MazeParams::default())
+            .with_corner_positions()
+            .with_random_cheese(3, true)
+            .build();
+        let game = config.create(Some(42));
         let mut handler = ObservationHandler::new(&game);
 
         // Clear all cheese

@@ -2,7 +2,7 @@
 //!
 //! Used by both `cargo bench` (criterion) and the `profile_game` binary.
 
-use crate::{Direction, GameState};
+use crate::{Direction, GameBuilder, GameState, MazeParams};
 use rand::{Rng, RngExt};
 
 /// Board dimensions and game parameters for a benchmark scenario.
@@ -94,14 +94,15 @@ pub fn random_direction(rng: &mut impl Rng) -> Direction {
 }
 
 pub fn create_game(size: &BoardSize, combo: &FeatureCombo, seed: u64) -> GameState {
-    let mut game = GameState::new_symmetric(
-        Some(size.width),
-        Some(size.height),
-        Some(size.cheese),
-        Some(seed),
-        Some(combo.wall_density),
-        Some(combo.mud_density),
-    );
-    game.max_turns = size.max_turns;
-    game
+    GameBuilder::new(size.width, size.height)
+        .with_max_turns(size.max_turns)
+        .with_random_maze(MazeParams {
+            target_density: combo.wall_density,
+            mud_density: combo.mud_density,
+            ..MazeParams::default()
+        })
+        .with_corner_positions()
+        .with_random_cheese(size.cheese, true)
+        .build()
+        .create(Some(seed))
 }

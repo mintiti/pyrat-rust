@@ -102,9 +102,40 @@ Rust tests run without Python features to avoid linking issues.
 
 ## Game Creation API
 
-The engine provides multiple ways to create games, supporting various use cases from quick testing to precise control:
+### Rust: Typestate Builder + GameConfig
 
-### 1. Basic Constructor
+The Rust API uses a two-phase system:
+1. **`GameBuilder`** — assembles a `GameConfig` through a compile-time enforced sequence (maze → players → cheese)
+2. **`GameConfig`** — stamps out `GameState` instances via `create(Option<u64>)`, enabling reuse for RL training
+
+```rust
+use pyrat_engine::{GameBuilder, GameConfig, MazeParams};
+
+// Build a reusable config
+let config = GameBuilder::new(21, 15)
+    .with_max_turns(300)                      // optional, default 300
+    .with_random_maze(MazeParams::default())  // or with_custom_maze(walls, mud)
+    .with_corner_positions()                  // or with_random_positions() / with_custom_positions(p1, p2)
+    .with_random_cheese(41, true)             // or with_custom_cheese(vec![...])
+    .build();
+
+// Stamp out games (different seed each time)
+let game1 = config.create(Some(42));
+let game2 = config.create(Some(43));
+
+// Named presets: tiny, small, default, large, huge, empty, asymmetric
+let config = GameConfig::preset("large").unwrap();
+let game = config.create(Some(42));
+```
+
+`MazeParams` fields: `target_density` (wall prob, 0–1), `connected` (bool), `symmetry` (bool), `mud_density` (0–1), `mud_range` (max mud cost).
+
+`GameState` constructors (`new`, `new_with_config`, etc.) are `pub(crate)` — use the builder from outside the crate.
+
+### Python API
+
+The Python bindings remain unchanged:
+
 ```python
 from pyrat_engine import PyRat
 
@@ -113,69 +144,20 @@ game = PyRat()
 
 # Custom parameters
 game = PyRat(width=31, height=21, cheese_count=85, max_turns=500)
-```
 
-### 2. Preset Configurations
-```python
-from pyrat_engine.core.game import GameState as PyGameState
+# Presets: tiny, small, default, large, huge, empty, asymmetric
+game = PyRat.create_preset("large", seed=42)
 
-# Available presets:
-# - "tiny": 11x9 board, 13 cheese, 150 turns
-# - "small": 15x11 board, 21 cheese, 200 turns
-# - "default": 21x15 board, 41 cheese, 300 turns
-# - "large": 31x21 board, 85 cheese, 400 turns
-# - "huge": 41x31 board, 165 cheese, 500 turns
-# - "empty": 21x15, no walls/mud, for testing
-# - "asymmetric": Standard size but asymmetric generation
+# Custom maze layout
+game = PyRat.create_from_maze(width=15, height=11, walls=[((0,0),(0,1))], seed=42)
 
-game_state = PyGameState.create_preset("large", seed=42)
-```
+# Custom starting positions
+game = PyRat.create_with_starts(21, 15, (5,5), (15,9), preset="default", seed=42)
 
-### 3. Custom Maze Layout
-```python
-# Define specific walls, generate random cheese
-walls = [
-    ((0, 0), (0, 1)),  # Wall between (0,0) and (0,1)
-    ((1, 1), (2, 1)),  # Wall between (1,1) and (2,1)
-]
-
-game_state = PyGameState.create_from_maze(
-    width=15,
-    height=11,
-    walls=walls,
-    seed=42,        # For reproducible cheese placement
-    max_turns=200
-)
-```
-
-### 4. Custom Starting Positions
-```python
-# Use preset configuration but with custom player positions
-game_state = PyGameState.create_with_starts(
-    width=21,
-    height=15,
-    player1_start=(5, 5),
-    player2_start=(15, 9),
-    preset="default",
-    seed=42
-)
-```
-
-### 5. Full Custom Configuration
-```python
-# Complete control over all game elements
-walls = [((0, 0), (0, 1)), ((1, 1), (2, 1))]
-mud = [((2, 2), (3, 2), 3)]  # 3 turns to traverse
-cheese = [(5, 5), (10, 10), (15, 7)]
-
-game_state = PyGameState.create_custom(
-    width=21,
-    height=15,
-    walls=walls,
-    mud=mud,
-    cheese=cheese,
-    player1_pos=(0, 0),
-    player2_pos=(20, 14),
-    max_turns=300
+# Full custom
+game = PyRat.create_custom(
+    width=21, height=15,
+    walls=[((0,0),(0,1))], mud=[((2,2),(3,2),3)],
+    cheese=[(5,5),(10,10)], player1_pos=(0,0), player2_pos=(20,14)
 )
 ```

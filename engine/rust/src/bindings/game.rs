@@ -39,12 +39,10 @@ pub enum WallInput {
     Object(crate::Wall),
 }
 
-/// Configuration for game presets
+/// Maze generation parameters for Python binding methods that need them
+/// (e.g., `create_with_starts` which takes its own width/height).
 #[derive(Clone)]
-struct PresetConfig {
-    width: u8,
-    height: u8,
-    cheese_count: u16,
+struct PresetMazeParams {
     symmetric: bool,
     wall_density: f32,
     mud_density: f32,
@@ -52,80 +50,16 @@ struct PresetConfig {
     max_turns: u16,
 }
 
-impl PresetConfig {
-    /// Get a preset configuration by name
+impl PresetMazeParams {
     fn get_preset(name: &str) -> PyResult<Self> {
         match name {
-            "tiny" => Ok(Self {
-                width: 11,
-                height: 9,
-                cheese_count: 13,
-                symmetric: true,
-                wall_density: 0.7,
-                mud_density: 0.1,
-                mud_range: 3,
-                max_turns: 150,
-            }),
-            "small" => Ok(Self {
-                width: 15,
-                height: 11,
-                cheese_count: 21,
-                symmetric: true,
-                wall_density: 0.7,
-                mud_density: 0.1,
-                mud_range: 3,
-                max_turns: 200,
-            }),
-            "default" => Ok(Self {
-                width: 21,
-                height: 15,
-                cheese_count: 41,
-                symmetric: true,
-                wall_density: 0.7,
-                mud_density: 0.1,
-                mud_range: 3,
-                max_turns: 300,
-            }),
-            "large" => Ok(Self {
-                width: 31,
-                height: 21,
-                cheese_count: 85,
-                symmetric: true,
-                wall_density: 0.7,
-                mud_density: 0.1,
-                mud_range: 3,
-                max_turns: 400,
-            }),
-            "huge" => Ok(Self {
-                width: 41,
-                height: 31,
-                cheese_count: 165,
-                symmetric: true,
-                wall_density: 0.7,
-                mud_density: 0.1,
-                mud_range: 3,
-                max_turns: 500,
-            }),
-            "empty" => Ok(Self {
-                width: 21,
-                height: 15,
-                cheese_count: 41,
-                symmetric: true,
-                wall_density: 0.0,  // No walls
-                mud_density: 0.0,   // No mud
-                mud_range: 2,
-                max_turns: 300,
-            }),
-            "asymmetric" => Ok(Self {
-                width: 21,
-                height: 15,
-                cheese_count: 41,
-                symmetric: false,  // Key difference
-                wall_density: 0.7,
-                mud_density: 0.1,
-                mud_range: 3,
-                max_turns: 300,
-            }),
+            "tiny" => Ok(Self { symmetric: true, wall_density: 0.7, mud_density: 0.1, mud_range: 3, max_turns: 150 }),
+            "small" => Ok(Self { symmetric: true, wall_density: 0.7, mud_density: 0.1, mud_range: 3, max_turns: 200 }),
+            "default" => Ok(Self { symmetric: true, wall_density: 0.7, mud_density: 0.1, mud_range: 3, max_turns: 300 }),
+            "large" => Ok(Self { symmetric: true, wall_density: 0.7, mud_density: 0.1, mud_range: 3, max_turns: 400 }),
+            "huge" => Ok(Self { symmetric: true, wall_density: 0.7, mud_density: 0.1, mud_range: 3, max_turns: 500 }),
+            "empty" => Ok(Self { symmetric: true, wall_density: 0.0, mud_density: 0.0, mud_range: 2, max_turns: 300 }),
+            "asymmetric" => Ok(Self { symmetric: false, wall_density: 0.7, mud_density: 0.1, mud_range: 3, max_turns: 300 }),
             _ => Err(PyValueError::new_err(format!(
                 "Unknown preset '{name}'. Available presets: tiny, small, default, large, huge, empty, asymmetric"
             ))),
@@ -245,17 +179,25 @@ impl PyRat {
         wall_density: Option<f32>,
         mud_density: Option<f32>,
     ) -> Self {
-        let mut game = if symmetric {
-            GameState::new_symmetric(width, height, cheese_count, seed, wall_density, mud_density)
-        } else {
-            GameState::new_asymmetric(width, height, cheese_count, seed, wall_density, mud_density)
-        };
+        use crate::game::builder::{GameBuilder, MazeParams};
 
-        // Override max_turns if provided
-        if let Some(max_turns) = max_turns {
-            game.max_turns = max_turns;
-        }
+        let w = width.unwrap_or(GameState::DEFAULT_WIDTH);
+        let h = height.unwrap_or(GameState::DEFAULT_HEIGHT);
+        let cheese = cheese_count.unwrap_or(GameState::DEFAULT_CHEESE_COUNT);
 
+        let config = GameBuilder::new(w, h)
+            .with_max_turns(max_turns.unwrap_or(300))
+            .with_random_maze(MazeParams {
+                target_density: wall_density.unwrap_or(0.7),
+                symmetry: symmetric,
+                mud_density: mud_density.unwrap_or(0.1),
+                ..MazeParams::default()
+            })
+            .with_corner_positions()
+            .with_random_cheese(cheese, symmetric)
+            .build();
+
+        let game = config.create(seed);
         let observation_handler = ObservationHandler::new(&game);
         Self {
             game,
@@ -531,25 +473,18 @@ impl PyRat {
     /// Reset the game state
     #[pyo3(signature = (seed=None))]
     fn reset(&mut self, seed: Option<u64>) {
-        self.game = if self.symmetric {
-            GameState::new_symmetric(
-                Some(self.game.width()),
-                Some(self.game.height()),
-                Some(self.game.total_cheese()),
-                seed,
-                None,
-                None,
-            )
-        } else {
-            GameState::new_asymmetric(
-                Some(self.game.width()),
-                Some(self.game.height()),
-                Some(self.game.total_cheese()),
-                seed,
-                None,
-                None,
-            )
-        };
+        use crate::game::builder::{GameBuilder, MazeParams};
+
+        let config = GameBuilder::new(self.game.width(), self.game.height())
+            .with_random_maze(MazeParams {
+                symmetry: self.symmetric,
+                ..MazeParams::default()
+            })
+            .with_corner_positions()
+            .with_random_cheese(self.game.total_cheese(), self.symmetric)
+            .build();
+
+        self.game = config.create(seed);
         // Need full refresh after reset
         self.observation_handler.refresh_cheese(&self.game);
     }
@@ -730,35 +665,18 @@ impl PyRat {
     #[staticmethod]
     #[pyo3(signature = (preset="default", *, seed=None))]
     fn create_preset(preset: &str, seed: Option<u64>) -> PyResult<Self> {
-        use crate::game::maze_generation::{CheeseConfig, MazeConfig};
+        use crate::game::builder::GameConfig;
 
-        let config = PresetConfig::get_preset(preset)?;
+        let game_config = GameConfig::preset(preset).map_err(PyValueError::new_err)?;
+        let symmetric = matches!(&game_config.maze,
+            crate::game::builder::MazeStrategy::Random(p) if p.symmetry);
 
-        let maze_config = MazeConfig {
-            width: config.width,
-            height: config.height,
-            target_density: config.wall_density,
-            connected: true,
-            symmetry: config.symmetric,
-            mud_density: config.mud_density,
-            mud_range: config.mud_range,
-            seed,
-        };
-
-        let cheese_config = CheeseConfig {
-            count: config.cheese_count,
-            symmetry: config.symmetric,
-        };
-
-        let mut game =
-            GameState::new_random(config.width, config.height, maze_config, cheese_config);
-        game.max_turns = config.max_turns;
-
+        let game = game_config.create(seed);
         let observation_handler = ObservationHandler::new(&game);
         Ok(Self {
             game,
             observation_handler,
-            symmetric: config.symmetric,
+            symmetric,
         })
     }
 
@@ -999,7 +917,7 @@ impl PyRat {
                 .ok_or_else(|| PyValueError::new_err("player2_start validation failed"))?;
 
         // Get preset configuration
-        let config = PresetConfig::get_preset(preset)?;
+        let config = PresetMazeParams::get_preset(preset)?;
 
         // Create maze with preset configuration
         let maze_config = MazeConfig {
