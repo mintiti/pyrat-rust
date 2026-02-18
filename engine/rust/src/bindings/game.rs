@@ -170,23 +170,25 @@ impl PyGameConfig {
 
     #[getter]
     fn width(&self) -> u8 {
-        self.inner.width
+        self.inner.width()
     }
 
     #[getter]
     fn height(&self) -> u8 {
-        self.inner.height
+        self.inner.height()
     }
 
     #[getter]
     fn max_turns(&self) -> u16 {
-        self.inner.max_turns
+        self.inner.max_turns()
     }
 
     fn __repr__(&self) -> String {
         format!(
             "GameConfig({}x{}, max_turns={})",
-            self.inner.width, self.inner.height, self.inner.max_turns
+            self.inner.width(),
+            self.inner.height(),
+            self.inner.max_turns()
         )
     }
 
@@ -266,9 +268,9 @@ impl PyGameBuilder {
         symmetric: bool,
     ) -> PyRefMut<'_, Self> {
         slf.maze = Some(MazeStrategy::Random(MazeParams {
-            target_density: wall_density,
+            wall_density,
             connected,
-            symmetry: symmetric,
+            symmetric,
             mud_density,
             mud_range,
         }));

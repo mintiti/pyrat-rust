@@ -662,7 +662,7 @@ mod tests {
     fn test_random_game_basic() {
         let config = GameBuilder::new(8, 8)
             .with_random_maze(MazeParams {
-                symmetry: false,
+                symmetric: false,
                 ..MazeParams::default()
             })
             .with_corner_positions()
@@ -704,7 +704,7 @@ mod tests {
     fn test_asymmetric_game() {
         let config = GameBuilder::new(8, 8)
             .with_random_maze(MazeParams {
-                symmetry: false,
+                symmetric: false,
                 ..MazeParams::default()
             })
             .with_corner_positions()
@@ -739,7 +739,7 @@ mod tests {
     fn test_zero_wall_density_creates_open_maze() {
         let config = GameBuilder::new(11, 11)
             .with_random_maze(MazeParams {
-                target_density: 0.0,
+                wall_density: 0.0,
                 mud_density: 0.0,
                 ..MazeParams::default()
             })
@@ -762,7 +762,7 @@ mod tests {
     fn test_density_parameters_affect_generation() {
         let low_config = GameBuilder::new(15, 15)
             .with_random_maze(MazeParams {
-                target_density: 0.3,
+                wall_density: 0.3,
                 mud_density: 0.1,
                 ..MazeParams::default()
             })
@@ -772,7 +772,7 @@ mod tests {
 
         let high_config = GameBuilder::new(15, 15)
             .with_random_maze(MazeParams {
-                target_density: 0.9,
+                wall_density: 0.9,
                 mud_density: 0.8,
                 ..MazeParams::default()
             })

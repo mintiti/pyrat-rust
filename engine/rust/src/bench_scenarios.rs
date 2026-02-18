@@ -97,7 +97,7 @@ pub fn create_game(size: &BoardSize, combo: &FeatureCombo, seed: u64) -> GameSta
     GameBuilder::new(size.width, size.height)
         .with_max_turns(size.max_turns)
         .with_random_maze(MazeParams {
-            target_density: combo.wall_density,
+            wall_density: combo.wall_density,
             mud_density: combo.mud_density,
             ..MazeParams::default()
         })

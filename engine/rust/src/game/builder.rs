@@ -87,11 +87,11 @@ pub enum CheeseStrategy {
 #[derive(Clone, Debug)]
 pub struct MazeParams {
     /// Probability of a wall between adjacent cells (0.0–1.0).
-    pub target_density: f32,
+    pub wall_density: f32,
     /// Whether the maze must be fully connected.
     pub connected: bool,
     /// Whether the maze has 180° rotational symmetry.
-    pub symmetry: bool,
+    pub symmetric: bool,
     /// Probability that a passage has mud (0.0–1.0).
     pub mud_density: f32,
     /// Maximum mud traversal cost (minimum is 2).
@@ -107,7 +107,7 @@ impl MazeParams {
     /// Open maze: no walls, no mud.
     pub fn open() -> Self {
         Self {
-            target_density: 0.0,
+            wall_density: 0.0,
             mud_density: 0.0,
             mud_range: 2,
             ..Self::default()
@@ -118,9 +118,9 @@ impl MazeParams {
 impl Default for MazeParams {
     fn default() -> Self {
         Self {
-            target_density: 0.7,
+            wall_density: 0.7,
             connected: true,
-            symmetry: true,
+            symmetric: true,
             mud_density: 0.1,
             mud_range: 3,
         }
@@ -338,15 +338,34 @@ impl GameBuilder<Ready> {
 /// `GameState` instances — each call can use a different seed.
 #[derive(Clone)]
 pub struct GameConfig {
-    pub width: u8,
-    pub height: u8,
-    pub max_turns: u16,
-    pub maze: MazeStrategy,
-    pub players: PlayerStrategy,
-    pub cheese: CheeseStrategy,
+    pub(crate) width: u8,
+    pub(crate) height: u8,
+    pub(crate) max_turns: u16,
+    pub(crate) maze: MazeStrategy,
+    pub(crate) players: PlayerStrategy,
+    pub(crate) cheese: CheeseStrategy,
 }
 
 impl GameConfig {
+    pub fn width(&self) -> u8 {
+        self.width
+    }
+    pub fn height(&self) -> u8 {
+        self.height
+    }
+    pub fn max_turns(&self) -> u16 {
+        self.max_turns
+    }
+    pub fn maze(&self) -> &MazeStrategy {
+        &self.maze
+    }
+    pub fn players(&self) -> &PlayerStrategy {
+        &self.players
+    }
+    pub fn cheese(&self) -> &CheeseStrategy {
+        &self.cheese
+    }
+
     /// Standard game: classic maze, corner starts, symmetric random cheese.
     pub fn classic(width: u8, height: u8, cheese: u16) -> Self {
         GameBuilder::new(width, height)
@@ -369,11 +388,11 @@ impl GameConfig {
             MazeStrategy::Fixed { walls, mud } => (walls.clone(), mud.clone()),
             MazeStrategy::Random(params) => {
                 let maze_config = MazeConfig {
-                    width: self.width,
-                    height: self.height,
-                    target_density: params.target_density,
+                    width: self.width(),
+                    height: self.height(),
+                    target_density: params.wall_density,
                     connected: params.connected,
-                    symmetry: params.symmetry,
+                    symmetry: params.symmetric,
                     mud_density: params.mud_density,
                     mud_range: params.mud_range,
                     seed: Some(rng.random()),
@@ -387,9 +406,11 @@ impl GameConfig {
         let (p1, p2) = match &self.players {
             PlayerStrategy::Corners => (
                 Coordinates::new(0, 0),
-                Coordinates::new(self.width - 1, self.height - 1),
+                Coordinates::new(self.width() - 1, self.height() - 1),
             ),
-            PlayerStrategy::Random => generate_random_positions(self.width, self.height, &mut rng),
+            PlayerStrategy::Random => {
+                generate_random_positions(self.width(), self.height(), &mut rng)
+            },
             PlayerStrategy::Fixed(p1, p2) => (*p1, *p2),
         };
 
@@ -403,8 +424,8 @@ impl GameConfig {
                 };
                 let mut cheese_gen = CheeseGenerator::new(
                     cheese_config,
-                    self.width,
-                    self.height,
+                    self.width(),
+                    self.height(),
                     Some(rng.random()),
                 );
                 cheese_gen.generate(p1, p2)
@@ -413,14 +434,14 @@ impl GameConfig {
 
         // 4. Assemble
         GameState::new_with_config(
-            self.width,
-            self.height,
+            self.width(),
+            self.height(),
             walls,
             mud,
             &cheese_positions,
             p1,
             p2,
-            self.max_turns,
+            self.max_turns(),
         )
     }
 
@@ -441,7 +462,7 @@ impl GameConfig {
     /// **Maze types:** *classic* = 0.7 wall density, 0.1 mud density;
     /// *open* = no walls, no mud.
     pub fn preset(name: &str) -> Result<Self, String> {
-        let (width, height, cheese, max_turns, symmetry, maze_params) = match name {
+        let (width, height, cheese, max_turns, symmetric, maze_params) = match name {
             "tiny" => (11, 9, 13, 150, true, MazeParams::classic()),
             "small" => (15, 11, 21, 200, true, MazeParams::classic()),
             "medium" => (21, 15, 41, 300, true, MazeParams::classic()),
@@ -455,7 +476,7 @@ impl GameConfig {
                 300,
                 false,
                 MazeParams {
-                    symmetry: false,
+                    symmetric: false,
                     ..MazeParams::classic()
                 },
             ),
@@ -469,11 +490,11 @@ impl GameConfig {
         Ok(GameBuilder::new(width, height)
             .with_max_turns(max_turns)
             .with_random_maze(MazeParams {
-                symmetry,
+                symmetric,
                 ..maze_params
             })
             .with_corner_positions()
-            .with_random_cheese(cheese, symmetry)
+            .with_random_cheese(cheese, symmetric)
             .build())
     }
 }
@@ -513,9 +534,9 @@ mod tests {
             .with_random_cheese(41, true)
             .build();
 
-        assert_eq!(config.width, 21);
-        assert_eq!(config.height, 15);
-        assert_eq!(config.max_turns, 300);
+        assert_eq!(config.width(), 21);
+        assert_eq!(config.height(), 15);
+        assert_eq!(config.max_turns(), 300);
     }
 
     #[test]
@@ -527,7 +548,7 @@ mod tests {
             .with_random_cheese(41, true)
             .build();
 
-        assert_eq!(config.max_turns, 500);
+        assert_eq!(config.max_turns(), 500);
     }
 
     #[test]
@@ -607,7 +628,7 @@ mod tests {
     fn random_positions_in_bounds_and_differ() {
         let config = GameBuilder::new(5, 5)
             .with_random_maze(MazeParams {
-                target_density: 0.0,
+                wall_density: 0.0,
                 mud_density: 0.0,
                 ..MazeParams::default()
             })
@@ -670,14 +691,14 @@ mod tests {
     #[test]
     fn preset_values_match_expected() {
         let config = GameConfig::preset("tiny").unwrap();
-        assert_eq!(config.width, 11);
-        assert_eq!(config.height, 9);
-        assert_eq!(config.max_turns, 150);
+        assert_eq!(config.width(), 11);
+        assert_eq!(config.height(), 9);
+        assert_eq!(config.max_turns(), 150);
 
         let config = GameConfig::preset("medium").unwrap();
-        assert_eq!(config.width, 21);
-        assert_eq!(config.height, 15);
-        assert_eq!(config.max_turns, 300);
+        assert_eq!(config.width(), 21);
+        assert_eq!(config.height(), 15);
+        assert_eq!(config.max_turns(), 300);
     }
 
     #[test]
