@@ -41,7 +41,7 @@ class PyRat:
     ) -> None: ...
     @staticmethod
     def create_preset(
-        preset: str = "default",
+        preset: str = "medium",
         *,
         seed: int | None = None,
     ) -> PyRat: ...
@@ -74,7 +74,7 @@ class PyRat:
         player1_start: Coordinates | tuple[int, int],
         player2_start: Coordinates | tuple[int, int],
         *,
-        preset: str = "default",
+        preset: str = "medium",
         seed: int | None = None,
     ) -> PyRat: ...
     @property

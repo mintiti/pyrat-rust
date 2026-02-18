@@ -37,7 +37,7 @@ pub const SIZES: &[BoardSize] = &[
         max_turns: 200,
     },
     BoardSize {
-        name: "default",
+        name: "medium",
         width: 21,
         height: 15,
         cheese: 41,
@@ -61,7 +61,7 @@ pub const SIZES: &[BoardSize] = &[
 
 pub const COMBOS: &[FeatureCombo] = &[
     FeatureCombo {
-        name: "empty",
+        name: "open",
         wall_density: 0.0,
         mud_density: 0.0,
     },
@@ -76,7 +76,7 @@ pub const COMBOS: &[FeatureCombo] = &[
         mud_density: 0.1,
     },
     FeatureCombo {
-        name: "default",
+        name: "classic",
         wall_density: 0.7,
         mud_density: 0.1,
     },

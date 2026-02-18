@@ -7,8 +7,13 @@
 //! ```rust,no_run
 //! use pyrat_engine::{GameBuilder, GameConfig, MazeParams};
 //!
+//! // Quick classic game
+//! let config = GameConfig::classic(21, 15, 41);
+//! let game = config.create(Some(42));
+//!
+//! // Builder with named maze constructors
 //! let config = GameBuilder::new(21, 15)
-//!     .with_random_maze(MazeParams::default())
+//!     .with_classic_maze()
 //!     .with_corner_positions()
 //!     .with_random_cheese(41, true)
 //!     .build();
@@ -93,6 +98,23 @@ pub struct MazeParams {
     pub mud_range: u8,
 }
 
+impl MazeParams {
+    /// Classic maze: 0.7 wall density, 0.1 mud density, connected, symmetric.
+    pub fn classic() -> Self {
+        Self::default()
+    }
+
+    /// Open maze: no walls, no mud.
+    pub fn open() -> Self {
+        Self {
+            target_density: 0.0,
+            mud_density: 0.0,
+            mud_range: 2,
+            ..Self::default()
+        }
+    }
+}
+
 impl Default for MazeParams {
     fn default() -> Self {
         Self {
@@ -163,6 +185,18 @@ impl GameBuilder<NeedsMaze> {
             cheese: None,
             _state: PhantomData,
         }
+    }
+
+    /// Use a classic maze (0.7 wall density, 0.1 mud density).
+    #[must_use]
+    pub fn with_classic_maze(self) -> GameBuilder<NeedsPlayers> {
+        self.with_random_maze(MazeParams::classic())
+    }
+
+    /// Use an open maze (no walls, no mud).
+    #[must_use]
+    pub fn with_open_maze(self) -> GameBuilder<NeedsPlayers> {
+        self.with_random_maze(MazeParams::open())
     }
 
     /// Use a fixed wall/mud layout.
@@ -304,6 +338,15 @@ pub struct GameConfig {
 }
 
 impl GameConfig {
+    /// Standard game: classic maze, corner starts, symmetric random cheese.
+    pub fn classic(width: u8, height: u8, cheese: u16) -> Self {
+        GameBuilder::new(width, height)
+            .with_classic_maze()
+            .with_corner_positions()
+            .with_random_cheese(cheese, true)
+            .build()
+    }
+
     /// Create a `GameState` from this config.
     ///
     /// `seed` controls all random generation. `None` uses OS entropy.
@@ -374,33 +417,51 @@ impl GameConfig {
 
     /// Look up a named preset configuration.
     ///
-    /// Available presets: `tiny`, `small`, `default`, `large`, `huge`,
-    /// `empty`, `asymmetric`.
+    /// Presets combine a **size** with a **maze type**:
+    ///
+    /// | Size     | Board  | Cheese | Turns | Maze type |
+    /// |----------|--------|--------|-------|-----------|
+    /// | `tiny`   | 11×9   | 13     | 150   | classic   |
+    /// | `small`  | 15×11  | 21     | 200   | classic   |
+    /// | `medium` | 21×15  | 41     | 300   | classic   |
+    /// | `large`  | 31×21  | 85     | 400   | classic   |
+    /// | `huge`   | 41×31  | 165    | 500   | classic   |
+    /// | `open`   | 21×15  | 41     | 300   | open      |
+    /// | `asymmetric` | 21×15 | 41  | 300   | classic (no symmetry) |
+    ///
+    /// **Maze types:** *classic* = 0.7 wall density, 0.1 mud density;
+    /// *open* = no walls, no mud.
     pub fn preset(name: &str) -> Result<Self, String> {
-        let (width, height, cheese, max_turns, symmetry, wall_density, mud_density, mud_range) =
-            match name {
-                "tiny" => (11, 9, 13, 150, true, 0.7, 0.1, 3),
-                "small" => (15, 11, 21, 200, true, 0.7, 0.1, 3),
-                "default" => (21, 15, 41, 300, true, 0.7, 0.1, 3),
-                "large" => (31, 21, 85, 400, true, 0.7, 0.1, 3),
-                "huge" => (41, 31, 165, 500, true, 0.7, 0.1, 3),
-                "empty" => (21, 15, 41, 300, true, 0.0, 0.0, 2),
-                "asymmetric" => (21, 15, 41, 300, false, 0.7, 0.1, 3),
-                _ => {
-                    return Err(format!(
-                        "Unknown preset '{name}'. Available: tiny, small, default, large, huge, empty, asymmetric"
-                    ))
-                }
-            };
+        let (width, height, cheese, max_turns, symmetry, maze_params) = match name {
+            "tiny" => (11, 9, 13, 150, true, MazeParams::classic()),
+            "small" => (15, 11, 21, 200, true, MazeParams::classic()),
+            "medium" => (21, 15, 41, 300, true, MazeParams::classic()),
+            "large" => (31, 21, 85, 400, true, MazeParams::classic()),
+            "huge" => (41, 31, 165, 500, true, MazeParams::classic()),
+            "open" => (21, 15, 41, 300, true, MazeParams::open()),
+            "asymmetric" => (
+                21,
+                15,
+                41,
+                300,
+                false,
+                MazeParams {
+                    symmetry: false,
+                    ..MazeParams::classic()
+                },
+            ),
+            _ => {
+                return Err(format!(
+                    "Unknown preset '{name}'. Available: tiny, small, medium, large, huge, open, asymmetric"
+                ))
+            }
+        };
 
         Ok(GameBuilder::new(width, height)
             .with_max_turns(max_turns)
             .with_random_maze(MazeParams {
-                target_density: wall_density,
-                connected: true,
                 symmetry,
-                mud_density,
-                mud_range,
+                ..maze_params
             })
             .with_corner_positions()
             .with_random_cheese(cheese, symmetry)
@@ -576,10 +637,10 @@ mod tests {
         for name in [
             "tiny",
             "small",
-            "default",
+            "medium",
             "large",
             "huge",
-            "empty",
+            "open",
             "asymmetric",
         ] {
             let config =
@@ -604,7 +665,7 @@ mod tests {
         assert_eq!(config.height, 9);
         assert_eq!(config.max_turns, 150);
 
-        let config = GameConfig::preset("default").unwrap();
+        let config = GameConfig::preset("medium").unwrap();
         assert_eq!(config.width, 21);
         assert_eq!(config.height, 15);
         assert_eq!(config.max_turns, 300);

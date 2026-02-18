@@ -147,7 +147,7 @@ class TestPresets:
 
     def test_all_presets_exist(self):
         """Test that all presets can be created."""
-        presets = ["tiny", "small", "default", "large", "huge", "empty", "asymmetric"]
+        presets = ["tiny", "small", "medium", "large", "huge", "open", "asymmetric"]
 
         for preset in presets:
             game = PyRat.create_preset(preset)
@@ -158,10 +158,10 @@ class TestPresets:
         expected = {
             "tiny": (11, 9, 13, 150),
             "small": (15, 11, 21, 200),
-            "default": (21, 15, 41, 300),
+            "medium": (21, 15, 41, 300),
             "large": (31, 21, 85, 400),
             "huge": (41, 31, 165, 500),
-            "empty": (21, 15, 41, 300),
+            "open": (21, 15, 41, 300),
             "asymmetric": (21, 15, 41, 300),
         }
 
@@ -175,17 +175,17 @@ class TestPresets:
 
     def test_preset_with_seed(self):
         """Test that presets with same seed are reproducible."""
-        game1 = PyRat.create_preset("default", seed=42)
-        game2 = PyRat.create_preset("default", seed=42)
+        game1 = PyRat.create_preset("medium", seed=42)
+        game2 = PyRat.create_preset("medium", seed=42)
 
         # Check that cheese positions are the same
         cheese1 = set(game1.cheese_positions())
         cheese2 = set(game2.cheese_positions())
         assert cheese1 == cheese2
 
-    def test_empty_preset_has_no_walls(self):
-        """Test that empty preset has no walls or mud."""
-        game = PyRat.create_preset("empty")
+    def test_open_preset_has_no_walls(self):
+        """Test that open preset has no walls or mud."""
+        game = PyRat.create_preset("open")
 
         # Check walls by seeing if all moves are valid
         # In a maze with no walls, you can move in all 4 directions
@@ -332,10 +332,10 @@ class TestResetSymmetry:
 
     def test_preset_symmetric_reset(self):
         """Test that preset games reset correctly."""
-        game = PyRat.create_preset("default", seed=42)
+        game = PyRat.create_preset("medium", seed=42)
         game.reset(seed=123)
 
-        # Default preset is symmetric - check cheese
+        # Medium preset is symmetric - check cheese
         cheese = game.cheese_positions()
         cheese_set = {(c.x, c.y) for c in cheese}
         width, height = game.width, game.height
@@ -548,7 +548,7 @@ class TestGetValidMoves:
         """Test that corner positions have limited valid moves."""
         from pyrat_engine import Direction
 
-        game = PyRat.create_preset("empty", seed=42)  # No walls
+        game = PyRat.create_preset("open", seed=42)  # No walls
         valid = game.get_valid_moves((0, 0))
 
         # Bottom-left corner: can only go UP and RIGHT
@@ -561,7 +561,7 @@ class TestGetValidMoves:
         """Test top-right corner has limited valid moves."""
         from pyrat_engine import Direction
 
-        game = PyRat.create_preset("empty", seed=42)
+        game = PyRat.create_preset("open", seed=42)
         valid = game.get_valid_moves((game.width - 1, game.height - 1))
 
         assert Direction.DOWN in valid
@@ -573,7 +573,7 @@ class TestGetValidMoves:
         """Test that center position in empty maze has all 4 moves."""
         from pyrat_engine import Direction
 
-        game = PyRat.create_preset("empty", seed=42)
+        game = PyRat.create_preset("open", seed=42)
         center_x = game.width // 2
         center_y = game.height // 2
         valid = game.get_valid_moves((center_x, center_y))
@@ -621,7 +621,7 @@ class TestGetValidMoves:
         """Test that get_valid_moves accepts Coordinates objects."""
         from pyrat_engine import Coordinates
 
-        game = PyRat.create_preset("empty", seed=42)
+        game = PyRat.create_preset("open", seed=42)
         pos = Coordinates(0, 0)
         valid = game.get_valid_moves(pos)
 
@@ -633,7 +633,7 @@ class TestGetValidMoves:
         """Test that returned values can be used as Direction enum."""
         from pyrat_engine import Direction
 
-        game = PyRat.create_preset("empty", seed=42)
+        game = PyRat.create_preset("open", seed=42)
         valid = game.get_valid_moves((5, 5))
 
         # All returned values should be convertible to Direction
@@ -658,7 +658,7 @@ class TestEffectiveActions:
         """Test corner position where DOWN and LEFT are blocked."""
         from pyrat_engine import Direction
 
-        game = PyRat.create_preset("empty", seed=42)
+        game = PyRat.create_preset("open", seed=42)
         result = game.effective_actions((0, 0))
 
         # At (0,0): UP and RIGHT are valid, DOWN and LEFT hit boundaries
@@ -672,7 +672,7 @@ class TestEffectiveActions:
         """Test corner position where UP and RIGHT are blocked."""
         from pyrat_engine import Direction
 
-        game = PyRat.create_preset("empty", seed=42)
+        game = PyRat.create_preset("open", seed=42)
         result = game.effective_actions((game.width - 1, game.height - 1))
 
         # At top-right: DOWN and LEFT are valid, UP and RIGHT hit boundaries
@@ -686,7 +686,7 @@ class TestEffectiveActions:
         """Test center position in empty maze has all moves valid."""
         from pyrat_engine import Direction
 
-        game = PyRat.create_preset("empty", seed=42)
+        game = PyRat.create_preset("open", seed=42)
         center_x = game.width // 2
         center_y = game.height // 2
         result = game.effective_actions((center_x, center_y))
@@ -765,7 +765,7 @@ class TestEffectiveActions:
         """Test that player not in mud uses position-based computation."""
         from pyrat_engine import Direction
 
-        game = PyRat.create_preset("empty", seed=42)
+        game = PyRat.create_preset("open", seed=42)
 
         # Player 1 starts at (0, 0)
         result_p1 = game.effective_actions_p1()
@@ -792,7 +792,7 @@ class TestEffectiveActions:
         """Test that effective_actions accepts Coordinates objects."""
         from pyrat_engine import Coordinates
 
-        game = PyRat.create_preset("empty", seed=42)
+        game = PyRat.create_preset("open", seed=42)
         pos = Coordinates(0, 0)
         result = game.effective_actions(pos)
 
@@ -802,7 +802,7 @@ class TestEffectiveActions:
 
     def test_return_type_is_list(self):
         """Test that the return type is a list of 5 integers."""
-        game = PyRat.create_preset("empty", seed=42)
+        game = PyRat.create_preset("open", seed=42)
         result = game.effective_actions((0, 0))
 
         assert len(result) == 5
@@ -813,7 +813,7 @@ class TestEffectiveActions:
         """Test that effective_actions is consistent with get_valid_moves."""
         from pyrat_engine import Direction
 
-        game = PyRat.create_preset("empty", seed=42)
+        game = PyRat.create_preset("open", seed=42)
 
         for x in range(game.width):
             for y in range(game.height):

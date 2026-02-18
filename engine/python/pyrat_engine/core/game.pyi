@@ -107,20 +107,24 @@ class PyRat:
     ) -> None: ...
     @staticmethod
     def create_preset(
-        preset: str = "default",
+        preset: str = "medium",
         *,
         seed: int | None = None,
     ) -> PyRat:
         """Create a game from a preset configuration.
 
-        Available presets:
-        - "tiny": 11x9 board, 13 cheese, 150 turns
-        - "small": 15x11 board, 21 cheese, 200 turns
-        - "default": 21x15 board, 41 cheese, 300 turns (standard)
-        - "large": 31x21 board, 85 cheese, 400 turns
-        - "huge": 41x31 board, 165 cheese, 500 turns
-        - "empty": No walls or mud, good for testing
-        - "asymmetric": Standard size but asymmetric generation
+        Presets combine a size with a maze type:
+
+        - "tiny": 11x9 board, 13 cheese, 150 turns (classic maze)
+        - "small": 15x11 board, 21 cheese, 200 turns (classic maze)
+        - "medium": 21x15 board, 41 cheese, 300 turns (classic maze)
+        - "large": 31x21 board, 85 cheese, 400 turns (classic maze)
+        - "huge": 41x31 board, 165 cheese, 500 turns (classic maze)
+        - "open": 21x15 board, 41 cheese, 300 turns (no walls or mud)
+        - "asymmetric": 21x15 board, 41 cheese, 300 turns (classic, no symmetry)
+
+        Maze types: *classic* = 0.7 wall density, 0.1 mud density;
+        *open* = no walls, no mud.
 
         Args:
             preset: Name of the preset configuration
@@ -199,7 +203,7 @@ class PyRat:
         player1_start: Coordinates | tuple[int, int],
         player2_start: Coordinates | tuple[int, int],
         *,
-        preset: str = "default",
+        preset: str = "medium",
         seed: int | None = None,
     ) -> PyRat:
         """Create a game with custom starting positions.

@@ -61,7 +61,7 @@ fn run_single(scenario: &str) -> ! {
     let parts: Vec<&str> = scenario.split('/').collect();
     if parts.len() != 2 {
         eprintln!("Usage: profile_game <size>/<combo>");
-        eprintln!("  e.g. default/default, large/walls_only");
+        eprintln!("  e.g. medium/classic, large/walls_only");
         std::process::exit(1);
     }
 

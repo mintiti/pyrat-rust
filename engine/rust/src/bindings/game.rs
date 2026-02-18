@@ -55,13 +55,13 @@ impl PresetMazeParams {
         match name {
             "tiny" => Ok(Self { symmetric: true, wall_density: 0.7, mud_density: 0.1, mud_range: 3, max_turns: 150 }),
             "small" => Ok(Self { symmetric: true, wall_density: 0.7, mud_density: 0.1, mud_range: 3, max_turns: 200 }),
-            "default" => Ok(Self { symmetric: true, wall_density: 0.7, mud_density: 0.1, mud_range: 3, max_turns: 300 }),
+            "medium" => Ok(Self { symmetric: true, wall_density: 0.7, mud_density: 0.1, mud_range: 3, max_turns: 300 }),
             "large" => Ok(Self { symmetric: true, wall_density: 0.7, mud_density: 0.1, mud_range: 3, max_turns: 400 }),
             "huge" => Ok(Self { symmetric: true, wall_density: 0.7, mud_density: 0.1, mud_range: 3, max_turns: 500 }),
-            "empty" => Ok(Self { symmetric: true, wall_density: 0.0, mud_density: 0.0, mud_range: 2, max_turns: 300 }),
+            "open" => Ok(Self { symmetric: true, wall_density: 0.0, mud_density: 0.0, mud_range: 2, max_turns: 300 }),
             "asymmetric" => Ok(Self { symmetric: false, wall_density: 0.7, mud_density: 0.1, mud_range: 3, max_turns: 300 }),
             _ => Err(PyValueError::new_err(format!(
-                "Unknown preset '{name}'. Available presets: tiny, small, default, large, huge, empty, asymmetric"
+                "Unknown preset '{name}'. Available presets: tiny, small, medium, large, huge, open, asymmetric"
             ))),
         }
     }
@@ -680,7 +680,7 @@ impl PyRat {
 
     /// Create a game from a preset configuration
     #[staticmethod]
-    #[pyo3(signature = (preset="default", *, seed=None))]
+    #[pyo3(signature = (preset="medium", *, seed=None))]
     fn create_preset(preset: &str, seed: Option<u64>) -> PyResult<Self> {
         use crate::game::builder::GameConfig;
 
@@ -753,7 +753,7 @@ impl PyRat {
         player1_start,
         player2_start,
         *,
-        preset = "default",
+        preset = "medium",
         seed = None
     ))]
     fn create_with_starts(

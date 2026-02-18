@@ -102,6 +102,19 @@ Rust tests run without Python features to avoid linking issues.
 
 ## Game Creation API
 
+### Terminology
+
+Presets are defined along two axes:
+
+| Axis | Values | Meaning |
+|------|--------|---------|
+| **Size** | `tiny`, `small`, `medium`, `large`, `huge` | Board dimensions, cheese count, max turns |
+| **Maze type** | `classic`, `open` | Wall/mud density |
+
+- **classic** — 0.7 wall density, 0.1 mud density (the `MazeParams` default)
+- **open** — no walls, no mud
+- **corner starts** — p1 at (0,0), p2 at (width-1, height-1) (all presets use this)
+
 ### Rust: Typestate Builder + GameConfig
 
 The Rust API uses a two-phase system:
@@ -111,48 +124,45 @@ The Rust API uses a two-phase system:
 ```rust
 use pyrat_engine::{GameBuilder, GameConfig, MazeParams};
 
-// Build a reusable config
+// Quick classic game
+let config = GameConfig::classic(21, 15, 41);
+let game = config.create(Some(42));
+
+// Builder with named maze constructors
 let config = GameBuilder::new(21, 15)
-    .with_max_turns(300)                      // optional, default 300
-    .with_random_maze(MazeParams::default())  // or with_custom_maze(walls, mud)
-    .with_corner_positions()                  // or with_random_positions() / with_custom_positions(p1, p2)
-    .with_random_cheese(41, true)             // or with_custom_cheese(vec![...])
+    .with_classic_maze()                     // or with_open_maze(), with_random_maze(params), with_custom_maze(walls, mud)
+    .with_corner_positions()                 // or with_random_positions() / with_custom_positions(p1, p2)
+    .with_random_cheese(41, true)            // or with_custom_cheese(vec![...])
     .build();
 
-// Stamp out games (different seed each time)
-let game1 = config.create(Some(42));
-let game2 = config.create(Some(43));
-
-// Named presets: tiny, small, default, large, huge, empty, asymmetric
+// Named presets: tiny, small, medium, large, huge, open, asymmetric
 let config = GameConfig::preset("large").unwrap();
 let game = config.create(Some(42));
 ```
 
-`MazeParams` fields: `target_density` (wall prob, 0–1), `connected` (bool), `symmetry` (bool), `mud_density` (0–1), `mud_range` (max mud cost).
+`MazeParams` named constructors: `MazeParams::classic()`, `MazeParams::open()`. Fields: `target_density` (wall prob, 0–1), `connected` (bool), `symmetry` (bool), `mud_density` (0–1), `mud_range` (max mud cost).
 
 `GameState` constructors (`new`, `new_with_config`, etc.) are `pub(crate)` — use the builder from outside the crate.
 
 ### Python API
 
-The Python bindings remain unchanged:
-
 ```python
 from pyrat_engine import PyRat
 
-# Default game (21x15, 41 cheese, symmetric)
+# Default game (21x15, 41 cheese, symmetric, classic maze)
 game = PyRat()
 
 # Custom parameters
 game = PyRat(width=31, height=21, cheese_count=85, max_turns=500)
 
-# Presets: tiny, small, default, large, huge, empty, asymmetric
+# Presets: tiny, small, medium, large, huge, open, asymmetric
 game = PyRat.create_preset("large", seed=42)
 
 # Custom maze layout
 game = PyRat.create_from_maze(width=15, height=11, walls=[((0,0),(0,1))], seed=42)
 
 # Custom starting positions
-game = PyRat.create_with_starts(21, 15, (5,5), (15,9), preset="default", seed=42)
+game = PyRat.create_with_starts(21, 15, (5,5), (15,9), preset="medium", seed=42)
 
 # Full custom
 game = PyRat.create_custom(
