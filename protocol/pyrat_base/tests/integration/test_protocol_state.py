@@ -3,9 +3,8 @@
 
 import numpy as np
 import pytest
-from pyrat_engine import PyRat
+from pyrat_engine import GameBuilder, PyRat
 from pyrat_engine.core import Direction
-from pyrat_engine.core.builder import GameConfigBuilder as PyGameConfigBuilder
 from pyrat_engine.core.types import Coordinates
 
 from pyrat_base import Player, ProtocolState
@@ -15,12 +14,13 @@ from pyrat_base import Player, ProtocolState
 def simple_game() -> PyRat:
     """Create a simple 5x5 game for testing."""
     return (
-        PyGameConfigBuilder(5, 5)
-        .with_cheese([(1, 1), (3, 3)])
-        .with_player1_pos((0, 0))  # RAT at bottom-left
-        .with_player2_pos((4, 4))  # PYTHON at top-right
+        GameBuilder(5, 5)
+        .with_open_maze()
+        .with_custom_positions((0, 0), (4, 4))
+        .with_custom_cheese([(1, 1), (3, 3)])
         .with_max_turns(100)
         .build()
+        .create()
     )
 
 
@@ -175,12 +175,12 @@ class TestProtocolState:
         """Test protocol state with mud in the game."""
         # Create game with mud
         game = (
-            PyGameConfigBuilder(5, 5)
-            .with_cheese([(2, 2)])
-            .with_player1_pos((0, 0))
-            .with_player2_pos((4, 4))
-            .with_mud([((0, 0), (1, 0), 2)])  # 2-turn mud to the right
+            GameBuilder(5, 5)
+            .with_custom_maze(walls=[], mud=[((0, 0), (1, 0), 2)])
+            .with_custom_positions((0, 0), (4, 4))
+            .with_custom_cheese([(2, 2)])
             .build()
+            .create()
         )
 
         state = ProtocolState(game, Player.RAT)
@@ -226,11 +226,12 @@ class TestProtocolState:
         """Test score tracking when collecting cheese."""
         # Place cheese next to starting positions
         game = (
-            PyGameConfigBuilder(5, 5)
-            .with_cheese([(1, 0), (3, 4)])
-            .with_player1_pos((0, 0))
-            .with_player2_pos((4, 4))
+            GameBuilder(5, 5)
+            .with_open_maze()
+            .with_custom_positions((0, 0), (4, 4))
+            .with_custom_cheese([(1, 0), (3, 4)])
             .build()
+            .create()
         )
 
         state = ProtocolState(game, Player.RAT)

@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from typing import List, Optional, Tuple
 
 import pytest
-from pyrat_engine.core.builder import GameConfigBuilder as PyGameConfigBuilder
+from pyrat_engine import GameBuilder, PyRat
 
 from pyrat_base import Protocol, ProtocolState
 from pyrat_base.enums import Player
@@ -133,16 +133,20 @@ def game_state_builder():
 
     def create_game(
         width: int = 5, height: int = 5, player: Player = Player.RAT
-    ) -> Tuple[PyGameConfigBuilder, Player]:
+    ) -> Tuple[GameBuilder, Player]:
         """
         Returns a tuple of (builder, player) to use with ProtocolState.
 
         Example:
             builder, player = game_state_builder()
-            game = builder.with_cheese([(2, 2)]).build()
+            config = (builder.with_open_maze()
+                      .with_corner_positions()
+                      .with_custom_cheese([(2, 2)])
+                      .build())
+            game = config.create()
             state = ProtocolState(game, player)
         """
-        return PyGameConfigBuilder(width, height), player
+        return GameBuilder(width, height), player
 
     # Also provide a direct method to build ProtocolState
     def build_protocol_state(
@@ -155,23 +159,19 @@ def game_state_builder():
         player2_pos: Optional[Tuple[int, int]] = None,
         player: Player = Player.RAT,
     ) -> ProtocolState:
-        """Build a ProtocolState directly using PyGameConfigBuilder."""
+        """Build a ProtocolState directly using GameBuilder."""
         if player2_pos is None:
             player2_pos = (width - 1, height - 1)
 
-        builder = PyGameConfigBuilder(width, height)
-
-        if walls:
-            builder = builder.with_walls(walls)
-        if mud:
-            builder = builder.with_mud(mud)
-        if cheese:
-            builder = builder.with_cheese(cheese)
-
-        builder = builder.with_player1_pos(player1_pos)
-        builder = builder.with_player2_pos(player2_pos)
-
-        game = builder.build()
+        game = PyRat.create_custom(
+            width=width,
+            height=height,
+            walls=walls or [],
+            mud=mud or [],
+            cheese=cheese or [(width // 2, height // 2)],
+            player1_pos=player1_pos,
+            player2_pos=player2_pos,
+        )
         return ProtocolState(game, player)
 
     # Return both methods

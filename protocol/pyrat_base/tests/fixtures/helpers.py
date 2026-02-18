@@ -5,7 +5,7 @@ import sys
 from contextlib import contextmanager
 from typing import Any, Dict, List, Optional
 
-from pyrat_engine.core.builder import GameConfigBuilder as PyGameConfigBuilder
+from pyrat_engine import PyRat
 from pyrat_engine.core.types import Direction
 
 from pyrat_base import Protocol, ProtocolState, PyRatAI
@@ -200,12 +200,13 @@ def capture_ai_execution(
 @contextmanager
 def mock_game_state(width: int = 5, height: int = 5):
     """Context manager that provides a mock game state for testing."""
-    game = (
-        PyGameConfigBuilder(width, height)
-        .with_cheese([(2, 2)])
-        .with_player1_pos((0, 0))
-        .with_player2_pos((width - 1, height - 1))
-        .build()
+    game = PyRat.create_custom(
+        width=width,
+        height=height,
+        walls=[],
+        cheese=[(2, 2)],
+        player1_pos=(0, 0),
+        player2_pos=(width - 1, height - 1),
     )
 
     protocol_state = ProtocolState(game, Player.RAT)

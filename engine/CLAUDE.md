@@ -146,28 +146,36 @@ let game = config.create(Some(42));
 
 ### Python API
 
+The primary API uses `GameBuilder` to compose a reusable `GameConfig`, which stamps out game instances via `create()`:
+
 ```python
-from pyrat_engine import PyRat
+from pyrat_engine import GameBuilder, GameConfig
 
-# Default game (21x15, 41 cheese, symmetric, classic maze)
-game = PyRat()
+# Presets (returns GameConfig directly)
+config = GameConfig.preset("large")
+game = config.create(seed=42)
 
-# Custom parameters
-game = PyRat(width=31, height=21, cheese_count=85, max_turns=500)
+# Standard classic game shortcut
+config = GameConfig.classic(21, 15, 41)
+game = config.create(seed=42)
 
-# Presets: tiny, small, medium, large, huge, open, asymmetric
-game = PyRat.create_preset("large", seed=42)
+# Builder for full control
+config = (GameBuilder(21, 15)
+    .with_classic_maze()                     # or with_open_maze(), with_random_maze(), with_custom_maze()
+    .with_corner_positions()                 # or with_random_positions(), with_custom_positions()
+    .with_random_cheese(41)                  # or with_custom_cheese()
+    .build())
+game = config.create(seed=42)
 
 # Custom maze layout
-game = PyRat.create_from_maze(width=15, height=11, walls=[((0,0),(0,1))], seed=42)
-
-# Custom starting positions
-game = PyRat.create_with_starts(21, 15, (5,5), (15,9), preset="medium", seed=42)
-
-# Full custom
-game = PyRat.create_custom(
-    width=21, height=15,
-    walls=[((0,0),(0,1))], mud=[((2,2),(3,2),3)],
-    cheese=[(5,5),(10,10)], player1_pos=(0,0), player2_pos=(20,14)
-)
+config = (GameBuilder(15, 11)
+    .with_custom_maze(walls=[((0,0),(0,1))], mud=[((2,2),(3,2),3)])
+    .with_custom_positions((0,0), (14,10))
+    .with_custom_cheese([(5,5),(10,10)])
+    .build())
+game = config.create(seed=42)
 ```
+
+`GameConfig` is reusable — call `create()` with different seeds for RL training loops.
+
+`PyRat` convenience methods (`PyRat()`, `create_preset()`, `create_custom()`, etc.) still work for quick one-off games.
