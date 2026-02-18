@@ -142,3 +142,23 @@ def test_custom_maze() -> None:
     assert game.player1_position.y == 0
     assert game.player2_position.x == 2  # noqa: PLR2004
     assert game.player2_position.y == 2  # noqa: PLR2004
+
+    # Verify movement matrix values
+    # Matrix shape: (width, height, 4), dir: UP=0, RIGHT=1, DOWN=2, LEFT=3
+    # Values: -1 = wall/boundary, 0 = open, N>0 = mud turns
+    obs = game.get_observation(is_player_one=True)
+    mm = np.array(obs.movement_matrix)
+
+    # (0,0): UP→wall(-1), RIGHT→open(0), DOWN→boundary(-1), LEFT→boundary(-1)
+    assert mm[0, 0, 0] == -1, "wall between (0,0) and (0,1)"
+    assert mm[0, 0, 1] == 0, "open path (0,0)→(1,0)"
+    assert mm[0, 0, 2] == -1, "boundary below (0,0)"
+    assert mm[0, 0, 3] == -1, "boundary left of (0,0)"
+
+    # (1,0): UP→mud(2), RIGHT→open(0), DOWN→boundary(-1), LEFT→open(0)
+    assert mm[1, 0, 0] == 2, "mud between (1,0) and (1,1)"  # noqa: PLR2004
+    assert mm[1, 0, 2] == -1, "boundary below (1,0)"
+
+    # (1,1): UP→open(0), RIGHT→wall(-1), DOWN→mud(2), LEFT→open(0)
+    assert mm[1, 1, 1] == -1, "wall between (1,1) and (2,1)"
+    assert mm[1, 1, 2] == 2, "mud between (1,1) and (1,0)"  # noqa: PLR2004

@@ -404,3 +404,26 @@ class TestBuilderChaining:
         assert game.player2_position.x == 8
         assert game.player2_position.y == 6
         assert len(game.cheese_positions()) == 10
+
+
+class TestMazeSymmetry:
+    """Test that symmetric maze generation produces 180°-rotationally symmetric walls."""
+
+    def test_symmetric_maze_has_symmetric_walls(self):
+        config = GameConfig.classic(21, 15, 41)
+        game = config.create(seed=42)
+        width, height = game.width, game.height
+
+        walls = game.wall_entries()
+        wall_set = {((w.pos1.x, w.pos1.y), (w.pos2.x, w.pos2.y)) for w in walls}
+
+        for w in walls:
+            # 180° rotation: (x, y) → (width-1-x, height-1-y)
+            sym_p1 = (width - 1 - w.pos1.x, height - 1 - w.pos1.y)
+            sym_p2 = (width - 1 - w.pos2.x, height - 1 - w.pos2.y)
+            # Normalize order (smaller first) to match wall_set
+            sym_wall = (min(sym_p1, sym_p2), max(sym_p1, sym_p2))
+            assert sym_wall in wall_set, (
+                f"Wall {w.pos1}↔{w.pos2} has no symmetric counterpart "
+                f"at {sym_wall[0]}↔{sym_wall[1]}"
+            )
