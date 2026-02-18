@@ -263,7 +263,7 @@ class TestGreedyAIEndToEnd:
         """Test greedy AI handles simultaneous cheese collection correctly."""
         game = _create_game(
             width=3,
-            height=1,
+            height=2,
             cheese=[(1, 0)],
             player1_pos=(0, 0),
             player2_pos=(2, 0),
@@ -289,7 +289,7 @@ class TestGreedyVsGreedy:
         """Test symmetric maze where both AIs collect equal cheese."""
         game = _create_game(
             width=5,
-            height=1,
+            height=2,
             cheese=[(1, 0), (2, 0), (3, 0)],
             player1_pos=(0, 0),
             player2_pos=(4, 0),
@@ -333,7 +333,7 @@ class TestGreedyVsGreedy:
         """Test asymmetric maze where Rat has clear advantage."""
         game = _create_game(
             width=7,
-            height=1,
+            height=2,
             cheese=[(1, 0), (2, 0)],
             player1_pos=(0, 0),
             player2_pos=(6, 0),

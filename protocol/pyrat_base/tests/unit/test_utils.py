@@ -305,9 +305,15 @@ class TestPathfinding:
 
     def test_mud_cost_calculation(self):
         """Test that mud costs are calculated correctly."""
+        # Block the top row so the only path is through mud on the bottom
         game = _create_game(
             width=3,
-            height=1,
+            height=2,
+            walls=[
+                ((0, 0), (0, 1)),
+                ((1, 0), (1, 1)),
+                ((2, 0), (2, 1)),
+            ],
             mud=[
                 ((0, 0), (1, 0), 3),
                 ((1, 0), (2, 0), 2),
