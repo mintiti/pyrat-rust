@@ -162,30 +162,28 @@ class TestPyRatFunctionality:
     """Test that game module classes work correctly."""
 
     def test_pyrat_creation(self):
-        """Test creating PyRat objects."""
-        from pyrat_engine import PyRat
+        """Test creating PyRat objects via GameConfig."""
+        from pyrat_engine import GameConfig
 
-        # Use odd dimensions to avoid the symmetric maze issue
-        game = PyRat(width=11, height=11)
+        game = GameConfig.classic(11, 11, 13).create()
         assert game.width == 11  # noqa: PLR2004
         assert game.height == 11  # noqa: PLR2004
 
     def test_pyrat_preset(self):
         """Test creating PyRat from preset."""
-        from pyrat_engine import PyRat
+        from pyrat_engine import GameConfig
 
-        game = PyRat.create_preset("tiny", seed=42)
+        game = GameConfig.preset("tiny").create(seed=42)
         assert game.width == 11  # noqa: PLR2004
         assert game.height == 9  # noqa: PLR2004
         assert game.max_turns == 150  # noqa: PLR2004
 
     def test_game_state_properties(self):
         """Test PyRat properties return correct types."""
-        from pyrat_engine import PyRat
+        from pyrat_engine import GameConfig
         from pyrat_engine.core.types import Coordinates
 
-        # Use odd dimensions to avoid the symmetric maze issue
-        game = PyRat(width=11, height=11, seed=42)
+        game = GameConfig.classic(11, 11, 13).create(seed=42)
 
         # Position properties should return Coordinates
         pos1 = game.player1_position
@@ -206,20 +204,21 @@ class TestPyRatFunctionality:
 class TestHighLevelAPI:
     """Test that the high-level API still works with the new structure."""
 
-    def test_pyrat_import(self):
-        """Test that PyRat can still be imported and used."""
-        from pyrat_engine import PyRat
+    def test_gameconfig_import(self):
+        """Test that GameConfig can be imported and used."""
+        from pyrat_engine import GameConfig
 
-        game = PyRat(width=15, height=15)
+        game = GameConfig.classic(15, 15, 21).create()
         assert game.width == 15  # noqa: PLR2004
         assert game.height == 15  # noqa: PLR2004
 
     def test_env_import(self):
         """Test that the PettingZoo environment still works."""
+        from pyrat_engine import GameConfig
         from pyrat_engine.env import PyRatEnv
 
-        # Use odd dimensions to avoid the symmetric maze issue
-        env = PyRatEnv(width=11, height=11)
+        config = GameConfig.classic(11, 11, 13)
+        env = PyRatEnv(config)
         assert env is not None
 
         # Test reset works

@@ -1,6 +1,6 @@
 """Test that walls and mud never overlap in the game state."""
 
-from pyrat_engine import PyRat
+from pyrat_engine import GameConfig
 
 # ruff: noqa: PLR2004
 
@@ -8,7 +8,7 @@ from pyrat_engine import PyRat
 def test_no_wall_mud_overlap_small_maze():
     """Test that walls and mud don't overlap in a small maze."""
     # Test the specific case that was failing: 5x5 with seed=0
-    game = PyRat(width=5, height=5, cheese_count=5, seed=0)
+    game = GameConfig.classic(5, 5, 5).create(seed=0)
 
     walls = game.wall_entries()
     mud = game.mud_entries()
@@ -33,7 +33,7 @@ def test_no_wall_mud_overlap_small_maze():
 
 def test_no_wall_mud_overlap_default_maze():
     """Test that walls and mud don't overlap in a default maze."""
-    game = PyRat()  # Default 21x15
+    game = GameConfig.classic(21, 15, 41).create()
 
     walls = game.wall_entries()
     mud = game.mud_entries()
@@ -61,8 +61,9 @@ def test_no_wall_mud_overlap_multiple_seeds():
     # Seeds that previously had overlaps in 5x5
     problematic_seeds = [0, 5, 8, 9, 11, 13, 16, 17, 18]
 
+    config = GameConfig.classic(5, 5, 5)
     for seed in problematic_seeds:
-        game = PyRat(width=5, height=5, cheese_count=5, seed=seed)
+        game = config.create(seed=seed)
 
         walls = game.wall_entries()
         mud = game.mud_entries()
@@ -91,13 +92,13 @@ def test_wall_entries_reasonable_count():
     """Test that wall_entries returns a reasonable number of walls."""
     # For a 5x5 maze, there are 40 possible walls (internal connections)
     # A typical maze should have around 10-20 walls
-    game = PyRat(width=5, height=5, cheese_count=5, seed=0)
+    game = GameConfig.classic(5, 5, 5).create(seed=0)
     walls = game.wall_entries()
 
     assert 5 <= len(walls) <= 30, f"Unexpected number of walls: {len(walls)}"
 
     # For default 21x15 maze
-    game = PyRat()
+    game = GameConfig.classic(21, 15, 41).create()
     walls = game.wall_entries()
 
     # Maximum possible internal walls: 20*15 + 21*14 = 594
@@ -107,7 +108,7 @@ def test_wall_entries_reasonable_count():
 
 def test_walls_are_between_adjacent_cells():
     """Test that all walls are between adjacent cells."""
-    game = PyRat(width=5, height=5, cheese_count=5, seed=0)
+    game = GameConfig.classic(5, 5, 5).create(seed=0)
     walls = game.wall_entries()
 
     for wall in walls:
@@ -127,7 +128,7 @@ def test_walls_are_between_adjacent_cells():
 
 def test_mud_only_on_passages():
     """Test that mud only exists where there are no walls (i.e., on passages)."""
-    game = PyRat(width=7, height=7, cheese_count=9, seed=42)
+    game = GameConfig.classic(7, 7, 9).create(seed=42)
 
     walls = game.wall_entries()
     mud = game.mud_entries()

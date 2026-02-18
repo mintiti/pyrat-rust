@@ -1,143 +1,170 @@
 """Tests for PyRat from the Rust bindings.
 
 This tests the game state implementation including:
-- Basic game creation
-- Constructor parameters
+- Game creation via GameConfig and GameBuilder
 - Preset configurations
-- Custom game creation methods
+- Custom game creation
+- Valid moves and effective actions
+- Copy protocol
 """
 # ruff: noqa: PLR2004
 
 import pytest
-from pyrat_engine import PyRat
+from pyrat_engine import GameBuilder, GameConfig
 
 
-class TestBasicGameCreation:
-    """Test basic game creation."""
+class TestGameCreation:
+    """Test game creation via GameConfig and GameBuilder."""
 
-    def test_game_creation(self) -> None:
-        """Test basic game creation with minimal parameters."""
-        game = PyRat(width=5, height=5, cheese_count=3)
+    def test_classic_config(self) -> None:
+        """Test basic game creation with GameConfig.classic."""
+        game = GameConfig.classic(5, 5, 3).create()
         assert game.width == 5
         assert game.height == 5
         assert len(game.cheese_positions()) == 3
 
-    def test_default_values(self) -> None:
-        """Test game creation with default values."""
-        game = PyRat()
+    def test_classic_defaults(self) -> None:
+        """Test game creation with standard defaults."""
+        game = GameConfig.classic(21, 15, 41).create()
         assert game.width == 21
         assert game.height == 15
         assert game.max_turns == 300
-        # Default cheese count is 41
         assert len(game.cheese_positions()) == 41
 
-
-class TestEnhancedConstructor:
-    """Test the enhanced main constructor with new parameters."""
-
-    def test_max_turns_parameter(self):
-        """Test that max_turns can be set in main constructor."""
-        game = PyRat(max_turns=500)
+    def test_builder_with_max_turns(self):
+        """Test that max_turns can be set via builder."""
+        config = (
+            GameBuilder(21, 15)
+            .with_max_turns(500)
+            .with_classic_maze()
+            .with_corner_positions()
+            .with_random_cheese(41)
+            .build()
+        )
+        game = config.create()
         assert game.max_turns == 500
 
-    def test_default_max_turns(self):
-        """Test that default max_turns is still 300."""
-        game = PyRat()
-        assert game.max_turns == 300
-
-    def test_all_parameters(self):
-        """Test all parameters work together."""
-        game = PyRat(
-            width=15, height=11, cheese_count=21, symmetric=True, seed=42, max_turns=200
+    def test_builder_all_parameters(self):
+        """Test builder with all parameters."""
+        config = (
+            GameBuilder(15, 11)
+            .with_max_turns(200)
+            .with_classic_maze()
+            .with_corner_positions()
+            .with_random_cheese(21)
+            .build()
         )
+        game = config.create(seed=42)
         assert game.width == 15
         assert game.height == 11
         assert game.max_turns == 200
         assert len(game.cheese_positions()) == 21
 
+    def test_seed_reproducibility(self):
+        """Test that same config + seed produces same game."""
+        config = GameConfig.classic(10, 10, 10)
+        game1 = config.create(seed=42)
+        game2 = config.create(seed=42)
+        assert game1.cheese_positions() == game2.cheese_positions()
+
 
 class TestDensityParameters:
-    """Test wall_density and mud_density parameters."""
+    """Test wall_density and mud_density parameters via builder."""
 
     def test_zero_wall_density_creates_open_maze(self):
         """wall_density=0.0 should create a maze with no walls."""
-        game = PyRat(width=11, height=11, cheese_count=10, wall_density=0.0, seed=42)
+        config = (
+            GameBuilder(11, 11)
+            .with_random_maze(wall_density=0.0, mud_density=0.1)
+            .with_corner_positions()
+            .with_random_cheese(10)
+            .build()
+        )
+        game = config.create(seed=42)
         walls = game.wall_entries()
         assert len(walls) == 0
 
     def test_zero_mud_density_creates_no_mud(self):
         """mud_density=0.0 should create a maze with no mud."""
-        game = PyRat(width=11, height=11, cheese_count=10, mud_density=0.0, seed=42)
+        config = (
+            GameBuilder(11, 11)
+            .with_random_maze(wall_density=0.7, mud_density=0.0)
+            .with_corner_positions()
+            .with_random_cheese(10)
+            .build()
+        )
+        game = config.create(seed=42)
         mud = game.mud_entries()
         assert len(mud) == 0
 
     def test_open_maze_with_random_cheese(self):
-        """The main use case: open maze with random symmetric cheese."""
-        game = PyRat(
-            width=5,
-            height=5,
-            cheese_count=5,
-            wall_density=0.0,
-            mud_density=0.0,
-            seed=42,
+        """Open maze with random symmetric cheese."""
+        config = (
+            GameBuilder(5, 5)
+            .with_open_maze()
+            .with_corner_positions()
+            .with_random_cheese(5)
+            .build()
         )
+        game = config.create(seed=42)
         assert len(game.wall_entries()) == 0
         assert len(game.mud_entries()) == 0
         assert len(game.cheese_positions()) == 5
 
     def test_high_wall_density_creates_more_walls(self):
         """Higher wall_density should create more walls."""
-        game_low = PyRat(
-            width=15, height=15, cheese_count=10, wall_density=0.3, seed=42
+        config_low = (
+            GameBuilder(15, 15)
+            .with_random_maze(wall_density=0.3)
+            .with_corner_positions()
+            .with_random_cheese(10)
+            .build()
         )
-        game_high = PyRat(
-            width=15, height=15, cheese_count=10, wall_density=0.9, seed=42
+        config_high = (
+            GameBuilder(15, 15)
+            .with_random_maze(wall_density=0.9)
+            .with_corner_positions()
+            .with_random_cheese(10)
+            .build()
         )
 
-        walls_low = len(game_low.wall_entries())
-        walls_high = len(game_high.wall_entries())
+        walls_low = len(config_low.create(seed=42).wall_entries())
+        walls_high = len(config_high.create(seed=42).wall_entries())
 
         assert walls_high > walls_low
 
     def test_high_mud_density_creates_more_mud(self):
         """Higher mud_density should create more mud passages."""
-        game_low = PyRat(width=15, height=15, cheese_count=10, mud_density=0.1, seed=42)
-        game_high = PyRat(
-            width=15, height=15, cheese_count=10, mud_density=0.8, seed=42
+        config_low = (
+            GameBuilder(15, 15)
+            .with_random_maze(mud_density=0.1)
+            .with_corner_positions()
+            .with_random_cheese(10)
+            .build()
+        )
+        config_high = (
+            GameBuilder(15, 15)
+            .with_random_maze(mud_density=0.8)
+            .with_corner_positions()
+            .with_random_cheese(10)
+            .build()
         )
 
-        mud_low = len(game_low.mud_entries())
-        mud_high = len(game_high.mud_entries())
+        mud_low = len(config_low.create(seed=42).mud_entries())
+        mud_high = len(config_high.create(seed=42).mud_entries())
 
         assert mud_high > mud_low
 
-    def test_default_density_unchanged(self):
-        """Games without density params should use defaults (0.7 walls, 0.1 mud)."""
-        game_default = PyRat(width=15, height=15, cheese_count=10, seed=42)
-        game_explicit = PyRat(
-            width=15,
-            height=15,
-            cheese_count=10,
-            wall_density=0.7,
-            mud_density=0.1,
-            seed=42,
-        )
-
-        # Same seed + same density = same maze
-        assert len(game_default.wall_entries()) == len(game_explicit.wall_entries())
-        assert len(game_default.mud_entries()) == len(game_explicit.mud_entries())
-
-    def test_density_with_asymmetric(self):
+    def test_asymmetric_maze(self):
         """Density parameters should work with asymmetric games."""
-        game = PyRat(
-            width=11,
-            height=11,
-            cheese_count=10,
-            symmetric=False,
-            wall_density=0.0,
-            mud_density=0.0,
-            seed=42,
+        config = (
+            GameBuilder(11, 11)
+            .with_random_maze(wall_density=0.0, mud_density=0.0, symmetric=False)
+            .with_corner_positions()
+            .with_random_cheese(10, symmetric=False)
+            .build()
         )
+        game = config.create(seed=42)
         assert len(game.wall_entries()) == 0
         assert len(game.mud_entries()) == 0
 
@@ -150,7 +177,7 @@ class TestPresets:
         presets = ["tiny", "small", "medium", "large", "huge", "open", "asymmetric"]
 
         for preset in presets:
-            game = PyRat.create_preset(preset)
+            game = GameConfig.preset(preset).create()
             assert game is not None
 
     def test_preset_dimensions(self):
@@ -166,7 +193,7 @@ class TestPresets:
         }
 
         for preset, (width, height, cheese, turns) in expected.items():
-            game = PyRat.create_preset(preset)
+            game = GameConfig.preset(preset).create()
             assert game.width == width
             assert game.height == height
             assert game.max_turns == turns
@@ -175,68 +202,63 @@ class TestPresets:
 
     def test_preset_with_seed(self):
         """Test that presets with same seed are reproducible."""
-        game1 = PyRat.create_preset("medium", seed=42)
-        game2 = PyRat.create_preset("medium", seed=42)
+        config = GameConfig.preset("medium")
+        game1 = config.create(seed=42)
+        game2 = config.create(seed=42)
 
-        # Check that cheese positions are the same
         cheese1 = set(game1.cheese_positions())
         cheese2 = set(game2.cheese_positions())
         assert cheese1 == cheese2
 
     def test_open_preset_has_no_walls(self):
         """Test that open preset has no walls or mud."""
-        game = PyRat.create_preset("open")
+        game = GameConfig.preset("open").create()
 
-        # Check walls by seeing if all moves are valid
-        # In a maze with no walls, you can move in all 4 directions
-        # from any non-edge position
-        obs = game.get_observation(True)  # True for player 1
+        obs = game.get_observation(True)
         movement_matrix = obs.movement_matrix
 
         # Check a center position (should have all 4 moves valid)
         center_x, center_y = game.width // 2, game.height // 2
-        # Movement matrix: [x, y, direction]
-        # Directions: 0=UP, 1=RIGHT, 2=DOWN, 3=LEFT
-        # Values: -1=wall/invalid, 0=free movement, >0=mud
         for direction in range(4):
             assert movement_matrix[center_x][center_y][direction] == 0
 
     def test_invalid_preset_name(self):
         """Test that invalid preset names raise an error."""
         with pytest.raises(ValueError, match="Unknown preset"):
-            PyRat.create_preset("invalid_preset")
+            GameConfig.preset("invalid_preset")
 
 
 class TestCustomCreationMethods:
-    """Test the new custom creation methods."""
+    """Test custom game creation via builder."""
 
-    def test_create_from_maze(self):
-        """Test creating a game from a specific maze layout."""
-        walls = [
-            ((0, 0), (0, 1)),  # Wall between (0,0) and (0,1)
-            ((1, 1), (2, 1)),  # Wall between (1,1) and (2,1)
-        ]
-
-        game = PyRat.create_from_maze(
-            width=5, height=5, walls=walls, seed=42, max_turns=100, symmetric=False
+    def test_custom_maze_with_random_cheese(self):
+        """Test creating a game from a specific maze layout with random cheese."""
+        config = (
+            GameBuilder(5, 5)
+            .with_max_turns(100)
+            .with_custom_maze(walls=[((0, 0), (0, 1)), ((1, 1), (2, 1))])
+            .with_corner_positions()
+            .with_random_cheese(3, symmetric=False)
+            .build()
         )
+        game = config.create(seed=42)
 
         assert game.width == 5
         assert game.height == 5
         assert game.max_turns == 100
-        # Should have cheese (13% of 25 = ~3 pieces)
         assert 2 <= len(game.cheese_positions()) <= 4
 
-    def test_create_with_starts(self):
+    def test_custom_positions(self):
         """Test creating a game with custom starting positions."""
-        game = PyRat.create_with_starts(
-            width=15,
-            height=11,
-            player1_start=(3, 3),
-            player2_start=(11, 7),
-            preset="small",
-            seed=42,
+        config = (
+            GameBuilder(15, 11)
+            .with_max_turns(200)
+            .with_classic_maze()
+            .with_custom_positions((3, 3), (11, 7))
+            .with_random_cheese(21)
+            .build()
         )
+        game = config.create(seed=42)
 
         assert game.width == 15
         assert game.height == 11
@@ -244,68 +266,16 @@ class TestCustomCreationMethods:
         assert game.player1_position.y == 3
         assert game.player2_position.x == 11
         assert game.player2_position.y == 7
-        # Should use the preset's max_turns
         assert game.max_turns == 200
 
 
-class TestPyRatIntegration:
-    """Test that the PyRat API works correctly."""
-
-    def test_pyrat_with_max_turns(self):
-        """Test that PyRat class accepts max_turns parameter."""
-        game = PyRat(max_turns=500)
-        assert game.max_turns == 500
-
-    def test_pyrat_defaults(self):
-        """Test that PyRat defaults still work."""
-        game = PyRat()
-        assert game.max_turns == 300
-        assert game.width == 21
-        assert game.height == 15
-
-    def test_pyrat_all_parameters(self):
-        """Test PyRat with all parameters."""
-        game = PyRat(
-            width=25,
-            height=17,
-            cheese_count=50,
-            symmetric=False,
-            seed=123,
-            max_turns=400,
-        )
-        assert game.width == 25
-        assert game.height == 17
-        assert game.max_turns == 400
-        # Cheese count might vary slightly
-        assert 48 <= len(game.cheese_positions()) <= 52
-
-
-class TestBackwardCompatibility:
-    """Test that the new API maintains backward compatibility."""
-
-    def test_old_constructor_still_works(self):
-        """Test that the old constructor signature still works."""
-        # Old way without max_turns
-        game = PyRat(width=10, height=10, cheese_count=10, symmetric=True, seed=42)
-        assert game.width == 10
-        assert game.height == 10
-        assert game.max_turns == 300  # Default value
-
-    def test_positional_arguments_work(self):
-        """Test that positional arguments still work for backward compatibility."""
-        # This is how some old code might call it
-        game = PyRat(15, 15, 20, True, 42)
-        assert game.width == 15
-        assert game.height == 15
-        assert len(game.cheese_positions()) == 20
-
-
 class TestResetSymmetry:
-    """Test that reset() respects the symmetric flag."""
+    """Test that reset() respects the config."""
 
     def test_symmetric_game_reset_stays_symmetric(self):
         """Test that resetting a symmetric game generates symmetric maze."""
-        game = PyRat(width=11, height=9, symmetric=True, seed=42)
+        config = GameConfig.classic(11, 9, 13)
+        game = config.create(seed=42)
         game.reset(seed=123)
 
         # Check cheese positions are symmetric
@@ -316,23 +286,27 @@ class TestResetSymmetry:
         for c in cheese:
             sym_x = width - 1 - c.x
             sym_y = height - 1 - c.y
-            # Either self-symmetric (center) or has symmetric counterpart
             assert (sym_x, sym_y) in cheese_set or (c.x == sym_x and c.y == sym_y)
 
-    def test_asymmetric_game_reset_stays_asymmetric(self):
-        """Test that resetting an asymmetric game generates asymmetric maze."""
-        game = PyRat(width=21, height=15, symmetric=False, seed=42)
-
+    def test_asymmetric_game_reset(self):
+        """Test that resetting an asymmetric game works."""
+        config = (
+            GameBuilder(21, 15)
+            .with_random_maze(symmetric=False)
+            .with_corner_positions()
+            .with_random_cheese(41, symmetric=False)
+            .build()
+        )
+        game = config.create(seed=42)
         game.reset(seed=123)
-        # Just verify game still works - asymmetric mazes don't guarantee
-        # anything specific about symmetry
+
         assert game.width == 21
         assert game.height == 15
         assert len(game.cheese_positions()) > 0
 
     def test_preset_symmetric_reset(self):
         """Test that preset games reset correctly."""
-        game = PyRat.create_preset("medium", seed=42)
+        game = GameConfig.preset("medium").create(seed=42)
         game.reset(seed=123)
 
         # Medium preset is symmetric - check cheese
@@ -347,194 +321,12 @@ class TestResetSymmetry:
 
     def test_preset_asymmetric_reset(self):
         """Test that asymmetric preset resets correctly."""
-        game = PyRat.create_preset("asymmetric", seed=42)
+        game = GameConfig.preset("asymmetric").create(seed=42)
         game.reset(seed=123)
 
-        # Just verify game still works
         assert game.width == 21
         assert game.height == 15
         assert len(game.cheese_positions()) > 0
-
-
-class TestCreateCustomSymmetry:
-    """Test symmetry validation in create_custom()."""
-
-    def test_symmetric_custom_game_valid(self):
-        """Test creating a symmetric custom game with valid data."""
-        # 5x5 maze: symmetric walls and cheese
-        walls = [
-            ((0, 0), (0, 1)),  # Wall at bottom-left
-            ((4, 4), (4, 3)),  # Symmetric wall at top-right
-        ]
-        cheese = [
-            (1, 1),  # Bottom-left area
-            (3, 3),  # Symmetric: top-right area
-            (2, 2),  # Center (self-symmetric in 5x5)
-        ]
-
-        game = PyRat.create_custom(
-            width=5,
-            height=5,
-            walls=walls,
-            cheese=cheese,
-            symmetric=True,
-        )
-        assert game.width == 5
-        assert len(game.cheese_positions()) == 3
-
-    def test_asymmetric_custom_game_no_validation(self):
-        """Test that asymmetric custom games skip validation."""
-        # Non-symmetric walls and cheese - should work with symmetric=False
-        walls = [((0, 0), (0, 1))]  # Only one wall
-        cheese = [(1, 1), (2, 2)]  # Non-symmetric cheese
-
-        game = PyRat.create_custom(
-            width=5,
-            height=5,
-            walls=walls,
-            cheese=cheese,
-            symmetric=False,
-        )
-        assert game.width == 5
-        assert len(game.cheese_positions()) == 2
-
-    def test_symmetric_custom_game_invalid_walls(self):
-        """Test that symmetric=True rejects non-symmetric walls."""
-        # Only one wall - missing symmetric counterpart
-        walls = [((0, 0), (0, 1))]
-        cheese = [(2, 2)]  # Center cheese is self-symmetric
-
-        with pytest.raises(ValueError, match="no symmetric counterpart"):
-            PyRat.create_custom(
-                width=5,
-                height=5,
-                walls=walls,
-                cheese=cheese,
-                symmetric=True,
-            )
-
-    def test_symmetric_custom_game_invalid_cheese(self):
-        """Test that symmetric=True rejects non-symmetric cheese."""
-        cheese = [(1, 1)]  # Only one cheese, not at center
-
-        with pytest.raises(ValueError, match="no symmetric counterpart"):
-            PyRat.create_custom(
-                width=5,
-                height=5,
-                cheese=cheese,
-                symmetric=True,
-            )
-
-    def test_symmetric_custom_game_invalid_players(self):
-        """Test that symmetric=True rejects non-symmetric player positions."""
-        cheese = [(2, 2)]  # Center cheese is valid
-
-        with pytest.raises(ValueError, match="not symmetric"):
-            PyRat.create_custom(
-                width=5,
-                height=5,
-                cheese=cheese,
-                player1_pos=(0, 0),
-                player2_pos=(3, 3),  # Should be (4, 4) for symmetry
-                symmetric=True,
-            )
-
-    def test_symmetric_custom_game_self_symmetric_wall(self):
-        """Test that self-symmetric walls are valid."""
-        # In a 5x5 maze, wall between (2,1) and (2,2) is self-symmetric
-        # (symmetric of (2,1) is (2,3), symmetric of (2,2) is (2,2))
-        # Actually, let's use a wall that is truly self-symmetric
-        # A wall between (1,2) and (2,2) has symmetric at (3,2)-(2,2)
-        # which is different. Let me think...
-        #
-        # For 5x5: symmetric(x,y) = (4-x, 4-y)
-        # Wall (2,1)-(2,2): sym = (2,3)-(2,2) - not the same
-        #
-        # Actually for a wall to be self-symmetric, both endpoints must
-        # map to each other: wall(a,b) is self-sym if sym(a)=b and sym(b)=a
-        # That means a and b are symmetric to each other.
-        #
-        # In 5x5: (1,1) and (3,3) are symmetric. Wall between them would be
-        # self-symmetric but they're not adjacent.
-        #
-        # Adjacent self-symmetric pairs in 5x5:
-        # (2,1)-(2,2)? sym(2,1)=(2,3), sym(2,2)=(2,2) - no
-        # (1,2)-(2,2)? sym(1,2)=(3,2), sym(2,2)=(2,2) - no
-        #
-        # There are no adjacent self-symmetric walls in 5x5.
-        # Let's use 7x7: symmetric(x,y) = (6-x, 6-y)
-        # (3,2)-(3,3)? sym(3,2)=(3,4), sym(3,3)=(3,3) - no
-        #
-        # Self-symmetric wall: sym(a)=b means b=sym(a)
-        # For wall a-b to be self-sym, we need {a,b} = {sym(a), sym(b)}
-        # If a and b are both on the center axis, this can work.
-        # E.g., in 5x5, (2,2) is the center.
-        # A wall (2,1)-(2,2): sym(2,1)=(2,3), sym(2,2)=(2,2)
-        # So the symmetric wall is (2,3)-(2,2) = (2,2)-(2,3)
-        # These are different walls.
-        #
-        # Let me just test with a valid symmetric pair instead.
-        walls = [
-            ((1, 2), (2, 2)),  # Wall
-            ((3, 2), (2, 2)),  # Its symmetric counterpart
-        ]
-        cheese = [(2, 2)]  # Center
-
-        game = PyRat.create_custom(
-            width=5,
-            height=5,
-            walls=walls,
-            cheese=cheese,
-            symmetric=True,
-        )
-        assert len(game.wall_entries()) == 2
-
-
-class TestCreateFromMazeSymmetry:
-    """Test symmetry parameter in create_from_maze()."""
-
-    def test_symmetric_from_maze(self):
-        """Test creating symmetric game from maze."""
-        # Symmetric walls for 5x5
-        walls = [
-            ((0, 0), (0, 1)),
-            ((4, 4), (4, 3)),
-        ]
-
-        game = PyRat.create_from_maze(
-            width=5,
-            height=5,
-            walls=walls,
-            symmetric=True,
-            seed=42,
-        )
-        assert game.width == 5
-
-    def test_asymmetric_from_maze(self):
-        """Test creating asymmetric game from maze."""
-        # Non-symmetric wall
-        walls = [((0, 0), (0, 1))]
-
-        game = PyRat.create_from_maze(
-            width=5,
-            height=5,
-            walls=walls,
-            symmetric=False,
-            seed=42,
-        )
-        assert game.width == 5
-
-    def test_symmetric_from_maze_invalid(self):
-        """Test that symmetric=True rejects non-symmetric walls."""
-        walls = [((0, 0), (0, 1))]  # Only one wall
-
-        with pytest.raises(ValueError, match="no symmetric counterpart"):
-            PyRat.create_from_maze(
-                width=5,
-                height=5,
-                walls=walls,
-                symmetric=True,
-            )
 
 
 class TestGetValidMoves:
@@ -548,10 +340,9 @@ class TestGetValidMoves:
         """Test that corner positions have limited valid moves."""
         from pyrat_engine import Direction
 
-        game = PyRat.create_preset("open", seed=42)  # No walls
+        game = GameConfig.preset("open").create(seed=42)
         valid = game.get_valid_moves((0, 0))
 
-        # Bottom-left corner: can only go UP and RIGHT
         assert Direction.UP in valid
         assert Direction.RIGHT in valid
         assert Direction.DOWN not in valid
@@ -561,7 +352,7 @@ class TestGetValidMoves:
         """Test top-right corner has limited valid moves."""
         from pyrat_engine import Direction
 
-        game = PyRat.create_preset("open", seed=42)
+        game = GameConfig.preset("open").create(seed=42)
         valid = game.get_valid_moves((game.width - 1, game.height - 1))
 
         assert Direction.DOWN in valid
@@ -573,7 +364,7 @@ class TestGetValidMoves:
         """Test that center position in empty maze has all 4 moves."""
         from pyrat_engine import Direction
 
-        game = PyRat.create_preset("open", seed=42)
+        game = GameConfig.preset("open").create(seed=42)
         center_x = game.width // 2
         center_y = game.height // 2
         valid = game.get_valid_moves((center_x, center_y))
@@ -588,23 +379,17 @@ class TestGetValidMoves:
         """Test that walls block moves."""
         from pyrat_engine import Direction
 
-        # Create a game with a wall blocking right movement from (0,0)
-        walls = [
-            ((0, 0), (1, 0)),  # Wall between (0,0) and (1,0)
-            # Add symmetric wall for validation
-            ((4, 4), (3, 4)),
-        ]
-        game = PyRat.create_custom(
-            width=5,
-            height=5,
-            walls=walls,
-            cheese=[(2, 2)],
-            symmetric=True,
+        config = (
+            GameBuilder(5, 5)
+            .with_custom_maze(walls=[((0, 0), (1, 0)), ((4, 4), (3, 4))])
+            .with_corner_positions()
+            .with_custom_cheese([(2, 2)])
+            .build()
         )
+        game = config.create()
 
         valid = game.get_valid_moves((0, 0))
 
-        # Can go UP but not RIGHT (wall), DOWN (boundary), or LEFT (boundary)
         assert Direction.UP in valid
         assert Direction.RIGHT not in valid
         assert Direction.DOWN not in valid
@@ -612,7 +397,7 @@ class TestGetValidMoves:
 
     def test_out_of_bounds_raises_error(self):
         """Test that out-of-bounds positions raise ValueError."""
-        game = PyRat.create_preset("tiny", seed=42)
+        game = GameConfig.preset("tiny").create(seed=42)
 
         with pytest.raises(ValueError, match="outside board bounds"):
             game.get_valid_moves((100, 100))
@@ -621,11 +406,10 @@ class TestGetValidMoves:
         """Test that get_valid_moves accepts Coordinates objects."""
         from pyrat_engine import Coordinates
 
-        game = PyRat.create_preset("open", seed=42)
+        game = GameConfig.preset("open").create(seed=42)
         pos = Coordinates(0, 0)
         valid = game.get_valid_moves(pos)
 
-        # Should work the same as tuple
         valid_tuple = game.get_valid_moves((0, 0))
         assert set(valid) == set(valid_tuple)
 
@@ -633,10 +417,9 @@ class TestGetValidMoves:
         """Test that returned values can be used as Direction enum."""
         from pyrat_engine import Direction
 
-        game = PyRat.create_preset("open", seed=42)
+        game = GameConfig.preset("open").create(seed=42)
         valid = game.get_valid_moves((5, 5))
 
-        # All returned values should be convertible to Direction
         for v in valid:
             direction = Direction(v)
             assert direction in [
@@ -658,40 +441,37 @@ class TestEffectiveActions:
         """Test corner position where DOWN and LEFT are blocked."""
         from pyrat_engine import Direction
 
-        game = PyRat.create_preset("open", seed=42)
+        game = GameConfig.preset("open").create(seed=42)
         result = game.effective_actions((0, 0))
 
-        # At (0,0): UP and RIGHT are valid, DOWN and LEFT hit boundaries
-        assert result[Direction.UP] == Direction.UP  # Valid
-        assert result[Direction.RIGHT] == Direction.RIGHT  # Valid
-        assert result[Direction.DOWN] == Direction.STAY  # Blocked → STAY
-        assert result[Direction.LEFT] == Direction.STAY  # Blocked → STAY
-        assert result[Direction.STAY] == Direction.STAY  # STAY → STAY
+        assert result[Direction.UP] == Direction.UP
+        assert result[Direction.RIGHT] == Direction.RIGHT
+        assert result[Direction.DOWN] == Direction.STAY
+        assert result[Direction.LEFT] == Direction.STAY
+        assert result[Direction.STAY] == Direction.STAY
 
     def test_corner_position_top_right(self):
         """Test corner position where UP and RIGHT are blocked."""
         from pyrat_engine import Direction
 
-        game = PyRat.create_preset("open", seed=42)
+        game = GameConfig.preset("open").create(seed=42)
         result = game.effective_actions((game.width - 1, game.height - 1))
 
-        # At top-right: DOWN and LEFT are valid, UP and RIGHT hit boundaries
-        assert result[Direction.UP] == Direction.STAY  # Blocked → STAY
-        assert result[Direction.RIGHT] == Direction.STAY  # Blocked → STAY
-        assert result[Direction.DOWN] == Direction.DOWN  # Valid
-        assert result[Direction.LEFT] == Direction.LEFT  # Valid
-        assert result[Direction.STAY] == Direction.STAY  # STAY → STAY
+        assert result[Direction.UP] == Direction.STAY
+        assert result[Direction.RIGHT] == Direction.STAY
+        assert result[Direction.DOWN] == Direction.DOWN
+        assert result[Direction.LEFT] == Direction.LEFT
+        assert result[Direction.STAY] == Direction.STAY
 
     def test_center_position_all_valid(self):
         """Test center position in empty maze has all moves valid."""
         from pyrat_engine import Direction
 
-        game = PyRat.create_preset("open", seed=42)
+        game = GameConfig.preset("open").create(seed=42)
         center_x = game.width // 2
         center_y = game.height // 2
         result = game.effective_actions((center_x, center_y))
 
-        # All 4 directions should map to themselves
         assert result[Direction.UP] == Direction.UP
         assert result[Direction.RIGHT] == Direction.RIGHT
         assert result[Direction.DOWN] == Direction.DOWN
@@ -702,47 +482,39 @@ class TestEffectiveActions:
         """Test that walls cause actions to map to STAY."""
         from pyrat_engine import Direction
 
-        # Create game with wall blocking RIGHT from (0,0)
-        walls = [
-            ((0, 0), (1, 0)),  # Wall between (0,0) and (1,0)
-            ((4, 4), (3, 4)),  # Symmetric wall
-        ]
-        game = PyRat.create_custom(
-            width=5,
-            height=5,
-            walls=walls,
-            cheese=[(2, 2)],
-            symmetric=True,
+        config = (
+            GameBuilder(5, 5)
+            .with_custom_maze(walls=[((0, 0), (1, 0)), ((4, 4), (3, 4))])
+            .with_corner_positions()
+            .with_custom_cheese([(2, 2)])
+            .build()
         )
+        game = config.create()
 
         result = game.effective_actions((0, 0))
 
-        # UP is valid, RIGHT is blocked by wall, DOWN and LEFT by boundary
-        assert result[Direction.UP] == Direction.UP  # Valid
-        assert result[Direction.RIGHT] == Direction.STAY  # Wall → STAY
-        assert result[Direction.DOWN] == Direction.STAY  # Boundary → STAY
-        assert result[Direction.LEFT] == Direction.STAY  # Boundary → STAY
+        assert result[Direction.UP] == Direction.UP
+        assert result[Direction.RIGHT] == Direction.STAY
+        assert result[Direction.DOWN] == Direction.STAY
+        assert result[Direction.LEFT] == Direction.STAY
         assert result[Direction.STAY] == Direction.STAY
 
     def test_player_in_mud_all_stay(self):
         """Test that player in mud has all actions map to STAY."""
         from pyrat_engine import Direction
 
-        # Create game with mud
-        mud = [((1, 0), (1, 1), 3)]  # 3 turns to traverse
-        game = PyRat.create_custom(
-            width=5,
-            height=5,
-            mud=mud,
-            cheese=[(2, 2)],
-            player1_pos=(1, 0),
-            player2_pos=(3, 4),
-            symmetric=False,
+        config = (
+            GameBuilder(5, 5)
+            .with_custom_maze(walls=[], mud=[((1, 0), (1, 1), 3)])
+            .with_custom_positions((1, 0), (3, 4))
+            .with_custom_cheese([(2, 2)])
+            .build()
         )
+        game = config.create()
 
         # Before entering mud, normal behavior
         result_before = game.effective_actions_p1()
-        assert result_before[Direction.UP] == Direction.UP  # Can move up into mud
+        assert result_before[Direction.UP] == Direction.UP
 
         # Move player 1 into mud
         game.step(Direction.UP, Direction.STAY)
@@ -759,31 +531,31 @@ class TestEffectiveActions:
 
         # Player 2 is not in mud, should have normal behavior
         result_p2 = game.effective_actions_p2()
-        assert result_p2[Direction.DOWN] == Direction.DOWN  # Can move down
+        assert result_p2[Direction.DOWN] == Direction.DOWN
 
     def test_player_not_in_mud_normal_behavior(self):
         """Test that player not in mud uses position-based computation."""
         from pyrat_engine import Direction
 
-        game = PyRat.create_preset("open", seed=42)
+        game = GameConfig.preset("open").create(seed=42)
 
         # Player 1 starts at (0, 0)
         result_p1 = game.effective_actions_p1()
         assert result_p1[Direction.UP] == Direction.UP
         assert result_p1[Direction.RIGHT] == Direction.RIGHT
-        assert result_p1[Direction.DOWN] == Direction.STAY  # Boundary
-        assert result_p1[Direction.LEFT] == Direction.STAY  # Boundary
+        assert result_p1[Direction.DOWN] == Direction.STAY
+        assert result_p1[Direction.LEFT] == Direction.STAY
 
         # Player 2 starts at (width-1, height-1)
         result_p2 = game.effective_actions_p2()
-        assert result_p2[Direction.UP] == Direction.STAY  # Boundary
-        assert result_p2[Direction.RIGHT] == Direction.STAY  # Boundary
+        assert result_p2[Direction.UP] == Direction.STAY
+        assert result_p2[Direction.RIGHT] == Direction.STAY
         assert result_p2[Direction.DOWN] == Direction.DOWN
         assert result_p2[Direction.LEFT] == Direction.LEFT
 
     def test_out_of_bounds_raises_error(self):
         """Test that out-of-bounds position raises ValueError."""
-        game = PyRat.create_preset("tiny", seed=42)
+        game = GameConfig.preset("tiny").create(seed=42)
 
         with pytest.raises(ValueError, match="outside board bounds"):
             game.effective_actions((100, 100))
@@ -792,17 +564,16 @@ class TestEffectiveActions:
         """Test that effective_actions accepts Coordinates objects."""
         from pyrat_engine import Coordinates
 
-        game = PyRat.create_preset("open", seed=42)
+        game = GameConfig.preset("open").create(seed=42)
         pos = Coordinates(0, 0)
         result = game.effective_actions(pos)
 
-        # Should work the same as tuple
         result_tuple = game.effective_actions((0, 0))
         assert list(result) == list(result_tuple)
 
     def test_return_type_is_list(self):
         """Test that the return type is a list of 5 integers."""
-        game = PyRat.create_preset("open", seed=42)
+        game = GameConfig.preset("open").create(seed=42)
         result = game.effective_actions((0, 0))
 
         assert len(result) == 5
@@ -813,18 +584,16 @@ class TestEffectiveActions:
         """Test that effective_actions is consistent with get_valid_moves."""
         from pyrat_engine import Direction
 
-        game = PyRat.create_preset("open", seed=42)
+        game = GameConfig.preset("open").create(seed=42)
 
         for x in range(game.width):
             for y in range(game.height):
                 valid_moves = game.get_valid_moves((x, y))
                 effective = game.effective_actions((x, y))
 
-                # Valid moves should map to themselves
                 for move in valid_moves:
                     assert effective[move] == move
 
-                # Invalid moves should map to STAY
                 for move in [
                     Direction.UP,
                     Direction.RIGHT,
@@ -842,13 +611,11 @@ class TestCopyProtocol:
         """Test that copy.copy() creates an independent game state."""
         import copy
 
-        game = PyRat(width=11, height=9, seed=42)
+        game = GameConfig.classic(11, 9, 13).create(seed=42)
         game_copy = copy.copy(game)
 
-        # Mutate the copy
-        game_copy.step(0, 0)  # Both players stay
+        game_copy.step(0, 0)
 
-        # Original should be unchanged
         assert game.turn == 0
         assert game_copy.turn == 1
 
@@ -856,13 +623,11 @@ class TestCopyProtocol:
         """Test that copy.deepcopy() creates an independent game state."""
         import copy
 
-        game = PyRat(width=11, height=9, seed=42)
+        game = GameConfig.classic(11, 9, 13).create(seed=42)
         game_copy = copy.deepcopy(game)
 
-        # Mutate the copy
         game_copy.step(0, 0)
 
-        # Original should be unchanged
         assert game.turn == 0
         assert game_copy.turn == 1
 
@@ -872,15 +637,13 @@ class TestCopyProtocol:
 
         from pyrat_engine import Direction
 
-        game = PyRat(width=11, height=9, seed=42)
+        game = GameConfig.classic(11, 9, 13).create(seed=42)
 
-        # Advance the game a few turns to build up state
         game.step(Direction.UP, Direction.DOWN)
         game.step(Direction.RIGHT, Direction.LEFT)
 
         game_copy = copy.copy(game)
 
-        # Check all state is preserved
         assert game_copy.width == game.width
         assert game_copy.height == game.height
         assert game_copy.turn == game.turn
@@ -899,18 +662,16 @@ class TestCopyProtocol:
 
         from pyrat_engine import Direction
 
-        game = PyRat(width=11, height=9, seed=42)
+        game = GameConfig.classic(11, 9, 13).create(seed=42)
         original_turn = game.turn
         original_p1_pos = game.player1_position
         original_cheese = game.cheese_positions()
 
         game_copy = copy.copy(game)
 
-        # Make several moves on the copy
         for _ in range(5):
             game_copy.step(Direction.UP, Direction.DOWN)
 
-        # Original should be completely unchanged
         assert game.turn == original_turn
         assert game.player1_position == original_p1_pos
         assert game.cheese_positions() == original_cheese
@@ -921,17 +682,14 @@ class TestCopyProtocol:
 
         from pyrat_engine import Direction
 
-        game = PyRat(width=11, height=9, seed=42)
+        game = GameConfig.classic(11, 9, 13).create(seed=42)
 
-        # Simulate what MCTS would do
         simulator = copy.deepcopy(game)
 
-        # Run a full simulation
         while not simulator.step(Direction.UP, Direction.DOWN)[0]:
             if simulator.turn >= simulator.max_turns:
                 break
 
-        # Original game should be at turn 0
         assert game.turn == 0
         assert simulator.turn > 0
 
@@ -939,7 +697,7 @@ class TestCopyProtocol:
         """Test copy works with preset-created games."""
         import copy
 
-        game = PyRat.create_preset("small", seed=42)
+        game = GameConfig.preset("small").create(seed=42)
         game_copy = copy.copy(game)
 
         assert game_copy.width == game.width

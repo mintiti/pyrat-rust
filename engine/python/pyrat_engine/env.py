@@ -8,7 +8,6 @@ from gymnasium.spaces import Dict as SpaceDict
 from pettingzoo.utils.env import AgentID, ParallelEnv
 
 from pyrat_engine.core import ObservationHandler as PyObservationHandler
-from pyrat_engine.core import PyRat
 
 if TYPE_CHECKING:
     from pyrat_engine.core.builder import GameConfig
@@ -39,7 +38,9 @@ class PyRatEnv(ParallelEnv):  # type: ignore[misc]
     - STAY (4)
 
     Example:
-        >>> env = PyRatEnv(width=15, height=15)
+        >>> from pyrat_engine import GameConfig
+        >>> config = GameConfig.classic(15, 15, 21)
+        >>> env = PyRatEnv(config)
         >>> obs, info = env.reset(seed=42)
         >>> actions = {"player_1": Direction.RIGHT, "player_2": Direction.LEFT}
         >>> obs, rewards, terminations, truncations, infos = env.step(actions)
@@ -52,26 +53,20 @@ class PyRatEnv(ParallelEnv):  # type: ignore[misc]
 
     def __init__(
         self,
-        width: int = 21,
-        height: int = 15,
-        cheese_count: int = 41,
-        symmetric: bool = True,
+        config: GameConfig,
         seed: int | None = None,
-        config: GameConfig | None = None,
     ):
         super().__init__()
 
         self.possible_agents = ["player_1", "player_2"]
 
         # Create game state and observation handler
-        if config is not None:
-            self.game = config.create(seed)
-            width = config.width
-            height = config.height
-            cheese_count = self.game.max_turns  # for obs space bounds
-        else:
-            self.game = PyRat(width, height, cheese_count, symmetric, seed)
+        self.game = config.create(seed)
+        width = config.width
+        height = config.height
         self.obs_handler = PyObservationHandler(self.game)
+        cheese_count = len(self.game.cheese_positions())
+        max_turns = self.game.max_turns
 
         # Define spaces
         self.action_space = {agent: Discrete(5) for agent in self.possible_agents}
@@ -93,8 +88,8 @@ class PyRatEnv(ParallelEnv):  # type: ignore[misc]
                 "opponent_score": Box(
                     low=0, high=cheese_count, shape=(1,), dtype=np.float32
                 ),
-                "current_turn": Box(low=0, high=300, shape=(1,), dtype=np.uint16),
-                "max_turns": Box(low=0, high=300, shape=(1,), dtype=np.uint16),
+                "current_turn": Box(low=0, high=max_turns, shape=(1,), dtype=np.uint16),
+                "max_turns": Box(low=0, high=max_turns, shape=(1,), dtype=np.uint16),
                 "cheese_matrix": Box(
                     low=0, high=1, shape=(width, height), dtype=np.uint8
                 ),

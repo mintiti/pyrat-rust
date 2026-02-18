@@ -4,13 +4,12 @@ Tests the new unified type system including:
 - Coordinates type
 - Wall type
 - Mud type
-- Tuple input support
 - Type conversions
 """
 # ruff: noqa: PLR2004
 
 import pytest
-from pyrat_engine import PyRat
+from pyrat_engine import GameBuilder, GameConfig
 from pyrat_engine.core.types import Coordinates, Direction, Mud, Wall
 
 
@@ -232,48 +231,20 @@ class TestMudType:
 
 
 class TestTupleInputSupport:
-    """Test that tuple input is supported for backward compatibility."""
+    """Test that tuple input is supported via GameBuilder."""
 
-    def test_game_accepts_tuple_walls(self):
-        """Test that PyRat.create_custom accepts tuple walls."""
-        # Should be able to pass tuples which get converted to Wall objects
+    def test_builder_accepts_tuple_walls(self):
+        """Test that GameBuilder.with_custom_maze accepts tuple walls."""
         walls = [((0, 0), (0, 1)), ((1, 1), (2, 1))]
 
-        game = PyRat.create_custom(
-            width=5,
-            height=5,
-            walls=walls,
-            cheese=[(2, 2)],
-            max_turns=100,
-            symmetric=False,
+        config = (
+            GameBuilder(5, 5)
+            .with_custom_maze(walls=walls)
+            .with_corner_positions()
+            .with_custom_cheese([(2, 2)])
+            .build()
         )
-
-        assert game is not None
-        assert game.width == 5
-        assert game.height == 5
-
-    def test_game_accepts_coordinates_walls(self):
-        """Test that PyRat.create_custom accepts Coordinates-based walls."""
-        # Can also pass Wall objects directly
-        walls = [
-            Wall(Coordinates(0, 0), Coordinates(0, 1)),
-            Wall(Coordinates(1, 1), Coordinates(2, 1)),
-        ]
-
-        # This should fail for now since create_custom expects tuples
-        # We'll update this test when we implement the FromPyObject trait
-        with pytest.raises(TypeError):
-            PyRat.create_custom(
-                width=5, height=5, walls=walls, cheese=[(2, 2)], max_turns=100
-            )
-
-    def test_create_from_maze_with_tuples(self):
-        """Test create_from_maze accepts tuple walls."""
-        walls = [((0, 0), (0, 1)), ((1, 1), (2, 1))]
-
-        game = PyRat.create_from_maze(
-            width=5, height=5, walls=walls, seed=42, max_turns=100, symmetric=False
-        )
+        game = config.create()
 
         assert game is not None
         assert game.width == 5
@@ -298,8 +269,7 @@ class TestIntegrationWithGame:
 
     def test_game_returns_coordinates(self):
         """Test that game methods return Coordinates objects."""
-        # Use even cheese count with even dimensions
-        game = PyRat(width=10, height=10, cheese_count=6)
+        game = GameConfig.classic(10, 10, 6).create()
 
         # Get player positions - should return Coordinates objects
         p1_pos = game.player1_position
@@ -319,8 +289,7 @@ class TestIntegrationWithGame:
 
     def test_cheese_positions_are_coordinates(self):
         """Test that cheese positions return Coordinates objects."""
-        # Use even cheese count with even dimensions
-        game = PyRat(width=10, height=10, cheese_count=6)
+        game = GameConfig.classic(10, 10, 6).create()
 
         cheese_positions = game.cheese_positions()
         assert len(cheese_positions) == 6

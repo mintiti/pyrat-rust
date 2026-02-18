@@ -3,7 +3,7 @@
 import random
 
 import numpy as np
-from pyrat_engine import Direction, PyRat
+from pyrat_engine import Direction, GameBuilder, GameConfig
 from pyrat_engine.env import PyRatEnv
 
 TEST_GAME_WIDTH = 5
@@ -11,11 +11,13 @@ TEST_GAME_HEIGHT = 5
 TEST_CHEESE_COUNT = 3
 
 
+def _test_config():
+    return GameConfig.classic(TEST_GAME_WIDTH, TEST_GAME_HEIGHT, TEST_CHEESE_COUNT)
+
+
 def test_env_initialization() -> None:
     """Test environment initialization."""
-    env = PyRatEnv(
-        width=TEST_GAME_WIDTH, height=TEST_GAME_HEIGHT, cheese_count=TEST_CHEESE_COUNT
-    )
+    env = PyRatEnv(_test_config())
 
     # Check spaces
     assert len(env.possible_agents) == 2  # noqa: PLR2004
@@ -36,9 +38,7 @@ def test_env_initialization() -> None:
 
 def test_env_reset() -> None:
     """Test environment reset."""
-    env = PyRatEnv(
-        width=TEST_GAME_WIDTH, height=TEST_GAME_HEIGHT, cheese_count=TEST_CHEESE_COUNT
-    )
+    env = PyRatEnv(_test_config())
 
     observations, infos = env.reset(seed=42)
 
@@ -58,9 +58,7 @@ def test_env_reset() -> None:
 
 def test_env_step() -> None:
     """Test environment step."""
-    env = PyRatEnv(
-        width=TEST_GAME_WIDTH, height=TEST_GAME_HEIGHT, cheese_count=TEST_CHEESE_COUNT
-    )
+    env = PyRatEnv(_test_config())
     env.reset(seed=42)
 
     actions = {
@@ -86,12 +84,7 @@ def test_env_step() -> None:
 
 def test_env_symmetry() -> None:
     """Test symmetric observations between players."""
-    env = PyRatEnv(
-        width=TEST_GAME_WIDTH,
-        height=TEST_GAME_HEIGHT,
-        cheese_count=TEST_CHEESE_COUNT,
-        symmetric=True,
-    )
+    env = PyRatEnv(_test_config())
     obs, _ = env.reset(seed=42)
 
     # Player 2's view should be symmetric to player 1's
@@ -104,9 +97,7 @@ def test_env_symmetry() -> None:
 
 def test_random_gameplay() -> None:
     """Test environment with random moves until termination."""
-    env = PyRatEnv(
-        width=TEST_GAME_WIDTH, height=TEST_GAME_HEIGHT, cheese_count=TEST_CHEESE_COUNT
-    )
+    env = PyRatEnv(_test_config())
     obs, _ = env.reset(seed=42)
 
     terminated = truncated = False
@@ -131,21 +122,17 @@ def test_custom_maze() -> None:
     """Test environment with custom maze configuration."""
     game_width = 3
     game_height = 3
-    game = PyRat.create_custom(
-        width=game_width,
-        height=game_height,
-        walls=[
-            ((0, 0), (0, 1)),  # Vertical wall
-            ((1, 1), (2, 1)),  # Horizontal wall
-        ],
-        mud=[
-            ((1, 0), (1, 1), 2),  # 2 turns of mud
-        ],
-        cheese=[(1, 1)],  # One cheese in the middle
-        player1_pos=(0, 0),
-        player2_pos=(2, 2),
-        symmetric=False,
+    config = (
+        GameBuilder(game_width, game_height)
+        .with_custom_maze(
+            walls=[((0, 0), (0, 1)), ((1, 1), (2, 1))],
+            mud=[((1, 0), (1, 1), 2)],
+        )
+        .with_custom_positions((0, 0), (2, 2))
+        .with_custom_cheese([(1, 1)])
+        .build()
     )
+    game = config.create()
 
     # Verify maze configuration
     assert game.width == game_width

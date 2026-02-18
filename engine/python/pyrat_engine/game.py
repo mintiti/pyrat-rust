@@ -27,11 +27,9 @@ class MoveUndo:
     and analyzing different game strategies.
 
     Example:
-        >>> from pyrat_engine import PyRat, Direction
-        >>> game = PyRat(width=15, height=15)
-        >>> # Make a move and store undo information
+        >>> from pyrat_engine import GameConfig, Direction
+        >>> game = GameConfig.classic(15, 15, 21).create()
         >>> undo_info = game.make_move(Direction.RIGHT, Direction.LEFT)
-        >>> # Undo the move
         >>> game.unmake_move(undo_info)
     """
 
@@ -85,11 +83,10 @@ class GameResult(NamedTuple):
         p2_score: Player 2's current score
 
     Example:
-        >>> from pyrat_engine import PyRat, Direction
+        >>> from pyrat_engine import GameConfig, Direction
         >>> from pyrat_engine.game import GameResult
-        >>> game = PyRat(width=15, height=15)
+        >>> game = GameConfig.classic(15, 15, 21).create()
         >>> game_over, collected = game.step(Direction.RIGHT, Direction.LEFT)
-        >>> # Or wrap in GameResult for named access:
         >>> result = GameResult(game_over, collected, game.player1_score, game.player2_score)
     """
 
