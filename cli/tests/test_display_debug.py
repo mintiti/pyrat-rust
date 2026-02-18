@@ -1,6 +1,6 @@
 """Tests for display behavior in non-TTY environments with debug override."""
 
-from pyrat_engine import PyRat
+from pyrat_engine import GameConfig
 from pyrat_runner.display import Display
 
 
@@ -9,7 +9,7 @@ def test_display_renders_multiple_frames_with_debug_override(capsys, monkeypatch
     monkeypatch.setenv("PYRAT_DEBUG", "1")
 
     # Create a tiny game to initialize Display
-    game = PyRat(width=3, height=3, cheese_count=1, seed=1)
+    game = GameConfig.classic(3, 3, 1).create(seed=1)
     disp = Display(game_state=game, delay=0.0)
 
     # First render
