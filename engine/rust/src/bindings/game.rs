@@ -1,4 +1,7 @@
 //! Python bindings for the `PyRat` game engine
+use crate::game::builder::{
+    CheeseStrategy, GameBuilder, GameConfig, MazeParams, MazeStrategy, PlayerStrategy,
+};
 use crate::game::game_logic::MoveUndo;
 use crate::game::observations::ObservationHandler;
 use crate::game::types::CoordinatesInput;
@@ -37,34 +40,6 @@ pub enum WallInput {
     Tuple(PyWall),
     /// Object form: Wall instance
     Object(crate::Wall),
-}
-
-/// Maze generation parameters for Python binding methods that need them
-/// (e.g., `create_with_starts` which takes its own width/height).
-#[derive(Clone)]
-struct PresetMazeParams {
-    symmetric: bool,
-    wall_density: f32,
-    mud_density: f32,
-    mud_range: u8,
-    max_turns: u16,
-}
-
-impl PresetMazeParams {
-    fn get_preset(name: &str) -> PyResult<Self> {
-        match name {
-            "tiny" => Ok(Self { symmetric: true, wall_density: 0.7, mud_density: 0.1, mud_range: 3, max_turns: 150 }),
-            "small" => Ok(Self { symmetric: true, wall_density: 0.7, mud_density: 0.1, mud_range: 3, max_turns: 200 }),
-            "medium" => Ok(Self { symmetric: true, wall_density: 0.7, mud_density: 0.1, mud_range: 3, max_turns: 300 }),
-            "large" => Ok(Self { symmetric: true, wall_density: 0.7, mud_density: 0.1, mud_range: 3, max_turns: 400 }),
-            "huge" => Ok(Self { symmetric: true, wall_density: 0.7, mud_density: 0.1, mud_range: 3, max_turns: 500 }),
-            "open" => Ok(Self { symmetric: true, wall_density: 0.0, mud_density: 0.0, mud_range: 2, max_turns: 300 }),
-            "asymmetric" => Ok(Self { symmetric: false, wall_density: 0.7, mud_density: 0.1, mud_range: 3, max_turns: 300 }),
-            _ => Err(PyValueError::new_err(format!(
-                "Unknown preset '{name}'. Available presets: tiny, small, medium, large, huge, open, asymmetric"
-            ))),
-        }
-    }
 }
 
 /// Convert a slice of `Wall` objects into a wall map (blocked-neighbor lists).
@@ -163,12 +138,362 @@ impl PyMoveUndo {
     }
 }
 
+// ---------------------------------------------------------------------------
+// PyGameConfig — reusable game configuration
+// ---------------------------------------------------------------------------
+
+/// Reusable game configuration. Stamps out `PyRat` instances via `create()`.
+#[pyclass(name = "GameConfig")]
+#[derive(Clone)]
+pub struct PyGameConfig {
+    inner: GameConfig,
+}
+
+#[pymethods]
+impl PyGameConfig {
+    /// Look up a named preset configuration.
+    #[staticmethod]
+    fn preset(name: &str) -> PyResult<Self> {
+        let inner = GameConfig::preset(name).map_err(PyValueError::new_err)?;
+        Ok(Self { inner })
+    }
+
+    /// Standard game: classic maze, corner starts, symmetric random cheese.
+    #[staticmethod]
+    fn classic(width: u8, height: u8, cheese: u16) -> Self {
+        Self {
+            inner: GameConfig::classic(width, height, cheese),
+        }
+    }
+
+    /// Stamp out a new game from this config.
+    #[pyo3(signature = (seed=None))]
+    fn create(&self, seed: Option<u64>) -> PyRat {
+        let game = self.inner.create(seed);
+        let observation_handler = ObservationHandler::new(&game);
+        PyRat {
+            game,
+            observation_handler,
+            config: self.inner.clone(),
+        }
+    }
+
+    #[getter]
+    fn width(&self) -> u8 {
+        self.inner.width
+    }
+
+    #[getter]
+    fn height(&self) -> u8 {
+        self.inner.height
+    }
+
+    #[getter]
+    fn max_turns(&self) -> u16 {
+        self.inner.max_turns
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "GameConfig({}x{}, max_turns={})",
+            self.inner.width, self.inner.height, self.inner.max_turns
+        )
+    }
+
+    fn __copy__(&self) -> Self {
+        self.clone()
+    }
+
+    fn __deepcopy__(&self, _memo: &Bound<'_, PyAny>) -> Self {
+        self.clone()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PyGameBuilder — runtime-checked builder mirroring Rust typestate API
+// ---------------------------------------------------------------------------
+
+/// Builder for composing game configurations.
+///
+/// Enforces that maze, players, and cheese strategies are all set before
+/// building. Each category must be set exactly once.
+#[pyclass(name = "GameBuilder")]
+pub struct PyGameBuilder {
+    width: u8,
+    height: u8,
+    max_turns: u16,
+    maze: Option<MazeStrategy>,
+    players: Option<PlayerStrategy>,
+    cheese: Option<CheeseStrategy>,
+}
+
+#[pymethods]
+impl PyGameBuilder {
+    #[new]
+    fn new(width: u8, height: u8) -> Self {
+        Self {
+            width,
+            height,
+            max_turns: 300,
+            maze: None,
+            players: None,
+            cheese: None,
+        }
+    }
+
+    // -- Maze strategies --
+
+    /// Classic maze: 0.7 wall density, 0.1 mud density, connected, symmetric.
+    fn with_classic_maze(mut slf: PyRefMut<'_, Self>) -> PyRefMut<'_, Self> {
+        slf.maze = Some(MazeStrategy::Random(MazeParams::classic()));
+        slf
+    }
+
+    /// Open maze: no walls, no mud.
+    fn with_open_maze(mut slf: PyRefMut<'_, Self>) -> PyRefMut<'_, Self> {
+        slf.maze = Some(MazeStrategy::Random(MazeParams::open()));
+        slf
+    }
+
+    /// Random maze with custom parameters.
+    #[pyo3(signature = (*, wall_density=0.7, mud_density=0.1, mud_range=3, connected=true, symmetric=true))]
+    fn with_random_maze(
+        mut slf: PyRefMut<'_, Self>,
+        wall_density: f32,
+        mud_density: f32,
+        mud_range: u8,
+        connected: bool,
+        symmetric: bool,
+    ) -> PyRefMut<'_, Self> {
+        slf.maze = Some(MazeStrategy::Random(MazeParams {
+            target_density: wall_density,
+            connected,
+            symmetry: symmetric,
+            mud_density,
+            mud_range,
+        }));
+        slf
+    }
+
+    /// Fixed maze layout from explicit walls and mud.
+    #[pyo3(signature = (walls, mud=vec![]))]
+    fn with_custom_maze(
+        mut slf: PyRefMut<'_, Self>,
+        walls: Vec<WallInput>,
+        mud: Vec<MudInput>,
+    ) -> PyResult<PyRefMut<'_, Self>> {
+        let width = slf.width;
+        let height = slf.height;
+
+        // Validate and convert walls
+        let validated_walls: Vec<Wall> = walls
+            .into_iter()
+            .map(|input| match input {
+                WallInput::Object(w) => Ok(w),
+                WallInput::Tuple(tuple) => validate_wall(tuple, width, height),
+            })
+            .collect::<PyResult<Vec<_>>>()?;
+
+        // Check for duplicate walls
+        let mut wall_set = std::collections::HashSet::new();
+        for wall in &validated_walls {
+            if !wall_set.insert((wall.pos1, wall.pos2)) {
+                return Err(PyValueError::new_err(format!(
+                    "Duplicate wall between {:?} and {:?}",
+                    wall.pos1, wall.pos2
+                )));
+            }
+        }
+
+        // Validate and convert mud
+        let mut mud_set = std::collections::HashSet::new();
+        let mut mud_map = MudMap::new();
+        for input in mud {
+            let m = match input {
+                MudInput::Object(m) => m,
+                MudInput::Tuple(tuple) => {
+                    let validated = validate_mud(tuple, width, height)?;
+                    let (p1, p2) = if validated.0 < validated.1 {
+                        (
+                            Coordinates::new(validated.0 .0, validated.0 .1),
+                            Coordinates::new(validated.1 .0, validated.1 .1),
+                        )
+                    } else {
+                        (
+                            Coordinates::new(validated.1 .0, validated.1 .1),
+                            Coordinates::new(validated.0 .0, validated.0 .1),
+                        )
+                    };
+                    crate::Mud {
+                        pos1: p1,
+                        pos2: p2,
+                        value: validated.2,
+                    }
+                },
+            };
+            let key = if m.pos1 < m.pos2 {
+                (m.pos1, m.pos2)
+            } else {
+                (m.pos2, m.pos1)
+            };
+            if !mud_set.insert(key) {
+                return Err(PyValueError::new_err(format!(
+                    "Duplicate mud between ({}, {}) and ({}, {})",
+                    m.pos1.x, m.pos1.y, m.pos2.x, m.pos2.y
+                )));
+            }
+            mud_map.insert(m.pos1, m.pos2, m.value);
+        }
+
+        let wall_map = walls_to_wall_map(&validated_walls);
+        slf.maze = Some(MazeStrategy::Fixed {
+            walls: wall_map,
+            mud: mud_map,
+        });
+        Ok(slf)
+    }
+
+    // -- Player strategies --
+
+    /// Player 1 at (0,0), player 2 at (width-1, height-1).
+    fn with_corner_positions(mut slf: PyRefMut<'_, Self>) -> PyRefMut<'_, Self> {
+        slf.players = Some(PlayerStrategy::Corners);
+        slf
+    }
+
+    /// Both players placed randomly (guaranteed different cells).
+    fn with_random_positions(mut slf: PyRefMut<'_, Self>) -> PyRefMut<'_, Self> {
+        slf.players = Some(PlayerStrategy::Random);
+        slf
+    }
+
+    /// Place players at explicit positions.
+    fn with_custom_positions(
+        mut slf: PyRefMut<'_, Self>,
+        p1: CoordinatesInput,
+        p2: CoordinatesInput,
+    ) -> PyResult<PyRefMut<'_, Self>> {
+        let p1_coord: Coordinates = PyResult::<Coordinates>::from(p1)?;
+        let p2_coord: Coordinates = PyResult::<Coordinates>::from(p2)?;
+
+        if p1_coord.x >= slf.width || p1_coord.y >= slf.height {
+            return Err(PyValueError::new_err(format!(
+                "Player 1 position ({}, {}) is outside board bounds ({}x{})",
+                p1_coord.x, p1_coord.y, slf.width, slf.height
+            )));
+        }
+        if p2_coord.x >= slf.width || p2_coord.y >= slf.height {
+            return Err(PyValueError::new_err(format!(
+                "Player 2 position ({}, {}) is outside board bounds ({}x{})",
+                p2_coord.x, p2_coord.y, slf.width, slf.height
+            )));
+        }
+
+        slf.players = Some(PlayerStrategy::Fixed(p1_coord, p2_coord));
+        Ok(slf)
+    }
+
+    // -- Cheese strategies --
+
+    /// Place `count` cheese randomly, optionally with 180° symmetry.
+    #[pyo3(signature = (count, symmetric=true))]
+    fn with_random_cheese(
+        mut slf: PyRefMut<'_, Self>,
+        count: u16,
+        symmetric: bool,
+    ) -> PyRefMut<'_, Self> {
+        slf.cheese = Some(CheeseStrategy::Random { count, symmetric });
+        slf
+    }
+
+    /// Place cheese at exact positions.
+    fn with_custom_cheese(
+        mut slf: PyRefMut<'_, Self>,
+        positions: Vec<CoordinatesInput>,
+    ) -> PyResult<PyRefMut<'_, Self>> {
+        let mut validated = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+
+        for input in positions {
+            let coord: Coordinates = PyResult::<Coordinates>::from(input)?;
+            if coord.x >= slf.width || coord.y >= slf.height {
+                return Err(PyValueError::new_err(format!(
+                    "Cheese position ({}, {}) is outside board bounds ({}x{})",
+                    coord.x, coord.y, slf.width, slf.height
+                )));
+            }
+            if !seen.insert((coord.x, coord.y)) {
+                return Err(PyValueError::new_err(format!(
+                    "Duplicate cheese position at ({}, {})",
+                    coord.x, coord.y
+                )));
+            }
+            validated.push(coord);
+        }
+
+        if validated.is_empty() {
+            return Err(PyValueError::new_err("Game must have at least one cheese"));
+        }
+
+        slf.cheese = Some(CheeseStrategy::Fixed(validated));
+        Ok(slf)
+    }
+
+    // -- Other --
+
+    /// Override the default max_turns (300).
+    fn with_max_turns(mut slf: PyRefMut<'_, Self>, max_turns: u16) -> PyResult<PyRefMut<'_, Self>> {
+        if max_turns == 0 {
+            return Err(PyValueError::new_err("max_turns must be greater than 0"));
+        }
+        slf.max_turns = max_turns;
+        Ok(slf)
+    }
+
+    /// Consume the builder and produce a `GameConfig`.
+    fn build(&self) -> PyResult<PyGameConfig> {
+        let maze = self.maze.clone().ok_or_else(|| {
+            PyValueError::new_err(
+                "Maze strategy not set. Call with_classic_maze(), with_open_maze(), \
+                 with_random_maze(), or with_custom_maze() before build().",
+            )
+        })?;
+        let players = self.players.clone().ok_or_else(|| {
+            PyValueError::new_err(
+                "Player strategy not set. Call with_corner_positions(), \
+                 with_random_positions(), or with_custom_positions() before build().",
+            )
+        })?;
+        let cheese = self.cheese.clone().ok_or_else(|| {
+            PyValueError::new_err(
+                "Cheese strategy not set. Call with_random_cheese() or \
+                 with_custom_cheese() before build().",
+            )
+        })?;
+
+        Ok(PyGameConfig {
+            inner: GameConfig {
+                width: self.width,
+                height: self.height,
+                max_turns: self.max_turns,
+                maze,
+                players,
+                cheese,
+            },
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PyRat — Python-facing game state
+// ---------------------------------------------------------------------------
+
 /// Python-facing PyRat game state
 #[pyclass(name = "PyRat")]
 pub struct PyRat {
     game: GameState,
     observation_handler: ObservationHandler,
-    symmetric: bool,
+    config: GameConfig,
 }
 
 #[pymethods]
@@ -196,8 +521,6 @@ impl PyRat {
         wall_density: Option<f32>,
         mud_density: Option<f32>,
     ) -> Self {
-        use crate::game::builder::{GameBuilder, MazeParams};
-
         let w = width.unwrap_or(GameState::DEFAULT_WIDTH);
         let h = height.unwrap_or(GameState::DEFAULT_HEIGHT);
         let cheese = cheese_count.unwrap_or(GameState::DEFAULT_CHEESE_COUNT);
@@ -219,7 +542,7 @@ impl PyRat {
         Self {
             game,
             observation_handler,
-            symmetric,
+            config,
         }
     }
 
@@ -487,21 +810,10 @@ impl PyRat {
         self.observation_handler.refresh_cheese(&self.game);
     }
 
-    /// Reset the game state
+    /// Reset the game state using the stored config.
     #[pyo3(signature = (seed=None))]
     fn reset(&mut self, seed: Option<u64>) {
-        use crate::game::builder::{GameBuilder, MazeParams};
-
-        let config = GameBuilder::new(self.game.width(), self.game.height())
-            .with_random_maze(MazeParams {
-                symmetry: self.symmetric,
-                ..MazeParams::default()
-            })
-            .with_corner_positions()
-            .with_random_cheese(self.game.total_cheese(), self.symmetric)
-            .build();
-
-        self.game = config.create(seed);
+        self.game = self.config.create(seed);
         // Need full refresh after reset
         self.observation_handler.refresh_cheese(&self.game);
     }
@@ -524,7 +836,7 @@ impl PyRat {
         Self {
             game: self.game.clone(),
             observation_handler: self.observation_handler.clone(),
-            symmetric: self.symmetric,
+            config: self.config.clone(),
         }
     }
 
@@ -664,36 +976,46 @@ impl PyRat {
                 .map_err(PyValueError::new_err)?;
         }
 
-        // Now use the builder with validated data
-        let mut builder = PyGameConfigBuilder::new(width, height);
-        builder.walls = validated_walls;
-        builder.mud = validated_mud;
-        builder.cheese = validated_cheese;
-        builder.player1_pos = validated_player1_pos.map(|(x, y)| Coordinates::new(x, y));
-        builder.player2_pos = validated_player2_pos.map(|(x, y)| Coordinates::new(x, y));
-        builder.max_turns = max_turns;
-        builder.symmetric = symmetric;
+        // Build config using validated data
+        let wall_map = walls_to_wall_map(&validated_walls);
+        let mut mud_map = MudMap::new();
+        for m in &validated_mud {
+            mud_map.insert(m.pos1, m.pos2, m.value);
+        }
 
-        // Build the game
-        builder.build()
+        let config = GameConfig {
+            width,
+            height,
+            max_turns,
+            maze: MazeStrategy::Fixed {
+                walls: wall_map,
+                mud: mud_map,
+            },
+            players: PlayerStrategy::Fixed(p1_pos, p2_pos),
+            cheese: CheeseStrategy::Fixed(validated_cheese),
+        };
+
+        let game = config.create(None);
+        let observation_handler = ObservationHandler::new(&game);
+
+        Ok(PyRat {
+            game,
+            observation_handler,
+            config,
+        })
     }
 
     /// Create a game from a preset configuration
     #[staticmethod]
     #[pyo3(signature = (preset="medium", *, seed=None))]
     fn create_preset(preset: &str, seed: Option<u64>) -> PyResult<Self> {
-        use crate::game::builder::GameConfig;
-
-        let game_config = GameConfig::preset(preset).map_err(PyValueError::new_err)?;
-        let symmetric = matches!(&game_config.maze,
-            crate::game::builder::MazeStrategy::Random(p) if p.symmetry);
-
-        let game = game_config.create(seed);
+        let config = GameConfig::preset(preset).map_err(PyValueError::new_err)?;
+        let game = config.create(seed);
         let observation_handler = ObservationHandler::new(&game);
         Ok(Self {
             game,
             observation_handler,
-            symmetric,
+            config,
         })
     }
 
@@ -715,8 +1037,6 @@ impl PyRat {
         max_turns: u16,
         symmetric: bool,
     ) -> PyResult<Self> {
-        use crate::game::builder::GameBuilder;
-
         let validated_walls: Vec<Wall> = walls
             .into_iter()
             .map(|w| validate_wall(w, width, height))
@@ -742,7 +1062,7 @@ impl PyRat {
         Ok(Self {
             game,
             observation_handler,
-            symmetric,
+            config,
         })
     }
 
@@ -764,8 +1084,6 @@ impl PyRat {
         preset: &str,
         seed: Option<u64>,
     ) -> PyResult<Self> {
-        use crate::game::builder::{GameBuilder, MazeParams};
-
         let p1_pos =
             validate_optional_position(Some(player1_start), width, height, "player1_start")?
                 .ok_or_else(|| PyValueError::new_err("player1_start validation failed"))?;
@@ -773,23 +1091,38 @@ impl PyRat {
             validate_optional_position(Some(player2_start), width, height, "player2_start")?
                 .ok_or_else(|| PyValueError::new_err("player2_start validation failed"))?;
 
-        let params = PresetMazeParams::get_preset(preset)?;
+        // Derive maze params from preset name
+        let (preset_max_turns, maze_params) = match preset {
+            "tiny" => (150, MazeParams::classic()),
+            "small" => (200, MazeParams::classic()),
+            "medium" => (300, MazeParams::classic()),
+            "large" => (400, MazeParams::classic()),
+            "huge" => (500, MazeParams::classic()),
+            "open" => (300, MazeParams::open()),
+            "asymmetric" => (
+                300,
+                MazeParams {
+                    symmetry: false,
+                    ..MazeParams::classic()
+                },
+            ),
+            _ => {
+                return Err(PyValueError::new_err(format!(
+                    "Unknown preset '{preset}'. Available presets: tiny, small, medium, large, huge, open, asymmetric"
+                )))
+            },
+        };
+
         let cheese_count = ((width as u16 * height as u16) * 13 / 100).max(1);
 
         let config = GameBuilder::new(width, height)
-            .with_max_turns(params.max_turns)
-            .with_random_maze(MazeParams {
-                target_density: params.wall_density,
-                connected: true,
-                symmetry: params.symmetric,
-                mud_density: params.mud_density,
-                mud_range: params.mud_range,
-            })
+            .with_max_turns(preset_max_turns)
+            .with_random_maze(maze_params.clone())
             .with_custom_positions(
                 Coordinates::new(p1_pos.0, p1_pos.1),
                 Coordinates::new(p2_pos.0, p2_pos.1),
             )
-            .with_random_cheese(cheese_count, params.symmetric)
+            .with_random_cheese(cheese_count, maze_params.symmetry)
             .build();
 
         let game = config.create(seed);
@@ -797,7 +1130,7 @@ impl PyRat {
         Ok(Self {
             game,
             observation_handler,
-            symmetric: params.symmetric,
+            config,
         })
     }
 }
@@ -809,15 +1142,13 @@ impl PyRat {
         &self.game
     }
 
-    /// Wrap an existing `GameState` into a `PyRat`.
-    ///
-    /// `symmetric` controls how `reset()` regenerates the maze.
-    pub fn from_game_state(game: GameState, symmetric: bool) -> Self {
+    /// Wrap an existing `GameState` into a `PyRat` with a config for `reset()`.
+    pub fn from_game_state(game: GameState, config: GameConfig) -> Self {
         let observation_handler = ObservationHandler::new(&game);
         Self {
             game,
             observation_handler,
-            symmetric,
+            config,
         }
     }
 }
@@ -937,251 +1268,6 @@ impl PyObservationHandler {
     }
 }
 
-#[pyclass]
-pub struct PyGameConfigBuilder {
-    width: u8,
-    height: u8,
-    walls: Vec<crate::Wall>,
-    mud: Vec<crate::Mud>,
-    cheese: Vec<Coordinates>,
-    player1_pos: Option<Coordinates>,
-    player2_pos: Option<Coordinates>,
-    max_turns: u16,
-    symmetric: bool,
-}
-
-#[pymethods]
-impl PyGameConfigBuilder {
-    #[new]
-    fn new(width: u8, height: u8) -> Self {
-        Self {
-            width,
-            height,
-            walls: Vec::new(),
-            mud: Vec::new(),
-            cheese: Vec::new(),
-            player1_pos: None,
-            player2_pos: None,
-            max_turns: 300,
-            symmetric: true,
-        }
-    }
-
-    /// Validates that a Coordinates is within the maze bounds
-    fn validate_coords(&self, pos: &Coordinates, name: &str) -> PyResult<()> {
-        if pos.x >= self.width || pos.y >= self.height {
-            return Err(PyValueError::new_err(format!(
-                "{} position ({}, {}) is outside maze bounds ({}x{})",
-                name, pos.x, pos.y, self.width, self.height
-            )));
-        }
-        Ok(())
-    }
-
-    /// Add walls to the game (accepts Wall objects or tuples)
-    #[pyo3(name = "with_walls")]
-    fn with_walls(
-        mut slf: PyRefMut<'_, Self>,
-        walls: Vec<WallInput>,
-    ) -> PyResult<PyRefMut<'_, Self>> {
-        let mut validated_walls = Vec::new();
-
-        for input in walls {
-            let wall = match input {
-                WallInput::Object(w) => w,
-                WallInput::Tuple(tuple) => validate_wall(tuple, slf.width, slf.height)?,
-            };
-
-            // Check for duplicate walls
-            if validated_walls
-                .iter()
-                .any(|existing: &crate::Wall| existing == &wall)
-                || slf.walls.iter().any(|existing| existing == &wall)
-            {
-                return Err(PyValueError::new_err(format!("Duplicate wall: {wall:?}")));
-            }
-
-            // Check for overlap with existing mud
-            if slf.mud.iter().any(|m| {
-                (m.pos1 == wall.pos1 && m.pos2 == wall.pos2)
-                    || (m.pos1 == wall.pos2 && m.pos2 == wall.pos1)
-            }) {
-                return Err(PyValueError::new_err(
-                    "Cannot place wall where there is already mud".to_string(),
-                ));
-            }
-
-            validated_walls.push(wall);
-        }
-
-        slf.walls = validated_walls;
-        Ok(slf)
-    }
-
-    /// Add mud to the game (accepts Mud objects or tuples)
-    #[pyo3(name = "with_mud")]
-    fn with_mud(mut slf: PyRefMut<'_, Self>, mud: Vec<MudInput>) -> PyResult<PyRefMut<'_, Self>> {
-        let mut validated_mud = Vec::new();
-
-        for input in mud {
-            let m = match input {
-                MudInput::Object(m) => m,
-                MudInput::Tuple(tuple) => {
-                    let validated = validate_mud(tuple, slf.width, slf.height)?;
-                    // Normalize order
-                    let (p1, p2) = if validated.0 < validated.1 {
-                        (
-                            Coordinates::new(validated.0 .0, validated.0 .1),
-                            Coordinates::new(validated.1 .0, validated.1 .1),
-                        )
-                    } else {
-                        (
-                            Coordinates::new(validated.1 .0, validated.1 .1),
-                            Coordinates::new(validated.0 .0, validated.0 .1),
-                        )
-                    };
-                    crate::Mud {
-                        pos1: p1,
-                        pos2: p2,
-                        value: validated.2,
-                    }
-                },
-            };
-
-            // Check for overlap with walls
-            if slf.walls.iter().any(|wall| {
-                (wall.pos1 == m.pos1 && wall.pos2 == m.pos2)
-                    || (wall.pos1 == m.pos2 && wall.pos2 == m.pos1)
-            }) {
-                return Err(PyValueError::new_err(format!(
-                    "Cannot place mud between ({}, {}) and ({}, {}) where there is already a wall",
-                    m.pos1.x, m.pos1.y, m.pos2.x, m.pos2.y
-                )));
-            }
-
-            // Check for duplicate mud
-            if validated_mud.iter().any(|existing: &crate::Mud| {
-                (existing.pos1 == m.pos1 && existing.pos2 == m.pos2)
-                    || (existing.pos1 == m.pos2 && existing.pos2 == m.pos1)
-            }) || slf.mud.iter().any(|existing| {
-                (existing.pos1 == m.pos1 && existing.pos2 == m.pos2)
-                    || (existing.pos1 == m.pos2 && existing.pos2 == m.pos1)
-            }) {
-                return Err(PyValueError::new_err(format!(
-                    "Duplicate mud between ({}, {}) and ({}, {})",
-                    m.pos1.x, m.pos1.y, m.pos2.x, m.pos2.y
-                )));
-            }
-
-            validated_mud.push(m);
-        }
-
-        slf.mud = validated_mud;
-        Ok(slf)
-    }
-
-    /// Add cheese positions (accepts Coordinates objects or tuples)
-    #[pyo3(name = "with_cheese")]
-    fn with_cheese(
-        mut slf: PyRefMut<'_, Self>,
-        cheese: Vec<CoordinatesInput>,
-    ) -> PyResult<PyRefMut<'_, Self>> {
-        let mut validated_cheese = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-
-        for input in cheese {
-            let coord: Coordinates = PyResult::<Coordinates>::from(input)?;
-
-            // Validate bounds
-            slf.validate_coords(&coord, "Cheese")?;
-
-            // Check for duplicates
-            if !seen.insert((coord.x, coord.y)) {
-                return Err(PyValueError::new_err(format!(
-                    "Duplicate cheese position at ({}, {})",
-                    coord.x, coord.y
-                )));
-            }
-
-            validated_cheese.push(coord);
-        }
-
-        slf.cheese = validated_cheese;
-        Ok(slf)
-    }
-
-    /// Set player 1 position (accepts Coordinates or tuple)
-    #[pyo3(name = "with_player1_pos")]
-    fn with_player1_pos(
-        mut slf: PyRefMut<'_, Self>,
-        pos: CoordinatesInput,
-    ) -> PyResult<PyRefMut<'_, Self>> {
-        let coord: Coordinates = PyResult::<Coordinates>::from(pos)?;
-        slf.validate_coords(&coord, "Player 1")?;
-        slf.player1_pos = Some(coord);
-        Ok(slf)
-    }
-
-    /// Set player 2 position (accepts Coordinates or tuple)
-    #[pyo3(name = "with_player2_pos")]
-    fn with_player2_pos(
-        mut slf: PyRefMut<'_, Self>,
-        pos: CoordinatesInput,
-    ) -> PyResult<PyRefMut<'_, Self>> {
-        let coord: Coordinates = PyResult::<Coordinates>::from(pos)?;
-        slf.validate_coords(&coord, "Player 2")?;
-        slf.player2_pos = Some(coord);
-        Ok(slf)
-    }
-
-    /// Set maximum turns
-    #[pyo3(name = "with_max_turns")]
-    fn with_max_turns(mut slf: PyRefMut<'_, Self>, max_turns: u16) -> PyResult<PyRefMut<'_, Self>> {
-        if max_turns == 0 {
-            return Err(PyValueError::new_err("max_turns must be greater than 0"));
-        }
-        slf.max_turns = max_turns;
-        Ok(slf)
-    }
-
-    /// Build the game state
-    #[pyo3(name = "build")]
-    fn build(&self) -> PyResult<PyRat> {
-        use crate::game::builder::GameBuilder;
-
-        if self.cheese.is_empty() {
-            return Err(PyValueError::new_err("Game must have at least one cheese"));
-        }
-
-        let wall_map = walls_to_wall_map(&self.walls);
-
-        let mut mud_map = MudMap::new();
-        for m in &self.mud {
-            mud_map.insert(m.pos1, m.pos2, m.value);
-        }
-
-        let config = GameBuilder::new(self.width, self.height)
-            .with_max_turns(self.max_turns)
-            .with_custom_maze(wall_map, mud_map)
-            .with_custom_positions(
-                self.player1_pos.unwrap_or_else(|| Coordinates::new(0, 0)),
-                self.player2_pos
-                    .unwrap_or_else(|| Coordinates::new(self.width - 1, self.height - 1)),
-            )
-            .with_custom_cheese(self.cheese.clone())
-            .build();
-
-        let game = config.create(None);
-        let observation_handler = ObservationHandler::new(&game);
-
-        Ok(PyRat {
-            game,
-            observation_handler,
-            symmetric: self.symmetric,
-        })
-    }
-}
-
 /// Register types submodule
 pub fn register_types(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Coordinates>()?;
@@ -1207,6 +1293,7 @@ pub fn register_observation(m: &Bound<'_, PyModule>) -> PyResult<()> {
 
 /// Register builder submodule
 pub fn register_builder(m: &Bound<'_, PyModule>) -> PyResult<()> {
-    m.add_class::<PyGameConfigBuilder>()?;
+    m.add_class::<PyGameBuilder>()?;
+    m.add_class::<PyGameConfig>()?;
     Ok(())
 }

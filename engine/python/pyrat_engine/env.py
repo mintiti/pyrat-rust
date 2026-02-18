@@ -11,6 +11,7 @@ from pyrat_engine.core import ObservationHandler as PyObservationHandler
 from pyrat_engine.core import PyRat
 
 if TYPE_CHECKING:
+    from pyrat_engine.core.builder import GameConfig
     from pyrat_engine.core.types import Direction
 
 
@@ -56,13 +57,20 @@ class PyRatEnv(ParallelEnv):  # type: ignore[misc]
         cheese_count: int = 41,
         symmetric: bool = True,
         seed: int | None = None,
+        config: GameConfig | None = None,
     ):
         super().__init__()
 
         self.possible_agents = ["player_1", "player_2"]
 
         # Create game state and observation handler
-        self.game = PyRat(width, height, cheese_count, symmetric, seed)
+        if config is not None:
+            self.game = config.create(seed)
+            width = config.width
+            height = config.height
+            cheese_count = self.game.max_turns  # for obs space bounds
+        else:
+            self.game = PyRat(width, height, cheese_count, symmetric, seed)
         self.obs_handler = PyObservationHandler(self.game)
 
         # Define spaces

@@ -1,4 +1,4 @@
-"""Tests for the new module structure of pyrat_engine.core.
+"""Tests for the module structure of pyrat_engine.core.
 
 This tests that the module reorganization works correctly:
 - The compiled _core module exists and has submodules
@@ -58,16 +58,18 @@ class TestModuleStructure:
 
     def test_builder_submodule_imports(self):
         """Test importing from the builder submodule."""
-        from pyrat_engine.core.builder import GameConfigBuilder
+        from pyrat_engine.core.builder import GameBuilder, GameConfig
 
-        assert GameConfigBuilder is not None
+        assert GameBuilder is not None
+        assert GameConfig is not None
 
     def test_core_level_imports(self):
         """Test that commonly used classes are available at the core level."""
         from pyrat_engine.core import (
             Coordinates,
             Direction,
-            GameConfigBuilder,
+            GameBuilder,
+            GameConfig,
             GameObservation,
             MoveUndo,
             Mud,
@@ -87,27 +89,17 @@ class TestModuleStructure:
                 MoveUndo,
                 GameObservation,
                 ObservationHandler,
-                GameConfigBuilder,
+                GameBuilder,
+                GameConfig,
             ]
         )
 
-    def test_backward_compatibility_names(self):
-        """Test that the Py-prefixed names are still available for some types."""
-        from pyrat_engine.core.builder import GameConfigBuilder, PyGameConfigBuilder
-        from pyrat_engine.core.game import MoveUndo, PyMoveUndo, PyRat
-        from pyrat_engine.core.observation import (
-            GameObservation,
-            ObservationHandler,
-            PyGameObservation,
-            PyObservationHandler,
-        )
+    def test_top_level_imports(self):
+        """Test that GameBuilder and GameConfig are available at the top level."""
+        from pyrat_engine import GameBuilder, GameConfig
 
-        # PyRat is the primary name now (no GameState alias)
-        assert PyRat is not None
-        assert PyMoveUndo is MoveUndo
-        assert PyGameObservation is GameObservation
-        assert PyObservationHandler is ObservationHandler
-        assert PyGameConfigBuilder is GameConfigBuilder
+        assert GameBuilder is not None
+        assert GameConfig is not None
 
 
 class TestTypesFunctionality:

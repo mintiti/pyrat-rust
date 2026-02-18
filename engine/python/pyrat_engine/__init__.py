@@ -20,7 +20,7 @@ Example:
     >>> print(f"Player 1 score: {game.player1_score}")
 """
 
-from pyrat_engine.core import MoveUndo, PyRat
+from pyrat_engine.core import GameBuilder, GameConfig, MoveUndo, PyRat
 from pyrat_engine.core.types import (
     Coordinates,
     Direction,
@@ -33,6 +33,8 @@ __version__ = "0.1.0"
 __all__ = [
     "Coordinates",
     "Direction",
+    "GameBuilder",
+    "GameConfig",
     "GameResult",
     "MoveUndo",
     "Mud",
