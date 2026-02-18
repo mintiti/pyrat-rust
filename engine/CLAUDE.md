@@ -177,5 +177,3 @@ game = config.create(seed=42)
 ```
 
 `GameConfig` is reusable — call `create()` with different seeds for RL training loops.
-
-`PyRat` convenience methods (`PyRat()`, `create_preset()`, `create_custom()`, etc.) still work for quick one-off games.
