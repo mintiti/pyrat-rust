@@ -28,55 +28,6 @@ class PyMoveUndo:
     def turn(self) -> int: ...
 
 class PyRat:
-    def __init__(
-        self,
-        width: int | None = None,
-        height: int | None = None,
-        cheese_count: int | None = None,
-        symmetric: bool = True,
-        seed: int | None = None,
-        max_turns: int | None = None,
-        wall_density: float | None = None,
-        mud_density: float | None = None,
-    ) -> None: ...
-    @staticmethod
-    def create_preset(
-        preset: str = "medium",
-        *,
-        seed: int | None = None,
-    ) -> PyRat: ...
-    @staticmethod
-    def create_custom(
-        width: int,
-        height: int,
-        walls: list[Wall] | list[tuple[tuple[int, int], tuple[int, int]]] = [],
-        mud: list[Mud] | list[tuple[tuple[int, int], tuple[int, int], int]] = [],
-        cheese: list[Coordinates] | list[tuple[int, int]] = [],
-        player1_pos: Coordinates | tuple[int, int] | None = None,
-        player2_pos: Coordinates | tuple[int, int] | None = None,
-        max_turns: int = 300,
-        symmetric: bool = True,
-    ) -> PyRat: ...
-    @staticmethod
-    def create_from_maze(
-        width: int,
-        height: int,
-        walls: list[Wall] | list[tuple[tuple[int, int], tuple[int, int]]],
-        *,
-        seed: int | None = None,
-        max_turns: int = 300,
-        symmetric: bool = True,
-    ) -> PyRat: ...
-    @staticmethod
-    def create_with_starts(
-        width: int,
-        height: int,
-        player1_start: Coordinates | tuple[int, int],
-        player2_start: Coordinates | tuple[int, int],
-        *,
-        preset: str = "medium",
-        seed: int | None = None,
-    ) -> PyRat: ...
     @property
     def width(self) -> int: ...
     @property

@@ -77,154 +77,11 @@ class MoveUndo:
 class PyRat:
     """Core PyRat game engine implementation in Rust.
 
-    This class provides the main interface to the Rust game engine.
-    It manages all game state including:
-    - Player positions and scores
-    - Cheese placement and collection
-    - Mud effects and movement delays
-    - Turn counting and game termination
+    This class manages all game state including player positions, scores,
+    cheese placement, mud effects, and turn counting.
 
-    Args:
-        width: Board width (default: 21)
-        height: Board height (default: 15)
-        cheese_count: Number of cheese pieces (default: 41)
-        symmetric: Whether to generate symmetric mazes (default: True)
-        seed: Random seed for reproducible games (default: None)
-        max_turns: Maximum number of turns before game ends (default: 300)
-        wall_density: Proportion of walls in the maze, 0.0 to 1.0 (default: 0.7)
-        mud_density: Proportion of passages with mud, 0.0 to 1.0 (default: 0.1)
+    PyRat instances are created via GameConfig.create() or GameBuilder.
     """
-    def __init__(
-        self,
-        width: int | None = None,
-        height: int | None = None,
-        cheese_count: int | None = None,
-        symmetric: bool = True,
-        seed: int | None = None,
-        max_turns: int | None = None,
-        wall_density: float | None = None,
-        mud_density: float | None = None,
-    ) -> None: ...
-    @staticmethod
-    def create_preset(
-        preset: str = "medium",
-        *,
-        seed: int | None = None,
-    ) -> PyRat:
-        """Create a game from a preset configuration.
-
-        Presets combine a size with a maze type:
-
-        - "tiny": 11x9 board, 13 cheese, 150 turns (classic maze)
-        - "small": 15x11 board, 21 cheese, 200 turns (classic maze)
-        - "medium": 21x15 board, 41 cheese, 300 turns (classic maze)
-        - "large": 31x21 board, 85 cheese, 400 turns (classic maze)
-        - "huge": 41x31 board, 165 cheese, 500 turns (classic maze)
-        - "open": 21x15 board, 41 cheese, 300 turns (no walls or mud)
-        - "asymmetric": 21x15 board, 41 cheese, 300 turns (classic, no symmetry)
-
-        Maze types: *classic* = 0.7 wall density, 0.1 mud density;
-        *open* = no walls, no mud.
-
-        Args:
-            preset: Name of the preset configuration
-            seed: Random seed for reproducible games
-
-        Returns:
-            A new PyRat instance with the preset configuration
-        """
-        ...
-
-    @staticmethod
-    def create_custom(
-        width: int,
-        height: int,
-        walls: list[Wall] | list[tuple[tuple[int, int], tuple[int, int]]] = [],
-        mud: list[Mud] | list[tuple[tuple[int, int], tuple[int, int], int]] = [],
-        cheese: list[Coordinates] | list[tuple[int, int]] = [],
-        player1_pos: Coordinates | tuple[int, int] | None = None,
-        player2_pos: Coordinates | tuple[int, int] | None = None,
-        max_turns: int = 300,
-        symmetric: bool = True,
-    ) -> PyRat:
-        """Create a game with a fully specified maze configuration.
-
-        Args:
-            width: Width of the game board
-            height: Height of the game board
-            walls: List of wall pairs, each defined by two (x,y) positions
-            mud: List of mud patches, each defined by two positions and mud value
-            cheese: List of cheese positions as (x,y) coordinates
-            player1_pos: Starting position for player 1 (default: (0,0))
-            player2_pos: Starting position for player 2 (default: (width-1, height-1))
-            max_turns: Maximum number of turns before game ends
-            symmetric: If True (default), validate that walls, mud, cheese, and
-                player positions are 180° rotationally symmetric.
-
-        Returns:
-            A new PyRat instance with the specified configuration
-        """
-        ...
-
-    @staticmethod
-    def create_from_maze(
-        width: int,
-        height: int,
-        walls: list[Wall] | list[tuple[tuple[int, int], tuple[int, int]]],
-        *,
-        seed: int | None = None,
-        max_turns: int = 300,
-        symmetric: bool = True,
-    ) -> PyRat:
-        """Create a game with a specific maze layout and random cheese placement.
-
-        This method is useful for creating games with predefined maze structures
-        while still having random cheese placement. Perfect for testing specific maze
-        configurations.
-
-        Args:
-            width: Width of the game board
-            height: Height of the game board
-            walls: List of wall pairs, each defined by two (x,y) positions
-            seed: Random seed for reproducible cheese placement
-            max_turns: Maximum number of turns before game ends
-            symmetric: If True (default), validate walls are symmetric and
-                generate symmetric cheese/player positions.
-
-        Returns:
-            A new PyRat instance with the specified maze and random cheese
-        """
-        ...
-
-    @staticmethod
-    def create_with_starts(
-        width: int,
-        height: int,
-        player1_start: Coordinates | tuple[int, int],
-        player2_start: Coordinates | tuple[int, int],
-        *,
-        preset: str = "medium",
-        seed: int | None = None,
-    ) -> PyRat:
-        """Create a game with custom starting positions.
-
-        This method generates a random maze using the specified preset configuration
-        but places players at custom starting positions. Useful for AI testing
-        with specific positional scenarios.
-
-        Args:
-            width: Width of the game board
-            height: Height of the game board
-            player1_start: Starting (x,y) position for player 1
-            player2_start: Starting (x,y) position for player 2
-            preset: Preset configuration to use for maze generation
-            seed: Random seed for reproducible maze generation
-
-        Returns:
-            A new PyRat instance with custom starting positions
-        """
-        ...
-
     @property
     def width(self) -> int:
         """Width of the game board."""
@@ -331,10 +188,7 @@ class PyRat:
 
         Example: at corner (0,0) with no walls::
 
-            [0, 1, 4, 4, 4]  # UP=valid, RIGHT=valid, DOWN→STAY, LEFT→STAY, STAY→STAY
-
-        Useful for MCTS and tree search where you need to know which actions
-        are equivalent (blocked moves all reduce to STAY).
+            [0, 1, 4, 4, 4]  # UP=valid, RIGHT=valid, DOWN->STAY, LEFT->STAY, STAY->STAY
 
         Args:
             pos: Position to check, as Coordinates or (x, y) tuple
