@@ -1,6 +1,6 @@
 """Test that the move parsing bug is fixed."""
 
-from pyrat_engine import PyRat
+from pyrat_engine import GameBuilder
 from pyrat_engine.core import Direction
 from pyrat_engine.core.types import Coordinates
 
@@ -58,14 +58,14 @@ def test_move_parsing_with_game_state():
     ai = MinimalTestAI()
 
     # Create a minimal game state
-    game = PyRat.create_custom(
-        width=5,
-        height=5,
-        walls=[],
-        cheese=[(2, 2)],
-        player1_pos=(0, 0),
-        player2_pos=(4, 4),
+    config = (
+        GameBuilder(5, 5)
+        .with_open_maze()
+        .with_custom_positions((0, 0), (4, 4))
+        .with_custom_cheese([(2, 2)])
+        .build()
     )
+    game = config.create()
 
     # Set the game state on the AI
     ai._game_state = game

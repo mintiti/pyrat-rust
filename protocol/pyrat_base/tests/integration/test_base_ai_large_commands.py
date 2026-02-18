@@ -155,7 +155,7 @@ class TestLargeCommandIntegration:
 
     def test_create_game_with_many_walls(self):
         """Test creating a game state with many walls."""
-        from pyrat_engine import PyRat
+        from pyrat_engine import GameBuilder
 
         # Create walls (but not too many to avoid performance issues)
         walls = []
@@ -163,16 +163,14 @@ class TestLargeCommandIntegration:
             walls.append(((i, 0), (i, 1)))
 
         # Create game state
-        game = PyRat.create_custom(
-            width=50,
-            height=50,
-            walls=walls,
-            mud=[],
-            cheese=[(25, 25)],
-            player1_pos=(0, 0),
-            player2_pos=(49, 49),
-            symmetric=False,
+        config = (
+            GameBuilder(50, 50)
+            .with_custom_maze(walls=walls, mud=[])
+            .with_custom_positions((0, 0), (49, 49))
+            .with_custom_cheese([(25, 25)])
+            .build()
         )
+        game = config.create()
 
         # Verify it was created successfully
         assert game is not None

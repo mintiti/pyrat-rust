@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from typing import List, Optional, Tuple
 
 import pytest
-from pyrat_engine import GameBuilder, PyRat
+from pyrat_engine import GameBuilder
 
 from pyrat_base import Protocol, ProtocolState
 from pyrat_base.enums import Player
@@ -163,15 +163,14 @@ def game_state_builder():
         if player2_pos is None:
             player2_pos = (width - 1, height - 1)
 
-        game = PyRat.create_custom(
-            width=width,
-            height=height,
-            walls=walls or [],
-            mud=mud or [],
-            cheese=cheese or [(width // 2, height // 2)],
-            player1_pos=player1_pos,
-            player2_pos=player2_pos,
+        config = (
+            GameBuilder(width, height)
+            .with_custom_maze(walls=walls or [], mud=mud or [])
+            .with_custom_positions(player1_pos, player2_pos)
+            .with_custom_cheese(cheese or [(width // 2, height // 2)])
+            .build()
         )
+        game = config.create()
         return ProtocolState(game, player)
 
     # Return both methods

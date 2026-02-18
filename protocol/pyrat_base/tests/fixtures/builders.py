@@ -6,7 +6,7 @@ from pyrat_engine.core.types import Direction
 
 from pyrat_base.enums import Player
 
-# Use GameBuilder or PyRat.create_custom() to create test games.
+# Use GameBuilder to create test games.
 # See engine/python/pyrat_engine/core/builder.pyi for the full API.
 
 

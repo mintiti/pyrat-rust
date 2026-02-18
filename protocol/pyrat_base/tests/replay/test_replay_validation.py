@@ -19,7 +19,7 @@ C:(10,10)
 """
 
     reader = ReplayReader()
-    with pytest.raises(ValueError, match="Cheese position .* is outside maze bounds"):
+    with pytest.raises(ValueError, match="outside board bounds"):
         replay = reader.parse(replay_content)
         ReplayPlayer(replay)
 

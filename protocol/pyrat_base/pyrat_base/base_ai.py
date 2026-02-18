@@ -23,7 +23,7 @@ import sys
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
-from pyrat_engine import PyRat
+from pyrat_engine import GameBuilder, PyRat
 from pyrat_engine.core.types import Direction
 
 from pyrat_base.enums import CommandType, GameResult, Player, ResponseType
@@ -508,17 +508,23 @@ class PyRatAI:
         }
         if required.issubset(self._game_config.keys()) and self._player:
             # Create the game state
-            # Note: symmetric=False because protocol data may not be symmetric
-            self._game_state = PyRat.create_custom(
-                width=self._game_config["width"],
-                height=self._game_config["height"],
-                walls=self._game_config["walls"],
-                mud=self._game_config["mud"],
-                cheese=self._game_config["cheese"],
-                player1_pos=self._game_config["player1_pos"],
-                player2_pos=self._game_config["player2_pos"],
-                symmetric=False,
+            config = (
+                GameBuilder(
+                    self._game_config["width"],
+                    self._game_config["height"],
+                )
+                .with_custom_maze(
+                    walls=self._game_config["walls"],
+                    mud=self._game_config["mud"],
+                )
+                .with_custom_positions(
+                    self._game_config["player1_pos"],
+                    self._game_config["player2_pos"],
+                )
+                .with_custom_cheese(self._game_config["cheese"])
+                .build()
             )
+            self._game_state = config.create()
             self._state = "READY"
 
     def _run_preprocessing(self) -> None:
