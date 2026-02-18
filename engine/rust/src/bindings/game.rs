@@ -220,15 +220,25 @@ pub struct PyGameBuilder {
 #[pymethods]
 impl PyGameBuilder {
     #[new]
-    fn new(width: u8, height: u8) -> Self {
-        Self {
+    fn new(width: u8, height: u8) -> PyResult<Self> {
+        if width < 2 {
+            return Err(PyValueError::new_err(format!(
+                "width must be >= 2, got {width}"
+            )));
+        }
+        if height < 2 {
+            return Err(PyValueError::new_err(format!(
+                "height must be >= 2, got {height}"
+            )));
+        }
+        Ok(Self {
             width,
             height,
             max_turns: 300,
             maze: None,
             players: None,
             cheese: None,
-        }
+        })
     }
 
     // -- Maze strategies --

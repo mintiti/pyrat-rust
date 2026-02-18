@@ -149,8 +149,12 @@ pub struct GameBuilder<State> {
 
 impl<S> GameBuilder<S> {
     /// Override the default max_turns (300).
+    ///
+    /// # Panics
+    /// Panics if `n == 0`.
     #[must_use]
     pub fn with_max_turns(mut self, n: u16) -> Self {
+        assert!(n > 0, "max_turns must be > 0");
         self.max_turns = n;
         self
     }
@@ -160,8 +164,13 @@ impl<S> GameBuilder<S> {
 
 impl GameBuilder<NeedsMaze> {
     /// Start building a game with the given board dimensions.
+    ///
+    /// # Panics
+    /// Panics if `width < 2` or `height < 2`.
     #[must_use]
     pub fn new(width: u8, height: u8) -> Self {
+        assert!(width >= 2, "width must be >= 2, got {width}");
+        assert!(height >= 2, "height must be >= 2, got {height}");
         Self {
             width,
             height,
@@ -697,6 +706,50 @@ mod tests {
         let game = config.create(Some(42));
         assert_eq!(game.player1_position(), Coordinates::new(0, 0));
         assert_eq!(game.player2_position(), Coordinates::new(20, 14));
+    }
+
+    #[test]
+    #[should_panic(expected = "width must be >= 2")]
+    fn zero_width_panics() {
+        let _ = GameBuilder::new(0, 5);
+    }
+
+    #[test]
+    #[should_panic(expected = "height must be >= 2")]
+    fn zero_height_panics() {
+        let _ = GameBuilder::new(5, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "width must be >= 2")]
+    fn one_by_one_width_panics() {
+        let _ = GameBuilder::new(1, 5);
+    }
+
+    #[test]
+    #[should_panic(expected = "height must be >= 2")]
+    fn one_by_one_height_panics() {
+        let _ = GameBuilder::new(5, 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "max_turns must be > 0")]
+    fn zero_max_turns_panics() {
+        let _ = GameBuilder::new(5, 5).with_max_turns(0);
+    }
+
+    #[test]
+    fn two_by_two_board_works() {
+        let config = GameBuilder::new(2, 2)
+            .with_open_maze()
+            .with_corner_positions()
+            .with_custom_cheese(vec![Coordinates::new(1, 0)])
+            .build();
+        let game = config.create(Some(42));
+        assert_eq!(game.width, 2);
+        assert_eq!(game.height, 2);
+        assert_eq!(game.player1_position(), Coordinates::new(0, 0));
+        assert_eq!(game.player2_position(), Coordinates::new(1, 1));
     }
 
     #[test]

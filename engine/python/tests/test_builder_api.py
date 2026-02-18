@@ -262,6 +262,18 @@ class TestGameBuilderValidation:
         with pytest.raises(ValueError, match="max_turns must be greater than 0"):
             GameBuilder(5, 5).with_max_turns(0)
 
+    def test_zero_dimensions_raises(self):
+        with pytest.raises(ValueError, match="width must be >= 2"):
+            GameBuilder(0, 5)
+        with pytest.raises(ValueError, match="height must be >= 2"):
+            GameBuilder(5, 0)
+
+    def test_one_by_one_raises(self):
+        with pytest.raises(ValueError, match="width must be >= 2"):
+            GameBuilder(1, 5)
+        with pytest.raises(ValueError, match="height must be >= 2"):
+            GameBuilder(5, 1)
+
 
 class TestGameBuilderMaxTurns:
     """Test max_turns override."""
