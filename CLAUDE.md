@@ -230,27 +230,26 @@ is_next = pos.is_adjacent_to(other_pos)
 - `Mud` - Mud passage with turn count
 
 ### Accessing Game State
-Key properties and methods on `GameState`:
+Key properties and methods on `PyRat`:
 
 ```python
 # Player positions (returns Coordinates)
-pos1 = game.player1_position()
-pos2 = game.player2_position()
+pos1 = game.player1_position
+pos2 = game.player2_position
 
 # Mud status (0 if not in mud, >0 for turns remaining)
 mud1 = game.player1_mud_turns
 mud2 = game.player2_mud_turns
 
 # Scores
-score1 = game.player1_score()
-score2 = game.player2_score()
+score1 = game.player1_score
+score2 = game.player2_score
 
 # Cheese locations (returns list of Coordinates)
-cheese = game.cheese_locations()
+cheese = game.cheese_positions()
 
 # Game state
-is_done = game.is_game_over()
-turn = game.turn_count()
+turn = game.turn
 ```
 
 ### Observation Space

@@ -48,8 +48,8 @@ make test-engine
 
 ## Package Details
 - **Package name**: `pyrat-engine` (was `pyrat` before monorepo)
-- **Import**: `from pyrat_engine import PyRatEnv, Direction`
-- **Rust module**: `pyrat_engine._rust`
+- **Import**: `from pyrat_engine import Direction` and `from pyrat_engine.env import PyRatEnv`
+- **Rust module**: `pyrat_engine._core`
 
 ## Performance Notes
 - `cargo bench` runs criterion benchmarks (game init + full game across preset sizes and wall/mud combos)
