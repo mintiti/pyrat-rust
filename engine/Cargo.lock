@@ -603,7 +603,7 @@ dependencies = [
 
 [[package]]
 name = "pyrat-extension"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "pyo3",
  "pyrat-rust",
@@ -611,7 +611,7 @@ dependencies = [
 
 [[package]]
 name = "pyrat-rust"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "criterion",
  "ndarray",
