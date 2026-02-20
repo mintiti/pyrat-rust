@@ -602,7 +602,7 @@ mod tests {
             .with_corner_positions()
             .with_custom_cheese(vec![])
             .build();
-        let game = config.create(None);
+        let game = config.create(None).unwrap();
 
         assert_eq!(game.width, 10);
         assert_eq!(game.height, 10);
@@ -625,7 +625,7 @@ mod tests {
             .with_custom_positions(p1_pos, p2_pos)
             .with_custom_cheese(vec![])
             .build();
-        let game = config.create(None);
+        let game = config.create(None).unwrap();
 
         assert_eq!(game.player1.current_pos, p1_pos);
         assert_eq!(game.player1.target_pos, p1_pos);
@@ -648,7 +648,7 @@ mod tests {
             .with_custom_positions(Coordinates::new(0, 0), Coordinates::new(2, 2))
             .with_custom_cheese(cheese_positions)
             .build();
-        let game = config.create(None);
+        let game = config.create(None).unwrap();
 
         assert_eq!(game.width, 3);
         assert_eq!(game.height, 3);
@@ -669,7 +669,7 @@ mod tests {
             .with_random_cheese(10, false)
             .build();
 
-        let game = config.create(Some(42));
+        let game = config.create(Some(42)).unwrap();
 
         assert_eq!(game.width, 8);
         assert_eq!(game.height, 8);
@@ -686,7 +686,7 @@ mod tests {
             .with_random_cheese(15, true)
             .build();
 
-        let game = config.create(Some(42));
+        let game = config.create(Some(42)).unwrap();
 
         let cheese_positions = game.cheese.get_all_cheese_positions();
         for pos in &cheese_positions {
@@ -711,7 +711,7 @@ mod tests {
             .with_random_cheese(10, false)
             .build();
 
-        let game = config.create(Some(42));
+        let game = config.create(Some(42)).unwrap();
 
         assert_eq!(game.width, 8);
         assert_eq!(game.height, 8);
@@ -726,8 +726,8 @@ mod tests {
             .with_random_cheese(10, true)
             .build();
 
-        let game1 = config.create(Some(42));
-        let game2 = config.create(Some(42));
+        let game1 = config.create(Some(42)).unwrap();
+        let game2 = config.create(Some(42)).unwrap();
 
         assert_eq!(
             game1.cheese.get_all_cheese_positions(),
@@ -747,7 +747,7 @@ mod tests {
             .with_random_cheese(10, true)
             .build();
 
-        let game = config.create(Some(42));
+        let game = config.create(Some(42)).unwrap();
 
         let center_moves = game.move_table.get_valid_moves(Coordinates::new(5, 5));
         assert_eq!(
@@ -780,8 +780,8 @@ mod tests {
             .with_random_cheese(10, true)
             .build();
 
-        let game_low = low_config.create(Some(42));
-        let game_high = high_config.create(Some(42));
+        let game_low = low_config.create(Some(42)).unwrap();
+        let game_high = high_config.create(Some(42)).unwrap();
 
         // Count valid moves in each game (fewer valid moves = more walls)
         let mut valid_low = 0u32;
@@ -809,6 +809,7 @@ mod tests {
             .with_custom_cheese(vec![])
             .build()
             .create(None)
+            .unwrap()
     }
 
     // Helper to create a game state with mud
@@ -827,6 +828,7 @@ mod tests {
             .with_custom_cheese(vec![])
             .build()
             .create(None)
+            .unwrap()
     }
 
     mod basic_movement {
@@ -996,7 +998,7 @@ mod tests {
                 .with_corner_positions()
                 .with_custom_cheese(vec![])
                 .build();
-            let game = config.create(None);
+            let game = config.create(None).unwrap();
             let result = game.effective_actions_at(Coordinates::new(0, 0));
 
             assert_eq!(result[0], 0); // UP valid
@@ -1156,6 +1158,7 @@ mod make_unmake_tests {
             .with_custom_cheese(vec![])
             .build()
             .create(None)
+            .unwrap()
     }
 
     #[test]
@@ -1308,7 +1311,8 @@ mod make_unmake_tests {
             .with_corner_positions()
             .with_custom_cheese(vec![])
             .build()
-            .create(None);
+            .create(None)
+            .unwrap();
 
         let initial_state = game.clone();
 
@@ -1344,7 +1348,8 @@ mod make_unmake_tests {
             .with_corner_positions()
             .with_custom_cheese(vec![])
             .build()
-            .create(None);
+            .create(None)
+            .unwrap();
         let initial_state = game.clone();
 
         // Try to move outside board boundaries
@@ -1392,7 +1397,8 @@ mod make_unmake_tests {
             .with_corner_positions()
             .with_custom_cheese(vec![Coordinates::new(1, 2), Coordinates::new(2, 2)])
             .build()
-            .create(None);
+            .create(None)
+            .unwrap();
 
         let initial_state = game.clone();
         let mut undo_stack = Vec::new();
@@ -1460,7 +1466,8 @@ mod make_unmake_tests {
             .with_corner_positions()
             .with_custom_cheese(vec![])
             .build()
-            .create(None);
+            .create(None)
+            .unwrap();
 
         // Make initial state different from default
         game.player1.score = 1.0;
@@ -1490,7 +1497,8 @@ mod make_unmake_tests {
             .with_corner_positions()
             .with_custom_cheese(vec![cheese_pos])
             .build()
-            .create(None);
+            .create(None)
+            .unwrap();
         let initial_cheese_count = game.cheese.total_cheese();
         let initial_remaining = game.cheese.remaining_cheese();
 
@@ -1520,7 +1528,8 @@ mod make_unmake_tests {
             .with_custom_positions(Coordinates::new(0, 1), Coordinates::new(2, 1))
             .with_custom_cheese(vec![cheese_pos])
             .build()
-            .create(None);
+            .create(None)
+            .unwrap();
 
         // Make move where both players collect cheese
         let undo = game.make_move(Direction::Right, Direction::Left);
@@ -1549,6 +1558,7 @@ mod make_unmake_tests {
             .with_custom_cheese(vec![])
             .build()
             .create(None)
+            .unwrap()
     }
 
     /// Helper to create a test game with mud
@@ -1561,5 +1571,6 @@ mod make_unmake_tests {
             .with_custom_cheese(vec![])
             .build()
             .create(None)
+            .unwrap()
     }
 }

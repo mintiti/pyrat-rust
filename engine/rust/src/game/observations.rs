@@ -199,7 +199,8 @@ mod tests {
             .with_corner_positions()
             .with_custom_cheese(vec![])
             .build()
-            .create(None);
+            .create(None)
+            .unwrap();
 
         let constraints = MovementConstraints::new(&game);
 
@@ -237,7 +238,7 @@ mod tests {
             .with_corner_positions()
             .with_random_cheese(3, true)
             .build();
-        let game = config.create(Some(42));
+        let game = config.create(Some(42)).unwrap();
         let mut handler = ObservationHandler::new(&game);
 
         // Clear all cheese

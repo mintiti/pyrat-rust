@@ -12,7 +12,9 @@ use pyo3::types::PyModule;
 use pyo3::Python;
 use std::collections::HashMap;
 
-use super::validation::{validate_mud, validate_wall, PyMudEntry, PyWall};
+use super::validation::{
+    validate_mud, validate_mud_object, validate_wall, validate_wall_object, PyMudEntry, PyWall,
+};
 
 /// Input type for Mud that accepts either tuples or Mud objects
 #[derive(FromPyObject)]
@@ -150,22 +152,35 @@ impl PyGameConfig {
 
     /// Standard game: classic maze, corner starts, symmetric random cheese.
     #[staticmethod]
-    fn classic(width: u8, height: u8, cheese: u16) -> Self {
-        Self {
-            inner: GameConfig::classic(width, height, cheese),
+    fn classic(width: u8, height: u8, cheese: u16) -> PyResult<Self> {
+        if width < 2 {
+            return Err(PyValueError::new_err(format!(
+                "width must be >= 2, got {width}"
+            )));
         }
+        if height < 2 {
+            return Err(PyValueError::new_err(format!(
+                "height must be >= 2, got {height}"
+            )));
+        }
+        if cheese == 0 {
+            return Err(PyValueError::new_err("cheese count must be > 0"));
+        }
+        Ok(Self {
+            inner: GameConfig::classic(width, height, cheese),
+        })
     }
 
     /// Stamp out a new game from this config.
     #[pyo3(signature = (seed=None))]
-    fn create(&self, seed: Option<u64>) -> PyRat {
-        let game = self.inner.create(seed);
+    fn create(&self, seed: Option<u64>) -> PyResult<PyRat> {
+        let game = self.inner.create(seed).map_err(PyValueError::new_err)?;
         let observation_handler = ObservationHandler::new(&game);
-        PyRat {
+        Ok(PyRat {
             game,
             observation_handler,
             config: self.inner.clone(),
-        }
+        })
     }
 
     #[getter]
@@ -266,7 +281,22 @@ impl PyGameBuilder {
         mud_range: u8,
         connected: bool,
         symmetric: bool,
-    ) -> PyRefMut<'_, Self> {
+    ) -> PyResult<PyRefMut<'_, Self>> {
+        if !(0.0..=1.0).contains(&wall_density) {
+            return Err(PyValueError::new_err(format!(
+                "wall_density must be between 0.0 and 1.0, got {wall_density}"
+            )));
+        }
+        if !(0.0..=1.0).contains(&mud_density) {
+            return Err(PyValueError::new_err(format!(
+                "mud_density must be between 0.0 and 1.0, got {mud_density}"
+            )));
+        }
+        if mud_density > 0.0 && mud_range < 2 {
+            return Err(PyValueError::new_err(format!(
+                "mud_range must be >= 2 when mud_density > 0, got {mud_range}"
+            )));
+        }
         slf.maze = Some(MazeStrategy::Random(MazeParams {
             wall_density,
             connected,
@@ -274,7 +304,7 @@ impl PyGameBuilder {
             mud_density,
             mud_range,
         }));
-        slf
+        Ok(slf)
     }
 
     /// Fixed maze layout from explicit walls and mud.
@@ -291,7 +321,10 @@ impl PyGameBuilder {
         let validated_walls: Vec<Wall> = walls
             .into_iter()
             .map(|input| match input {
-                WallInput::Object(w) => Ok(w),
+                WallInput::Object(w) => {
+                    validate_wall_object(&w, width, height)?;
+                    Ok(w)
+                },
                 WallInput::Tuple(tuple) => validate_wall(tuple, width, height),
             })
             .collect::<PyResult<Vec<_>>>()?;
@@ -301,8 +334,8 @@ impl PyGameBuilder {
         for wall in &validated_walls {
             if !wall_set.insert((wall.pos1, wall.pos2)) {
                 return Err(PyValueError::new_err(format!(
-                    "Duplicate wall between {:?} and {:?}",
-                    wall.pos1, wall.pos2
+                    "Duplicate wall between ({}, {}) and ({}, {})",
+                    wall.pos1.x, wall.pos1.y, wall.pos2.x, wall.pos2.y
                 )));
             }
         }
@@ -312,7 +345,10 @@ impl PyGameBuilder {
         let mut mud_map = MudMap::new();
         for input in mud {
             let m = match input {
-                MudInput::Object(m) => m,
+                MudInput::Object(m) => {
+                    validate_mud_object(&m, width, height)?;
+                    m
+                },
                 MudInput::Tuple(tuple) => {
                     let validated = validate_mud(tuple, width, height)?;
                     let (p1, p2) = if validated.0 < validated.1 {
@@ -403,9 +439,12 @@ impl PyGameBuilder {
         mut slf: PyRefMut<'_, Self>,
         count: u16,
         symmetric: bool,
-    ) -> PyRefMut<'_, Self> {
+    ) -> PyResult<PyRefMut<'_, Self>> {
+        if count == 0 {
+            return Err(PyValueError::new_err("cheese count must be > 0"));
+        }
         slf.cheese = Some(CheeseStrategy::Random { count, symmetric });
-        slf
+        Ok(slf)
     }
 
     /// Place cheese at exact positions.
@@ -725,10 +764,16 @@ impl PyRat {
     ///
     /// Returns (game_over: bool, collected_cheese: List[Coordinates])
     fn step(&mut self, p1_move: u8, p2_move: u8) -> PyResult<(bool, Vec<Coordinates>)> {
-        let p1_dir = Direction::try_from(p1_move)
-            .map_err(|_| PyValueError::new_err("Invalid move for player 1"))?;
-        let p2_dir = Direction::try_from(p2_move)
-            .map_err(|_| PyValueError::new_err("Invalid move for player 2"))?;
+        let p1_dir = Direction::try_from(p1_move).map_err(|_| {
+            PyValueError::new_err(format!(
+                "Invalid move for player 1: got {p1_move}, expected 0-4 (UP, RIGHT, DOWN, LEFT, STAY)"
+            ))
+        })?;
+        let p2_dir = Direction::try_from(p2_move).map_err(|_| {
+            PyValueError::new_err(format!(
+                "Invalid move for player 2: got {p2_move}, expected 0-4 (UP, RIGHT, DOWN, LEFT, STAY)"
+            ))
+        })?;
 
         let result = self.game.process_turn(p1_dir, p2_dir);
 
@@ -745,10 +790,16 @@ impl PyRat {
     /// like MCTS or minimax. Undo objects must be applied in LIFO order —
     /// always undo the most recent `make_move()` first.
     fn make_move(&mut self, p1_move: u8, p2_move: u8) -> PyResult<PyMoveUndo> {
-        let p1_dir = Direction::try_from(p1_move)
-            .map_err(|_| PyValueError::new_err("Invalid move for player 1"))?;
-        let p2_dir = Direction::try_from(p2_move)
-            .map_err(|_| PyValueError::new_err("Invalid move for player 2"))?;
+        let p1_dir = Direction::try_from(p1_move).map_err(|_| {
+            PyValueError::new_err(format!(
+                "Invalid move for player 1: got {p1_move}, expected 0-4 (UP, RIGHT, DOWN, LEFT, STAY)"
+            ))
+        })?;
+        let p2_dir = Direction::try_from(p2_move).map_err(|_| {
+            PyValueError::new_err(format!(
+                "Invalid move for player 2: got {p2_move}, expected 0-4 (UP, RIGHT, DOWN, LEFT, STAY)"
+            ))
+        })?;
 
         let undo = self.game.make_move(p1_dir, p2_dir);
         Ok(PyMoveUndo { inner: undo })
@@ -766,10 +817,11 @@ impl PyRat {
 
     /// Reset the game state using the stored config.
     #[pyo3(signature = (seed=None))]
-    fn reset(&mut self, seed: Option<u64>) {
-        self.game = self.config.create(seed);
+    fn reset(&mut self, seed: Option<u64>) -> PyResult<()> {
+        self.game = self.config.create(seed).map_err(PyValueError::new_err)?;
         // Need full refresh after reset
         self.observation_handler.refresh_cheese(&self.game);
+        Ok(())
     }
 
     // String representation

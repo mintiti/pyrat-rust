@@ -105,4 +105,5 @@ pub fn create_game(size: &BoardSize, combo: &FeatureCombo, seed: u64) -> GameSta
         .with_random_cheese(size.cheese, true)
         .build()
         .create(Some(seed))
+        .unwrap()
 }

@@ -114,6 +114,40 @@ pub fn validate_mud(mud: PyMudEntry, width: u8, height: u8) -> PyResult<Validate
     Ok((validated_pos1, validated_pos2, value as u8))
 }
 
+/// Validates that a Wall object's coordinates are within board bounds.
+pub fn validate_wall_object(wall: &crate::Wall, width: u8, height: u8) -> PyResult<()> {
+    if wall.pos1.x >= width || wall.pos1.y >= height {
+        return Err(PyValueError::new_err(format!(
+            "Wall position ({}, {}) is outside board bounds ({width}x{height})",
+            wall.pos1.x, wall.pos1.y
+        )));
+    }
+    if wall.pos2.x >= width || wall.pos2.y >= height {
+        return Err(PyValueError::new_err(format!(
+            "Wall position ({}, {}) is outside board bounds ({width}x{height})",
+            wall.pos2.x, wall.pos2.y
+        )));
+    }
+    Ok(())
+}
+
+/// Validates that a Mud object's coordinates are within board bounds.
+pub fn validate_mud_object(mud: &crate::Mud, width: u8, height: u8) -> PyResult<()> {
+    if mud.pos1.x >= width || mud.pos1.y >= height {
+        return Err(PyValueError::new_err(format!(
+            "Mud position ({}, {}) is outside board bounds ({width}x{height})",
+            mud.pos1.x, mud.pos1.y
+        )));
+    }
+    if mud.pos2.x >= width || mud.pos2.y >= height {
+        return Err(PyValueError::new_err(format!(
+            "Mud position ({}, {}) is outside board bounds ({width}x{height})",
+            mud.pos2.x, mud.pos2.y
+        )));
+    }
+    Ok(())
+}
+
 /// Helper function to check if two positions are adjacent
 fn are_adjacent(pos1: (u8, u8), pos2: (u8, u8)) -> bool {
     let dx = pos1.0.abs_diff(pos2.0);

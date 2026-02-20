@@ -9,7 +9,7 @@
 //!
 //! // Quick classic game
 //! let config = GameConfig::classic(21, 15, 41);
-//! let game = config.create(Some(42));
+//! let game = config.create(Some(42)).unwrap();
 //!
 //! // Builder with named maze constructors
 //! let config = GameBuilder::new(21, 15)
@@ -18,8 +18,8 @@
 //!     .with_random_cheese(41, true)
 //!     .build();
 //!
-//! let game1 = config.create(Some(42));
-//! let game2 = config.create(Some(43));
+//! let game1 = config.create(Some(42)).unwrap();
+//! let game2 = config.create(Some(43)).unwrap();
 //! ```
 
 use crate::game::maze_generation::{CheeseConfig, CheeseGenerator, MazeConfig, MazeGenerator};
@@ -183,8 +183,29 @@ impl GameBuilder<NeedsMaze> {
     }
 
     /// Use random maze generation with the given parameters.
+    ///
+    /// # Panics
+    /// Panics if densities are outside `[0.0, 1.0]` or `mud_range < 2`
+    /// when `mud_density > 0`.
     #[must_use]
     pub fn with_random_maze(self, params: MazeParams) -> GameBuilder<NeedsPlayers> {
+        assert!(
+            (0.0..=1.0).contains(&params.wall_density),
+            "wall_density must be between 0.0 and 1.0, got {}",
+            params.wall_density
+        );
+        assert!(
+            (0.0..=1.0).contains(&params.mud_density),
+            "mud_density must be between 0.0 and 1.0, got {}",
+            params.mud_density
+        );
+        if params.mud_density > 0.0 {
+            assert!(
+                params.mud_range >= 2,
+                "mud_range must be >= 2 when mud_density > 0, got {}",
+                params.mud_range
+            );
+        }
         GameBuilder {
             width: self.width,
             height: self.height,
@@ -281,8 +302,12 @@ impl GameBuilder<NeedsPlayers> {
 
 impl GameBuilder<NeedsCheese> {
     /// Place `count` cheese randomly, optionally with 180° symmetry.
+    ///
+    /// # Panics
+    /// Panics if `count == 0`.
     #[must_use]
     pub fn with_random_cheese(self, count: u16, symmetric: bool) -> GameBuilder<Ready> {
+        assert!(count > 0, "cheese count must be > 0");
         GameBuilder {
             width: self.width,
             height: self.height,
@@ -379,7 +404,11 @@ impl GameConfig {
     ///
     /// `seed` controls all random generation. `None` uses OS entropy.
     /// Fixed strategies ignore the seed.
-    pub fn create(&self, seed: Option<u64>) -> GameState {
+    ///
+    /// # Errors
+    /// Returns an error if cheese placement fails (e.g. too many cheese for
+    /// the board, or odd symmetric cheese on an even board).
+    pub fn create(&self, seed: Option<u64>) -> Result<GameState, String> {
         let mut rng: rand::rngs::StdRng =
             seed.map_or_else(rand::make_rng, SeedableRng::seed_from_u64);
 
@@ -428,12 +457,12 @@ impl GameConfig {
                     self.height(),
                     Some(rng.random()),
                 );
-                cheese_gen.generate(p1, p2)
+                cheese_gen.generate(p1, p2)?
             },
         };
 
         // 4. Assemble
-        GameState::new_with_config(
+        Ok(GameState::new_with_config(
             self.width(),
             self.height(),
             walls,
@@ -442,7 +471,7 @@ impl GameConfig {
             p1,
             p2,
             self.max_turns(),
-        )
+        ))
     }
 
     /// Look up a named preset configuration.
@@ -569,8 +598,8 @@ mod tests {
             .build();
 
         // Seed shouldn't matter for fully-fixed config
-        let game1 = config.create(Some(1));
-        let game2 = config.create(Some(999));
+        let game1 = config.create(Some(1)).unwrap();
+        let game2 = config.create(Some(999)).unwrap();
 
         assert_eq!(game1.width, 3);
         assert_eq!(game1.height, 3);
@@ -597,8 +626,8 @@ mod tests {
             .with_random_cheese(13, true)
             .build();
 
-        let game1 = config.create(Some(42));
-        let game2 = config.create(Some(42));
+        let game1 = config.create(Some(42)).unwrap();
+        let game2 = config.create(Some(42)).unwrap();
 
         assert_eq!(
             game1.cheese.get_all_cheese_positions(),
@@ -614,8 +643,8 @@ mod tests {
             .with_random_cheese(41, true)
             .build();
 
-        let game1 = config.create(Some(1));
-        let game2 = config.create(Some(2));
+        let game1 = config.create(Some(1)).unwrap();
+        let game2 = config.create(Some(2)).unwrap();
 
         // Overwhelmingly likely to differ
         assert_ne!(
@@ -637,7 +666,7 @@ mod tests {
             .build();
 
         for seed in 0..20 {
-            let game = config.create(Some(seed));
+            let game = config.create(Some(seed)).unwrap();
             let p1 = game.player1_position();
             let p2 = game.player2_position();
 
@@ -655,8 +684,8 @@ mod tests {
             .with_random_cheese(10, true)
             .build();
 
-        let game1 = config.create(Some(42));
-        let game2 = config.create(Some(42));
+        let game1 = config.create(Some(42)).unwrap();
+        let game2 = config.create(Some(42)).unwrap();
 
         assert_eq!(game1.player1_position(), game2.player1_position());
         assert_eq!(game1.player2_position(), game2.player2_position());
@@ -675,7 +704,7 @@ mod tests {
         ] {
             let config =
                 GameConfig::preset(name).unwrap_or_else(|e| panic!("preset '{name}': {e}"));
-            let game = config.create(Some(42));
+            let game = config.create(Some(42)).unwrap();
             assert!(
                 game.cheese.total_cheese() > 0,
                 "preset '{name}' has no cheese"
@@ -710,7 +739,7 @@ mod tests {
             .with_random_cheese(10, true)
             .build();
 
-        let game = config.create(Some(42));
+        let game = config.create(Some(42)).unwrap();
         assert_eq!(game.player1_position(), Coordinates::new(2, 2));
         assert_eq!(game.player2_position(), Coordinates::new(8, 6));
         assert_eq!(game.cheese.total_cheese(), 10);
@@ -724,7 +753,7 @@ mod tests {
             .with_random_cheese(41, true)
             .build();
 
-        let game = config.create(Some(42));
+        let game = config.create(Some(42)).unwrap();
         assert_eq!(game.player1_position(), Coordinates::new(0, 0));
         assert_eq!(game.player2_position(), Coordinates::new(20, 14));
     }
@@ -766,7 +795,7 @@ mod tests {
             .with_corner_positions()
             .with_custom_cheese(vec![Coordinates::new(1, 0)])
             .build();
-        let game = config.create(Some(42));
+        let game = config.create(Some(42)).unwrap();
         assert_eq!(game.width, 2);
         assert_eq!(game.height, 2);
         assert_eq!(game.player1_position(), Coordinates::new(0, 0));
@@ -781,7 +810,7 @@ mod tests {
             .with_custom_cheese(vec![Coordinates::new(1, 1)])
             .build();
 
-        let game = config.create(None);
+        let game = config.create(None).unwrap();
         assert_eq!(game.width, 3);
         assert_eq!(game.height, 3);
         assert_eq!(game.cheese.total_cheese(), 1);

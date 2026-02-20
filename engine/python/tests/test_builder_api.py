@@ -3,7 +3,7 @@
 # ruff: noqa: PLR2004
 
 import pytest
-from pyrat_engine import GameBuilder, GameConfig
+from pyrat_engine import Coordinates, GameBuilder, GameConfig, Mud, Wall
 
 
 class TestGameConfigPresets:
@@ -427,3 +427,84 @@ class TestMazeSymmetry:
                 f"Wall {w.pos1}↔{w.pos2} has no symmetric counterpart "
                 f"at {sym_wall[0]}↔{sym_wall[1]}"
             )
+
+
+class TestNewValidation:
+    """Tests for validation that returns ValueError instead of panicking."""
+
+    def test_classic_zero_width(self):
+        with pytest.raises(ValueError, match="width must be >= 2"):
+            GameConfig.classic(0, 15, 41)
+
+    def test_classic_zero_height(self):
+        with pytest.raises(ValueError, match="height must be >= 2"):
+            GameConfig.classic(21, 0, 41)
+
+    def test_classic_zero_cheese(self):
+        with pytest.raises(ValueError, match="cheese count must be > 0"):
+            GameConfig.classic(21, 15, 0)
+
+    def test_random_cheese_zero(self):
+        with pytest.raises(ValueError, match="cheese count must be > 0"):
+            (
+                GameBuilder(5, 5)
+                .with_open_maze()
+                .with_corner_positions()
+                .with_random_cheese(0)
+            )
+
+    def test_wall_density_too_high(self):
+        with pytest.raises(ValueError, match="wall_density must be between"):
+            GameBuilder(5, 5).with_random_maze(wall_density=1.5)
+
+    def test_mud_density_negative(self):
+        with pytest.raises(ValueError, match="mud_density must be between"):
+            GameBuilder(5, 5).with_random_maze(mud_density=-0.1)
+
+    def test_mud_range_too_low(self):
+        with pytest.raises(ValueError, match="mud_range must be >= 2"):
+            GameBuilder(5, 5).with_random_maze(mud_density=0.5, mud_range=1)
+
+    def test_wall_object_out_of_bounds(self):
+        wall = Wall(Coordinates(10, 10), Coordinates(10, 11))
+        with pytest.raises(ValueError, match="outside board bounds"):
+            GameBuilder(5, 5).with_custom_maze(walls=[wall])
+
+    def test_mud_object_out_of_bounds(self):
+        mud = Mud(Coordinates(10, 10), Coordinates(10, 11), 3)
+        with pytest.raises(ValueError, match="outside board bounds"):
+            GameBuilder(5, 5).with_custom_maze(walls=[], mud=[mud])
+
+    def test_too_many_cheese_at_create(self):
+        """Too many cheese for the board size errors at create(), not build()."""
+        config = (
+            GameBuilder(3, 3)
+            .with_open_maze()
+            .with_corner_positions()
+            .with_random_cheese(100)
+            .build()
+        )
+        with pytest.raises(ValueError, match="Too many pieces of cheese"):
+            config.create(seed=42)
+
+    def test_odd_symmetric_cheese_even_board(self):
+        """Odd cheese count with symmetry on even board errors at create()."""
+        config = (
+            GameBuilder(6, 6)
+            .with_open_maze()
+            .with_corner_positions()
+            .with_random_cheese(5, symmetric=True)
+            .build()
+        )
+        with pytest.raises(ValueError, match="Cannot place odd number of cheese"):
+            config.create(seed=42)
+
+    def test_step_invalid_move_shows_value(self):
+        game = GameConfig.classic(5, 5, 3).create(seed=42)
+        with pytest.raises(ValueError, match="got 99"):
+            game.step(99, 0)
+
+    def test_make_move_invalid_shows_value(self):
+        game = GameConfig.classic(5, 5, 3).create(seed=42)
+        with pytest.raises(ValueError, match="got 10"):
+            game.make_move(0, 10)

@@ -607,23 +607,25 @@ impl CheeseGenerator {
 
     /// Generate cheese placements.
     ///
-    /// # Panics
+    /// # Errors
     /// - When attempting to place odd number of cheese in symmetric maze with even dimensions
     /// - When requesting more cheese pieces than available positions in the maze
     pub fn generate(
         &mut self,
         player1_pos: Coordinates,
         player2_pos: Coordinates,
-    ) -> Vec<Coordinates> {
+    ) -> Result<Vec<Coordinates>, String> {
         let mut pieces = Vec::new();
         let mut remaining = self.config.count;
 
         // Handle center piece for odd counts in symmetric mazes
         if self.config.symmetry && remaining % 2 == 1 {
-            assert!(
-                !(self.width.is_multiple_of(2) || self.height.is_multiple_of(2)),
-                "Cannot place odd number of cheese in symmetric maze with even dimensions"
-            );
+            if self.width.is_multiple_of(2) || self.height.is_multiple_of(2) {
+                return Err(
+                    "Cannot place odd number of cheese in symmetric maze with even dimensions"
+                        .to_string(),
+                );
+            }
             let center = Coordinates::new(self.width / 2, self.height / 2);
             if center != player1_pos && center != player2_pos {
                 pieces.push(center);
@@ -668,12 +670,11 @@ impl CheeseGenerator {
             }
         }
 
-        assert!(
-            remaining == 0,
-            "Too many pieces of cheese for maze dimensions"
-        );
+        if remaining != 0 {
+            return Err("Too many pieces of cheese for maze dimensions".to_string());
+        }
 
-        pieces
+        Ok(pieces)
     }
 
     /// Gets the symmetric position for a given coordinate
@@ -906,7 +907,7 @@ mod tests {
         let p2 = Coordinates::new(4, 4);
 
         let mut generator = CheeseGenerator::new(config, width, height, Some(42));
-        let cheese = generator.generate(p1, p2);
+        let cheese = generator.generate(p1, p2).unwrap();
 
         assert_eq!(cheese.len(), 4);
         assert!(!cheese.contains(&p1));
@@ -925,7 +926,7 @@ mod tests {
         let p2 = Coordinates::new(6, 6);
 
         let mut generator = CheeseGenerator::new(config, width, height, Some(42));
-        let cheese = generator.generate(p1, p2);
+        let cheese = generator.generate(p1, p2).unwrap();
 
         // Check center piece
         assert_eq!(cheese.len(), 5);
@@ -942,7 +943,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Cannot place odd number of cheese")]
     fn test_invalid_symmetric_cheese() {
         let config = CheeseConfig {
             count: 5, // Odd number
@@ -954,7 +954,11 @@ mod tests {
         let p2 = Coordinates::new(5, 5);
 
         let mut generator = CheeseGenerator::new(config, width, height, Some(42));
-        generator.generate(p1, p2); // Should panic
+        let result = generator.generate(p1, p2);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .contains("Cannot place odd number of cheese"));
     }
 
     #[test]
@@ -969,7 +973,7 @@ mod tests {
         let p2 = Coordinates::new(4, 4);
 
         let mut generator = CheeseGenerator::new(config, width, height, Some(42));
-        let cheese = generator.generate(p1, p2);
+        let cheese = generator.generate(p1, p2).unwrap();
 
         assert!(
             !cheese.contains(&p1),
@@ -982,7 +986,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "Too many pieces of cheese")]
     fn test_too_many_cheese() {
         let width = 5;
         let height = 5;
@@ -995,7 +998,9 @@ mod tests {
         let player2_pos = Coordinates::new(width - 1, height - 1);
 
         let mut generator = CheeseGenerator::new(config, width, height, Some(42));
-        generator.generate(player1_pos, player2_pos); // Should panic
+        let result = generator.generate(player1_pos, player2_pos);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Too many pieces of cheese"));
     }
 
     #[test]
