@@ -26,14 +26,6 @@ ndarray = { version = "0.16", optional = true }
 criterion = { version = "0.8", features = ["html_reports"] }
 pretty_assertions = "1.4"
 
-[profile.release]
-debug = true
-codegen-units = 1
-lto = "fat"
-
-[profile.bench]
-debug = true  # Also keep debug info for bench profile
-
 [[bench]]
 name = "game_benchmarks"
 path = "rust/benches/game_benchmarks.rs"
@@ -46,22 +38,6 @@ path = "rust/benches/bin/profile_game.rs"
 [features]
 default = []
 python = ["dep:pyo3", "dep:numpy", "dep:ndarray"]
-
-[workspace]
-members = ["extension"]
-
-[workspace.lints.clippy]
-# Lint groups at priority -1 so individual overrides take precedence
-cargo = { level = "warn", priority = -1 }
-complexity = { level = "warn", priority = -1 }
-correctness = { level = "warn", priority = -1 }
-perf = { level = "warn", priority = -1 }
-suspicious = { level = "warn", priority = -1 }
-pedantic = { level = "allow", priority = -1 }
-nursery = { level = "allow", priority = -1 }
-
-# Individual overrides
-cargo_common_metadata = "allow"  # root has full metadata; extension is publish = false
 
 [lints]
 workspace = true

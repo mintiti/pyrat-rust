@@ -1,0 +1,14 @@
+[package]
+name = "pyrat-protocol"
+version = "0.1.0"
+edition = "2021"
+description = "FlatBuffers wire protocol for PyRat host-bot communication"
+license = "MIT"
+repository = "https://github.com/mintiti/pyrat-rust"
+publish = false
+
+[dependencies]
+flatbuffers = "25.2.10"
+
+[lints]
+workspace = true

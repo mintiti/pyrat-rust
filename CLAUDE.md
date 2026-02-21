@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 PyRat is a monorepo containing the complete PyRat ecosystem for a competitive maze game. The repository is organized into multiple components:
 
 - **engine/**: Rust game engine with PyO3 bindings - core game logic and Python API
-- **protocol/**: Text-based AI communication protocol and Python SDK (`pyrat_base`)
+- **protocol/**: AI communication protocol — text-based Python SDK (`pyrat_base`) and FlatBuffers wire protocol (`pyrat_protocol`)
 - **cli/**: Command-line game runner tool (`pyrat-game` command)
 
 This monorepo structure enables clean separation of concerns while maintaining a cohesive ecosystem.
@@ -112,26 +112,13 @@ uv run pre-commit install --hook-type pre-push
 make check  # Run all checks
 make fmt    # Format all code
 
-# From engine directory
-cd engine
-
-# Format Rust code
-cargo fmt
-
-# Check Rust formatting (CI will fail if not formatted)
+# Rust checks (all run from repo root — Cargo workspace is at root)
 cargo fmt --all -- --check
-
-# Run Rust linter with all warnings as errors
-cargo clippy --all-targets --all-features -- -D warnings
-
-# Run Rust linter (ignoring PyO3 warnings for CI)
 cargo clippy --all-targets --all-features -- -D warnings -A non-local-definitions
+cargo clippy -p pyrat-rust --all-targets --no-default-features -- -D warnings
 
 # Run Python tests
-pytest python/tests -v
-
-# Run specific test
-pytest python/tests/test_env.py::test_custom_maze -v
+cd engine && uv run pytest python/tests -v
 ```
 
 ### Building and Testing
@@ -143,20 +130,13 @@ make test-protocol # Run protocol tests only
 make test-cli    # Run CLI tests only
 make bench       # Run benchmarks
 
-# From engine directory
-cd engine
-
-# Build the Rust library
-cargo build --release
-
-# Run Rust tests (without Python features to avoid linking issues)
-cd engine && cargo test --lib --no-default-features
-
-# Run benchmarks
-cargo bench
+# Rust commands (from repo root — Cargo workspace is at root)
+cargo build -p pyrat-rust --release
+cargo test -p pyrat-rust --lib --no-default-features
+cargo bench -p pyrat-rust --bench game_benchmarks
 
 # Build Python package with maturin
-maturin build --release
+cd engine && uv run maturin develop --release
 ```
 
 ### Running Games with CLI
@@ -268,7 +248,7 @@ Each player receives:
 - Rust unit tests for core game logic
 - Python integration tests for the PettingZoo interface
 - Benchmarks for performance-critical paths (game_benchmarks.rs)
-- Use `cargo test --lib --no-default-features` and `pytest` separately for each language layer
+- `cargo test -p pyrat-rust --lib --no-default-features` and `pytest` separately for each language layer
 - Or use `make test-engine` from the repository root for both
 
 ## Component Details

@@ -30,11 +30,11 @@ uv run maturin develop --release  # Build Rust extension
 
 ### Testing
 ```bash
-# Rust tests (without Python bindings)
-cargo test --lib --no-default-features
+# Rust tests (from repo root — Cargo workspace is at root)
+cargo test -p pyrat-rust --lib --no-default-features
 
-# Python tests
-pytest python/tests -v
+# Python tests (from engine directory)
+uv run pytest python/tests -v
 
 # Or from repo root
 make test-engine
@@ -90,9 +90,9 @@ samply record ./target/profiling/profile_game default/default
 
 ## CI/CD
 The engine is tested on Python 3.8-3.11 with:
-- Rust formatting (`cargo fmt --check`)
-- Rust linting (`cargo clippy`) - runs with and without Python features
-- Rust unit tests (`cargo test --lib --no-default-features`)
+- Rust formatting (`cargo fmt --all -- --check`) — from repo root
+- Rust linting (`cargo clippy`) — from repo root, runs with and without Python features
+- Rust unit tests (`cargo test -p pyrat-rust --lib --no-default-features`) — from repo root
 - Python integration tests (`pytest`)
 
 ### Feature Flags

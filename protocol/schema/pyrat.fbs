@@ -1,0 +1,175 @@
+namespace pyrat.protocol;
+
+// ── Core types ──────────────────────────────────────
+
+struct Vec2 {
+  x: uint8;
+  y: uint8;
+}
+
+enum Direction: uint8 {
+  Up = 0,
+  Right = 1,
+  Down = 2,
+  Left = 3,
+  Stay = 4,
+}
+
+enum Player: uint8 {
+  Rat = 0,
+  Python = 1,
+}
+
+enum TimingMode: uint8 {
+  Wait = 0,
+  Clock = 1,
+}
+
+enum GameResult: uint8 {
+  Rat = 0,
+  Python = 1,
+  Draw = 2,
+}
+
+enum OptionType: uint8 {
+  Check = 0,    // bool
+  Spin = 1,     // int with min/max
+  Combo = 2,    // choice from list
+  String = 3,   // free text
+  Button = 4,   // trigger action
+}
+
+// ── Maze elements ───────────────────────────────────
+
+table Wall {
+  pos1: Vec2;
+  pos2: Vec2;
+}
+
+table Mud {
+  pos1: Vec2;
+  pos2: Vec2;
+  value: uint8;
+}
+
+// ── Bot options (declared during handshake) ─────────
+
+table OptionDef {
+  name: string;
+  type: OptionType;
+  default_value: string;
+  min: int32;          // spin only
+  max: int32;          // spin only
+  choices: [string];   // combo only
+}
+
+// ── Host → Bot ──────────────────────────────────────
+
+table SetOption {
+  name: string;
+  value: string;
+}
+
+table MatchConfig {
+  width: uint8;
+  height: uint8;
+  max_turns: uint16;
+  walls: [Wall];
+  mud: [Mud];
+  cheese: [Vec2];
+  rat_start: Vec2;
+  python_start: Vec2;
+  you_are: Player;
+  timing: TimingMode;
+  move_timeout_ms: uint32;
+  preprocessing_timeout_ms: uint32;
+}
+
+table StartPreprocessing {}
+
+table TurnState {
+  turn: uint16;
+  rat_position: Vec2;
+  python_position: Vec2;
+  rat_score: float32;
+  python_score: float32;
+  rat_mud_turns: uint8;
+  python_mud_turns: uint8;
+  cheese: [Vec2];
+  rat_last_move: Direction;
+  python_last_move: Direction;
+}
+
+table Stop {}
+
+table Timeout {
+  default_move: Direction;
+}
+
+table GameOver {
+  result: GameResult;
+  rat_score: float32;
+  python_score: float32;
+}
+
+table Ping {}
+
+union HostMessage {
+  SetOption,
+  MatchConfig,
+  StartPreprocessing,
+  TurnState,
+  Stop,
+  Timeout,
+  GameOver,
+  Ping,
+}
+
+table HostPacket {
+  message: HostMessage;
+}
+
+// ── Bot → Host ──────────────────────────────────────
+
+table Identify {
+  name: string;
+  author: string;
+  options: [OptionDef];
+}
+
+table Ready {}
+
+table PreprocessingDone {}
+
+table Action {
+  direction: Direction;
+}
+
+table Pong {}
+
+table Info {
+  target: Vec2;
+  depth: uint16;
+  nodes: uint32;
+  score: float32;
+  path: [Vec2];
+  message: string;
+}
+
+table RenderCommands {
+  // Primitives TBD — designed with GUI brief.
+}
+
+union BotMessage {
+  Identify,
+  Ready,
+  PreprocessingDone,
+  Action,
+  Pong,
+  Info,
+  RenderCommands,
+}
+
+table BotPacket {
+  message: BotMessage;
+}
