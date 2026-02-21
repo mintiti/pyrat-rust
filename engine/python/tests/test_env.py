@@ -3,7 +3,7 @@
 import random
 
 import numpy as np
-from pyrat_engine import Direction, PyRat
+from pyrat_engine import Direction, GameBuilder, GameConfig
 from pyrat_engine.env import PyRatEnv
 
 TEST_GAME_WIDTH = 5
@@ -11,11 +11,13 @@ TEST_GAME_HEIGHT = 5
 TEST_CHEESE_COUNT = 3
 
 
+def _test_config():
+    return GameConfig.classic(TEST_GAME_WIDTH, TEST_GAME_HEIGHT, TEST_CHEESE_COUNT)
+
+
 def test_env_initialization() -> None:
     """Test environment initialization."""
-    env = PyRatEnv(
-        width=TEST_GAME_WIDTH, height=TEST_GAME_HEIGHT, cheese_count=TEST_CHEESE_COUNT
-    )
+    env = PyRatEnv(_test_config())
 
     # Check spaces
     assert len(env.possible_agents) == 2  # noqa: PLR2004
@@ -36,9 +38,7 @@ def test_env_initialization() -> None:
 
 def test_env_reset() -> None:
     """Test environment reset."""
-    env = PyRatEnv(
-        width=TEST_GAME_WIDTH, height=TEST_GAME_HEIGHT, cheese_count=TEST_CHEESE_COUNT
-    )
+    env = PyRatEnv(_test_config())
 
     observations, infos = env.reset(seed=42)
 
@@ -58,9 +58,7 @@ def test_env_reset() -> None:
 
 def test_env_step() -> None:
     """Test environment step."""
-    env = PyRatEnv(
-        width=TEST_GAME_WIDTH, height=TEST_GAME_HEIGHT, cheese_count=TEST_CHEESE_COUNT
-    )
+    env = PyRatEnv(_test_config())
     env.reset(seed=42)
 
     actions = {
@@ -86,12 +84,7 @@ def test_env_step() -> None:
 
 def test_env_symmetry() -> None:
     """Test symmetric observations between players."""
-    env = PyRatEnv(
-        width=TEST_GAME_WIDTH,
-        height=TEST_GAME_HEIGHT,
-        cheese_count=TEST_CHEESE_COUNT,
-        symmetric=True,
-    )
+    env = PyRatEnv(_test_config())
     obs, _ = env.reset(seed=42)
 
     # Player 2's view should be symmetric to player 1's
@@ -104,9 +97,7 @@ def test_env_symmetry() -> None:
 
 def test_random_gameplay() -> None:
     """Test environment with random moves until termination."""
-    env = PyRatEnv(
-        width=TEST_GAME_WIDTH, height=TEST_GAME_HEIGHT, cheese_count=TEST_CHEESE_COUNT
-    )
+    env = PyRatEnv(_test_config())
     obs, _ = env.reset(seed=42)
 
     terminated = truncated = False
@@ -131,21 +122,17 @@ def test_custom_maze() -> None:
     """Test environment with custom maze configuration."""
     game_width = 3
     game_height = 3
-    game = PyRat.create_custom(
-        width=game_width,
-        height=game_height,
-        walls=[
-            ((0, 0), (0, 1)),  # Vertical wall
-            ((1, 1), (2, 1)),  # Horizontal wall
-        ],
-        mud=[
-            ((1, 0), (1, 1), 2),  # 2 turns of mud
-        ],
-        cheese=[(1, 1)],  # One cheese in the middle
-        player1_pos=(0, 0),
-        player2_pos=(2, 2),
-        symmetric=False,
+    config = (
+        GameBuilder(game_width, game_height)
+        .with_custom_maze(
+            walls=[((0, 0), (0, 1)), ((1, 1), (2, 1))],
+            mud=[((1, 0), (1, 1), 2)],
+        )
+        .with_custom_positions((0, 0), (2, 2))
+        .with_custom_cheese([(1, 1)])
+        .build()
     )
+    game = config.create()
 
     # Verify maze configuration
     assert game.width == game_width
@@ -155,3 +142,23 @@ def test_custom_maze() -> None:
     assert game.player1_position.y == 0
     assert game.player2_position.x == 2  # noqa: PLR2004
     assert game.player2_position.y == 2  # noqa: PLR2004
+
+    # Verify movement matrix values
+    # Matrix shape: (width, height, 4), dir: UP=0, RIGHT=1, DOWN=2, LEFT=3
+    # Values: -1 = wall/boundary, 0 = open, N>0 = mud turns
+    obs = game.get_observation(is_player_one=True)
+    mm = np.array(obs.movement_matrix)
+
+    # (0,0): UP→wall(-1), RIGHT→open(0), DOWN→boundary(-1), LEFT→boundary(-1)
+    assert mm[0, 0, 0] == -1, "wall between (0,0) and (0,1)"
+    assert mm[0, 0, 1] == 0, "open path (0,0)→(1,0)"
+    assert mm[0, 0, 2] == -1, "boundary below (0,0)"
+    assert mm[0, 0, 3] == -1, "boundary left of (0,0)"
+
+    # (1,0): UP→mud(2), RIGHT→open(0), DOWN→boundary(-1), LEFT→open(0)
+    assert mm[1, 0, 0] == 2, "mud between (1,0) and (1,1)"  # noqa: PLR2004
+    assert mm[1, 0, 2] == -1, "boundary below (1,0)"
+
+    # (1,1): UP→open(0), RIGHT→wall(-1), DOWN→mud(2), LEFT→open(0)
+    assert mm[1, 1, 1] == -1, "wall between (1,1) and (2,1)"
+    assert mm[1, 1, 2] == 2, "mud between (1,1) and (1,0)"  # noqa: PLR2004

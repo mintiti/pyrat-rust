@@ -1,152 +1,121 @@
-"""Game configuration builder for custom games.
-
-This module contains the builder pattern for creating custom game configurations.
-"""
+"""Type stubs for the game builder and config classes."""
 
 from pyrat_engine.core.game import PyRat
 from pyrat_engine.core.types import Coordinates, Mud, Wall
 
-class GameConfigBuilder:
-    """Builder for creating custom PyRat game configurations.
+class GameConfig:
+    """Reusable game configuration. Stamps out PyRat instances via create().
 
-    This class provides a fluent interface for constructing custom game states
-    with specific maze layouts, including walls, mud patches, cheese positions,
-    and player starting positions.
+    Use GameBuilder to construct, or use the preset()/classic() shortcuts.
+    """
+
+    @staticmethod
+    def preset(name: str) -> GameConfig:
+        """Look up a named preset configuration.
+
+        Available presets: tiny, small, medium, large, huge, open, asymmetric.
+        """
+        ...
+
+    @staticmethod
+    def classic(width: int, height: int, cheese: int) -> GameConfig:
+        """Standard game: classic maze, corner starts, symmetric random cheese."""
+        ...
+
+    def create(self, seed: int | None = None) -> PyRat:
+        """Stamp out a new game from this config."""
+        ...
+
+    @property
+    def width(self) -> int: ...
+    @property
+    def height(self) -> int: ...
+    @property
+    def max_turns(self) -> int: ...
+
+class GameBuilder:
+    """Builder for composing game configurations.
+
+    Enforces that maze, players, and cheese strategies are all set before
+    building. Each category must be set exactly once.
 
     Example:
-        >>> game = (GameConfigBuilder(width=4, height=4)
-        ...         .with_walls([((1, 1), (1, 2))])  # Horizontal wall
-        ...         .with_mud([((1, 1), (2, 1), 3)])  # 3-turn mud
-        ...         .with_cheese([(1, 2), (3, 1)])
-        ...         .with_player1_pos((0, 0))
-        ...         .with_player2_pos((3, 3))
-        ...         .with_max_turns(100)
-        ...         .build())
-
-    Args:
-        width: Width of the game board
-        height: Height of the game board
+        >>> config = (GameBuilder(21, 15)
+        ...     .with_classic_maze()
+        ...     .with_corner_positions()
+        ...     .with_random_cheese(41)
+        ...     .build())
+        >>> game = config.create(seed=42)
     """
 
     def __init__(self, width: int, height: int) -> None: ...
-    def with_walls(
-        self, walls: list[Wall] | list[tuple[tuple[int, int], tuple[int, int]]]
-    ) -> GameConfigBuilder:
-        """Add walls to the maze configuration.
 
-        Args:
-            walls: List of wall definitions, where each wall is defined by two adjacent
-                  cell positions it blocks movement between.
-                  Format: [((x1,y1), (x2,y2)), ...]
-
-        Returns:
-            Self for method chaining
-
-        Example:
-            >>> builder.with_walls([
-            ...     ((1, 1), (1, 2)),  # Vertical wall between (1,1) and (1,2)
-            ...     ((0, 0), (1, 0)),  # Horizontal wall between (0,0) and (1,0)
-            ... ])
-        """
+    # Maze strategies (pick one)
+    def with_classic_maze(self) -> GameBuilder:
+        """Classic maze: 0.7 wall density, 0.1 mud density, connected, symmetric."""
         ...
 
-    def with_mud(
-        self, mud: list[Mud] | list[tuple[tuple[int, int], tuple[int, int], int]]
-    ) -> GameConfigBuilder:
-        """Add mud patches to the maze configuration.
-
-        Args:
-            mud: List of mud definitions, where each mud is defined by two adjacent
-                 cell positions and the number of turns it takes to cross.
-                 Format: [((x1,y1), (x2,y2), turns), ...]
-
-        Returns:
-            Self for method chaining
-
-        Example:
-            >>> builder.with_mud([
-            ...     ((1, 1), (2, 1), 3),  # 3-turn mud between (1,1) and (2,1)
-            ... ])
-        """
+    def with_open_maze(self) -> GameBuilder:
+        """Open maze: no walls, no mud."""
         ...
 
-    def with_cheese(
-        self, cheese: list[Coordinates] | list[tuple[int, int]]
-    ) -> GameConfigBuilder:
-        """Set cheese positions in the maze.
-
-        Args:
-            cheese: List of coordinates where cheese should be placed.
-                   Format: [(x1,y1), (x2,y2), ...]
-
-        Returns:
-            Self for method chaining
-
-        Example:
-            >>> builder.with_cheese([
-            ...     (1, 2),  # Cheese at (1,2)
-            ...     (3, 1),  # Cheese at (3,1)
-            ... ])
-        """
+    def with_random_maze(
+        self,
+        *,
+        wall_density: float = 0.7,
+        mud_density: float = 0.1,
+        mud_range: int = 3,
+        connected: bool = True,
+        symmetric: bool = True,
+    ) -> GameBuilder:
+        """Random maze with custom parameters."""
         ...
 
-    def with_player1_pos(self, pos: Coordinates | tuple[int, int]) -> GameConfigBuilder:
-        """Set the starting position for player 1.
-
-        Args:
-            pos: Tuple of (x,y) coordinates for player 1's starting position
-
-        Returns:
-            Self for method chaining
-
-        Example:
-            >>> builder.with_player1_pos((0, 0))  # Start at bottom left
-        """
+    def with_custom_maze(
+        self,
+        walls: list[Wall] | list[tuple[tuple[int, int], tuple[int, int]]],
+        mud: list[Mud] | list[tuple[tuple[int, int], tuple[int, int], int]] = [],
+    ) -> GameBuilder:
+        """Fixed maze layout from explicit walls and mud."""
         ...
 
-    def with_player2_pos(self, pos: Coordinates | tuple[int, int]) -> GameConfigBuilder:
-        """Set the starting position for player 2.
-
-        Args:
-            pos: Tuple of (x,y) coordinates for player 2's starting position
-
-        Returns:
-            Self for method chaining
-
-        Example:
-            >>> builder.with_player2_pos((3, 3))  # Start at top right
-        """
+    # Player strategies (pick one)
+    def with_corner_positions(self) -> GameBuilder:
+        """Player 1 at (0,0), player 2 at (width-1, height-1)."""
         ...
 
-    def with_max_turns(self, max_turns: int) -> GameConfigBuilder:
-        """Set the maximum number of turns for the game.
-
-        Args:
-            max_turns: Maximum number of turns before the game is truncated.
-                      Must be greater than 0.
-
-        Returns:
-            Self for method chaining
-
-        Example:
-            >>> builder.with_max_turns(100)
-        """
+    def with_random_positions(self) -> GameBuilder:
+        """Both players placed randomly (guaranteed different cells)."""
         ...
 
-    def build(self) -> PyRat:
-        """Construct and return the final game state.
-
-        Returns:
-            A new PyRat instance with the configured parameters
-
-        Raises:
-            ValueError: If the configuration is invalid (e.g., invalid positions,
-                       overlapping walls/mud, no cheese placed)
-
-        Example:
-            >>> game = builder.build()
-        """
+    def with_custom_positions(
+        self,
+        p1: Coordinates | tuple[int, int],
+        p2: Coordinates | tuple[int, int],
+    ) -> GameBuilder:
+        """Place players at explicit positions."""
         ...
 
-# Rename the class to match the Rust name
-PyGameConfigBuilder = GameConfigBuilder
+    # Cheese strategies (pick one)
+    def with_random_cheese(self, count: int, symmetric: bool = True) -> GameBuilder:
+        """Place count cheese randomly, optionally with 180 degree symmetry."""
+        ...
+
+    def with_custom_cheese(
+        self,
+        positions: list[Coordinates] | list[tuple[int, int]],
+    ) -> GameBuilder:
+        """Place cheese at exact positions."""
+        ...
+
+    # Other
+    def with_max_turns(self, max_turns: int) -> GameBuilder:
+        """Override the default max_turns (300)."""
+        ...
+
+    def build(self) -> GameConfig:
+        """Consume the builder and produce a GameConfig.
+
+        Raises ValueError if maze, players, or cheese strategy is not set.
+        """
+        ...

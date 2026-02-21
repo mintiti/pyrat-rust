@@ -1,9 +1,9 @@
-from pyrat_engine import Direction, PyRat
+from pyrat_engine import Direction, GameConfig
 
 
 def test_import() -> None:
     # Create game
-    game = PyRat(width=15, height=15)
+    game = GameConfig.classic(15, 15, 21).create()
     print(game.cheese_positions())
 
     # Make some moves with undo capability

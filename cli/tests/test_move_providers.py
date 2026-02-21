@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Optional
 from unittest.mock import MagicMock, patch
 
-from pyrat_engine import PyRat
+from pyrat_engine import GameConfig
 from pyrat_engine.core import Direction
 
 from pyrat_runner.ai_process import AIInfo
@@ -85,7 +85,7 @@ class TestSubprocessMoveProvider:
         assert provider.start() is True
         mock_ai.start.assert_called_once()
 
-        game = PyRat(width=5, height=5, cheese_count=1, seed=42)
+        game = GameConfig.classic(5, 5, 1).create(seed=42)
         provider.send_game_start(game, 3.0)
         mock_ai.send_game_start.assert_called_once_with(game, 3.0)
 
@@ -108,7 +108,7 @@ class TestRunGameFunction:
 
     def test_runs_game_to_completion(self):
         """Test that run_game executes a full game and returns correct result."""
-        game = PyRat(width=5, height=5, cheese_count=1, seed=42)
+        game = GameConfig.classic(5, 5, 1).create(seed=42)
 
         rat = MockMoveProvider("Rat", [Direction.STAY] * 500)
         python = MockMoveProvider("Python", [Direction.STAY] * 500)
@@ -124,7 +124,7 @@ class TestRunGameFunction:
 
     def test_headless_mode_no_display(self):
         """Test that run_game works without a display object."""
-        game = PyRat(width=5, height=5, cheese_count=1, seed=42)
+        game = GameConfig.classic(5, 5, 1).create(seed=42)
         rat = MockMoveProvider("Rat", [Direction.RIGHT] * 100)
         python = MockMoveProvider("Python", [Direction.UP] * 100)
 
@@ -137,7 +137,7 @@ class TestRunGameFunction:
 
     def test_handles_provider_crash(self):
         """Test that run_game handles provider crash (returns None + not alive)."""
-        game = PyRat(width=5, height=5, cheese_count=1, seed=42)
+        game = GameConfig.classic(5, 5, 1).create(seed=42)
 
         # Rat crashes after 3 moves
         rat = MockMoveProvider(
@@ -158,7 +158,7 @@ class TestRunGameFunction:
 
     def test_handles_timeout_gracefully(self):
         """Test that timeouts (None move + still alive) are treated as STAY."""
-        game = PyRat(width=5, height=5, cheese_count=1, seed=42)
+        game = GameConfig.classic(5, 5, 1).create(seed=42)
 
         # Rat times out (returns None) but stays alive
         rat = MockMoveProvider(
@@ -174,7 +174,7 @@ class TestRunGameFunction:
 
     def test_returns_correct_scores(self):
         """Test that run_game returns valid scores."""
-        game = PyRat(width=5, height=5, cheese_count=1, seed=42)
+        game = GameConfig.classic(5, 5, 1).create(seed=42)
 
         rat = MockMoveProvider("Rat", [Direction.RIGHT] * 100)
         python = MockMoveProvider("Python", [Direction.UP] * 100)

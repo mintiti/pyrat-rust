@@ -6,13 +6,8 @@ from pyrat_engine.core.types import Direction
 
 from pyrat_base.enums import Player
 
-# Note: We now use PyGameConfigBuilder directly instead of a custom MazeBuilder
-# Example usage:
-#   game = (PyGameConfigBuilder(5, 5)
-#           .with_walls([((0, 0), (1, 0))])
-#           .with_mud([((1, 1), (1, 2), 2)])
-#           .with_cheese([(2, 2)])
-#           .build())
+# Use GameBuilder to create test games.
+# See engine/python/pyrat_engine/core/builder.pyi for the full API.
 
 
 class CommandSequenceBuilder:

@@ -2,7 +2,7 @@
 
 import pytest
 
-from pyrat_engine import PyRat
+from pyrat_engine import GameBuilder
 
 from pyrat_runner.display import (
     Display,
@@ -30,15 +30,13 @@ def empty_game():
     Creates a 5x5 game with players at opposite corners.
     Has one cheese at an out-of-the-way position (engine requires at least one).
     """
-    return PyRat.create_custom(
-        width=5,
-        height=5,
-        walls=[],
-        mud=[],
-        cheese=[(0, 4)],  # One cheese at corner to satisfy validation
-        player1_pos=(0, 0),
-        player2_pos=(4, 4),
-        symmetric=False,
+    return (
+        GameBuilder(5, 5)
+        .with_custom_maze(walls=[], mud=[])
+        .with_custom_positions((0, 0), (4, 4))
+        .with_custom_cheese([(0, 4)])
+        .build()
+        .create()
     )
 
 
@@ -50,18 +48,16 @@ def game_with_walls():
     - Vertical wall between (1,1) and (2,1)
     - Horizontal wall between (3,2) and (3,3)
     """
-    return PyRat.create_custom(
-        width=5,
-        height=5,
-        walls=[
-            ((1, 1), (2, 1)),  # Vertical wall
-            ((3, 2), (3, 3)),  # Horizontal wall
-        ],
-        mud=[],
-        cheese=[(0, 4)],  # One cheese at corner to satisfy validation
-        player1_pos=(0, 0),
-        player2_pos=(4, 4),
-        symmetric=False,
+    return (
+        GameBuilder(5, 5)
+        .with_custom_maze(
+            walls=[((1, 1), (2, 1)), ((3, 2), (3, 3))],
+            mud=[],
+        )
+        .with_custom_positions((0, 0), (4, 4))
+        .with_custom_cheese([(0, 4)])
+        .build()
+        .create()
     )
 
 
@@ -73,18 +69,16 @@ def game_with_mud():
     - Vertical mud (3 turns) between (1,2) and (2,2)
     - Horizontal mud (2 turns) between (3,1) and (3,2)
     """
-    return PyRat.create_custom(
-        width=5,
-        height=5,
-        walls=[],
-        mud=[
-            ((1, 2), (2, 2), 3),  # Vertical mud (3 turns)
-            ((3, 1), (3, 2), 2),  # Horizontal mud (2 turns)
-        ],
-        cheese=[(0, 4)],  # One cheese at corner to satisfy validation
-        player1_pos=(0, 0),
-        player2_pos=(4, 4),
-        symmetric=False,
+    return (
+        GameBuilder(5, 5)
+        .with_custom_maze(
+            walls=[],
+            mud=[((1, 2), (2, 2), 3), ((3, 1), (3, 2), 2)],
+        )
+        .with_custom_positions((0, 0), (4, 4))
+        .with_custom_cheese([(0, 4)])
+        .build()
+        .create()
     )
 
 
@@ -120,15 +114,13 @@ class TestCellContent:
         # Add a dummy cheese at (0,4) if cheese_set is empty (engine requires at least one)
         cheese_list = list(cheese_set) if cheese_set else [(0, 4)]
 
-        game = PyRat.create_custom(
-            width=5,
-            height=5,
-            walls=[],
-            mud=[],
-            cheese=cheese_list,
-            player1_pos=rat_pos,
-            player2_pos=python_pos,
-            symmetric=False,
+        game = (
+            GameBuilder(5, 5)
+            .with_custom_maze(walls=[], mud=[])
+            .with_custom_positions(rat_pos, python_pos)
+            .with_custom_cheese(cheese_list)
+            .build()
+            .create()
         )
 
         display = Display(game, delay=0)
@@ -237,17 +229,13 @@ class TestMazeStructureBuilding:
     def test_wall_order_independence(self):
         """Wall parsing should work regardless of coordinate order."""
         # Test that ((x1, y1), (x2, y2)) and ((x2, y2), (x1, y1)) produce same result
-        game = PyRat.create_custom(
-            width=5,
-            height=5,
-            walls=[
-                ((2, 1), (1, 1)),  # Reversed order vertical wall
-            ],
-            mud=[],
-            cheese=[(0, 4)],  # One cheese at corner to satisfy validation
-            player1_pos=(0, 0),
-            player2_pos=(4, 4),
-            symmetric=False,
+        game = (
+            GameBuilder(5, 5)
+            .with_custom_maze(walls=[((2, 1), (1, 1))], mud=[])
+            .with_custom_positions((0, 0), (4, 4))
+            .with_custom_cheese([(0, 4)])
+            .build()
+            .create()
         )
 
         display = Display(game, delay=0)

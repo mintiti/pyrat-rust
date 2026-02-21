@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Optional, Tuple
 
-from pyrat_engine import PyRat
+from pyrat_engine import GameBuilder, PyRat
 from pyrat_engine.core import Direction
 
 from pyrat_runner.display import Display
@@ -205,13 +205,16 @@ class GameRunner:
         self.rat_script = rat_script
         self.python_script = python_script
 
-        self.game = PyRat(
-            width=width,
-            height=height,
-            cheese_count=cheese_count,
-            seed=seed,
-            max_turns=max_turns,
+        builder = GameBuilder(width, height)
+        if max_turns is not None:
+            builder = builder.with_max_turns(max_turns)
+        config = (
+            builder.with_classic_maze()
+            .with_corner_positions()
+            .with_random_cheese(cheese_count)
+            .build()
         )
+        self.game = config.create(seed=seed)
 
         # Optional logger: create a timestamped subdirectory under log_dir
         self.logger: Optional[GameLogger] = None

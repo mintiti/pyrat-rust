@@ -134,25 +134,25 @@ class ObservationHandler:
         """
         ...
 
-    def update_collected_cheese(self, collected: list[Coordinates]) -> None:
+    def update_collected_cheese(self, collected: list[tuple[int, int]]) -> None:
         """Updates the observation state after cheese collection.
 
         Efficiently updates internal state when cheese is collected during gameplay,
         avoiding full state recalculation.
 
         Args:
-            collected: List of Coordinates where cheese was collected
+            collected: List of (x, y) tuples where cheese was collected
         """
         ...
 
-    def update_restored_cheese(self, restored: list[Coordinates]) -> None:
-        """Updates the observation state when cheese is restored during move undo.
+    def refresh_cheese(self, game: PyRat) -> None:
+        """Fully refreshes cheese state from the game.
 
-        Restores cheese positions when moves are undone, maintaining consistency
-        with the game state.
+        Use after operations that invalidate incremental tracking
+        (e.g. unmake_move, reset).
 
         Args:
-            restored: List of Coordinates where cheese should be restored
+            game: Current game state to sync from
         """
         ...
 

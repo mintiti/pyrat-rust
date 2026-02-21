@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TextIO, Tuple, Union
 
-from pyrat_engine import PyRat
+from pyrat_engine import GameBuilder, PyRat
 from pyrat_engine.core.types import Coordinates as Position
 from pyrat_engine.core.types import Direction
 from pyrat_engine.game import GameResult
@@ -536,10 +536,10 @@ class ReplayPlayer:
         self._move_index = 0
 
     def _create_game(self) -> PyRat:
-        """Create game from initial state using PyRat.create_custom()."""
+        """Create game from initial state using GameBuilder."""
         state = self.replay.initial_state
 
-        # Convert walls and mud to the format expected by PyRat
+        # Convert walls and mud to the format expected by the builder
         walls = state.walls
         mud = [(cells[0], cells[1], value) for cells, value in state.mud]
 
@@ -548,17 +548,15 @@ class ReplayPlayer:
             state.cheese if state.cheese else [(state.width // 2, state.height // 2)]
         )
 
-        return PyRat.create_custom(
-            width=state.width,
-            height=state.height,
-            walls=walls,
-            mud=mud,
-            cheese=cheese,
-            player1_pos=state.rat_position,
-            player2_pos=state.python_position,
-            max_turns=state.max_turns,
-            symmetric=False,  # Replay data may not be symmetric
+        config = (
+            GameBuilder(state.width, state.height)
+            .with_max_turns(state.max_turns)
+            .with_custom_maze(walls=walls, mud=mud)
+            .with_custom_positions(state.rat_position, state.python_position)
+            .with_custom_cheese(cheese)
+            .build()
         )
+        return config.create()
 
     def step_forward(self) -> Optional[GameResult]:
         """Execute next move in replay."""

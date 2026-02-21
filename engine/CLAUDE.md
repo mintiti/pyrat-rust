@@ -48,8 +48,8 @@ make test-engine
 
 ## Package Details
 - **Package name**: `pyrat-engine` (was `pyrat` before monorepo)
-- **Import**: `from pyrat_engine import PyRatEnv, Direction`
-- **Rust module**: `pyrat_engine._rust`
+- **Import**: `from pyrat_engine import Direction` and `from pyrat_engine.env import PyRatEnv`
+- **Rust module**: `pyrat_engine._core`
 
 ## Performance Notes
 - `cargo bench` runs criterion benchmarks (game init + full game across preset sizes and wall/mud combos)
@@ -102,80 +102,78 @@ Rust tests run without Python features to avoid linking issues.
 
 ## Game Creation API
 
-The engine provides multiple ways to create games, supporting various use cases from quick testing to precise control:
+### Terminology
 
-### 1. Basic Constructor
-```python
-from pyrat_engine import PyRat
+Presets are defined along two axes:
 
-# Default game (21x15, 41 cheese, symmetric)
-game = PyRat()
+| Axis | Values | Meaning |
+|------|--------|---------|
+| **Size** | `tiny`, `small`, `medium`, `large`, `huge` | Board dimensions, cheese count, max turns |
+| **Maze type** | `classic`, `open` | Wall/mud density |
 
-# Custom parameters
-game = PyRat(width=31, height=21, cheese_count=85, max_turns=500)
+- **classic** — 0.7 wall density, 0.1 mud density (the `MazeParams` default)
+- **open** — no walls, no mud
+- **corner starts** — p1 at (0,0), p2 at (width-1, height-1) (all presets use this)
+
+### Rust: Typestate Builder + GameConfig
+
+The Rust API uses a two-phase system:
+1. **`GameBuilder`** — assembles a `GameConfig` through a compile-time enforced sequence (maze → players → cheese)
+2. **`GameConfig`** — stamps out `GameState` instances via `create(Option<u64>)`, enabling reuse for RL training
+
+```rust
+use pyrat_engine::{GameBuilder, GameConfig, MazeParams};
+
+// Quick classic game
+let config = GameConfig::classic(21, 15, 41);
+let game = config.create(Some(42));
+
+// Builder with named maze constructors
+let config = GameBuilder::new(21, 15)
+    .with_classic_maze()                     // or with_open_maze(), with_random_maze(params), with_custom_maze(walls, mud)
+    .with_corner_positions()                 // or with_random_positions() / with_custom_positions(p1, p2)
+    .with_random_cheese(41, true)            // or with_custom_cheese(vec![...])
+    .build();
+
+// Named presets: tiny, small, medium, large, huge, open, asymmetric
+let config = GameConfig::preset("large").unwrap();
+let game = config.create(Some(42));
 ```
 
-### 2. Preset Configurations
+`MazeParams` named constructors: `MazeParams::classic()`, `MazeParams::open()`. Fields: `target_density` (wall prob, 0–1), `connected` (bool), `symmetry` (bool), `mud_density` (0–1), `mud_range` (max mud cost).
+
+`GameState` constructors (`new`, `new_with_config`, etc.) are `pub(crate)` — use the builder from outside the crate.
+
+### Python API
+
+The primary API uses `GameBuilder` to compose a reusable `GameConfig`, which stamps out game instances via `create()`:
+
 ```python
-from pyrat_engine.core.game import GameState as PyGameState
+from pyrat_engine import GameBuilder, GameConfig
 
-# Available presets:
-# - "tiny": 11x9 board, 13 cheese, 150 turns
-# - "small": 15x11 board, 21 cheese, 200 turns
-# - "default": 21x15 board, 41 cheese, 300 turns
-# - "large": 31x21 board, 85 cheese, 400 turns
-# - "huge": 41x31 board, 165 cheese, 500 turns
-# - "empty": 21x15, no walls/mud, for testing
-# - "asymmetric": Standard size but asymmetric generation
+# Presets (returns GameConfig directly)
+config = GameConfig.preset("large")
+game = config.create(seed=42)
 
-game_state = PyGameState.create_preset("large", seed=42)
+# Standard classic game shortcut
+config = GameConfig.classic(21, 15, 41)
+game = config.create(seed=42)
+
+# Builder for full control
+config = (GameBuilder(21, 15)
+    .with_classic_maze()                     # or with_open_maze(), with_random_maze(), with_custom_maze()
+    .with_corner_positions()                 # or with_random_positions(), with_custom_positions()
+    .with_random_cheese(41)                  # or with_custom_cheese()
+    .build())
+game = config.create(seed=42)
+
+# Custom maze layout
+config = (GameBuilder(15, 11)
+    .with_custom_maze(walls=[((0,0),(0,1))], mud=[((2,2),(3,2),3)])
+    .with_custom_positions((0,0), (14,10))
+    .with_custom_cheese([(5,5),(10,10)])
+    .build())
+game = config.create(seed=42)
 ```
 
-### 3. Custom Maze Layout
-```python
-# Define specific walls, generate random cheese
-walls = [
-    ((0, 0), (0, 1)),  # Wall between (0,0) and (0,1)
-    ((1, 1), (2, 1)),  # Wall between (1,1) and (2,1)
-]
-
-game_state = PyGameState.create_from_maze(
-    width=15,
-    height=11,
-    walls=walls,
-    seed=42,        # For reproducible cheese placement
-    max_turns=200
-)
-```
-
-### 4. Custom Starting Positions
-```python
-# Use preset configuration but with custom player positions
-game_state = PyGameState.create_with_starts(
-    width=21,
-    height=15,
-    player1_start=(5, 5),
-    player2_start=(15, 9),
-    preset="default",
-    seed=42
-)
-```
-
-### 5. Full Custom Configuration
-```python
-# Complete control over all game elements
-walls = [((0, 0), (0, 1)), ((1, 1), (2, 1))]
-mud = [((2, 2), (3, 2), 3)]  # 3 turns to traverse
-cheese = [(5, 5), (10, 10), (15, 7)]
-
-game_state = PyGameState.create_custom(
-    width=21,
-    height=15,
-    walls=walls,
-    mud=mud,
-    cheese=cheese,
-    player1_pos=(0, 0),
-    player2_pos=(20, 14),
-    max_turns=300
-)
-```
+`GameConfig` is reusable — call `create()` with different seeds for RL training loops.

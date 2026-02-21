@@ -34,9 +34,9 @@ class ProtocolState:
         i_am: Which player this AI is (RAT or PYTHON)
 
     Example:
-        >>> from pyrat_engine import PyRat
+        >>> from pyrat_engine import GameConfig
         >>> from pyrat_base.enums import Player
-        >>> game = PyRat(width=15, height=15)
+        >>> game = GameConfig.classic(15, 15, 21).create()
         >>> state = ProtocolState(game, Player.RAT)
         >>> print(f"My position: {state.my_position}")
         >>> print(f"Opponent position: {state.opponent_position}")

@@ -14,7 +14,6 @@
 //! - `MudMap` — HashMap lookup per move into a muddy passage;
 //!   this is the most expensive per-turn operation
 
-use crate::game::maze_generation::{CheeseConfig, CheeseGenerator, MazeConfig, MazeGenerator};
 use crate::{CheeseBoard, Coordinates, Direction, MoveTable};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -84,25 +83,9 @@ impl GameState {
     pub const DEFAULT_WIDTH: u8 = 21;
     pub const DEFAULT_HEIGHT: u8 = 15;
     pub const DEFAULT_CHEESE_COUNT: u16 = 41;
-    /// Creates a new game state with the given dimensions and walls.
-    ///
-    /// Players start at opposite corners: player 1 at (0, 0), player 2 at
-    /// (width-1, height-1). No cheese or mud is placed — add them separately
-    /// or use [`new_with_config`](Self::new_with_config).
-    ///
-    /// # Arguments
-    /// * `width` - Width of the game board
-    /// * `height` - Height of the game board
-    /// * `walls` - Maps each position to the neighbors it **cannot** reach
-    ///   (blocked by walls). Walls must be inserted in both directions:
-    ///   ```text
-    ///   walls.insert(Coordinates::new(0, 0), vec![Coordinates::new(1, 0)]);
-    ///   walls.insert(Coordinates::new(1, 0), vec![Coordinates::new(0, 0)]);
-    ///   ```
-    /// * `max_turns` - Maximum number of turns before the game ends
     #[must_use]
     #[allow(clippy::needless_pass_by_value)] // We need to own the walls for MoveTable
-    pub fn new(
+    pub(crate) fn new(
         width: u8,
         height: u8,
         walls: HashMap<Coordinates, Vec<Coordinates>>,
@@ -141,12 +124,8 @@ impl GameState {
         }
     }
 
-    /// Creates a new game state with customized player positions.
-    ///
-    /// Same as [`new`](Self::new) but lets you place players at arbitrary
-    /// positions instead of the default corners.
     #[must_use]
-    pub fn new_with_positions(
+    pub(crate) fn new_with_positions(
         width: u8,
         height: u8,
         walls: HashMap<Coordinates, Vec<Coordinates>>,
@@ -162,15 +141,9 @@ impl GameState {
         game
     }
 
-    /// Creates a new game state with full control over all game elements.
-    ///
-    /// Use this when you need to specify walls, mud, cheese, and player
-    /// positions all at once. The `walls` parameter uses the same format
-    /// as [`new`](Self::new). The `mud` parameter maps position pairs to
-    /// the number of turns needed to traverse the passage.
     #[allow(clippy::too_many_arguments)]
     #[must_use]
-    pub fn new_with_config(
+    pub(crate) fn new_with_config(
         width: u8,
         height: u8,
         walls: HashMap<Coordinates, Vec<Coordinates>>,
@@ -193,164 +166,6 @@ impl GameState {
         game
     }
 
-    /// Creates a new randomized game state with the given configuration
-    ///
-    /// # Panics
-    /// - If width/height in `maze_config` don't match the provided dimensions
-    /// - If too many cheese pieces are requested for the maze size
-    /// - If odd number of cheese requested with even dimensions in symmetric mode
-    #[must_use]
-    pub fn new_random(
-        width: u8,
-        height: u8,
-        maze_config: MazeConfig,
-        cheese_config: CheeseConfig,
-    ) -> Self {
-        // Validate dimensions match
-        assert_eq!(width, maze_config.width, "Width mismatch in configurations");
-        assert_eq!(
-            height, maze_config.height,
-            "Height mismatch in configurations"
-        );
-
-        // Create default player positions (opposite corners)
-        let player1_pos = Coordinates::new(0, 0); // Bottom left
-        let player2_pos = Coordinates::new(width - 1, height - 1); // Top right
-
-        // Generate maze layout
-        let mut maze_gen = MazeGenerator::new(maze_config);
-        let (walls, mud) = maze_gen.generate();
-
-        // Generate cheese positions
-        let mut cheese_gen = CheeseGenerator::new(
-            cheese_config,
-            width,
-            height,
-            maze_config.seed, // Use same seed for reproducibility
-        );
-        let cheese_positions = cheese_gen.generate(player1_pos, player2_pos);
-
-        // Create cheese board and place cheese
-        let mut cheese_board = CheeseBoard::new(width, height);
-        for pos in cheese_positions {
-            cheese_board.place_cheese(pos);
-        }
-
-        // Create initial game state
-        Self {
-            width,
-            height,
-            move_table: MoveTable::new(width, height, &walls),
-            player1: PlayerState {
-                current_pos: player1_pos,
-                target_pos: player1_pos,
-                mud_timer: 0,
-                score: 0.0,
-                misses: 0,
-            },
-            player2: PlayerState {
-                current_pos: player2_pos,
-                target_pos: player2_pos,
-                mud_timer: 0,
-                score: 0.0,
-                misses: 0,
-            },
-            mud,
-            cheese: cheese_board,
-            turn: 0,
-            max_turns: 300, // Default from Python implementation
-        }
-    }
-
-    /// Creates a new randomized symmetric game state.
-    ///
-    /// Generates a 180° rotationally symmetric maze with symmetric cheese
-    /// placement. Player 1 starts at (0, 0) and player 2 at
-    /// (width-1, height-1).
-    ///
-    /// # Arguments
-    /// * `width` - Board width (default: 21)
-    /// * `height` - Board height (default: 15)
-    /// * `cheese_count` - Number of cheese pieces to place (default: 41)
-    /// * `seed` - Random seed for reproducible generation (`None` = random)
-    /// * `wall_density` - Proportion of walls, 0.0 to 1.0 (default: 0.7)
-    /// * `mud_density` - Proportion of passages with mud, 0.0 to 1.0 (default: 0.1)
-    #[must_use]
-    pub fn new_symmetric(
-        width: Option<u8>,
-        height: Option<u8>,
-        cheese_count: Option<u16>,
-        seed: Option<u64>,
-        wall_density: Option<f32>,
-        mud_density: Option<f32>,
-    ) -> Self {
-        let width = width.unwrap_or(Self::DEFAULT_WIDTH);
-        let height = height.unwrap_or(Self::DEFAULT_HEIGHT);
-        let cheese_count = cheese_count.unwrap_or(Self::DEFAULT_CHEESE_COUNT);
-
-        let maze_config = MazeConfig {
-            width,
-            height,
-            target_density: wall_density.unwrap_or(0.7),
-            connected: true,
-            symmetry: true,
-            mud_density: mud_density.unwrap_or(0.1),
-            mud_range: 3,
-            seed,
-        };
-
-        let cheese_config = CheeseConfig {
-            count: cheese_count,
-            symmetry: true,
-        };
-
-        Self::new_random(width, height, maze_config, cheese_config)
-    }
-
-    /// Creates a new randomized asymmetric game state.
-    ///
-    /// Same as [`new_symmetric`](Self::new_symmetric) but generates a maze
-    /// without rotational symmetry constraints. Cheese placement is also
-    /// asymmetric.
-    ///
-    /// # Arguments
-    /// * `width` - Board width (default: 21)
-    /// * `height` - Board height (default: 15)
-    /// * `cheese_count` - Number of cheese pieces to place (default: 41)
-    /// * `seed` - Random seed for reproducible generation (`None` = random)
-    /// * `wall_density` - Proportion of walls, 0.0 to 1.0 (default: 0.7)
-    /// * `mud_density` - Proportion of passages with mud, 0.0 to 1.0 (default: 0.1)
-    #[must_use]
-    pub fn new_asymmetric(
-        width: Option<u8>,
-        height: Option<u8>,
-        cheese_count: Option<u16>,
-        seed: Option<u64>,
-        wall_density: Option<f32>,
-        mud_density: Option<f32>,
-    ) -> Self {
-        let width = width.unwrap_or(Self::DEFAULT_WIDTH);
-        let height = height.unwrap_or(Self::DEFAULT_HEIGHT);
-        let cheese_count = cheese_count.unwrap_or(Self::DEFAULT_CHEESE_COUNT);
-
-        let maze_config = MazeConfig {
-            width,
-            height,
-            target_density: wall_density.unwrap_or(0.7),
-            connected: true,
-            symmetry: false,
-            mud_density: mud_density.unwrap_or(0.1),
-            mud_range: 3,
-            seed,
-        };
-
-        let cheese_config = CheeseConfig {
-            count: cheese_count,
-            symmetry: false,
-        };
-
-        Self::new_random(width, height, maze_config, cheese_config)
-    }
     /// Process a single game turn.
     ///
     /// Advances the game by one step: applies moves, handles mud, collects
@@ -774,6 +589,7 @@ impl std::fmt::Debug for GameState {
 
 #[cfg(test)]
 mod tests {
+    use crate::game::builder::{GameBuilder, MazeParams};
     use crate::game::types::MudMap;
 
     use super::*;
@@ -781,22 +597,17 @@ mod tests {
 
     #[test]
     fn test_new_game_state() {
-        let width = 10;
-        let height = 10;
-        let game = GameState::new(width, height, HashMap::new(), 300);
+        let config = GameBuilder::new(10, 10)
+            .with_custom_maze(HashMap::new(), MudMap::new())
+            .with_corner_positions()
+            .with_custom_cheese(vec![])
+            .build();
+        let game = config.create(None).unwrap();
 
-        // Check dimensions
-        assert_eq!(game.width, width);
-        assert_eq!(game.height, height);
-
-        // Check player positions
+        assert_eq!(game.width, 10);
+        assert_eq!(game.height, 10);
         assert_eq!(game.player1.current_pos, Coordinates::new(0, 0));
-        assert_eq!(
-            game.player2.current_pos,
-            Coordinates::new(width - 1, height - 1)
-        );
-
-        // Check initial state
+        assert_eq!(game.player2.current_pos, Coordinates::new(9, 9));
         assert_eq!(game.turn, 0);
         assert_eq!(game.max_turns, 300);
         assert_eq!(game.player1.score, 0.0);
@@ -809,7 +620,12 @@ mod tests {
     fn test_new_with_positions() {
         let p1_pos = Coordinates::new(1, 1);
         let p2_pos = Coordinates::new(2, 2);
-        let game = GameState::new_with_positions(3, 3, HashMap::new(), 300, p1_pos, p2_pos);
+        let config = GameBuilder::new(3, 3)
+            .with_custom_maze(HashMap::new(), MudMap::new())
+            .with_custom_positions(p1_pos, p2_pos)
+            .with_custom_cheese(vec![])
+            .build();
+        let game = config.create(None).unwrap();
 
         assert_eq!(game.player1.current_pos, p1_pos);
         assert_eq!(game.player1.target_pos, p1_pos);
@@ -819,8 +635,6 @@ mod tests {
 
     #[test]
     fn test_new_with_config() {
-        let width = 3;
-        let height = 3;
         let mut walls = HashMap::new();
         walls.insert(Coordinates::new(0, 0), vec![Coordinates::new(1, 0)]);
 
@@ -829,20 +643,15 @@ mod tests {
 
         let cheese_positions = vec![Coordinates::new(1, 1), Coordinates::new(2, 2)];
 
-        let game = GameState::new_with_config(
-            width,
-            height,
-            walls,
-            mud,
-            &cheese_positions,
-            Coordinates::new(0, 0),
-            Coordinates::new(2, 2),
-            300,
-        );
+        let config = GameBuilder::new(3, 3)
+            .with_custom_maze(walls, mud)
+            .with_custom_positions(Coordinates::new(0, 0), Coordinates::new(2, 2))
+            .with_custom_cheese(cheese_positions)
+            .build();
+        let game = config.create(None).unwrap();
 
-        // Check everything was configured correctly
-        assert_eq!(game.width, width);
-        assert_eq!(game.height, height);
+        assert_eq!(game.width, 3);
+        assert_eq!(game.height, 3);
         assert_eq!(game.cheese.total_cheese(), 2);
         assert!(game
             .mud
@@ -850,48 +659,39 @@ mod tests {
         assert_eq!(game.mud.len(), 1);
     }
     #[test]
-    fn test_new_random_basic() {
-        let width = 8;
-        let height = 8;
-        let maze_config = MazeConfig {
-            width,
-            height,
-            target_density: 0.7,
-            connected: true,
-            symmetry: false,
-            mud_density: 0.1,
-            mud_range: 3,
-            seed: Some(42),
-        };
+    fn test_random_game_basic() {
+        let config = GameBuilder::new(8, 8)
+            .with_random_maze(MazeParams {
+                symmetric: false,
+                ..MazeParams::default()
+            })
+            .with_corner_positions()
+            .with_random_cheese(10, false)
+            .build();
 
-        let cheese_config = CheeseConfig {
-            count: 10,
-            symmetry: false,
-        };
+        let game = config.create(Some(42)).unwrap();
 
-        let game = GameState::new_random(width, height, maze_config, cheese_config);
-
-        // Check basic properties
-        assert_eq!(game.width, width);
-        assert_eq!(game.height, height);
+        assert_eq!(game.width, 8);
+        assert_eq!(game.height, 8);
         assert_eq!(game.cheese.total_cheese(), 10);
         assert_eq!(game.player1.current_pos, Coordinates::new(0, 0));
-        assert_eq!(
-            game.player2.current_pos,
-            Coordinates::new(width - 1, height - 1)
-        );
+        assert_eq!(game.player2.current_pos, Coordinates::new(7, 7));
     }
 
     #[test]
-    fn test_new_symmetric() {
-        let game = GameState::new_symmetric(Some(11), Some(11), Some(15), Some(42), None, None);
+    fn test_symmetric_cheese() {
+        let config = GameBuilder::new(11, 11)
+            .with_random_maze(MazeParams::default())
+            .with_corner_positions()
+            .with_random_cheese(15, true)
+            .build();
 
-        // Check if cheese placement is symmetric
+        let game = config.create(Some(42)).unwrap();
+
         let cheese_positions = game.cheese.get_all_cheese_positions();
         for pos in &cheese_positions {
             let symmetric_pos = Coordinates::new(game.width - 1 - pos.x, game.height - 1 - pos.y);
             if *pos != symmetric_pos {
-                // Ignore center piece if it exists
                 assert!(
                     cheese_positions.contains(&symmetric_pos),
                     "Missing symmetric cheese piece for {pos:?}"
@@ -901,10 +701,18 @@ mod tests {
     }
 
     #[test]
-    fn test_new_asymmetric() {
-        let game = GameState::new_asymmetric(Some(8), Some(8), Some(10), Some(42), None, None);
+    fn test_asymmetric_game() {
+        let config = GameBuilder::new(8, 8)
+            .with_random_maze(MazeParams {
+                symmetric: false,
+                ..MazeParams::default()
+            })
+            .with_corner_positions()
+            .with_random_cheese(10, false)
+            .build();
 
-        // Basic structure tests
+        let game = config.create(Some(42)).unwrap();
+
         assert_eq!(game.width, 8);
         assert_eq!(game.height, 8);
         assert_eq!(game.cheese.total_cheese(), 10);
@@ -912,11 +720,15 @@ mod tests {
 
     #[test]
     fn test_reproducibility() {
-        let seed = Some(42);
-        let game1 = GameState::new_symmetric(Some(8), Some(8), Some(10), seed, None, None);
-        let game2 = GameState::new_symmetric(Some(8), Some(8), Some(10), seed, None, None);
+        let config = GameBuilder::new(8, 8)
+            .with_random_maze(MazeParams::default())
+            .with_corner_positions()
+            .with_random_cheese(10, true)
+            .build();
 
-        // Games should be identical with same seed
+        let game1 = config.create(Some(42)).unwrap();
+        let game2 = config.create(Some(42)).unwrap();
+
         assert_eq!(
             game1.cheese.get_all_cheese_positions(),
             game2.cheese.get_all_cheese_positions()
@@ -925,36 +737,51 @@ mod tests {
 
     #[test]
     fn test_zero_wall_density_creates_open_maze() {
-        let game = GameState::new_symmetric(
-            Some(11),
-            Some(11),
-            Some(10),
-            Some(42),
-            Some(0.0), // wall_density
-            Some(0.0), // mud_density
-        );
+        let config = GameBuilder::new(11, 11)
+            .with_random_maze(MazeParams {
+                wall_density: 0.0,
+                mud_density: 0.0,
+                ..MazeParams::default()
+            })
+            .with_corner_positions()
+            .with_random_cheese(10, true)
+            .build();
 
-        // With zero wall density, center positions should have all 4 directions valid
-        // get_valid_moves returns a bitmask: bit 0=Up, 1=Right, 2=Down, 3=Left
+        let game = config.create(Some(42)).unwrap();
+
         let center_moves = game.move_table.get_valid_moves(Coordinates::new(5, 5));
         assert_eq!(
             center_moves, 0b1111,
             "Center should have all 4 directions valid in open maze"
         );
 
-        // Mud map should be empty
         assert!(game.mud.is_empty());
     }
 
     #[test]
     fn test_density_parameters_affect_generation() {
-        // Low density game
-        let game_low =
-            GameState::new_symmetric(Some(15), Some(15), Some(10), Some(42), Some(0.3), Some(0.1));
+        let low_config = GameBuilder::new(15, 15)
+            .with_random_maze(MazeParams {
+                wall_density: 0.3,
+                mud_density: 0.1,
+                ..MazeParams::default()
+            })
+            .with_corner_positions()
+            .with_random_cheese(10, true)
+            .build();
 
-        // High density game
-        let game_high =
-            GameState::new_symmetric(Some(15), Some(15), Some(10), Some(42), Some(0.9), Some(0.8));
+        let high_config = GameBuilder::new(15, 15)
+            .with_random_maze(MazeParams {
+                wall_density: 0.9,
+                mud_density: 0.8,
+                ..MazeParams::default()
+            })
+            .with_corner_positions()
+            .with_random_cheese(10, true)
+            .build();
+
+        let game_low = low_config.create(Some(42)).unwrap();
+        let game_high = high_config.create(Some(42)).unwrap();
 
         // Count valid moves in each game (fewer valid moves = more walls)
         let mut valid_low = 0u32;
@@ -976,33 +803,13 @@ mod tests {
 
     // Helper function to create a simple 3x3 game state for testing
     fn create_test_game(player1_pos: Coordinates, player2_pos: Coordinates) -> GameState {
-        let width = 3;
-        let height = 3;
-        let walls = HashMap::new();
-
-        GameState {
-            width,
-            height,
-            move_table: MoveTable::new(width, height, &walls),
-            player1: PlayerState {
-                current_pos: player1_pos,
-                target_pos: player1_pos,
-                mud_timer: 0,
-                score: 0.0,
-                misses: 0,
-            },
-            player2: PlayerState {
-                current_pos: player2_pos,
-                target_pos: player2_pos,
-                mud_timer: 0,
-                score: 0.0,
-                misses: 0,
-            },
-            mud: MudMap::new(),
-            cheese: CheeseBoard::new(width, height),
-            turn: 0,
-            max_turns: 300,
-        }
+        GameBuilder::new(3, 3)
+            .with_custom_maze(HashMap::new(), MudMap::new())
+            .with_custom_positions(player1_pos, player2_pos)
+            .with_custom_cheese(vec![])
+            .build()
+            .create(None)
+            .unwrap()
     }
 
     // Helper to create a game state with mud
@@ -1011,11 +818,17 @@ mod tests {
         player2_pos: Coordinates,
         mud_positions: &[((Coordinates, Coordinates), u8)],
     ) -> GameState {
-        let mut game = create_test_game(player1_pos, player2_pos);
+        let mut mud = MudMap::new();
         for &(positions, timer) in mud_positions {
-            game.mud.insert(positions.0, positions.1, timer);
+            mud.insert(positions.0, positions.1, timer);
         }
-        game
+        GameBuilder::new(3, 3)
+            .with_custom_maze(HashMap::new(), mud)
+            .with_custom_positions(player1_pos, player2_pos)
+            .with_custom_cheese(vec![])
+            .build()
+            .create(None)
+            .unwrap()
     }
 
     mod basic_movement {
@@ -1180,7 +993,12 @@ mod tests {
             walls.insert(Coordinates::new(0, 0), vec![Coordinates::new(1, 0)]);
             walls.insert(Coordinates::new(1, 0), vec![Coordinates::new(0, 0)]);
 
-            let game = GameState::new(3, 3, walls, 300);
+            let config = GameBuilder::new(3, 3)
+                .with_custom_maze(walls, MudMap::new())
+                .with_corner_positions()
+                .with_custom_cheese(vec![])
+                .build();
+            let game = config.create(None).unwrap();
             let result = game.effective_actions_at(Coordinates::new(0, 0));
 
             assert_eq!(result[0], 0); // UP valid
@@ -1327,16 +1145,20 @@ mod tests {
 #[cfg(test)]
 mod make_unmake_tests {
     use super::*;
+    use crate::game::builder::GameBuilder;
+    use crate::game::types::MudMap;
 
     /// Helper to create a game with mud in specific positions
     fn create_game_with_mud() -> GameState {
-        let mut game = GameState::new(3, 3, HashMap::new(), 300);
-        game.mud.insert(
-            Coordinates::new(0, 0),
-            Coordinates::new(0, 1),
-            2, // 2 turns of mud
-        );
-        game
+        let mut mud = MudMap::new();
+        mud.insert(Coordinates::new(0, 0), Coordinates::new(0, 1), 2);
+        GameBuilder::new(3, 3)
+            .with_custom_maze(HashMap::new(), mud)
+            .with_corner_positions()
+            .with_custom_cheese(vec![])
+            .build()
+            .create(None)
+            .unwrap()
     }
 
     #[test]
@@ -1480,13 +1302,17 @@ mod make_unmake_tests {
     }
     #[test]
     fn test_make_unmake_simultaneous_mud_movement() {
-        let mut game = GameState::new(3, 3, HashMap::new(), 300);
+        let mut mud = MudMap::new();
+        mud.insert(Coordinates::new(0, 0), Coordinates::new(0, 1), 2);
+        mud.insert(Coordinates::new(2, 2), Coordinates::new(2, 1), 3);
 
-        // Add mud for both players
-        game.mud
-            .insert(Coordinates::new(0, 0), Coordinates::new(0, 1), 2);
-        game.mud
-            .insert(Coordinates::new(2, 2), Coordinates::new(2, 1), 3);
+        let mut game = GameBuilder::new(3, 3)
+            .with_custom_maze(HashMap::new(), mud)
+            .with_corner_positions()
+            .with_custom_cheese(vec![])
+            .build()
+            .create(None)
+            .unwrap();
 
         let initial_state = game.clone();
 
@@ -1517,7 +1343,13 @@ mod make_unmake_tests {
 
     #[test]
     fn test_make_unmake_boundary_collision() {
-        let mut game = GameState::new(3, 3, HashMap::new(), 300);
+        let mut game = GameBuilder::new(3, 3)
+            .with_custom_maze(HashMap::new(), MudMap::new())
+            .with_corner_positions()
+            .with_custom_cheese(vec![])
+            .build()
+            .create(None)
+            .unwrap();
         let initial_state = game.clone();
 
         // Try to move outside board boundaries
@@ -1557,15 +1389,16 @@ mod make_unmake_tests {
 
     #[test]
     fn test_make_unmake_complex_sequence() {
-        let mut game = GameState::new(3, 3, HashMap::new(), 300);
+        let mut mud = MudMap::new();
+        mud.insert(Coordinates::new(1, 1), Coordinates::new(1, 2), 2);
 
-        // Place cheese pieces
-        game.cheese.place_cheese(Coordinates::new(1, 2));
-        game.cheese.place_cheese(Coordinates::new(2, 2));
-
-        // Add mud
-        game.mud
-            .insert(Coordinates::new(1, 1), Coordinates::new(1, 2), 2);
+        let mut game = GameBuilder::new(3, 3)
+            .with_custom_maze(HashMap::new(), mud)
+            .with_corner_positions()
+            .with_custom_cheese(vec![Coordinates::new(1, 2), Coordinates::new(2, 2)])
+            .build()
+            .create(None)
+            .unwrap();
 
         let initial_state = game.clone();
         let mut undo_stack = Vec::new();
@@ -1628,7 +1461,13 @@ mod make_unmake_tests {
     }
     #[test]
     fn test_make_unmake_basic_move() {
-        let mut game = GameState::new(3, 3, HashMap::new(), 300);
+        let mut game = GameBuilder::new(3, 3)
+            .with_custom_maze(HashMap::new(), MudMap::new())
+            .with_corner_positions()
+            .with_custom_cheese(vec![])
+            .build()
+            .create(None)
+            .unwrap();
 
         // Make initial state different from default
         game.player1.score = 1.0;
@@ -1652,11 +1491,14 @@ mod make_unmake_tests {
 
     #[test]
     fn test_make_unmake_cheese_collection() {
-        let mut game = GameState::new(3, 3, HashMap::new(), 300);
-
-        // Place a cheese piece
         let cheese_pos = Coordinates::new(1, 0);
-        game.cheese.place_cheese(cheese_pos);
+        let mut game = GameBuilder::new(3, 3)
+            .with_custom_maze(HashMap::new(), MudMap::new())
+            .with_corner_positions()
+            .with_custom_cheese(vec![cheese_pos])
+            .build()
+            .create(None)
+            .unwrap();
         let initial_cheese_count = game.cheese.total_cheese();
         let initial_remaining = game.cheese.remaining_cheese();
 
@@ -1680,17 +1522,14 @@ mod make_unmake_tests {
 
     #[test]
     fn test_make_unmake_simultaneous_collection() {
-        let mut game = GameState::new(3, 3, HashMap::new(), 300);
-
-        // Place cheese where both players can reach it
         let cheese_pos = Coordinates::new(1, 1);
-        game.cheese.place_cheese(cheese_pos);
-
-        // Position players adjacent to cheese
-        game.player1.current_pos = Coordinates::new(0, 1);
-        game.player1.target_pos = Coordinates::new(0, 1);
-        game.player2.current_pos = Coordinates::new(2, 1);
-        game.player2.target_pos = Coordinates::new(2, 1);
+        let mut game = GameBuilder::new(3, 3)
+            .with_custom_maze(HashMap::new(), MudMap::new())
+            .with_custom_positions(Coordinates::new(0, 1), Coordinates::new(2, 1))
+            .with_custom_cheese(vec![cheese_pos])
+            .build()
+            .create(None)
+            .unwrap();
 
         // Make move where both players collect cheese
         let undo = game.make_move(Direction::Right, Direction::Left);
@@ -1713,17 +1552,25 @@ mod make_unmake_tests {
         let mut walls = HashMap::new();
         walls.insert(Coordinates::new(1, 0), vec![Coordinates::new(0, 0)]);
         walls.insert(Coordinates::new(0, 0), vec![Coordinates::new(1, 0)]);
-        GameState::new(3, 3, walls, 300)
+        GameBuilder::new(3, 3)
+            .with_custom_maze(walls, MudMap::new())
+            .with_corner_positions()
+            .with_custom_cheese(vec![])
+            .build()
+            .create(None)
+            .unwrap()
     }
 
     /// Helper to create a test game with mud
     fn create_test_game_with_mud() -> GameState {
-        let mut game = GameState::new(3, 3, HashMap::new(), 300);
-        game.mud.insert(
-            Coordinates::new(0, 0),
-            Coordinates::new(0, 1),
-            2, // 2 turns of mud
-        );
-        game
+        let mut mud = MudMap::new();
+        mud.insert(Coordinates::new(0, 0), Coordinates::new(0, 1), 2);
+        GameBuilder::new(3, 3)
+            .with_custom_maze(HashMap::new(), mud)
+            .with_corner_positions()
+            .with_custom_cheese(vec![])
+            .build()
+            .create(None)
+            .unwrap()
     }
 }

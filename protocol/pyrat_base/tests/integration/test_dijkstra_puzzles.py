@@ -6,7 +6,7 @@ makes optimal decisions considering walls, mud, and actual travel time.
 # ruff: noqa: PLR2004
 
 import pytest
-from pyrat_engine import PyRat
+from pyrat_engine import GameBuilder, GameConfig
 from pyrat_engine.core import Direction
 from pyrat_engine.core.types import Coordinates
 
@@ -28,16 +28,14 @@ def create_game_state():
         player1_pos=(0, 0),
         player2_pos=(4, 4),
     ):
-        game = PyRat.create_custom(
-            width=width,
-            height=height,
-            walls=walls or [],
-            mud=mud or [],
-            cheese=cheese or [],
-            player1_pos=player1_pos,
-            player2_pos=player2_pos,
-            symmetric=False,
+        config = (
+            GameBuilder(width, height)
+            .with_custom_maze(walls=walls or [], mud=mud or [])
+            .with_custom_positions(player1_pos, player2_pos)
+            .with_custom_cheese(cheese or [])
+            .build()
         )
+        game = config.create()
         return ProtocolState(game, Player.RAT)
 
     return _create_game
@@ -73,17 +71,14 @@ class TestWallNavigation:
             width=6,
             height=6,
             walls=vertical_wall,
-            cheese=[(2, 0), (3, 3)],  # One behind wall, one accessible
+            cheese=[(2, 0), (3, 3)],
         )
 
         result = find_nearest_cheese_by_time(state)
         assert result is not None
 
         cheese_pos, _, time = result
-        # Direct to (2,0) would be 2 moves but wall blocks it
-        # Path to (3,3) is shorter when considering the wall
         assert cheese_pos == Coordinates(3, 3)
-        # Expected time accounting for wall detour
         assert time == 10
 
 
@@ -108,7 +103,6 @@ class TestMudNavigation:
         expected_time,
     ):
         """Test choosing optimal path based on mud cost."""
-        # Adjust game size based on cheese positions
         max_x = max(pos[0] for pos in cheese_positions) + 1
         max_y = max(pos[1] for pos in cheese_positions) + 1
 
@@ -147,21 +141,19 @@ class TestComplexMazes:
             width=7,
             height=7,
             walls=horizontal_barrier_with_gap,
-            mud=[((1, 2), (1, 3), 4)],  # 4-turn mud at alternative route
-            cheese=[(3, 5), (1, 1)],  # One above barrier, one below
+            mud=[((1, 2), (1, 3), 4)],
+            cheese=[(3, 5), (1, 1)],
         )
 
         result = find_nearest_cheese_by_time(state)
         assert result is not None
 
         cheese_pos, _, time = result
-        # Should choose (1,1) as it's more accessible
         assert cheese_pos == Coordinates(1, 1)
         assert time == 2
 
     def test_multiple_mud_paths_choose_optimal(self, create_game_state):
         """When all paths have mud, choose the least costly route."""
-        # Create partial box with mud at entrances
         walls = [
             ((2, 2), (2, 3)),
             ((2, 3), (3, 3)),
@@ -170,9 +162,9 @@ class TestComplexMazes:
         ]
 
         mud = [
-            ((2, 1), (3, 1), 3),  # 3-turn mud at bottom entrance
-            ((3, 1), (4, 1), 5),  # 5-turn mud at bottom-right
-            ((1, 2), (2, 2), 2),  # 2-turn mud at left entrance (best)
+            ((2, 1), (3, 1), 3),
+            ((3, 1), (4, 1), 5),
+            ((1, 2), (2, 2), 2),
         ]
 
         state = create_game_state(
@@ -180,18 +172,15 @@ class TestComplexMazes:
             height=6,
             walls=walls,
             mud=mud,
-            cheese=[(3, 2)],  # Cheese inside the partial box
+            cheese=[(3, 2)],
         )
 
         result = find_nearest_cheese_by_time(state)
         assert result is not None
 
-        # Should find path through least costly mud (2-turn)
         cheese_pos, path, _ = result
         assert cheese_pos == Coordinates(3, 2)
-        # Path should be relatively short since we found the optimal route
-        # The 2-turn mud path is better than the 3-turn or 5-turn alternatives
-        assert len(path) <= 6  # Should find a reasonably short path
+        assert len(path) <= 6
 
 
 class TestAlgorithmComparison:
@@ -206,15 +195,13 @@ class TestAlgorithmComparison:
 
         state = create_game_state(
             mud=mud,
-            cheese=[(2, 0), (0, 4)],  # (2,0) closer by Manhattan but has heavy mud
+            cheese=[(2, 0), (0, 4)],
         )
 
         result = find_nearest_cheese_by_time(state)
         assert result is not None
 
         cheese_pos, _, time = result
-        # Manhattan: (2,0)=2, (0,4)=4
-        # Actual time: (2,0)=20 (heavy mud), (0,4)=4
         assert cheese_pos == Coordinates(0, 4)
         assert time == 4
 
@@ -225,19 +212,14 @@ class TestRandomGames:
     @pytest.mark.parametrize(
         "seed,width,height,cheese_count",
         [
-            (12345, 15, 11, None),  # Odd dimensions, default cheese
-            (54321, 10, 10, 20),  # Even dimensions, even cheese
-            (99999, 20, 15, 30),  # Mixed dimensions (one even), even cheese
+            (12345, 15, 11, 21),
+            (54321, 10, 10, 20),
+            (99999, 20, 15, 30),
         ],
     )
     def test_pathfinding_on_random_game(self, seed, width, height, cheese_count):
         """Test pathfinding works correctly on random games."""
-        if cheese_count is None:
-            game = PyRat(width=width, height=height, seed=seed)
-        else:
-            game = PyRat(
-                width=width, height=height, seed=seed, cheese_count=cheese_count
-            )
+        game = GameConfig.classic(width, height, cheese_count).create(seed=seed)
         state = ProtocolState(game, Player.RAT)
 
         result = find_nearest_cheese_by_time(state)
@@ -245,12 +227,10 @@ class TestRandomGames:
         if result:
             cheese_pos, path, time = result
 
-            # Basic sanity checks
             assert cheese_pos in state.cheese
             assert len(path) > 0
-            assert time >= len(path)  # Time can be > path length due to mud
+            assert time >= len(path)
 
-            # Verify first move is valid
             if path:
                 first_move = path[0]
                 assert first_move in [
@@ -284,7 +264,6 @@ class TestPathfindingIntegration:
         result = find_nearest_cheese_by_time(state)
         assert result is not None
 
-        # Verify it finds a valid path
         cheese_pos, path, time = result
         assert cheese_pos in [Coordinates(4, 0), Coordinates(1, 3), Coordinates(5, 4)]
         assert time > 0
