@@ -45,12 +45,24 @@ impl PlayerState {
     }
 }
 
+impl PlayerState {
+    /// Score as an integer count of half-points (0.5 → 1, 1.0 → 2, etc.).
+    ///
+    /// Scores are always multiples of 0.5 (full collect = +1.0,
+    /// simultaneous = +0.5), so `(score * 2.0) as u16` is lossless.
+    #[inline(always)]
+    #[must_use]
+    const fn half_score(&self) -> u16 {
+        (self.score * 2.0) as u16
+    }
+}
+
 impl PartialEq for PlayerState {
     fn eq(&self, other: &Self) -> bool {
         self.current_pos == other.current_pos
             && self.target_pos == other.target_pos
             && self.mud_timer == other.mud_timer
-            && self.score.to_bits() == other.score.to_bits()
+            && self.half_score() == other.half_score()
             && self.misses == other.misses
     }
 }
@@ -62,7 +74,7 @@ impl Hash for PlayerState {
         self.current_pos.hash(state);
         self.target_pos.hash(state);
         self.mud_timer.hash(state);
-        self.score.to_bits().hash(state);
+        self.half_score().hash(state);
         self.misses.hash(state);
     }
 }
