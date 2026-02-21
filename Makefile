@@ -1,6 +1,6 @@
 # PyRat Monorepo Makefile
 
-.PHONY: all engine gui protocol examples cli test bench clean help sync lint lint-engine lint-protocol lint-cli test-cli test-integration
+.PHONY: all engine gui protocol examples cli test bench clean help sync lint lint-engine lint-protocol lint-cli test-cli test-integration generate-protocol
 
 # Default target
 all: sync engine
@@ -44,7 +44,7 @@ test: test-engine test-protocol test-cli
 
 test-engine:
 	@echo "Running engine tests..."
-	cd engine && cargo test -p pyrat-rust --lib --no-default-features
+	cargo test -p pyrat-rust --lib --no-default-features
 	cd engine && uv run pytest python/tests -v
 
 test-protocol:
@@ -63,19 +63,19 @@ test-integration:
 bench:
 	@echo "Running benchmarks..."
 	@echo "Note: Requires Python environment activated"
-	cd engine && cargo bench --bench game_benchmarks
+	cargo bench -p pyrat-rust --bench game_benchmarks
 
 # Code quality
 fmt:
 	@echo "Formatting code..."
-	cd engine && cargo fmt
+	cargo fmt --all
 	uv run ruff format engine/python protocol/pyrat_base cli
 
 check:
 	@echo "Running checks..."
-	cd engine && cargo fmt --all -- --check
-	cd engine && cargo clippy -p pyrat-rust --all-targets --no-default-features -- -D warnings
-	cd engine && cargo clippy --all-targets --all-features -- -D warnings -A non-local-definitions
+	cargo fmt --all -- --check
+	cargo clippy -p pyrat-rust --all-targets --no-default-features -- -D warnings
+	cargo clippy --all-targets --all-features -- -D warnings -A non-local-definitions
 	uv run ruff check engine/python protocol/pyrat_base cli
 	uv run mypy engine/python/pyrat_engine protocol/pyrat_base/pyrat_base cli/pyrat_runner --ignore-missing-imports
 
@@ -98,9 +98,13 @@ lint-cli:
 	uv run mypy cli/pyrat_runner --ignore-missing-imports
 
 # Clean build artifacts
+generate-protocol:
+	@echo "Generating protocol FlatBuffers code..."
+	./protocol/schema/generate.sh
+
 clean:
 	@echo "Cleaning build artifacts..."
-	cd engine && cargo clean
+	cargo clean
 	find . -type d -name "__pycache__" -exec rm -rf {} +
 	find . -type d -name ".pytest_cache" -exec rm -rf {} +
 	find . -type d -name "*.egg-info" -exec rm -rf {} +
@@ -138,9 +142,10 @@ help:
 	@echo "  lint-cli         - Lint CLI code"
 	@echo ""
 	@echo "Other:"
-	@echo "  bench            - Run performance benchmarks"
-	@echo "  clean            - Remove build artifacts"
-	@echo "  help             - Show this help message"
+	@echo "  bench              - Run performance benchmarks"
+	@echo "  generate-protocol  - Regenerate FlatBuffers Rust code (requires flatc)"
+	@echo "  clean              - Remove build artifacts"
+	@echo "  help               - Show this help message"
 	@echo ""
 	@echo "Components:"
 	@echo "  engine           - High-performance Rust game engine (implemented)"
