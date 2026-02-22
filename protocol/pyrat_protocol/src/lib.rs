@@ -8,3 +8,5 @@
 mod pyrat_generated;
 
 pub use pyrat_generated::pyrat::protocol::*;
+
+pub mod framing;

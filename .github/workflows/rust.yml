@@ -46,8 +46,11 @@ jobs:
     - name: Run clippy (all features, full workspace)
       run: cargo clippy --all-targets --all-features -- -D warnings -A non-local-definitions
 
-    - name: Run tests
+    - name: Run engine tests
       run: cargo test -p pyrat-rust --lib --no-default-features --verbose
+
+    - name: Run protocol tests
+      run: cargo test -p pyrat-protocol --lib --verbose
 
     - name: Build release
       run: cargo build -p pyrat-rust --release --no-default-features --verbose
