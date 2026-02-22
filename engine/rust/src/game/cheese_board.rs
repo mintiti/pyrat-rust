@@ -1,3 +1,5 @@
+use std::hash::{Hash, Hasher};
+
 use crate::Coordinates;
 
 /// Efficient cheese tracking using bitboards
@@ -148,6 +150,16 @@ impl CheeseBoard {
         count
     }
 
+    /// Returns a reference to the raw bitboard data.
+    ///
+    /// Each `u64` represents 64 cells. Cell at `Coordinates { x, y }` maps to
+    /// bit `(y * width + x)` in the corresponding word.
+    #[must_use]
+    #[inline(always)]
+    pub fn bits(&self) -> &[u64] {
+        &self.bits
+    }
+
     /// Clear all cheese
     #[inline]
     pub fn clear(&mut self) {
@@ -165,6 +177,21 @@ impl Clone for CheeseBoard {
             initial_cheese_count: self.initial_cheese_count,
             remaining_cheese_count: self.remaining_cheese_count,
         }
+    }
+}
+
+impl PartialEq for CheeseBoard {
+    fn eq(&self, other: &Self) -> bool {
+        self.width == other.width && self.bits == other.bits
+    }
+}
+
+impl Eq for CheeseBoard {}
+
+impl Hash for CheeseBoard {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.width.hash(state);
+        self.bits.hash(state);
     }
 }
 

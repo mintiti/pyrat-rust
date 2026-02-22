@@ -14,11 +14,13 @@
 //! - `MudMap` — HashMap lookup per move into a muddy passage;
 //!   this is the most expensive per-turn operation
 
-use crate::{CheeseBoard, Coordinates, Direction, MoveTable};
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
+
+use serde::{Deserialize, Serialize};
 
 use crate::game::types::MudMap;
+use crate::{CheeseBoard, Coordinates, Direction, MoveTable};
 
 /// Stores the state of a player including their movement status
 #[derive(Clone)]
@@ -40,6 +42,40 @@ impl PlayerState {
     #[inline(always)]
     const fn can_collect_cheese(&self) -> bool {
         !self.is_in_mud() // Can collect on last mud turn
+    }
+}
+
+impl PlayerState {
+    /// Score as an integer count of half-points (0.5 → 1, 1.0 → 2, etc.).
+    ///
+    /// Scores are always multiples of 0.5 (full collect = +1.0,
+    /// simultaneous = +0.5), so `(score * 2.0) as u16` is lossless.
+    #[inline(always)]
+    #[must_use]
+    const fn half_score(&self) -> u16 {
+        (self.score * 2.0) as u16
+    }
+}
+
+impl PartialEq for PlayerState {
+    fn eq(&self, other: &Self) -> bool {
+        self.current_pos == other.current_pos
+            && self.target_pos == other.target_pos
+            && self.mud_timer == other.mud_timer
+            && self.half_score() == other.half_score()
+            && self.misses == other.misses
+    }
+}
+
+impl Eq for PlayerState {}
+
+impl Hash for PlayerState {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.current_pos.hash(state);
+        self.target_pos.hash(state);
+        self.mud_timer.hash(state);
+        self.half_score().hash(state);
+        self.misses.hash(state);
     }
 }
 /// Records what happened in a move for unmake purposes
@@ -506,6 +542,27 @@ impl GameState {
     #[inline(always)]
     pub const fn player2_mud_turns(&self) -> u8 {
         self.player2.mud_timer
+    }
+
+    /// Compute a hash of the dynamic game state for use as a transposition
+    /// table key.
+    ///
+    /// The hash covers player positions, mud timers, turn counter, and cheese
+    /// layout — everything that changes during gameplay. Static maze structure
+    /// (`MoveTable`, `MudMap`) and scores are excluded since the maze is fixed
+    /// per game and scores can be reconstructed from the search path.
+    #[must_use]
+    pub fn position_hash(&self) -> u64 {
+        let mut hasher = std::hash::DefaultHasher::new();
+        self.player1.current_pos.hash(&mut hasher);
+        self.player1.target_pos.hash(&mut hasher);
+        self.player1.mud_timer.hash(&mut hasher);
+        self.player2.current_pos.hash(&mut hasher);
+        self.player2.target_pos.hash(&mut hasher);
+        self.player2.mud_timer.hash(&mut hasher);
+        self.turn.hash(&mut hasher);
+        self.cheese.hash(&mut hasher);
+        hasher.finish()
     }
 
     /// Get effective actions for a position (ignores mud state).

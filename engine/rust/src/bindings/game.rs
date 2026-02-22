@@ -824,6 +824,14 @@ impl PyRat {
         Ok(())
     }
 
+    /// Hash of the dynamic game state for use as a transposition table key.
+    ///
+    /// Covers player positions, mud timers, turn counter, and cheese layout.
+    /// Static maze structure and scores are excluded.
+    fn position_hash(&self) -> u64 {
+        self.game.position_hash()
+    }
+
     // String representation
     fn __repr__(&self) -> String {
         format!(
