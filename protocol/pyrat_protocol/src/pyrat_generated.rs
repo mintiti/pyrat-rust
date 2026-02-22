@@ -1538,7 +1538,7 @@ pub mod pyrat {
             pub const VT_CHEESE: ::flatbuffers::VOffsetT = 14;
             pub const VT_RAT_START: ::flatbuffers::VOffsetT = 16;
             pub const VT_PYTHON_START: ::flatbuffers::VOffsetT = 18;
-            pub const VT_YOU_ARE: ::flatbuffers::VOffsetT = 20;
+            pub const VT_CONTROLLED_PLAYERS: ::flatbuffers::VOffsetT = 20;
             pub const VT_TIMING: ::flatbuffers::VOffsetT = 22;
             pub const VT_MOVE_TIMEOUT_MS: ::flatbuffers::VOffsetT = 24;
             pub const VT_PREPROCESSING_TIMEOUT_MS: ::flatbuffers::VOffsetT = 26;
@@ -1560,6 +1560,9 @@ pub mod pyrat {
                 let mut builder = MatchConfigBuilder::new(_fbb);
                 builder.add_preprocessing_timeout_ms(args.preprocessing_timeout_ms);
                 builder.add_move_timeout_ms(args.move_timeout_ms);
+                if let Some(x) = args.controlled_players {
+                    builder.add_controlled_players(x);
+                }
                 if let Some(x) = args.python_start {
                     builder.add_python_start(x);
                 }
@@ -1577,7 +1580,6 @@ pub mod pyrat {
                 }
                 builder.add_max_turns(args.max_turns);
                 builder.add_timing(args.timing);
-                builder.add_you_are(args.you_are);
                 builder.add_height(args.height);
                 builder.add_width(args.width);
                 builder.finish()
@@ -1668,14 +1670,16 @@ pub mod pyrat {
                 unsafe { self._tab.get::<Vec2>(MatchConfig::VT_PYTHON_START, None) }
             }
             #[inline]
-            pub fn you_are(&self) -> Player {
+            pub fn controlled_players(&self) -> Option<::flatbuffers::Vector<'a, Player>> {
                 // Safety:
                 // Created from valid Table for this object
                 // which contains a valid value in this slot
                 unsafe {
                     self._tab
-                        .get::<Player>(MatchConfig::VT_YOU_ARE, Some(Player::Rat))
-                        .unwrap()
+                        .get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, Player>>>(
+                            MatchConfig::VT_CONTROLLED_PLAYERS,
+                            None,
+                        )
                 }
             }
             #[inline]
@@ -1720,31 +1724,19 @@ pub mod pyrat {
                 pos: usize,
             ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
                 v.visit_table(pos)?
-                    .visit_field::<u8>("width", Self::VT_WIDTH, false)?
-                    .visit_field::<u8>("height", Self::VT_HEIGHT, false)?
-                    .visit_field::<u16>("max_turns", Self::VT_MAX_TURNS, false)?
-                    .visit_field::<::flatbuffers::ForwardsUOffset<
-                        ::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<Wall>>,
-                    >>("walls", Self::VT_WALLS, false)?
-                    .visit_field::<::flatbuffers::ForwardsUOffset<
-                        ::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<Mud>>,
-                    >>("mud", Self::VT_MUD, false)?
-                    .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, Vec2>>>(
-                        "cheese",
-                        Self::VT_CHEESE,
-                        false,
-                    )?
-                    .visit_field::<Vec2>("rat_start", Self::VT_RAT_START, false)?
-                    .visit_field::<Vec2>("python_start", Self::VT_PYTHON_START, false)?
-                    .visit_field::<Player>("you_are", Self::VT_YOU_ARE, false)?
-                    .visit_field::<TimingMode>("timing", Self::VT_TIMING, false)?
-                    .visit_field::<u32>("move_timeout_ms", Self::VT_MOVE_TIMEOUT_MS, false)?
-                    .visit_field::<u32>(
-                        "preprocessing_timeout_ms",
-                        Self::VT_PREPROCESSING_TIMEOUT_MS,
-                        false,
-                    )?
-                    .finish();
+     .visit_field::<u8>("width", Self::VT_WIDTH, false)?
+     .visit_field::<u8>("height", Self::VT_HEIGHT, false)?
+     .visit_field::<u16>("max_turns", Self::VT_MAX_TURNS, false)?
+     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<Wall>>>>("walls", Self::VT_WALLS, false)?
+     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<Mud>>>>("mud", Self::VT_MUD, false)?
+     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, Vec2>>>("cheese", Self::VT_CHEESE, false)?
+     .visit_field::<Vec2>("rat_start", Self::VT_RAT_START, false)?
+     .visit_field::<Vec2>("python_start", Self::VT_PYTHON_START, false)?
+     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, Player>>>("controlled_players", Self::VT_CONTROLLED_PLAYERS, false)?
+     .visit_field::<TimingMode>("timing", Self::VT_TIMING, false)?
+     .visit_field::<u32>("move_timeout_ms", Self::VT_MOVE_TIMEOUT_MS, false)?
+     .visit_field::<u32>("preprocessing_timeout_ms", Self::VT_PREPROCESSING_TIMEOUT_MS, false)?
+     .finish();
                 Ok(())
             }
         }
@@ -1765,7 +1757,8 @@ pub mod pyrat {
             pub cheese: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, Vec2>>>,
             pub rat_start: Option<&'a Vec2>,
             pub python_start: Option<&'a Vec2>,
-            pub you_are: Player,
+            pub controlled_players:
+                Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, Player>>>,
             pub timing: TimingMode,
             pub move_timeout_ms: u32,
             pub preprocessing_timeout_ms: u32,
@@ -1782,7 +1775,7 @@ pub mod pyrat {
                     cheese: None,
                     rat_start: None,
                     python_start: None,
-                    you_are: Player::Rat,
+                    controlled_players: None,
                     timing: TimingMode::Wait,
                     move_timeout_ms: 0,
                     preprocessing_timeout_ms: 0,
@@ -1849,9 +1842,14 @@ pub mod pyrat {
                     .push_slot_always::<&Vec2>(MatchConfig::VT_PYTHON_START, python_start);
             }
             #[inline]
-            pub fn add_you_are(&mut self, you_are: Player) {
-                self.fbb_
-                    .push_slot::<Player>(MatchConfig::VT_YOU_ARE, you_are, Player::Rat);
+            pub fn add_controlled_players(
+                &mut self,
+                controlled_players: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b, Player>>,
+            ) {
+                self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+                    MatchConfig::VT_CONTROLLED_PLAYERS,
+                    controlled_players,
+                );
             }
             #[inline]
             pub fn add_timing(&mut self, timing: TimingMode) {
@@ -1899,7 +1897,7 @@ pub mod pyrat {
                 ds.field("cheese", &self.cheese());
                 ds.field("rat_start", &self.rat_start());
                 ds.field("python_start", &self.python_start());
-                ds.field("you_are", &self.you_are());
+                ds.field("controlled_players", &self.controlled_players());
                 ds.field("timing", &self.timing());
                 ds.field("move_timeout_ms", &self.move_timeout_ms());
                 ds.field("preprocessing_timeout_ms", &self.preprocessing_timeout_ms());
@@ -3462,6 +3460,7 @@ pub mod pyrat {
 
         impl<'a> Action<'a> {
             pub const VT_DIRECTION: ::flatbuffers::VOffsetT = 4;
+            pub const VT_PLAYER: ::flatbuffers::VOffsetT = 6;
 
             #[inline]
             pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -3478,6 +3477,7 @@ pub mod pyrat {
                 args: &'args ActionArgs,
             ) -> ::flatbuffers::WIPOffset<Action<'bldr>> {
                 let mut builder = ActionBuilder::new(_fbb);
+                builder.add_player(args.player);
                 builder.add_direction(args.direction);
                 builder.finish()
             }
@@ -3493,6 +3493,17 @@ pub mod pyrat {
                         .unwrap()
                 }
             }
+            #[inline]
+            pub fn player(&self) -> Player {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<Player>(Action::VT_PLAYER, Some(Player::Rat))
+                        .unwrap()
+                }
+            }
         }
 
         impl ::flatbuffers::Verifiable for Action<'_> {
@@ -3503,18 +3514,21 @@ pub mod pyrat {
             ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
                 v.visit_table(pos)?
                     .visit_field::<Direction>("direction", Self::VT_DIRECTION, false)?
+                    .visit_field::<Player>("player", Self::VT_PLAYER, false)?
                     .finish();
                 Ok(())
             }
         }
         pub struct ActionArgs {
             pub direction: Direction,
+            pub player: Player,
         }
         impl<'a> Default for ActionArgs {
             #[inline]
             fn default() -> Self {
                 ActionArgs {
                     direction: Direction::Up,
+                    player: Player::Rat,
                 }
             }
         }
@@ -3528,6 +3542,11 @@ pub mod pyrat {
             pub fn add_direction(&mut self, direction: Direction) {
                 self.fbb_
                     .push_slot::<Direction>(Action::VT_DIRECTION, direction, Direction::Up);
+            }
+            #[inline]
+            pub fn add_player(&mut self, player: Player) {
+                self.fbb_
+                    .push_slot::<Player>(Action::VT_PLAYER, player, Player::Rat);
             }
             #[inline]
             pub fn new(
@@ -3550,6 +3569,7 @@ pub mod pyrat {
             fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                 let mut ds = f.debug_struct("Action");
                 ds.field("direction", &self.direction());
+                ds.field("player", &self.player());
                 ds.finish()
             }
         }
