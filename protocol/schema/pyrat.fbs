@@ -79,7 +79,7 @@ table MatchConfig {
   cheese: [Vec2];
   rat_start: Vec2;
   python_start: Vec2;
-  you_are: Player;
+  controlled_players: [Player];
   timing: TimingMode;
   move_timeout_ms: uint32;
   preprocessing_timeout_ms: uint32;
@@ -143,6 +143,7 @@ table PreprocessingDone {}
 
 table Action {
   direction: Direction;
+  player: Player;
 }
 
 table Pong {}
