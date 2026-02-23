@@ -1,5 +1,5 @@
 [workspace]
-members = ["engine", "engine/extension", "protocol/pyrat_protocol"]
+members = ["engine", "engine/extension", "host"]
 resolver = "2"
 
 [workspace.lints.clippy]
