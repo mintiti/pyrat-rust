@@ -13,15 +13,9 @@ use pyrat::{Coordinates, Direction as EngineDirection};
 use crate::session::messages::{HostCommand, OwnedTurnState, SessionId, SessionMsg};
 use crate::wire::{Direction as WireDirection, GameResult, Player};
 
-use super::setup::SessionHandle;
+use super::config::{PlayingConfig, SessionHandle};
 
 // ── Public types ─────────────────────────────────────
-
-/// Configuration for the playing phase.
-pub struct PlayingConfig {
-    /// Per-turn timeout for receiving actions from bots.
-    pub move_timeout: Duration,
-}
 
 /// Result of a completed match.
 #[derive(Debug, Clone)]
@@ -82,11 +76,17 @@ pub async fn run_playing(
 
         // Send TurnState to each connected session.
         for s in sessions {
-            if !disconnected.contains(&s.session_id) {
-                let _ = s
-                    .cmd_tx
+            if !disconnected.contains(&s.session_id)
+                && s.cmd_tx
                     .send(HostCommand::TurnState(Box::new(turn_state.clone())))
-                    .await;
+                    .await
+                    .is_err()
+            {
+                debug!(
+                    session = s.session_id.0,
+                    "TurnState send failed — marking disconnected"
+                );
+                disconnected.insert(s.session_id);
             }
         }
 
@@ -118,15 +118,20 @@ pub async fn run_playing(
 
     // Send GameOver to all connected sessions.
     for s in sessions {
-        if !disconnected.contains(&s.session_id) {
-            let _ = s
-                .cmd_tx
+        if !disconnected.contains(&s.session_id)
+            && s.cmd_tx
                 .send(HostCommand::GameOver {
                     result: match_result.result,
                     player1_score: match_result.player1_score,
                     player2_score: match_result.player2_score,
                 })
-                .await;
+                .await
+                .is_err()
+        {
+            debug!(
+                session = s.session_id.0,
+                "GameOver send failed — session already gone"
+            );
         }
     }
 
@@ -239,6 +244,7 @@ async fn collect_actions(
             }
             _ = tokio::time::sleep_until(deadline) => {
                 // Timeout: fill remaining with STAY, notify timed-out sessions.
+                debug!(turn = current_turn, "move timeout — defaulting remaining players to STAY");
                 if p1_action.is_none() {
                     p1_action = Some(stay);
                 }

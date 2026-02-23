@@ -7,23 +7,11 @@ use tracing::{debug, info, warn};
 
 use crate::session::messages::HostCommand;
 use crate::session::{run_session, SessionConfig, SessionId, SessionMsg};
-use crate::wire::Player;
 
-use super::config::MatchSetup;
+use super::config::{MatchSetup, SessionHandle};
 use super::slots::PlayerSlots;
 
 // ── Public types ─────────────────────────────────────
-
-/// Handle to an active session after setup completes.
-#[derive(Debug)]
-pub struct SessionHandle {
-    pub session_id: SessionId,
-    pub cmd_tx: mpsc::Sender<HostCommand>,
-    pub name: String,
-    pub author: String,
-    pub agent_id: String,
-    pub controlled_players: Vec<Player>,
-}
 
 /// Successful result of the setup phase.
 #[derive(Debug)]
@@ -134,6 +122,7 @@ pub async fn run_setup(
                             slots.unreserve(session_id);
                         }
                     }
+                    // Info, Action, etc. — ignored during setup.
                     _ => {}
                 }
             }
@@ -196,6 +185,7 @@ pub async fn run_setup(
                         SessionMsg::Connected { session_id, .. } => {
                             debug!(session = session_id.0, "late connection during phase B — ignored");
                         }
+                        // Info, Action, etc. — ignored during setup.
                         _ => {}
                     }
                 }
@@ -240,6 +230,7 @@ pub async fn run_setup(
                         SessionMsg::Connected { session_id, .. } => {
                             debug!(session = session_id.0, "late connection during phase C — ignored");
                         }
+                        // Info, Action, etc. — ignored during setup.
                         _ => {}
                     }
                 }
