@@ -210,10 +210,6 @@ pub fn serialize_host_command(fbb: &mut FlatBufferBuilder<'_>, cmd: &HostCommand
             );
             (HostMessage::TurnState, off.as_union_value())
         },
-        HostCommand::Stop => {
-            let off = wire::Stop::create(fbb, &wire::StopArgs {});
-            (HostMessage::Stop, off.as_union_value())
-        },
         HostCommand::Timeout { default_move } => {
             let off = wire::Timeout::create(
                 fbb,
@@ -559,9 +555,9 @@ mod tests {
     }
 
     #[test]
-    fn round_trip_stop() {
+    fn round_trip_shutdown_serializes_as_stop() {
         let mut fbb = FlatBufferBuilder::new();
-        let bytes = serialize_host_command(&mut fbb, &HostCommand::Stop);
+        let bytes = serialize_host_command(&mut fbb, &HostCommand::Shutdown);
         let packet = flatbuffers::root::<HostPacket>(&bytes).unwrap();
         assert_eq!(packet.message_type(), HostMessage::Stop);
     }
@@ -583,7 +579,7 @@ mod tests {
     fn fbb_reuse_across_calls() {
         let mut fbb = FlatBufferBuilder::new();
         let _ = serialize_host_command(&mut fbb, &HostCommand::Ping);
-        let _ = serialize_host_command(&mut fbb, &HostCommand::Stop);
+        let _ = serialize_host_command(&mut fbb, &HostCommand::Shutdown);
         // Just verifying no panic — builder resets cleanly.
         let bytes = serialize_host_command(
             &mut fbb,

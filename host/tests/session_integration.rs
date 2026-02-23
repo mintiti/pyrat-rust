@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 use tokio::time::timeout;
 
 use pyrat_host::session::messages::*;
-use pyrat_host::session::run_session;
+use pyrat_host::session::{run_session, SessionConfig};
 use pyrat_host::wire::framing::{FrameReader, FrameWriter};
 use pyrat_host::wire::*;
 
@@ -137,6 +137,7 @@ async fn happy_path_full_lifecycle() {
         session_read,
         session_write,
         game_tx,
+        SessionConfig::default(),
     ));
 
     let mut bot_writer = FrameWriter::with_default_max(bot_write);
@@ -232,10 +233,14 @@ async fn happy_path_full_lifecycle() {
     let msg = recv(&mut game_rx).await;
     match msg {
         SessionMsg::Action {
-            player, direction, ..
+            player,
+            direction,
+            turn,
+            ..
         } => {
             assert_eq!(player, Player::Rat);
             assert_eq!(direction, Direction::Left);
+            assert_eq!(turn, 1);
         },
         other => panic!("expected Action, got {other:?}"),
     }
@@ -277,6 +282,7 @@ async fn wrong_state_rejection_action_before_playing() {
         session_read,
         session_write,
         game_tx,
+        SessionConfig::default(),
     ));
 
     let mut bot_writer = FrameWriter::with_default_max(bot_write);
@@ -327,6 +333,7 @@ async fn ownership_validation_rejects_non_controlled_player() {
         session_read,
         session_write,
         game_tx,
+        SessionConfig::default(),
     ));
 
     let mut bot_writer = FrameWriter::with_default_max(bot_write);
@@ -414,6 +421,7 @@ async fn shutdown_drains_and_disconnects() {
         session_read,
         session_write,
         game_tx,
+        SessionConfig::default(),
     ));
 
     let mut bot_writer = FrameWriter::with_default_max(bot_write);
@@ -463,6 +471,7 @@ async fn tcp_disconnect_sends_disconnected() {
         session_read,
         session_write,
         game_tx,
+        SessionConfig::default(),
     ));
 
     // Connected
@@ -490,6 +499,7 @@ async fn channel_closed_exits_cleanly() {
         session_read,
         session_write,
         game_tx,
+        SessionConfig::default(),
     ));
 
     // Get Connected and the cmd_tx
@@ -503,7 +513,12 @@ async fn channel_closed_exits_cleanly() {
 
     // Session should exit and send Disconnected
     let msg = recv(&mut game_rx).await;
-    assert!(matches!(msg, SessionMsg::Disconnected { .. }));
+    match msg {
+        SessionMsg::Disconnected { reason, .. } => {
+            assert_eq!(reason, DisconnectReason::ChannelClosed);
+        },
+        other => panic!("expected Disconnected, got {other:?}"),
+    }
 
     session_handle.await.unwrap();
 }
@@ -521,6 +536,7 @@ async fn pong_and_info_accepted_in_any_non_done_state() {
         session_read,
         session_write,
         game_tx,
+        SessionConfig::default(),
     ));
 
     let mut bot_writer = FrameWriter::with_default_max(bot_write);
@@ -564,6 +580,7 @@ async fn default_player_inference_single_bot() {
         session_read,
         session_write,
         game_tx,
+        SessionConfig::default(),
     ));
 
     let mut bot_writer = FrameWriter::with_default_max(bot_write);
@@ -622,6 +639,375 @@ async fn default_player_inference_single_bot() {
 
     let msg = recv(&mut game_rx).await;
     assert!(matches!(msg, SessionMsg::Disconnected { .. }));
+
+    session_handle.await.unwrap();
+}
+
+// ── New tests ───────────────────────────────────────
+
+#[tokio::test]
+async fn game_over_then_bot_message_rejected() {
+    let (bot_io, session_io) = tokio::io::duplex(8192);
+    let (bot_read, bot_write) = tokio::io::split(bot_io);
+    let (session_read, session_write) = tokio::io::split(session_io);
+
+    let (game_tx, mut game_rx) = mpsc::channel(32);
+
+    let session_handle = tokio::spawn(run_session(
+        SessionId(10),
+        session_read,
+        session_write,
+        game_tx,
+        SessionConfig::default(),
+    ));
+
+    let mut bot_writer = FrameWriter::with_default_max(bot_write);
+    let mut bot_reader = FrameReader::with_default_max(bot_read);
+
+    let cmd_tx = match recv(&mut game_rx).await {
+        SessionMsg::Connected { cmd_tx, .. } => cmd_tx,
+        other => panic!("expected Connected, got {other:?}"),
+    };
+
+    // Advance to Playing
+    bot_writer
+        .write_frame(&identify_frame("Bot", "Auth"))
+        .await
+        .unwrap();
+    let _ = recv(&mut game_rx).await;
+
+    bot_writer.write_frame(&ready_frame()).await.unwrap();
+    let _ = recv(&mut game_rx).await;
+
+    cmd_tx
+        .send(HostCommand::MatchConfig(Box::new(simple_match_config())))
+        .await
+        .unwrap();
+    let _ = bot_reader.read_frame().await.unwrap();
+
+    cmd_tx.send(HostCommand::StartPreprocessing).await.unwrap();
+    let _ = bot_reader.read_frame().await.unwrap();
+
+    bot_writer
+        .write_frame(&preprocessing_done_frame())
+        .await
+        .unwrap();
+    let _ = recv(&mut game_rx).await;
+
+    // Send GameOver
+    cmd_tx
+        .send(HostCommand::GameOver {
+            result: GameResult::Draw,
+            rat_score: 0.0,
+            python_score: 0.0,
+        })
+        .await
+        .unwrap();
+    let _ = bot_reader.read_frame().await.unwrap(); // GameOver frame
+
+    // Bot sends Action after GameOver — should be drained, not forwarded
+    bot_writer
+        .write_frame(&action_frame(Direction::Up, Player::Rat))
+        .await
+        .unwrap();
+
+    let maybe = try_recv(&mut game_rx).await;
+    assert!(
+        maybe.is_none(),
+        "action after GameOver should be drained, got {maybe:?}"
+    );
+
+    drop(bot_writer);
+    drop(bot_reader);
+
+    let msg = recv(&mut game_rx).await;
+    assert!(matches!(msg, SessionMsg::Disconnected { .. }));
+
+    session_handle.await.unwrap();
+}
+
+#[tokio::test]
+async fn multiple_controlled_players_no_inference() {
+    let (bot_io, session_io) = tokio::io::duplex(8192);
+    let (bot_read, bot_write) = tokio::io::split(bot_io);
+    let (session_read, session_write) = tokio::io::split(session_io);
+
+    let (game_tx, mut game_rx) = mpsc::channel(32);
+
+    let session_handle = tokio::spawn(run_session(
+        SessionId(11),
+        session_read,
+        session_write,
+        game_tx,
+        SessionConfig::default(),
+    ));
+
+    let mut bot_writer = FrameWriter::with_default_max(bot_write);
+    let mut bot_reader = FrameReader::with_default_max(bot_read);
+
+    let cmd_tx = match recv(&mut game_rx).await {
+        SessionMsg::Connected { cmd_tx, .. } => cmd_tx,
+        other => panic!("expected Connected, got {other:?}"),
+    };
+
+    // Full handshake with BOTH players controlled
+    bot_writer
+        .write_frame(&identify_frame("Bot", "Auth"))
+        .await
+        .unwrap();
+    let _ = recv(&mut game_rx).await;
+
+    bot_writer.write_frame(&ready_frame()).await.unwrap();
+    let _ = recv(&mut game_rx).await;
+
+    let mut config = simple_match_config();
+    config.controlled_players = vec![Player::Rat, Player::Python];
+    cmd_tx
+        .send(HostCommand::MatchConfig(Box::new(config)))
+        .await
+        .unwrap();
+    let _ = bot_reader.read_frame().await.unwrap();
+
+    cmd_tx.send(HostCommand::StartPreprocessing).await.unwrap();
+    let _ = bot_reader.read_frame().await.unwrap();
+
+    bot_writer
+        .write_frame(&preprocessing_done_frame())
+        .await
+        .unwrap();
+    let _ = recv(&mut game_rx).await;
+
+    // Bot sends Rat action — should NOT be inferred, stays as Rat
+    bot_writer
+        .write_frame(&action_frame(Direction::Left, Player::Rat))
+        .await
+        .unwrap();
+    let msg = recv(&mut game_rx).await;
+    match msg {
+        SessionMsg::Action { player, .. } => {
+            assert_eq!(
+                player,
+                Player::Rat,
+                "no inference with 2 controlled players"
+            );
+        },
+        other => panic!("expected Action, got {other:?}"),
+    }
+
+    drop(bot_writer);
+    drop(bot_reader);
+
+    let msg = recv(&mut game_rx).await;
+    assert!(matches!(msg, SessionMsg::Disconnected { .. }));
+
+    session_handle.await.unwrap();
+}
+
+#[tokio::test]
+async fn malformed_flatbuffers_continues() {
+    let (bot_io, session_io) = tokio::io::duplex(8192);
+    let (bot_read, bot_write) = tokio::io::split(bot_io);
+    let (session_read, session_write) = tokio::io::split(session_io);
+
+    let (game_tx, mut game_rx) = mpsc::channel(32);
+
+    let session_handle = tokio::spawn(run_session(
+        SessionId(12),
+        session_read,
+        session_write,
+        game_tx,
+        SessionConfig::default(),
+    ));
+
+    let mut bot_writer = FrameWriter::with_default_max(bot_write);
+    let _bot_reader = FrameReader::with_default_max(bot_read);
+
+    let _connected = recv(&mut game_rx).await;
+
+    // Send garbage bytes as a frame
+    bot_writer
+        .write_frame(&[0xDE, 0xAD, 0xBE, 0xEF])
+        .await
+        .unwrap();
+
+    // Session should survive — send a valid Identify after
+    bot_writer
+        .write_frame(&identify_frame("Bot", "Auth"))
+        .await
+        .unwrap();
+
+    let msg = recv(&mut game_rx).await;
+    assert!(
+        matches!(msg, SessionMsg::Identified { .. }),
+        "session should survive malformed frame"
+    );
+
+    drop(bot_writer);
+    drop(_bot_reader);
+
+    let msg = recv(&mut game_rx).await;
+    assert!(matches!(msg, SessionMsg::Disconnected { .. }));
+
+    session_handle.await.unwrap();
+}
+
+#[tokio::test]
+async fn empty_controlled_players_skips_ownership_check() {
+    let (bot_io, session_io) = tokio::io::duplex(8192);
+    let (bot_read, bot_write) = tokio::io::split(bot_io);
+    let (session_read, session_write) = tokio::io::split(session_io);
+
+    let (game_tx, mut game_rx) = mpsc::channel(32);
+
+    let session_handle = tokio::spawn(run_session(
+        SessionId(13),
+        session_read,
+        session_write,
+        game_tx,
+        SessionConfig::default(),
+    ));
+
+    let mut bot_writer = FrameWriter::with_default_max(bot_write);
+    let mut bot_reader = FrameReader::with_default_max(bot_read);
+
+    let cmd_tx = match recv(&mut game_rx).await {
+        SessionMsg::Connected { cmd_tx, .. } => cmd_tx,
+        other => panic!("expected Connected, got {other:?}"),
+    };
+
+    bot_writer
+        .write_frame(&identify_frame("Bot", "Auth"))
+        .await
+        .unwrap();
+    let _ = recv(&mut game_rx).await;
+
+    bot_writer.write_frame(&ready_frame()).await.unwrap();
+    let _ = recv(&mut game_rx).await;
+
+    // MatchConfig with empty controlled_players
+    let mut config = simple_match_config();
+    config.controlled_players = vec![];
+    cmd_tx
+        .send(HostCommand::MatchConfig(Box::new(config)))
+        .await
+        .unwrap();
+    let _ = bot_reader.read_frame().await.unwrap();
+
+    cmd_tx.send(HostCommand::StartPreprocessing).await.unwrap();
+    let _ = bot_reader.read_frame().await.unwrap();
+
+    bot_writer
+        .write_frame(&preprocessing_done_frame())
+        .await
+        .unwrap();
+    let _ = recv(&mut game_rx).await;
+
+    // Any player should be accepted when controlled_players is empty
+    bot_writer
+        .write_frame(&action_frame(Direction::Up, Player::Python))
+        .await
+        .unwrap();
+    let msg = recv(&mut game_rx).await;
+    match msg {
+        SessionMsg::Action { player, .. } => {
+            assert_eq!(player, Player::Python);
+        },
+        other => panic!("expected Action, got {other:?}"),
+    }
+
+    drop(bot_writer);
+    drop(bot_reader);
+
+    let msg = recv(&mut game_rx).await;
+    assert!(matches!(msg, SessionMsg::Disconnected { .. }));
+
+    session_handle.await.unwrap();
+}
+
+#[tokio::test]
+async fn handshake_timeout_disconnects() {
+    let (bot_io, session_io) = tokio::io::duplex(8192);
+    let (_bot_read, _bot_write) = tokio::io::split(bot_io);
+    let (session_read, session_write) = tokio::io::split(session_io);
+
+    let (game_tx, mut game_rx) = mpsc::channel(32);
+
+    let config = SessionConfig {
+        handshake_timeout: Duration::from_millis(50),
+        ..SessionConfig::default()
+    };
+
+    let session_handle = tokio::spawn(run_session(
+        SessionId(14),
+        session_read,
+        session_write,
+        game_tx,
+        config,
+    ));
+
+    // Connected arrives
+    let _connected = recv(&mut game_rx).await;
+
+    // Don't send Identify — wait for timeout
+    let msg = recv(&mut game_rx).await;
+    match msg {
+        SessionMsg::Disconnected { reason, .. } => {
+            assert_eq!(reason, DisconnectReason::HandshakeTimeout);
+        },
+        other => panic!("expected Disconnected with HandshakeTimeout, got {other:?}"),
+    }
+
+    session_handle.await.unwrap();
+}
+
+#[tokio::test]
+async fn drain_budget_exhausted_breaks_loop() {
+    let (bot_io, session_io) = tokio::io::duplex(8192);
+    let (bot_read, bot_write) = tokio::io::split(bot_io);
+    let (session_read, session_write) = tokio::io::split(session_io);
+
+    let (game_tx, mut game_rx) = mpsc::channel(32);
+
+    let config = SessionConfig {
+        drain_max_frames: 3,
+        drain_timeout: Duration::from_secs(10), // long timeout — budget should trigger first
+        ..SessionConfig::default()
+    };
+
+    let session_handle = tokio::spawn(run_session(
+        SessionId(15),
+        session_read,
+        session_write,
+        game_tx,
+        config,
+    ));
+
+    let mut bot_writer = FrameWriter::with_default_max(bot_write);
+    let mut bot_reader = FrameReader::with_default_max(bot_read);
+
+    let cmd_tx = match recv(&mut game_rx).await {
+        SessionMsg::Connected { cmd_tx, .. } => cmd_tx,
+        other => panic!("expected Connected, got {other:?}"),
+    };
+
+    // Send Shutdown
+    cmd_tx.send(HostCommand::Shutdown).await.unwrap();
+    let _ = bot_reader.read_frame().await.unwrap(); // Stop
+
+    // Flood more frames than the drain budget (3)
+    for _ in 0..5 {
+        // Ignore write errors — session may close mid-flood
+        let _ = bot_writer.write_frame(&identify_frame("Bot", "Auth")).await;
+    }
+
+    // Session should exit with DrainComplete
+    let msg = recv(&mut game_rx).await;
+    match msg {
+        SessionMsg::Disconnected { reason, .. } => {
+            assert_eq!(reason, DisconnectReason::DrainComplete);
+        },
+        other => panic!("expected Disconnected with DrainComplete, got {other:?}"),
+    }
 
     session_handle.await.unwrap();
 }

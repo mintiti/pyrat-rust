@@ -97,6 +97,7 @@ pub enum SessionMsg {
         session_id: SessionId,
         player: Player,
         direction: Direction,
+        turn: u16,
     },
     /// Bot sent debug/analysis info (forwarded as-is).
     Info {
@@ -104,7 +105,25 @@ pub enum SessionMsg {
         info: OwnedInfo,
     },
     /// Session ended (TCP closed, shutdown, or error).
-    Disconnected { session_id: SessionId },
+    Disconnected {
+        session_id: SessionId,
+        reason: DisconnectReason,
+    },
+}
+
+/// Why a session ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DisconnectReason {
+    /// The remote peer closed the connection cleanly.
+    PeerClosed,
+    /// A framing error occurred on the wire.
+    FrameError,
+    /// The game loop dropped the command channel.
+    ChannelClosed,
+    /// The bot never sent Identify within the allowed window.
+    HandshakeTimeout,
+    /// Post-shutdown/game-over drain budget exhausted.
+    DrainComplete,
 }
 
 // ── Game loop → Session ─────────────────────────────
@@ -119,7 +138,6 @@ pub enum HostCommand {
     MatchConfig(Box<OwnedMatchConfig>),
     StartPreprocessing,
     TurnState(Box<OwnedTurnState>),
-    Stop,
     Timeout {
         default_move: Direction,
     },
