@@ -1,0 +1,17 @@
+[package]
+name = "pyrat-host"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+flatbuffers = "25.2.10"
+tokio = { version = "1", features = ["sync", "macros", "io-util", "time"] }
+tracing = "0.1"
+thiserror = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["sync", "macros", "io-util", "rt", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true
