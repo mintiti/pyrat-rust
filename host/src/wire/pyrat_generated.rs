@@ -3116,6 +3116,7 @@ pub mod pyrat {
             pub const VT_NAME: ::flatbuffers::VOffsetT = 4;
             pub const VT_AUTHOR: ::flatbuffers::VOffsetT = 6;
             pub const VT_OPTIONS: ::flatbuffers::VOffsetT = 8;
+            pub const VT_AGENT_ID: ::flatbuffers::VOffsetT = 10;
 
             #[inline]
             pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -3132,6 +3133,9 @@ pub mod pyrat {
                 args: &'args IdentifyArgs<'args>,
             ) -> ::flatbuffers::WIPOffset<Identify<'bldr>> {
                 let mut builder = IdentifyBuilder::new(_fbb);
+                if let Some(x) = args.agent_id {
+                    builder.add_agent_id(x);
+                }
                 if let Some(x) = args.options {
                     builder.add_options(x);
                 }
@@ -3178,6 +3182,16 @@ pub mod pyrat {
                     >>(Identify::VT_OPTIONS, None)
                 }
             }
+            #[inline]
+            pub fn agent_id(&self) -> Option<&'a str> {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<::flatbuffers::ForwardsUOffset<&str>>(Identify::VT_AGENT_ID, None)
+                }
+            }
         }
 
         impl ::flatbuffers::Verifiable for Identify<'_> {
@@ -3200,6 +3214,11 @@ pub mod pyrat {
                     .visit_field::<::flatbuffers::ForwardsUOffset<
                         ::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<OptionDef>>,
                     >>("options", Self::VT_OPTIONS, false)?
+                    .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                        "agent_id",
+                        Self::VT_AGENT_ID,
+                        false,
+                    )?
                     .finish();
                 Ok(())
             }
@@ -3212,6 +3231,7 @@ pub mod pyrat {
                     ::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<OptionDef<'a>>>,
                 >,
             >,
+            pub agent_id: Option<::flatbuffers::WIPOffset<&'a str>>,
         }
         impl<'a> Default for IdentifyArgs<'a> {
             #[inline]
@@ -3220,6 +3240,7 @@ pub mod pyrat {
                     name: None,
                     author: None,
                     options: None,
+                    agent_id: None,
                 }
             }
         }
@@ -3250,6 +3271,13 @@ pub mod pyrat {
                     .push_slot_always::<::flatbuffers::WIPOffset<_>>(Identify::VT_OPTIONS, options);
             }
             #[inline]
+            pub fn add_agent_id(&mut self, agent_id: ::flatbuffers::WIPOffset<&'b str>) {
+                self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+                    Identify::VT_AGENT_ID,
+                    agent_id,
+                );
+            }
+            #[inline]
             pub fn new(
                 _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
             ) -> IdentifyBuilder<'a, 'b, A> {
@@ -3272,6 +3300,7 @@ pub mod pyrat {
                 ds.field("name", &self.name());
                 ds.field("author", &self.author());
                 ds.field("options", &self.options());
+                ds.field("agent_id", &self.agent_id());
                 ds.finish()
             }
         }
