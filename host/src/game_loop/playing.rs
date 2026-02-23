@@ -306,3 +306,100 @@ fn determine_result(game: &GameState) -> MatchResult {
         turns_played: game.turn,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::session::messages::{HostCommand, SessionId, SessionMsg};
+    use crate::wire::{Direction as WireDirection, Player};
+    use std::collections::{HashMap, HashSet};
+    use std::time::Duration;
+    use tokio::sync::mpsc;
+
+    /// Stale action (wrong turn number) is silently dropped; the player times out.
+    #[tokio::test]
+    async fn stale_action_is_ignored() {
+        let (game_tx, mut game_rx) = mpsc::channel::<SessionMsg>(16);
+
+        // Two sessions, each controlling one player.
+        let (cmd_tx1, mut cmd_rx1) = mpsc::channel::<HostCommand>(16);
+        let (cmd_tx2, mut cmd_rx2) = mpsc::channel::<HostCommand>(16);
+
+        let sessions = vec![
+            SessionHandle {
+                session_id: SessionId(1),
+                cmd_tx: cmd_tx1,
+                name: "Bot1".into(),
+                author: "A".into(),
+                agent_id: "bot-1".into(),
+                controlled_players: vec![Player::Player1],
+            },
+            SessionHandle {
+                session_id: SessionId(2),
+                cmd_tx: cmd_tx2,
+                name: "Bot2".into(),
+                author: "B".into(),
+                agent_id: "bot-2".into(),
+                controlled_players: vec![Player::Player2],
+            },
+        ];
+
+        let session_players: HashMap<SessionId, Vec<Player>> = sessions
+            .iter()
+            .map(|s| (s.session_id, s.controlled_players.clone()))
+            .collect();
+
+        let current_turn: u16 = 5;
+
+        // P1: correct turn → accepted.
+        game_tx
+            .send(SessionMsg::Action {
+                session_id: SessionId(1),
+                player: Player::Player1,
+                direction: WireDirection::Right,
+                turn: current_turn,
+            })
+            .await
+            .unwrap();
+
+        // P2: stale turn (3 != 5) → ignored, will timeout.
+        game_tx
+            .send(SessionMsg::Action {
+                session_id: SessionId(2),
+                player: Player::Player2,
+                direction: WireDirection::Right,
+                turn: 3,
+            })
+            .await
+            .unwrap();
+
+        let mut disconnected = HashSet::new();
+        let (p1, p2) = collect_actions(
+            &mut game_rx,
+            current_turn,
+            &sessions,
+            &session_players,
+            &mut disconnected,
+            Duration::from_millis(100),
+        )
+        .await
+        .expect("collect_actions should not fail");
+
+        // P1 got Right (accepted), P2 got Stay (stale → timeout default).
+        assert_eq!(p1, WireDirection::Right);
+        assert_eq!(p2, WireDirection::Stay);
+
+        // Session 2 should have received a Timeout command.
+        let cmd = cmd_rx2.try_recv().expect("session 2 should get Timeout");
+        assert!(
+            matches!(cmd, HostCommand::Timeout { default_move } if default_move == WireDirection::Stay),
+            "expected Timeout with Stay, got {cmd:?}"
+        );
+
+        // Session 1 responded, so no Timeout for it.
+        assert!(
+            cmd_rx1.try_recv().is_err(),
+            "session 1 should not receive Timeout"
+        );
+    }
+}

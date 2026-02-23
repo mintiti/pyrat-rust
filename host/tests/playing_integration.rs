@@ -382,67 +382,6 @@ async fn timeout_defaults_to_stay() {
     let _ = h2.await;
 }
 
-/// Action with wrong turn number is ignored; bot times out.
-#[tokio::test]
-async fn stale_turn_ignored() {
-    let (game_tx, mut game_rx) = mpsc::channel(64);
-    let (mut w1, mut r1, h1) = spawn_session(SessionId(1), game_tx.clone());
-    let (mut w2, mut r2, h2) = spawn_session(SessionId(2), game_tx.clone());
-
-    let sessions = setup_two_bots(game_tx, &mut game_rx, &mut w1, &mut r1, &mut w2, &mut r2).await;
-
-    let mut game = tiny_game(2);
-    let config = PlayingConfig {
-        move_timeout: Duration::from_millis(100),
-    };
-
-    let play_task =
-        tokio::spawn(async move { run_playing(&mut game, &sessions, &mut game_rx, &config).await });
-
-    // Turn 0: Both respond normally.
-    let _ = read_turn_state(&mut r1).await;
-    let _ = read_turn_state(&mut r2).await;
-    w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
-        .await
-        .unwrap();
-    w2.write_frame(&action_frame(Direction::Stay, Player::Player2))
-        .await
-        .unwrap();
-
-    // Turn 1: P1 responds. P2 sends an action but the session stamps it with
-    // the turn from the TurnState it received — which will be turn 1. However,
-    // to test staleness, P2 needs to send an action with an old turn.
-    // Since session stamps current_turn from TurnState.turn, a "stale" action
-    // would only happen if the session received an older TurnState. We can't
-    // easily forge that with the real session layer. Instead, we verify that
-    // when P2 is silent, it times out correctly (which is what staleness leads to).
-    let _ = read_turn_state(&mut r1).await;
-    let _ = read_turn_state(&mut r2).await;
-    w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
-        .await
-        .unwrap();
-    // P2 silent.
-    read_timeout(&mut r2).await;
-
-    let _ = read_game_over(&mut r1).await;
-    let _ = read_game_over(&mut r2).await;
-
-    let result = timeout(Duration::from_secs(5), play_task)
-        .await
-        .expect("play timed out")
-        .expect("play panicked")
-        .expect("play returned error");
-
-    assert_eq!(result.turns_played, 2);
-
-    drop(w1);
-    drop(r1);
-    drop(w2);
-    drop(r2);
-    let _ = h1.await;
-    let _ = h2.await;
-}
-
 /// Bot disconnects mid-game. Game continues with STAY for that bot.
 #[tokio::test]
 async fn disconnect_mid_game() {
@@ -678,13 +617,18 @@ async fn cheese_updates_in_state() {
 
     let sessions = setup_two_bots(game_tx, &mut game_rx, &mut w1, &mut r1, &mut w2, &mut r2).await;
 
-    // 3×3 open maze, cheese at (1,0) — one step Right from P1 start (0,0).
-    // Two cheese so the game doesn't end immediately: (1,0) and (2,2).
+    // 3×3 open maze, P1 at (0,0), P2 at (2,2).
+    // 3 cheese: (1,0), (0,2), (2,0) — P2 doesn't start on any cheese.
+    // P1 collects (1,0) on turn 0 (score 1.0 < 1.5 threshold), game continues.
     let mut game = GameBuilder::new(3, 3)
-        .with_max_turns(5)
+        .with_max_turns(2)
         .with_open_maze()
         .with_custom_positions(Coordinates::new(0, 0), Coordinates::new(2, 2))
-        .with_custom_cheese(vec![Coordinates::new(1, 0), Coordinates::new(2, 2)])
+        .with_custom_cheese(vec![
+            Coordinates::new(1, 0),
+            Coordinates::new(0, 2),
+            Coordinates::new(2, 0),
+        ])
         .build()
         .create(Some(42))
         .expect("game creation failed");
@@ -694,13 +638,13 @@ async fn cheese_updates_in_state() {
     let play_task =
         tokio::spawn(async move { run_playing(&mut game, &sessions, &mut game_rx, &config).await });
 
-    // Turn 0: cheese at (1,0) and (2,2).
+    // Turn 0: 3 cheese present.
     let (turn0, cheese0) = read_turn_state(&mut r1).await;
     let _ = read_turn_state(&mut r2).await;
     assert_eq!(turn0, 0);
-    assert_eq!(cheese0.len(), 2);
+    assert_eq!(cheese0.len(), 3, "turn 0 should have 3 cheese");
 
-    // P1 moves Right to (1,0) to collect cheese. P2 stays (already on (2,2), collects).
+    // P1 moves Right to (1,0) to collect cheese. P2 stays.
     w1.write_frame(&action_frame(Direction::Right, Player::Player1))
         .await
         .unwrap();
@@ -708,18 +652,27 @@ async fn cheese_updates_in_state() {
         .await
         .unwrap();
 
-    // Both collected cheese — game should end (all cheese gone or score majority).
-    // Read GameOver.
+    // Turn 1: P1 collected (1,0), 2 cheese remain.
+    let (turn1, cheese1) = read_turn_state(&mut r1).await;
+    let _ = read_turn_state(&mut r2).await;
+    assert_eq!(turn1, 1);
+    assert_eq!(cheese1.len(), 2, "turn 1 should have 2 cheese");
+    assert!(
+        !cheese1.contains(&(1, 0)),
+        "(1,0) should be gone after collection"
+    );
+
+    // Both stay. Game ends at max_turns = 2.
+    w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
+        .await
+        .unwrap();
+    w2.write_frame(&action_frame(Direction::Stay, Player::Player2))
+        .await
+        .unwrap();
+
     let result_msg = read_game_over(&mut r1).await;
     let _ = read_game_over(&mut r2).await;
-
-    // Both collected at the same time — could be Draw or either wins depending
-    // on score. P2 starts on the cheese at (2,2) — they collect on turn 0 effectively.
-    // Wait, turn 0 is the first state. P2 is AT (2,2) which has cheese. The engine
-    // checks cheese collection after processing moves. On turn 0 P2 stays at (2,2),
-    // so it collects the cheese at (2,2). P1 moves to (1,0) and collects that cheese.
-    // Both get 1.0. It's a draw.
-    assert_eq!(result_msg, GameResult::Draw);
+    assert_eq!(result_msg, GameResult::Player1);
 
     let result = timeout(Duration::from_secs(5), play_task)
         .await
@@ -727,8 +680,10 @@ async fn cheese_updates_in_state() {
         .expect("play panicked")
         .expect("play returned error");
 
+    assert_eq!(result.result, GameResult::Player1);
     assert_eq!(result.player1_score, 1.0);
-    assert_eq!(result.player2_score, 1.0);
+    assert_eq!(result.player2_score, 0.0);
+    assert_eq!(result.turns_played, 2);
 
     drop(w1);
     drop(r1);
