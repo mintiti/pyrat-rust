@@ -16,8 +16,8 @@ enum Direction: uint8 {
 }
 
 enum Player: uint8 {
-  Rat = 0,
-  Python = 1,
+  Player1 = 0,
+  Player2 = 1,
 }
 
 enum TimingMode: uint8 {
@@ -26,8 +26,8 @@ enum TimingMode: uint8 {
 }
 
 enum GameResult: uint8 {
-  Rat = 0,
-  Python = 1,
+  Player1 = 0,
+  Player2 = 1,
   Draw = 2,
 }
 
@@ -77,8 +77,8 @@ table MatchConfig {
   walls: [Wall];
   mud: [Mud];
   cheese: [Vec2];
-  rat_start: Vec2;
-  python_start: Vec2;
+  player1_start: Vec2;
+  player2_start: Vec2;
   controlled_players: [Player];
   timing: TimingMode;
   move_timeout_ms: uint32;
@@ -89,15 +89,15 @@ table StartPreprocessing {}
 
 table TurnState {
   turn: uint16;
-  rat_position: Vec2;
-  python_position: Vec2;
-  rat_score: float32;
-  python_score: float32;
-  rat_mud_turns: uint8;
-  python_mud_turns: uint8;
+  player1_position: Vec2;
+  player2_position: Vec2;
+  player1_score: float32;
+  player2_score: float32;
+  player1_mud_turns: uint8;
+  player2_mud_turns: uint8;
   cheese: [Vec2];
-  rat_last_move: Direction;
-  python_last_move: Direction;
+  player1_last_move: Direction;
+  player2_last_move: Direction;
 }
 
 table Stop {}
@@ -108,8 +108,8 @@ table Timeout {
 
 table GameOver {
   result: GameResult;
-  rat_score: float32;
-  python_score: float32;
+  player1_score: float32;
+  player2_score: float32;
 }
 
 table Ping {}

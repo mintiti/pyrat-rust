@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use crate::session::messages::OwnedMatchConfig;
+use tokio::sync::mpsc;
+
+use crate::session::messages::{HostCommand, OwnedMatchConfig};
+use crate::session::SessionId;
 use crate::wire::Player;
 
 /// Which player a bot controls, identified by agent_id.
@@ -25,6 +28,32 @@ impl Default for SetupTiming {
         Self {
             startup_timeout: Duration::from_secs(30),
             preprocessing_timeout: Duration::from_secs(10),
+        }
+    }
+}
+
+/// Handle to an active session after setup completes.
+#[derive(Debug)]
+pub struct SessionHandle {
+    pub session_id: SessionId,
+    pub cmd_tx: mpsc::Sender<HostCommand>,
+    pub name: String,
+    pub author: String,
+    pub agent_id: String,
+    pub controlled_players: Vec<Player>,
+}
+
+/// Configuration for the playing phase.
+#[derive(Debug, Clone)]
+pub struct PlayingConfig {
+    /// Per-turn timeout for receiving actions from bots.
+    pub move_timeout: Duration,
+}
+
+impl Default for PlayingConfig {
+    fn default() -> Self {
+        Self {
+            move_timeout: Duration::from_secs(3),
         }
     }
 }

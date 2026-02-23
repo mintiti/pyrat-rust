@@ -98,32 +98,32 @@ mod tests {
 
     #[test]
     fn reserve_normal_two_agents() {
-        let players = entries(&[(Player::Rat, "bot-a"), (Player::Python, "bot-b")]);
+        let players = entries(&[(Player::Player1, "bot-a"), (Player::Player2, "bot-b")]);
         let mut slots = PlayerSlots::new(&players);
 
         let claimed = slots.reserve(SessionId(1), "bot-a");
-        assert_eq!(claimed, vec![Player::Rat]);
+        assert_eq!(claimed, vec![Player::Player1]);
         assert!(!slots.all_claimed());
 
         let claimed = slots.reserve(SessionId(2), "bot-b");
-        assert_eq!(claimed, vec![Player::Python]);
+        assert_eq!(claimed, vec![Player::Player2]);
         assert!(slots.all_claimed());
     }
 
     #[test]
     fn reserve_hivemind() {
-        let players = entries(&[(Player::Rat, "hive"), (Player::Python, "hive")]);
+        let players = entries(&[(Player::Player1, "hive"), (Player::Player2, "hive")]);
         let mut slots = PlayerSlots::new(&players);
         assert!(slots.is_hivemind());
 
         let claimed = slots.reserve(SessionId(1), "hive");
-        assert_eq!(claimed, vec![Player::Rat, Player::Python]);
+        assert_eq!(claimed, vec![Player::Player1, Player::Player2]);
         assert!(slots.all_claimed());
     }
 
     #[test]
     fn reserve_wrong_agent_id() {
-        let players = entries(&[(Player::Rat, "bot-a"), (Player::Python, "bot-b")]);
+        let players = entries(&[(Player::Player1, "bot-a"), (Player::Player2, "bot-b")]);
         let mut slots = PlayerSlots::new(&players);
 
         let claimed = slots.reserve(SessionId(1), "unknown");
@@ -133,7 +133,7 @@ mod tests {
 
     #[test]
     fn unreserve_frees_slot() {
-        let players = entries(&[(Player::Rat, "bot-a"), (Player::Python, "bot-b")]);
+        let players = entries(&[(Player::Player1, "bot-a"), (Player::Player2, "bot-b")]);
         let mut slots = PlayerSlots::new(&players);
 
         slots.reserve(SessionId(1), "bot-a");
@@ -145,26 +145,26 @@ mod tests {
 
         // Re-reserve with different session
         let claimed = slots.reserve(SessionId(3), "bot-a");
-        assert_eq!(claimed, vec![Player::Rat]);
+        assert_eq!(claimed, vec![Player::Player1]);
         assert!(slots.all_claimed());
     }
 
     #[test]
     fn is_hivemind_detection() {
-        let hive = entries(&[(Player::Rat, "same"), (Player::Python, "same")]);
+        let hive = entries(&[(Player::Player1, "same"), (Player::Player2, "same")]);
         assert!(PlayerSlots::new(&hive).is_hivemind());
 
-        let diff = entries(&[(Player::Rat, "a"), (Player::Python, "b")]);
+        let diff = entries(&[(Player::Player1, "a"), (Player::Player2, "b")]);
         assert!(!PlayerSlots::new(&diff).is_hivemind());
     }
 
     #[test]
     fn duplicate_agent_id_second_session_rejected() {
-        let players = entries(&[(Player::Rat, "bot-a"), (Player::Python, "bot-b")]);
+        let players = entries(&[(Player::Player1, "bot-a"), (Player::Player2, "bot-b")]);
         let mut slots = PlayerSlots::new(&players);
 
         let first = slots.reserve(SessionId(1), "bot-a");
-        assert_eq!(first, vec![Player::Rat]);
+        assert_eq!(first, vec![Player::Player1]);
 
         // Second session trying the same agent_id gets nothing.
         let second = slots.reserve(SessionId(2), "bot-a");
@@ -173,12 +173,12 @@ mod tests {
 
     #[test]
     fn players_for_session_returns_correct_set() {
-        let players = entries(&[(Player::Rat, "hive"), (Player::Python, "hive")]);
+        let players = entries(&[(Player::Player1, "hive"), (Player::Player2, "hive")]);
         let mut slots = PlayerSlots::new(&players);
         slots.reserve(SessionId(1), "hive");
 
         let ps = slots.players_for_session(SessionId(1));
-        assert_eq!(ps, vec![Player::Rat, Player::Python]);
+        assert_eq!(ps, vec![Player::Player1, Player::Player2]);
 
         let ps = slots.players_for_session(SessionId(99));
         assert!(ps.is_empty());
