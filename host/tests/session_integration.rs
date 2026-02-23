@@ -32,17 +32,28 @@ where
 }
 
 fn identify_frame(name: &str, author: &str) -> Vec<u8> {
+    identify_frame_with_agent(name, author, "")
+}
+
+fn identify_frame_with_agent(name: &str, author: &str, agent_id: &str) -> Vec<u8> {
     let name = name.to_owned();
     let author = author.to_owned();
+    let agent_id = agent_id.to_owned();
     build_bot_frame(BotMessage::Identify, move |fbb| {
         let n = fbb.create_string(&name);
         let a = fbb.create_string(&author);
+        let aid = if agent_id.is_empty() {
+            None
+        } else {
+            Some(fbb.create_string(&agent_id))
+        };
         Identify::create(
             fbb,
             &IdentifyArgs {
                 name: Some(n),
                 author: Some(a),
                 options: None,
+                agent_id: aid,
             },
         )
         .as_union_value()

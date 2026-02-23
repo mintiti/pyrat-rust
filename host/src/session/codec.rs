@@ -24,6 +24,7 @@ pub enum BotPayload {
         name: String,
         author: String,
         options: Vec<OwnedOptionDef>,
+        agent_id: String,
     },
     Ready,
     PreprocessingDone,
@@ -72,6 +73,7 @@ pub fn extract_bot_packet(buf: &[u8]) -> Result<(BotMessage, BotPayload), String
             name: id.name().unwrap_or("").to_owned(),
             author: id.author().unwrap_or("").to_owned(),
             options,
+            agent_id: id.agent_id().unwrap_or("").to_owned(),
         }
     } else if msg_type == BotMessage::Ready {
         BotPayload::Ready
@@ -321,6 +323,7 @@ mod tests {
                 name: Some(name),
                 author: Some(author),
                 options: None,
+                agent_id: None,
             },
         );
         let packet = wire::BotPacket::create(
@@ -400,10 +403,12 @@ mod tests {
                 name,
                 author,
                 options,
+                agent_id,
             } => {
                 assert_eq!(name, "TestBot");
                 assert_eq!(author, "Author");
                 assert!(options.is_empty());
+                assert!(agent_id.is_empty());
             },
             _ => panic!("expected Identify"),
         }

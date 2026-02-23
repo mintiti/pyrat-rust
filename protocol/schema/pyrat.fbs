@@ -135,6 +135,7 @@ table Identify {
   name: string;
   author: string;
   options: [OptionDef];
+  agent_id: string;
 }
 
 table Ready {}

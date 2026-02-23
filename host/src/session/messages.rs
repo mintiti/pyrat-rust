@@ -81,12 +81,13 @@ pub enum SessionMsg {
         session_id: SessionId,
         cmd_tx: mpsc::Sender<HostCommand>,
     },
-    /// Bot sent Identify with name, author, and declared options.
+    /// Bot sent Identify with name, author, declared options, and agent_id.
     Identified {
         session_id: SessionId,
         name: String,
         author: String,
         options: Vec<OwnedOptionDef>,
+        agent_id: String,
     },
     /// Bot declared itself ready to receive match configuration.
     Ready { session_id: SessionId },

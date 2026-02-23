@@ -249,11 +249,13 @@ async fn handle_bot_frame(
             name,
             author,
             options,
+            agent_id,
         } => SessionMsg::Identified {
             session_id,
             name,
             author,
             options,
+            agent_id,
         },
         BotPayload::Ready => SessionMsg::Ready { session_id },
         BotPayload::PreprocessingDone => SessionMsg::PreprocessingDone { session_id },

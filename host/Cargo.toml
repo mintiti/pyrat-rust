@@ -6,12 +6,12 @@ publish = false
 
 [dependencies]
 flatbuffers = "25.2.10"
-tokio = { version = "1", features = ["sync", "macros", "io-util", "time"] }
+tokio = { version = "1", features = ["sync", "macros", "io-util", "time", "net"] }
 tracing = "0.1"
 thiserror = "2"
 
 [dev-dependencies]
-tokio = { version = "1", features = ["sync", "macros", "io-util", "rt", "rt-multi-thread", "time"] }
+tokio = { version = "1", features = ["sync", "macros", "io-util", "rt", "rt-multi-thread", "time", "net"] }
 
 [lints]
 workspace = true
