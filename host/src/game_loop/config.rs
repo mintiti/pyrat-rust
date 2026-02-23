@@ -58,6 +58,19 @@ impl Default for PlayingConfig {
     }
 }
 
+/// How to launch a bot subprocess. Separate from [`MatchSetup`] because
+/// launching is optional — tests and GUIs that manage bots externally
+/// never provide this.
+#[derive(Debug, Clone)]
+pub struct BotConfig {
+    /// Shell command to spawn the bot. Empty string = manual start (skipped).
+    pub run_command: String,
+    /// Working directory for the spawned process.
+    pub working_dir: std::path::PathBuf,
+    /// Agent identifier the bot uses to identify itself on connect.
+    pub agent_id: String,
+}
+
 /// What the caller provides to run a match setup.
 #[derive(Debug, Clone)]
 pub struct MatchSetup {
