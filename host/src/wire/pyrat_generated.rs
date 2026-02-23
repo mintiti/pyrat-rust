@@ -124,24 +124,24 @@ pub mod pyrat {
             note = "Use associated constants instead. This will no longer be generated in 2021."
         )]
         #[allow(non_camel_case_types)]
-        pub const ENUM_VALUES_PLAYER: [Player; 2] = [Player::Rat, Player::Python];
+        pub const ENUM_VALUES_PLAYER: [Player; 2] = [Player::Player1, Player::Player2];
 
         #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
         #[repr(transparent)]
         pub struct Player(pub u8);
         #[allow(non_upper_case_globals)]
         impl Player {
-            pub const Rat: Self = Self(0);
-            pub const Python: Self = Self(1);
+            pub const Player1: Self = Self(0);
+            pub const Player2: Self = Self(1);
 
             pub const ENUM_MIN: u8 = 0;
             pub const ENUM_MAX: u8 = 1;
-            pub const ENUM_VALUES: &'static [Self] = &[Self::Rat, Self::Python];
+            pub const ENUM_VALUES: &'static [Self] = &[Self::Player1, Self::Player2];
             /// Returns the variant's name or "" if unknown.
             pub fn variant_name(self) -> Option<&'static str> {
                 match self {
-                    Self::Rat => Some("Rat"),
-                    Self::Python => Some("Python"),
+                    Self::Player1 => Some("Player1"),
+                    Self::Player2 => Some("Player2"),
                     _ => None,
                 }
             }
@@ -301,25 +301,25 @@ pub mod pyrat {
         )]
         #[allow(non_camel_case_types)]
         pub const ENUM_VALUES_GAME_RESULT: [GameResult; 3] =
-            [GameResult::Rat, GameResult::Python, GameResult::Draw];
+            [GameResult::Player1, GameResult::Player2, GameResult::Draw];
 
         #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
         #[repr(transparent)]
         pub struct GameResult(pub u8);
         #[allow(non_upper_case_globals)]
         impl GameResult {
-            pub const Rat: Self = Self(0);
-            pub const Python: Self = Self(1);
+            pub const Player1: Self = Self(0);
+            pub const Player2: Self = Self(1);
             pub const Draw: Self = Self(2);
 
             pub const ENUM_MIN: u8 = 0;
             pub const ENUM_MAX: u8 = 2;
-            pub const ENUM_VALUES: &'static [Self] = &[Self::Rat, Self::Python, Self::Draw];
+            pub const ENUM_VALUES: &'static [Self] = &[Self::Player1, Self::Player2, Self::Draw];
             /// Returns the variant's name or "" if unknown.
             pub fn variant_name(self) -> Option<&'static str> {
                 match self {
-                    Self::Rat => Some("Rat"),
-                    Self::Python => Some("Python"),
+                    Self::Player1 => Some("Player1"),
+                    Self::Player2 => Some("Player2"),
                     Self::Draw => Some("Draw"),
                     _ => None,
                 }
@@ -1536,8 +1536,8 @@ pub mod pyrat {
             pub const VT_WALLS: ::flatbuffers::VOffsetT = 10;
             pub const VT_MUD: ::flatbuffers::VOffsetT = 12;
             pub const VT_CHEESE: ::flatbuffers::VOffsetT = 14;
-            pub const VT_RAT_START: ::flatbuffers::VOffsetT = 16;
-            pub const VT_PYTHON_START: ::flatbuffers::VOffsetT = 18;
+            pub const VT_PLAYER1_START: ::flatbuffers::VOffsetT = 16;
+            pub const VT_PLAYER2_START: ::flatbuffers::VOffsetT = 18;
             pub const VT_CONTROLLED_PLAYERS: ::flatbuffers::VOffsetT = 20;
             pub const VT_TIMING: ::flatbuffers::VOffsetT = 22;
             pub const VT_MOVE_TIMEOUT_MS: ::flatbuffers::VOffsetT = 24;
@@ -1563,11 +1563,11 @@ pub mod pyrat {
                 if let Some(x) = args.controlled_players {
                     builder.add_controlled_players(x);
                 }
-                if let Some(x) = args.python_start {
-                    builder.add_python_start(x);
+                if let Some(x) = args.player2_start {
+                    builder.add_player2_start(x);
                 }
-                if let Some(x) = args.rat_start {
-                    builder.add_rat_start(x);
+                if let Some(x) = args.player1_start {
+                    builder.add_player1_start(x);
                 }
                 if let Some(x) = args.cheese {
                     builder.add_cheese(x);
@@ -1656,18 +1656,18 @@ pub mod pyrat {
                 }
             }
             #[inline]
-            pub fn rat_start(&self) -> Option<&'a Vec2> {
+            pub fn player1_start(&self) -> Option<&'a Vec2> {
                 // Safety:
                 // Created from valid Table for this object
                 // which contains a valid value in this slot
-                unsafe { self._tab.get::<Vec2>(MatchConfig::VT_RAT_START, None) }
+                unsafe { self._tab.get::<Vec2>(MatchConfig::VT_PLAYER1_START, None) }
             }
             #[inline]
-            pub fn python_start(&self) -> Option<&'a Vec2> {
+            pub fn player2_start(&self) -> Option<&'a Vec2> {
                 // Safety:
                 // Created from valid Table for this object
                 // which contains a valid value in this slot
-                unsafe { self._tab.get::<Vec2>(MatchConfig::VT_PYTHON_START, None) }
+                unsafe { self._tab.get::<Vec2>(MatchConfig::VT_PLAYER2_START, None) }
             }
             #[inline]
             pub fn controlled_players(&self) -> Option<::flatbuffers::Vector<'a, Player>> {
@@ -1730,8 +1730,8 @@ pub mod pyrat {
      .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<Wall>>>>("walls", Self::VT_WALLS, false)?
      .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<Mud>>>>("mud", Self::VT_MUD, false)?
      .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, Vec2>>>("cheese", Self::VT_CHEESE, false)?
-     .visit_field::<Vec2>("rat_start", Self::VT_RAT_START, false)?
-     .visit_field::<Vec2>("python_start", Self::VT_PYTHON_START, false)?
+     .visit_field::<Vec2>("player1_start", Self::VT_PLAYER1_START, false)?
+     .visit_field::<Vec2>("player2_start", Self::VT_PLAYER2_START, false)?
      .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, Player>>>("controlled_players", Self::VT_CONTROLLED_PLAYERS, false)?
      .visit_field::<TimingMode>("timing", Self::VT_TIMING, false)?
      .visit_field::<u32>("move_timeout_ms", Self::VT_MOVE_TIMEOUT_MS, false)?
@@ -1755,8 +1755,8 @@ pub mod pyrat {
                 >,
             >,
             pub cheese: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, Vec2>>>,
-            pub rat_start: Option<&'a Vec2>,
-            pub python_start: Option<&'a Vec2>,
+            pub player1_start: Option<&'a Vec2>,
+            pub player2_start: Option<&'a Vec2>,
             pub controlled_players:
                 Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, Player>>>,
             pub timing: TimingMode,
@@ -1773,8 +1773,8 @@ pub mod pyrat {
                     walls: None,
                     mud: None,
                     cheese: None,
-                    rat_start: None,
-                    python_start: None,
+                    player1_start: None,
+                    player2_start: None,
                     controlled_players: None,
                     timing: TimingMode::Wait,
                     move_timeout_ms: 0,
@@ -1832,14 +1832,14 @@ pub mod pyrat {
                 );
             }
             #[inline]
-            pub fn add_rat_start(&mut self, rat_start: &Vec2) {
+            pub fn add_player1_start(&mut self, player1_start: &Vec2) {
                 self.fbb_
-                    .push_slot_always::<&Vec2>(MatchConfig::VT_RAT_START, rat_start);
+                    .push_slot_always::<&Vec2>(MatchConfig::VT_PLAYER1_START, player1_start);
             }
             #[inline]
-            pub fn add_python_start(&mut self, python_start: &Vec2) {
+            pub fn add_player2_start(&mut self, player2_start: &Vec2) {
                 self.fbb_
-                    .push_slot_always::<&Vec2>(MatchConfig::VT_PYTHON_START, python_start);
+                    .push_slot_always::<&Vec2>(MatchConfig::VT_PLAYER2_START, player2_start);
             }
             #[inline]
             pub fn add_controlled_players(
@@ -1895,8 +1895,8 @@ pub mod pyrat {
                 ds.field("walls", &self.walls());
                 ds.field("mud", &self.mud());
                 ds.field("cheese", &self.cheese());
-                ds.field("rat_start", &self.rat_start());
-                ds.field("python_start", &self.python_start());
+                ds.field("player1_start", &self.player1_start());
+                ds.field("player2_start", &self.player2_start());
                 ds.field("controlled_players", &self.controlled_players());
                 ds.field("timing", &self.timing());
                 ds.field("move_timeout_ms", &self.move_timeout_ms());
@@ -2006,15 +2006,15 @@ pub mod pyrat {
 
         impl<'a> TurnState<'a> {
             pub const VT_TURN: ::flatbuffers::VOffsetT = 4;
-            pub const VT_RAT_POSITION: ::flatbuffers::VOffsetT = 6;
-            pub const VT_PYTHON_POSITION: ::flatbuffers::VOffsetT = 8;
-            pub const VT_RAT_SCORE: ::flatbuffers::VOffsetT = 10;
-            pub const VT_PYTHON_SCORE: ::flatbuffers::VOffsetT = 12;
-            pub const VT_RAT_MUD_TURNS: ::flatbuffers::VOffsetT = 14;
-            pub const VT_PYTHON_MUD_TURNS: ::flatbuffers::VOffsetT = 16;
+            pub const VT_PLAYER1_POSITION: ::flatbuffers::VOffsetT = 6;
+            pub const VT_PLAYER2_POSITION: ::flatbuffers::VOffsetT = 8;
+            pub const VT_PLAYER1_SCORE: ::flatbuffers::VOffsetT = 10;
+            pub const VT_PLAYER2_SCORE: ::flatbuffers::VOffsetT = 12;
+            pub const VT_PLAYER1_MUD_TURNS: ::flatbuffers::VOffsetT = 14;
+            pub const VT_PLAYER2_MUD_TURNS: ::flatbuffers::VOffsetT = 16;
             pub const VT_CHEESE: ::flatbuffers::VOffsetT = 18;
-            pub const VT_RAT_LAST_MOVE: ::flatbuffers::VOffsetT = 20;
-            pub const VT_PYTHON_LAST_MOVE: ::flatbuffers::VOffsetT = 22;
+            pub const VT_PLAYER1_LAST_MOVE: ::flatbuffers::VOffsetT = 20;
+            pub const VT_PLAYER2_LAST_MOVE: ::flatbuffers::VOffsetT = 22;
 
             #[inline]
             pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -2034,19 +2034,19 @@ pub mod pyrat {
                 if let Some(x) = args.cheese {
                     builder.add_cheese(x);
                 }
-                builder.add_python_score(args.python_score);
-                builder.add_rat_score(args.rat_score);
-                if let Some(x) = args.python_position {
-                    builder.add_python_position(x);
+                builder.add_player2_score(args.player2_score);
+                builder.add_player1_score(args.player1_score);
+                if let Some(x) = args.player2_position {
+                    builder.add_player2_position(x);
                 }
-                if let Some(x) = args.rat_position {
-                    builder.add_rat_position(x);
+                if let Some(x) = args.player1_position {
+                    builder.add_player1_position(x);
                 }
                 builder.add_turn(args.turn);
-                builder.add_python_last_move(args.python_last_move);
-                builder.add_rat_last_move(args.rat_last_move);
-                builder.add_python_mud_turns(args.python_mud_turns);
-                builder.add_rat_mud_turns(args.rat_mud_turns);
+                builder.add_player2_last_move(args.player2_last_move);
+                builder.add_player1_last_move(args.player1_last_move);
+                builder.add_player2_mud_turns(args.player2_mud_turns);
+                builder.add_player1_mud_turns(args.player1_mud_turns);
                 builder.finish()
             }
 
@@ -2058,60 +2058,60 @@ pub mod pyrat {
                 unsafe { self._tab.get::<u16>(TurnState::VT_TURN, Some(0)).unwrap() }
             }
             #[inline]
-            pub fn rat_position(&self) -> Option<&'a Vec2> {
+            pub fn player1_position(&self) -> Option<&'a Vec2> {
                 // Safety:
                 // Created from valid Table for this object
                 // which contains a valid value in this slot
-                unsafe { self._tab.get::<Vec2>(TurnState::VT_RAT_POSITION, None) }
+                unsafe { self._tab.get::<Vec2>(TurnState::VT_PLAYER1_POSITION, None) }
             }
             #[inline]
-            pub fn python_position(&self) -> Option<&'a Vec2> {
+            pub fn player2_position(&self) -> Option<&'a Vec2> {
                 // Safety:
                 // Created from valid Table for this object
                 // which contains a valid value in this slot
-                unsafe { self._tab.get::<Vec2>(TurnState::VT_PYTHON_POSITION, None) }
+                unsafe { self._tab.get::<Vec2>(TurnState::VT_PLAYER2_POSITION, None) }
             }
             #[inline]
-            pub fn rat_score(&self) -> f32 {
+            pub fn player1_score(&self) -> f32 {
                 // Safety:
                 // Created from valid Table for this object
                 // which contains a valid value in this slot
                 unsafe {
                     self._tab
-                        .get::<f32>(TurnState::VT_RAT_SCORE, Some(0.0))
+                        .get::<f32>(TurnState::VT_PLAYER1_SCORE, Some(0.0))
                         .unwrap()
                 }
             }
             #[inline]
-            pub fn python_score(&self) -> f32 {
+            pub fn player2_score(&self) -> f32 {
                 // Safety:
                 // Created from valid Table for this object
                 // which contains a valid value in this slot
                 unsafe {
                     self._tab
-                        .get::<f32>(TurnState::VT_PYTHON_SCORE, Some(0.0))
+                        .get::<f32>(TurnState::VT_PLAYER2_SCORE, Some(0.0))
                         .unwrap()
                 }
             }
             #[inline]
-            pub fn rat_mud_turns(&self) -> u8 {
+            pub fn player1_mud_turns(&self) -> u8 {
                 // Safety:
                 // Created from valid Table for this object
                 // which contains a valid value in this slot
                 unsafe {
                     self._tab
-                        .get::<u8>(TurnState::VT_RAT_MUD_TURNS, Some(0))
+                        .get::<u8>(TurnState::VT_PLAYER1_MUD_TURNS, Some(0))
                         .unwrap()
                 }
             }
             #[inline]
-            pub fn python_mud_turns(&self) -> u8 {
+            pub fn player2_mud_turns(&self) -> u8 {
                 // Safety:
                 // Created from valid Table for this object
                 // which contains a valid value in this slot
                 unsafe {
                     self._tab
-                        .get::<u8>(TurnState::VT_PYTHON_MUD_TURNS, Some(0))
+                        .get::<u8>(TurnState::VT_PLAYER2_MUD_TURNS, Some(0))
                         .unwrap()
                 }
             }
@@ -2129,24 +2129,24 @@ pub mod pyrat {
                 }
             }
             #[inline]
-            pub fn rat_last_move(&self) -> Direction {
+            pub fn player1_last_move(&self) -> Direction {
                 // Safety:
                 // Created from valid Table for this object
                 // which contains a valid value in this slot
                 unsafe {
                     self._tab
-                        .get::<Direction>(TurnState::VT_RAT_LAST_MOVE, Some(Direction::Up))
+                        .get::<Direction>(TurnState::VT_PLAYER1_LAST_MOVE, Some(Direction::Up))
                         .unwrap()
                 }
             }
             #[inline]
-            pub fn python_last_move(&self) -> Direction {
+            pub fn player2_last_move(&self) -> Direction {
                 // Safety:
                 // Created from valid Table for this object
                 // which contains a valid value in this slot
                 unsafe {
                     self._tab
-                        .get::<Direction>(TurnState::VT_PYTHON_LAST_MOVE, Some(Direction::Up))
+                        .get::<Direction>(TurnState::VT_PLAYER2_LAST_MOVE, Some(Direction::Up))
                         .unwrap()
                 }
             }
@@ -2160,49 +2160,57 @@ pub mod pyrat {
             ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
                 v.visit_table(pos)?
                     .visit_field::<u16>("turn", Self::VT_TURN, false)?
-                    .visit_field::<Vec2>("rat_position", Self::VT_RAT_POSITION, false)?
-                    .visit_field::<Vec2>("python_position", Self::VT_PYTHON_POSITION, false)?
-                    .visit_field::<f32>("rat_score", Self::VT_RAT_SCORE, false)?
-                    .visit_field::<f32>("python_score", Self::VT_PYTHON_SCORE, false)?
-                    .visit_field::<u8>("rat_mud_turns", Self::VT_RAT_MUD_TURNS, false)?
-                    .visit_field::<u8>("python_mud_turns", Self::VT_PYTHON_MUD_TURNS, false)?
+                    .visit_field::<Vec2>("player1_position", Self::VT_PLAYER1_POSITION, false)?
+                    .visit_field::<Vec2>("player2_position", Self::VT_PLAYER2_POSITION, false)?
+                    .visit_field::<f32>("player1_score", Self::VT_PLAYER1_SCORE, false)?
+                    .visit_field::<f32>("player2_score", Self::VT_PLAYER2_SCORE, false)?
+                    .visit_field::<u8>("player1_mud_turns", Self::VT_PLAYER1_MUD_TURNS, false)?
+                    .visit_field::<u8>("player2_mud_turns", Self::VT_PLAYER2_MUD_TURNS, false)?
                     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, Vec2>>>(
                         "cheese",
                         Self::VT_CHEESE,
                         false,
                     )?
-                    .visit_field::<Direction>("rat_last_move", Self::VT_RAT_LAST_MOVE, false)?
-                    .visit_field::<Direction>("python_last_move", Self::VT_PYTHON_LAST_MOVE, false)?
+                    .visit_field::<Direction>(
+                        "player1_last_move",
+                        Self::VT_PLAYER1_LAST_MOVE,
+                        false,
+                    )?
+                    .visit_field::<Direction>(
+                        "player2_last_move",
+                        Self::VT_PLAYER2_LAST_MOVE,
+                        false,
+                    )?
                     .finish();
                 Ok(())
             }
         }
         pub struct TurnStateArgs<'a> {
             pub turn: u16,
-            pub rat_position: Option<&'a Vec2>,
-            pub python_position: Option<&'a Vec2>,
-            pub rat_score: f32,
-            pub python_score: f32,
-            pub rat_mud_turns: u8,
-            pub python_mud_turns: u8,
+            pub player1_position: Option<&'a Vec2>,
+            pub player2_position: Option<&'a Vec2>,
+            pub player1_score: f32,
+            pub player2_score: f32,
+            pub player1_mud_turns: u8,
+            pub player2_mud_turns: u8,
             pub cheese: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, Vec2>>>,
-            pub rat_last_move: Direction,
-            pub python_last_move: Direction,
+            pub player1_last_move: Direction,
+            pub player2_last_move: Direction,
         }
         impl<'a> Default for TurnStateArgs<'a> {
             #[inline]
             fn default() -> Self {
                 TurnStateArgs {
                     turn: 0,
-                    rat_position: None,
-                    python_position: None,
-                    rat_score: 0.0,
-                    python_score: 0.0,
-                    rat_mud_turns: 0,
-                    python_mud_turns: 0,
+                    player1_position: None,
+                    player2_position: None,
+                    player1_score: 0.0,
+                    player2_score: 0.0,
+                    player1_mud_turns: 0,
+                    player2_mud_turns: 0,
                     cheese: None,
-                    rat_last_move: Direction::Up,
-                    python_last_move: Direction::Up,
+                    player1_last_move: Direction::Up,
+                    player2_last_move: Direction::Up,
                 }
             }
         }
@@ -2217,34 +2225,34 @@ pub mod pyrat {
                 self.fbb_.push_slot::<u16>(TurnState::VT_TURN, turn, 0);
             }
             #[inline]
-            pub fn add_rat_position(&mut self, rat_position: &Vec2) {
+            pub fn add_player1_position(&mut self, player1_position: &Vec2) {
                 self.fbb_
-                    .push_slot_always::<&Vec2>(TurnState::VT_RAT_POSITION, rat_position);
+                    .push_slot_always::<&Vec2>(TurnState::VT_PLAYER1_POSITION, player1_position);
             }
             #[inline]
-            pub fn add_python_position(&mut self, python_position: &Vec2) {
+            pub fn add_player2_position(&mut self, player2_position: &Vec2) {
                 self.fbb_
-                    .push_slot_always::<&Vec2>(TurnState::VT_PYTHON_POSITION, python_position);
+                    .push_slot_always::<&Vec2>(TurnState::VT_PLAYER2_POSITION, player2_position);
             }
             #[inline]
-            pub fn add_rat_score(&mut self, rat_score: f32) {
+            pub fn add_player1_score(&mut self, player1_score: f32) {
                 self.fbb_
-                    .push_slot::<f32>(TurnState::VT_RAT_SCORE, rat_score, 0.0);
+                    .push_slot::<f32>(TurnState::VT_PLAYER1_SCORE, player1_score, 0.0);
             }
             #[inline]
-            pub fn add_python_score(&mut self, python_score: f32) {
+            pub fn add_player2_score(&mut self, player2_score: f32) {
                 self.fbb_
-                    .push_slot::<f32>(TurnState::VT_PYTHON_SCORE, python_score, 0.0);
+                    .push_slot::<f32>(TurnState::VT_PLAYER2_SCORE, player2_score, 0.0);
             }
             #[inline]
-            pub fn add_rat_mud_turns(&mut self, rat_mud_turns: u8) {
+            pub fn add_player1_mud_turns(&mut self, player1_mud_turns: u8) {
                 self.fbb_
-                    .push_slot::<u8>(TurnState::VT_RAT_MUD_TURNS, rat_mud_turns, 0);
+                    .push_slot::<u8>(TurnState::VT_PLAYER1_MUD_TURNS, player1_mud_turns, 0);
             }
             #[inline]
-            pub fn add_python_mud_turns(&mut self, python_mud_turns: u8) {
+            pub fn add_player2_mud_turns(&mut self, player2_mud_turns: u8) {
                 self.fbb_
-                    .push_slot::<u8>(TurnState::VT_PYTHON_MUD_TURNS, python_mud_turns, 0);
+                    .push_slot::<u8>(TurnState::VT_PLAYER2_MUD_TURNS, player2_mud_turns, 0);
             }
             #[inline]
             pub fn add_cheese(
@@ -2255,18 +2263,18 @@ pub mod pyrat {
                     .push_slot_always::<::flatbuffers::WIPOffset<_>>(TurnState::VT_CHEESE, cheese);
             }
             #[inline]
-            pub fn add_rat_last_move(&mut self, rat_last_move: Direction) {
+            pub fn add_player1_last_move(&mut self, player1_last_move: Direction) {
                 self.fbb_.push_slot::<Direction>(
-                    TurnState::VT_RAT_LAST_MOVE,
-                    rat_last_move,
+                    TurnState::VT_PLAYER1_LAST_MOVE,
+                    player1_last_move,
                     Direction::Up,
                 );
             }
             #[inline]
-            pub fn add_python_last_move(&mut self, python_last_move: Direction) {
+            pub fn add_player2_last_move(&mut self, player2_last_move: Direction) {
                 self.fbb_.push_slot::<Direction>(
-                    TurnState::VT_PYTHON_LAST_MOVE,
-                    python_last_move,
+                    TurnState::VT_PLAYER2_LAST_MOVE,
+                    player2_last_move,
                     Direction::Up,
                 );
             }
@@ -2291,15 +2299,15 @@ pub mod pyrat {
             fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                 let mut ds = f.debug_struct("TurnState");
                 ds.field("turn", &self.turn());
-                ds.field("rat_position", &self.rat_position());
-                ds.field("python_position", &self.python_position());
-                ds.field("rat_score", &self.rat_score());
-                ds.field("python_score", &self.python_score());
-                ds.field("rat_mud_turns", &self.rat_mud_turns());
-                ds.field("python_mud_turns", &self.python_mud_turns());
+                ds.field("player1_position", &self.player1_position());
+                ds.field("player2_position", &self.player2_position());
+                ds.field("player1_score", &self.player1_score());
+                ds.field("player2_score", &self.player2_score());
+                ds.field("player1_mud_turns", &self.player1_mud_turns());
+                ds.field("player2_mud_turns", &self.player2_mud_turns());
                 ds.field("cheese", &self.cheese());
-                ds.field("rat_last_move", &self.rat_last_move());
-                ds.field("python_last_move", &self.python_last_move());
+                ds.field("player1_last_move", &self.player1_last_move());
+                ds.field("player2_last_move", &self.player2_last_move());
                 ds.finish()
             }
         }
@@ -2518,8 +2526,8 @@ pub mod pyrat {
 
         impl<'a> GameOver<'a> {
             pub const VT_RESULT: ::flatbuffers::VOffsetT = 4;
-            pub const VT_RAT_SCORE: ::flatbuffers::VOffsetT = 6;
-            pub const VT_PYTHON_SCORE: ::flatbuffers::VOffsetT = 8;
+            pub const VT_PLAYER1_SCORE: ::flatbuffers::VOffsetT = 6;
+            pub const VT_PLAYER2_SCORE: ::flatbuffers::VOffsetT = 8;
 
             #[inline]
             pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -2536,8 +2544,8 @@ pub mod pyrat {
                 args: &'args GameOverArgs,
             ) -> ::flatbuffers::WIPOffset<GameOver<'bldr>> {
                 let mut builder = GameOverBuilder::new(_fbb);
-                builder.add_python_score(args.python_score);
-                builder.add_rat_score(args.rat_score);
+                builder.add_player2_score(args.player2_score);
+                builder.add_player1_score(args.player1_score);
                 builder.add_result(args.result);
                 builder.finish()
             }
@@ -2549,29 +2557,29 @@ pub mod pyrat {
                 // which contains a valid value in this slot
                 unsafe {
                     self._tab
-                        .get::<GameResult>(GameOver::VT_RESULT, Some(GameResult::Rat))
+                        .get::<GameResult>(GameOver::VT_RESULT, Some(GameResult::Player1))
                         .unwrap()
                 }
             }
             #[inline]
-            pub fn rat_score(&self) -> f32 {
+            pub fn player1_score(&self) -> f32 {
                 // Safety:
                 // Created from valid Table for this object
                 // which contains a valid value in this slot
                 unsafe {
                     self._tab
-                        .get::<f32>(GameOver::VT_RAT_SCORE, Some(0.0))
+                        .get::<f32>(GameOver::VT_PLAYER1_SCORE, Some(0.0))
                         .unwrap()
                 }
             }
             #[inline]
-            pub fn python_score(&self) -> f32 {
+            pub fn player2_score(&self) -> f32 {
                 // Safety:
                 // Created from valid Table for this object
                 // which contains a valid value in this slot
                 unsafe {
                     self._tab
-                        .get::<f32>(GameOver::VT_PYTHON_SCORE, Some(0.0))
+                        .get::<f32>(GameOver::VT_PLAYER2_SCORE, Some(0.0))
                         .unwrap()
                 }
             }
@@ -2585,24 +2593,24 @@ pub mod pyrat {
             ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
                 v.visit_table(pos)?
                     .visit_field::<GameResult>("result", Self::VT_RESULT, false)?
-                    .visit_field::<f32>("rat_score", Self::VT_RAT_SCORE, false)?
-                    .visit_field::<f32>("python_score", Self::VT_PYTHON_SCORE, false)?
+                    .visit_field::<f32>("player1_score", Self::VT_PLAYER1_SCORE, false)?
+                    .visit_field::<f32>("player2_score", Self::VT_PLAYER2_SCORE, false)?
                     .finish();
                 Ok(())
             }
         }
         pub struct GameOverArgs {
             pub result: GameResult,
-            pub rat_score: f32,
-            pub python_score: f32,
+            pub player1_score: f32,
+            pub player2_score: f32,
         }
         impl<'a> Default for GameOverArgs {
             #[inline]
             fn default() -> Self {
                 GameOverArgs {
-                    result: GameResult::Rat,
-                    rat_score: 0.0,
-                    python_score: 0.0,
+                    result: GameResult::Player1,
+                    player1_score: 0.0,
+                    player2_score: 0.0,
                 }
             }
         }
@@ -2615,17 +2623,17 @@ pub mod pyrat {
             #[inline]
             pub fn add_result(&mut self, result: GameResult) {
                 self.fbb_
-                    .push_slot::<GameResult>(GameOver::VT_RESULT, result, GameResult::Rat);
+                    .push_slot::<GameResult>(GameOver::VT_RESULT, result, GameResult::Player1);
             }
             #[inline]
-            pub fn add_rat_score(&mut self, rat_score: f32) {
+            pub fn add_player1_score(&mut self, player1_score: f32) {
                 self.fbb_
-                    .push_slot::<f32>(GameOver::VT_RAT_SCORE, rat_score, 0.0);
+                    .push_slot::<f32>(GameOver::VT_PLAYER1_SCORE, player1_score, 0.0);
             }
             #[inline]
-            pub fn add_python_score(&mut self, python_score: f32) {
+            pub fn add_player2_score(&mut self, player2_score: f32) {
                 self.fbb_
-                    .push_slot::<f32>(GameOver::VT_PYTHON_SCORE, python_score, 0.0);
+                    .push_slot::<f32>(GameOver::VT_PLAYER2_SCORE, player2_score, 0.0);
             }
             #[inline]
             pub fn new(
@@ -2648,8 +2656,8 @@ pub mod pyrat {
             fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                 let mut ds = f.debug_struct("GameOver");
                 ds.field("result", &self.result());
-                ds.field("rat_score", &self.rat_score());
-                ds.field("python_score", &self.python_score());
+                ds.field("player1_score", &self.player1_score());
+                ds.field("player2_score", &self.player2_score());
                 ds.finish()
             }
         }
@@ -3529,7 +3537,7 @@ pub mod pyrat {
                 // which contains a valid value in this slot
                 unsafe {
                     self._tab
-                        .get::<Player>(Action::VT_PLAYER, Some(Player::Rat))
+                        .get::<Player>(Action::VT_PLAYER, Some(Player::Player1))
                         .unwrap()
                 }
             }
@@ -3557,7 +3565,7 @@ pub mod pyrat {
             fn default() -> Self {
                 ActionArgs {
                     direction: Direction::Up,
-                    player: Player::Rat,
+                    player: Player::Player1,
                 }
             }
         }
@@ -3575,7 +3583,7 @@ pub mod pyrat {
             #[inline]
             pub fn add_player(&mut self, player: Player) {
                 self.fbb_
-                    .push_slot::<Player>(Action::VT_PLAYER, player, Player::Rat);
+                    .push_slot::<Player>(Action::VT_PLAYER, player, Player::Player1);
             }
             #[inline]
             pub fn new(

@@ -105,11 +105,11 @@ async fn happy_path_two_bots() {
     let setup = MatchSetup {
         players: vec![
             PlayerEntry {
-                player: Player::Rat,
+                player: Player::Player1,
                 agent_id: "bot-a".into(),
             },
             PlayerEntry {
-                player: Player::Python,
+                player: Player::Player2,
                 agent_id: "bot-b".into(),
             },
         ],
@@ -137,10 +137,10 @@ async fn happy_path_two_bots() {
     // Verify controlled_players are assigned correctly.
     for s in &result.sessions {
         if s.agent_id == "bot-a" {
-            assert_eq!(s.controlled_players, vec![Player::Rat]);
+            assert_eq!(s.controlled_players, vec![Player::Player1]);
             assert_eq!(s.name, "BotA");
         } else if s.agent_id == "bot-b" {
-            assert_eq!(s.controlled_players, vec![Player::Python]);
+            assert_eq!(s.controlled_players, vec![Player::Player2]);
             assert_eq!(s.name, "BotB");
         } else {
             panic!("unexpected agent_id: {}", s.agent_id);
@@ -169,11 +169,11 @@ async fn hivemind_single_bot() {
     let setup = MatchSetup {
         players: vec![
             PlayerEntry {
-                player: Player::Rat,
+                player: Player::Player1,
                 agent_id: "hive".into(),
             },
             PlayerEntry {
-                player: Player::Python,
+                player: Player::Player2,
                 agent_id: "hive".into(),
             },
         ],
@@ -194,7 +194,7 @@ async fn hivemind_single_bot() {
 
     assert_eq!(result.sessions.len(), 1);
     let s = &result.sessions[0];
-    assert_eq!(s.controlled_players, vec![Player::Rat, Player::Python]);
+    assert_eq!(s.controlled_players, vec![Player::Player1, Player::Player2]);
 
     drop(w1);
     drop(r1);
@@ -213,11 +213,11 @@ async fn startup_timeout_no_bots() {
     let setup = MatchSetup {
         players: vec![
             PlayerEntry {
-                player: Player::Rat,
+                player: Player::Player1,
                 agent_id: "bot-a".into(),
             },
             PlayerEntry {
-                player: Player::Python,
+                player: Player::Player2,
                 agent_id: "bot-b".into(),
             },
         ],
@@ -245,11 +245,11 @@ async fn startup_timeout_one_bot() {
     let setup = MatchSetup {
         players: vec![
             PlayerEntry {
-                player: Player::Rat,
+                player: Player::Player1,
                 agent_id: "bot-a".into(),
             },
             PlayerEntry {
-                player: Player::Python,
+                player: Player::Player2,
                 agent_id: "bot-b".into(),
             },
         ],
@@ -291,11 +291,11 @@ async fn preprocessing_timeout_errors() {
     let setup = MatchSetup {
         players: vec![
             PlayerEntry {
-                player: Player::Rat,
+                player: Player::Player1,
                 agent_id: "bot-a".into(),
             },
             PlayerEntry {
-                player: Player::Python,
+                player: Player::Player2,
                 agent_id: "bot-b".into(),
             },
         ],
@@ -364,11 +364,11 @@ async fn disconnect_during_setup() {
     let setup = MatchSetup {
         players: vec![
             PlayerEntry {
-                player: Player::Rat,
+                player: Player::Player1,
                 agent_id: "bot-a".into(),
             },
             PlayerEntry {
-                player: Player::Python,
+                player: Player::Player2,
                 agent_id: "bot-b".into(),
             },
         ],
@@ -441,11 +441,11 @@ async fn unknown_agent_id_ignored() {
     let setup = MatchSetup {
         players: vec![
             PlayerEntry {
-                player: Player::Rat,
+                player: Player::Player1,
                 agent_id: "bot-a".into(),
             },
             PlayerEntry {
-                player: Player::Python,
+                player: Player::Player2,
                 agent_id: "bot-b".into(),
             },
         ],
@@ -509,11 +509,11 @@ async fn set_options_arrive_before_match_config() {
     let setup = MatchSetup {
         players: vec![
             PlayerEntry {
-                player: Player::Rat,
+                player: Player::Player1,
                 agent_id: "bot-a".into(),
             },
             PlayerEntry {
-                player: Player::Python,
+                player: Player::Player2,
                 agent_id: "bot-b".into(),
             },
         ],
@@ -556,7 +556,7 @@ async fn set_options_arrive_before_match_config() {
     // Verify controlled_players was filled in.
     let mc = pkt2.message_as_match_config().unwrap();
     let cp: Vec<Player> = mc.controlled_players().unwrap().iter().collect();
-    assert_eq!(cp, vec![Player::Rat]);
+    assert_eq!(cp, vec![Player::Player1]);
 
     let frame3 = r1.read_frame().await.unwrap();
     let pkt3 = flatbuffers::root::<HostPacket>(frame3).unwrap();
@@ -611,11 +611,11 @@ async fn disconnect_during_phase_b() {
     let setup = MatchSetup {
         players: vec![
             PlayerEntry {
-                player: Player::Rat,
+                player: Player::Player1,
                 agent_id: "bot-a".into(),
             },
             PlayerEntry {
-                player: Player::Python,
+                player: Player::Player2,
                 agent_id: "bot-b".into(),
             },
         ],
@@ -669,11 +669,11 @@ async fn disconnect_during_phase_c() {
     let setup = MatchSetup {
         players: vec![
             PlayerEntry {
-                player: Player::Rat,
+                player: Player::Player1,
                 agent_id: "bot-a".into(),
             },
             PlayerEntry {
-                player: Player::Python,
+                player: Player::Player2,
                 agent_id: "bot-b".into(),
             },
         ],
@@ -749,11 +749,11 @@ async fn all_disconnected_channel_closed() {
     let setup = MatchSetup {
         players: vec![
             PlayerEntry {
-                player: Player::Rat,
+                player: Player::Player1,
                 agent_id: "bot-a".into(),
             },
             PlayerEntry {
-                player: Player::Python,
+                player: Player::Player2,
                 agent_id: "bot-b".into(),
             },
         ],

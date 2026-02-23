@@ -177,8 +177,8 @@ pub fn serialize_host_command(fbb: &mut FlatBufferBuilder<'_>, cmd: &HostCommand
                     walls: Some(walls),
                     mud: Some(muds),
                     cheese: Some(cheese),
-                    rat_start: Some(&Vec2::new(cfg.rat_start.0, cfg.rat_start.1)),
-                    python_start: Some(&Vec2::new(cfg.python_start.0, cfg.python_start.1)),
+                    player1_start: Some(&Vec2::new(cfg.player1_start.0, cfg.player1_start.1)),
+                    player2_start: Some(&Vec2::new(cfg.player2_start.0, cfg.player2_start.1)),
                     controlled_players: Some(players),
                     timing: cfg.timing,
                     move_timeout_ms: cfg.move_timeout_ms,
@@ -199,15 +199,21 @@ pub fn serialize_host_command(fbb: &mut FlatBufferBuilder<'_>, cmd: &HostCommand
                 fbb,
                 &wire::TurnStateArgs {
                     turn: ts.turn,
-                    rat_position: Some(&Vec2::new(ts.rat_position.0, ts.rat_position.1)),
-                    python_position: Some(&Vec2::new(ts.python_position.0, ts.python_position.1)),
-                    rat_score: ts.rat_score,
-                    python_score: ts.python_score,
-                    rat_mud_turns: ts.rat_mud_turns,
-                    python_mud_turns: ts.python_mud_turns,
+                    player1_position: Some(&Vec2::new(
+                        ts.player1_position.0,
+                        ts.player1_position.1,
+                    )),
+                    player2_position: Some(&Vec2::new(
+                        ts.player2_position.0,
+                        ts.player2_position.1,
+                    )),
+                    player1_score: ts.player1_score,
+                    player2_score: ts.player2_score,
+                    player1_mud_turns: ts.player1_mud_turns,
+                    player2_mud_turns: ts.player2_mud_turns,
                     cheese: Some(cheese),
-                    rat_last_move: ts.rat_last_move,
-                    python_last_move: ts.python_last_move,
+                    player1_last_move: ts.player1_last_move,
+                    player2_last_move: ts.player2_last_move,
                 },
             );
             (HostMessage::TurnState, off.as_union_value())
@@ -223,15 +229,15 @@ pub fn serialize_host_command(fbb: &mut FlatBufferBuilder<'_>, cmd: &HostCommand
         },
         HostCommand::GameOver {
             result,
-            rat_score,
-            python_score,
+            player1_score,
+            player2_score,
         } => {
             let off = wire::GameOver::create(
                 fbb,
                 &wire::GameOverArgs {
                     result: *result,
-                    rat_score: *rat_score,
-                    python_score: *python_score,
+                    player1_score: *player1_score,
+                    player2_score: *player2_score,
                 },
             );
             (HostMessage::GameOver, off.as_union_value())
@@ -294,8 +300,8 @@ pub fn extract_match_config(mc: &wire::MatchConfig<'_>) -> OwnedMatchConfig {
             .cheese()
             .map(|cs| (0..cs.len()).map(|i| vec2_to_tuple(cs.get(i))).collect())
             .unwrap_or_default(),
-        rat_start: vec2_opt(mc.rat_start()),
-        python_start: vec2_opt(mc.python_start()),
+        player1_start: vec2_opt(mc.player1_start()),
+        player2_start: vec2_opt(mc.player2_start()),
         controlled_players: mc
             .controlled_players()
             .map(|ps| ps.iter().collect())
@@ -416,12 +422,12 @@ mod tests {
 
     #[test]
     fn extract_action() {
-        let buf = build_action(Direction::Left, Player::Python);
+        let buf = build_action(Direction::Left, Player::Player2);
         let (msg_type, payload) = extract_bot_packet(&buf).unwrap();
         assert_eq!(msg_type, BotMessage::Action);
         match payload {
             BotPayload::Action { player, direction } => {
-                assert_eq!(player, Player::Python);
+                assert_eq!(player, Player::Player2);
                 assert_eq!(direction, Direction::Left);
             },
             _ => panic!("expected Action"),
@@ -476,9 +482,9 @@ mod tests {
             walls: vec![((0, 0), (0, 1)), ((1, 2), (2, 2))],
             mud: vec![((3, 3), (3, 4), 5)],
             cheese: vec![(10, 7), (5, 3)],
-            rat_start: (20, 14),
-            python_start: (0, 0),
-            controlled_players: vec![Player::Rat],
+            player1_start: (20, 14),
+            player2_start: (0, 0),
+            controlled_players: vec![Player::Player1],
             timing: TimingMode::Wait,
             move_timeout_ms: 1000,
             preprocessing_timeout_ms: 5000,
@@ -496,8 +502,8 @@ mod tests {
         assert_eq!(mc.walls().unwrap().len(), 2);
         assert_eq!(mc.mud().unwrap().len(), 1);
         assert_eq!(mc.cheese().unwrap().len(), 2);
-        assert_eq!(mc.rat_start().unwrap().x(), 20);
-        assert_eq!(mc.rat_start().unwrap().y(), 14);
+        assert_eq!(mc.player1_start().unwrap().x(), 20);
+        assert_eq!(mc.player1_start().unwrap().y(), 14);
         assert_eq!(mc.move_timeout_ms(), 1000);
         assert_eq!(mc.preprocessing_timeout_ms(), 5000);
 
@@ -505,7 +511,7 @@ mod tests {
         let owned = extract_match_config(&mc);
         assert_eq!(owned.width, 21);
         assert_eq!(owned.walls.len(), 2);
-        assert_eq!(owned.controlled_players, vec![Player::Rat]);
+        assert_eq!(owned.controlled_players, vec![Player::Player1]);
     }
 
     #[test]
@@ -513,15 +519,15 @@ mod tests {
         let mut fbb = FlatBufferBuilder::new();
         let ts = OwnedTurnState {
             turn: 42,
-            rat_position: (10, 7),
-            python_position: (0, 0),
-            rat_score: 3.0,
-            python_score: 2.5,
-            rat_mud_turns: 0,
-            python_mud_turns: 2,
+            player1_position: (10, 7),
+            player2_position: (0, 0),
+            player1_score: 3.0,
+            player2_score: 2.5,
+            player1_mud_turns: 0,
+            player2_mud_turns: 2,
             cheese: vec![(5, 5), (15, 10)],
-            rat_last_move: Direction::Up,
-            python_last_move: Direction::Right,
+            player1_last_move: Direction::Up,
+            player2_last_move: Direction::Right,
         };
         let cmd = HostCommand::TurnState(Box::new(ts));
         let bytes = serialize_host_command(&mut fbb, &cmd);
@@ -530,8 +536,8 @@ mod tests {
         assert_eq!(packet.message_type(), HostMessage::TurnState);
         let ts = packet.message_as_turn_state().unwrap();
         assert_eq!(ts.turn(), 42);
-        assert_eq!(ts.rat_position().unwrap().x(), 10);
-        assert_eq!(ts.python_score(), 2.5);
+        assert_eq!(ts.player1_position().unwrap().x(), 10);
+        assert_eq!(ts.player2_score(), 2.5);
         assert_eq!(ts.cheese().unwrap().len(), 2);
     }
 
@@ -540,15 +546,15 @@ mod tests {
         let mut fbb = FlatBufferBuilder::new();
         let cmd = HostCommand::GameOver {
             result: GameResult::Draw,
-            rat_score: 5.0,
-            python_score: 5.0,
+            player1_score: 5.0,
+            player2_score: 5.0,
         };
         let bytes = serialize_host_command(&mut fbb, &cmd);
         let packet = flatbuffers::root::<HostPacket>(&bytes).unwrap();
         assert_eq!(packet.message_type(), HostMessage::GameOver);
         let go = packet.message_as_game_over().unwrap();
         assert_eq!(go.result(), GameResult::Draw);
-        assert_eq!(go.rat_score(), 5.0);
+        assert_eq!(go.player1_score(), 5.0);
     }
 
     #[test]

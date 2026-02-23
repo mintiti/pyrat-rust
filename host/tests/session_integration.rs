@@ -61,7 +61,7 @@ async fn try_recv(rx: &mut mpsc::Receiver<SessionMsg>) -> Option<SessionMsg> {
 
 fn session_match_config() -> OwnedMatchConfig {
     let mut cfg = simple_match_config();
-    cfg.controlled_players = vec![Player::Rat];
+    cfg.controlled_players = vec![Player::Player1];
     cfg
 }
 
@@ -153,15 +153,15 @@ async fn happy_path_full_lifecycle() {
     cmd_tx
         .send(HostCommand::TurnState(Box::new(OwnedTurnState {
             turn: 1,
-            rat_position: (20, 14),
-            python_position: (0, 0),
-            rat_score: 0.0,
-            python_score: 0.0,
-            rat_mud_turns: 0,
-            python_mud_turns: 0,
+            player1_position: (20, 14),
+            player2_position: (0, 0),
+            player1_score: 0.0,
+            player2_score: 0.0,
+            player1_mud_turns: 0,
+            player2_mud_turns: 0,
             cheese: vec![(10, 7)],
-            rat_last_move: Direction::Stay,
-            python_last_move: Direction::Stay,
+            player1_last_move: Direction::Stay,
+            player2_last_move: Direction::Stay,
         })))
         .await
         .unwrap();
@@ -171,7 +171,7 @@ async fn happy_path_full_lifecycle() {
     assert_eq!(packet.message_type(), HostMessage::TurnState);
 
     bot_writer
-        .write_frame(&action_frame(Direction::Left, Player::Rat))
+        .write_frame(&action_frame(Direction::Left, Player::Player1))
         .await
         .unwrap();
     let msg = recv(&mut game_rx).await;
@@ -182,7 +182,7 @@ async fn happy_path_full_lifecycle() {
             turn,
             ..
         } => {
-            assert_eq!(player, Player::Rat);
+            assert_eq!(player, Player::Player1);
             assert_eq!(direction, Direction::Left);
             assert_eq!(turn, 1);
         },
@@ -192,9 +192,9 @@ async fn happy_path_full_lifecycle() {
     // 8. Host sends GameOver
     cmd_tx
         .send(HostCommand::GameOver {
-            result: GameResult::Rat,
-            rat_score: 1.0,
-            python_score: 0.0,
+            result: GameResult::Player1,
+            player1_score: 1.0,
+            player2_score: 0.0,
         })
         .await
         .unwrap();
@@ -237,7 +237,7 @@ async fn wrong_state_rejection_action_before_playing() {
 
     // Send Action in Connected state — should be rejected silently
     bot_writer
-        .write_frame(&action_frame(Direction::Up, Player::Rat))
+        .write_frame(&action_frame(Direction::Up, Player::Player1))
         .await
         .unwrap();
 
@@ -316,7 +316,7 @@ async fn ownership_validation_rejects_non_controlled_player() {
 
     // Now Playing — send Action for Python (not controlled)
     bot_writer
-        .write_frame(&action_frame(Direction::Up, Player::Python))
+        .write_frame(&action_frame(Direction::Up, Player::Player2))
         .await
         .unwrap();
 
@@ -329,7 +329,7 @@ async fn ownership_validation_rejects_non_controlled_player() {
 
     // Send valid Action for Rat
     bot_writer
-        .write_frame(&action_frame(Direction::Down, Player::Rat))
+        .write_frame(&action_frame(Direction::Down, Player::Player1))
         .await
         .unwrap();
     let msg = recv(&mut game_rx).await;
@@ -337,7 +337,7 @@ async fn ownership_validation_rejects_non_controlled_player() {
         SessionMsg::Action {
             player, direction, ..
         } => {
-            assert_eq!(player, Player::Rat);
+            assert_eq!(player, Player::Player1);
             assert_eq!(direction, Direction::Down);
         },
         other => panic!("expected Action, got {other:?}"),
@@ -546,7 +546,7 @@ async fn default_player_inference_single_bot() {
     let _ = recv(&mut game_rx).await;
 
     let mut config = simple_match_config();
-    config.controlled_players = vec![Player::Python]; // Only Python
+    config.controlled_players = vec![Player::Player2]; // Only Python
     cmd_tx
         .send(HostCommand::MatchConfig(Box::new(config)))
         .await
@@ -564,7 +564,7 @@ async fn default_player_inference_single_bot() {
 
     // Send Action with default player (Rat/0) — should be inferred as Python
     bot_writer
-        .write_frame(&action_frame(Direction::Up, Player::Rat))
+        .write_frame(&action_frame(Direction::Up, Player::Player1))
         .await
         .unwrap();
     let msg = recv(&mut game_rx).await;
@@ -572,7 +572,7 @@ async fn default_player_inference_single_bot() {
         SessionMsg::Action {
             player, direction, ..
         } => {
-            assert_eq!(player, Player::Python, "should be inferred as Python");
+            assert_eq!(player, Player::Player2, "should be inferred as Python");
             assert_eq!(direction, Direction::Up);
         },
         other => panic!("expected Action, got {other:?}"),
@@ -642,8 +642,8 @@ async fn game_over_then_bot_message_rejected() {
     cmd_tx
         .send(HostCommand::GameOver {
             result: GameResult::Draw,
-            rat_score: 0.0,
-            python_score: 0.0,
+            player1_score: 0.0,
+            player2_score: 0.0,
         })
         .await
         .unwrap();
@@ -651,7 +651,7 @@ async fn game_over_then_bot_message_rejected() {
 
     // Bot sends Action after GameOver — should be drained, not forwarded
     bot_writer
-        .write_frame(&action_frame(Direction::Up, Player::Rat))
+        .write_frame(&action_frame(Direction::Up, Player::Player1))
         .await
         .unwrap();
 
@@ -705,7 +705,7 @@ async fn multiple_controlled_players_no_inference() {
     let _ = recv(&mut game_rx).await;
 
     let mut config = simple_match_config();
-    config.controlled_players = vec![Player::Rat, Player::Python];
+    config.controlled_players = vec![Player::Player1, Player::Player2];
     cmd_tx
         .send(HostCommand::MatchConfig(Box::new(config)))
         .await
@@ -723,7 +723,7 @@ async fn multiple_controlled_players_no_inference() {
 
     // Bot sends Rat action — should NOT be inferred, stays as Rat
     bot_writer
-        .write_frame(&action_frame(Direction::Left, Player::Rat))
+        .write_frame(&action_frame(Direction::Left, Player::Player1))
         .await
         .unwrap();
     let msg = recv(&mut game_rx).await;
@@ -731,7 +731,7 @@ async fn multiple_controlled_players_no_inference() {
         SessionMsg::Action { player, .. } => {
             assert_eq!(
                 player,
-                Player::Rat,
+                Player::Player1,
                 "no inference with 2 controlled players"
             );
         },
@@ -848,13 +848,13 @@ async fn empty_controlled_players_skips_ownership_check() {
 
     // Any player should be accepted when controlled_players is empty
     bot_writer
-        .write_frame(&action_frame(Direction::Up, Player::Python))
+        .write_frame(&action_frame(Direction::Up, Player::Player2))
         .await
         .unwrap();
     let msg = recv(&mut game_rx).await;
     match msg {
         SessionMsg::Action { player, .. } => {
-            assert_eq!(player, Player::Python);
+            assert_eq!(player, Player::Player2);
         },
         other => panic!("expected Action, got {other:?}"),
     }

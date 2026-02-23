@@ -141,12 +141,12 @@ pub async fn run_session<R, W>(
                             break;
                         }
                     }
-                    Some(HostCommand::GameOver { result, rat_score, python_score }) => {
+                    Some(HostCommand::GameOver { result, player1_score, player2_score }) => {
                         state = SessionState::Done;
                         closing = true;
                         drain_frames_remaining = config.drain_max_frames;
                         drain_deadline = Instant::now() + config.drain_timeout;
-                        let cmd = HostCommand::GameOver { result, rat_score, python_score };
+                        let cmd = HostCommand::GameOver { result, player1_score, player2_score };
                         let bytes = serialize_host_command(&mut fbb, &cmd);
                         if frame_writer.write_frame(&bytes).await.is_err() {
                             break;
@@ -264,11 +264,11 @@ async fn handle_bot_frame(
             direction,
         } => {
             // Default player inference: if there's exactly one controlled player
-            // that is NOT the FlatBuffers default (Rat), and the bot sent the
+            // that is NOT the FlatBuffers default (Player1), and the bot sent the
             // default, assume it meant the only player it controls.
             if controlled_players.len() == 1 {
                 let &only = controlled_players.iter().next().unwrap();
-                if only != Player::Rat && player == Player::Rat {
+                if only != Player::Player1 && player == Player::Player1 {
                     player = only;
                 }
             }

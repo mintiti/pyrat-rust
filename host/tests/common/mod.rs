@@ -65,6 +65,12 @@ pub fn preprocessing_done_frame() -> Vec<u8> {
     })
 }
 
+pub fn action_frame(direction: Direction, player: Player) -> Vec<u8> {
+    build_bot_frame(BotMessage::Action, move |fbb| {
+        Action::create(fbb, &ActionArgs { direction, player }).as_union_value()
+    })
+}
+
 pub fn simple_match_config() -> OwnedMatchConfig {
     OwnedMatchConfig {
         width: 21,
@@ -73,8 +79,8 @@ pub fn simple_match_config() -> OwnedMatchConfig {
         walls: vec![],
         mud: vec![],
         cheese: vec![(10, 7)],
-        rat_start: (20, 14),
-        python_start: (0, 0),
+        player1_start: (20, 14),
+        player2_start: (0, 0),
         controlled_players: vec![], // setup phase fills this
         timing: TimingMode::Wait,
         move_timeout_ms: 1000,

@@ -6,7 +6,8 @@ publish = false
 
 [dependencies]
 flatbuffers = "25.2.10"
-tokio = { version = "1", features = ["sync", "macros", "io-util", "time", "net"] }
+pyrat-rust = { path = "../engine", default-features = false }
+tokio = { version = "1", features = ["sync", "macros", "io-util", "time", "net", "rt"] }
 tracing = "0.1"
 thiserror = "2"
 

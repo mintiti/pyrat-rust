@@ -44,8 +44,8 @@ pub struct OwnedMatchConfig {
     pub walls: Vec<((u8, u8), (u8, u8))>,
     pub mud: Vec<MudEntry>,
     pub cheese: Vec<(u8, u8)>,
-    pub rat_start: (u8, u8),
-    pub python_start: (u8, u8),
+    pub player1_start: (u8, u8),
+    pub player2_start: (u8, u8),
     pub controlled_players: Vec<Player>,
     pub timing: TimingMode,
     pub move_timeout_ms: u32,
@@ -56,15 +56,15 @@ pub struct OwnedMatchConfig {
 #[derive(Debug, Clone)]
 pub struct OwnedTurnState {
     pub turn: u16,
-    pub rat_position: (u8, u8),
-    pub python_position: (u8, u8),
-    pub rat_score: f32,
-    pub python_score: f32,
-    pub rat_mud_turns: u8,
-    pub python_mud_turns: u8,
+    pub player1_position: (u8, u8),
+    pub player2_position: (u8, u8),
+    pub player1_score: f32,
+    pub player2_score: f32,
+    pub player1_mud_turns: u8,
+    pub player2_mud_turns: u8,
     pub cheese: Vec<(u8, u8)>,
-    pub rat_last_move: Direction,
-    pub python_last_move: Direction,
+    pub player1_last_move: Direction,
+    pub player2_last_move: Direction,
 }
 
 // ── Session → Game loop ─────────────────────────────
@@ -144,8 +144,8 @@ pub enum HostCommand {
     },
     GameOver {
         result: GameResult,
-        rat_score: f32,
-        python_score: f32,
+        player1_score: f32,
+        player2_score: f32,
     },
     Ping,
     Shutdown,
