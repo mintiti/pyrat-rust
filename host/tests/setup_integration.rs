@@ -1,9 +1,10 @@
 //! Integration tests for run_setup — async tests using tokio::io::duplex + real session tasks.
 
+mod common;
+
 use std::collections::HashMap;
 use std::time::Duration;
 
-use flatbuffers::FlatBufferBuilder;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
@@ -13,79 +14,7 @@ use pyrat_host::session::{run_session, SessionConfig, SessionId};
 use pyrat_host::wire::framing::{FrameReader, FrameWriter};
 use pyrat_host::wire::*;
 
-// ── Test helpers ────────────────────────────────────
-
-/// Build a framed BotPacket from a closure that builds the inner message.
-fn build_bot_frame<F>(msg_type: BotMessage, build_msg: F) -> Vec<u8>
-where
-    F: FnOnce(&mut FlatBufferBuilder) -> flatbuffers::WIPOffset<flatbuffers::UnionWIPOffset>,
-{
-    let mut fbb = FlatBufferBuilder::new();
-    let msg_offset = build_msg(&mut fbb);
-    let packet = BotPacket::create(
-        &mut fbb,
-        &BotPacketArgs {
-            message_type: msg_type,
-            message: Some(msg_offset),
-        },
-    );
-    fbb.finish(packet, None);
-    fbb.finished_data().to_vec()
-}
-
-fn identify_frame(name: &str, author: &str, agent_id: &str) -> Vec<u8> {
-    let name = name.to_owned();
-    let author = author.to_owned();
-    let agent_id = agent_id.to_owned();
-    build_bot_frame(BotMessage::Identify, move |fbb| {
-        let n = fbb.create_string(&name);
-        let a = fbb.create_string(&author);
-        let aid = if agent_id.is_empty() {
-            None
-        } else {
-            Some(fbb.create_string(&agent_id))
-        };
-        Identify::create(
-            fbb,
-            &IdentifyArgs {
-                name: Some(n),
-                author: Some(a),
-                options: None,
-                agent_id: aid,
-            },
-        )
-        .as_union_value()
-    })
-}
-
-fn ready_frame() -> Vec<u8> {
-    build_bot_frame(BotMessage::Ready, |fbb| {
-        Ready::create(fbb, &ReadyArgs {}).as_union_value()
-    })
-}
-
-fn preprocessing_done_frame() -> Vec<u8> {
-    build_bot_frame(BotMessage::PreprocessingDone, |fbb| {
-        PreprocessingDone::create(fbb, &PreprocessingDoneArgs {}).as_union_value()
-    })
-}
-
-fn simple_match_config() -> OwnedMatchConfig {
-    OwnedMatchConfig {
-        width: 21,
-        height: 15,
-        max_turns: 300,
-        walls: vec![],
-        mud: vec![],
-        cheese: vec![(10, 7)],
-        rat_start: (20, 14),
-        python_start: (0, 0),
-        controlled_players: vec![], // setup phase fills this
-        timing: TimingMode::Wait,
-        move_timeout_ms: 1000,
-        preprocessing_timeout_ms: 5000,
-    }
-}
+use common::*;
 
 fn fast_timing() -> SetupTiming {
     SetupTiming {
@@ -138,7 +67,7 @@ async fn drive_bot_through_setup(
 ) {
     // Send Identify
     writer
-        .write_frame(&identify_frame(name, author, agent_id))
+        .write_frame(&identify_frame_with_agent(name, author, agent_id))
         .await
         .unwrap();
 
@@ -335,7 +264,7 @@ async fn startup_timeout_one_bot() {
     let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx).await });
 
     // Bot A identifies, but bot B never connects.
-    w1.write_frame(&identify_frame("BotA", "Auth", "bot-a"))
+    w1.write_frame(&identify_frame_with_agent("BotA", "Auth", "bot-a"))
         .await
         .unwrap();
 
@@ -352,7 +281,7 @@ async fn startup_timeout_one_bot() {
 }
 
 #[tokio::test]
-async fn preprocessing_timeout_proceeds() {
+async fn preprocessing_timeout_errors() {
     let (game_tx, mut game_rx) = mpsc::channel(64);
 
     let (mut w1, mut r1, h1) = spawn_session(SessionId(1), game_tx.clone());
@@ -387,7 +316,7 @@ async fn preprocessing_timeout_proceeds() {
     };
     let bot_b = async {
         // Identify + Ready
-        w2.write_frame(&identify_frame("BotB", "AuthB", "bot-b"))
+        w2.write_frame(&identify_frame_with_agent("BotB", "AuthB", "bot-b"))
             .await
             .unwrap();
         w2.write_frame(&ready_frame()).await.unwrap();
@@ -406,19 +335,17 @@ async fn preprocessing_timeout_proceeds() {
     let result = timeout(Duration::from_secs(5), setup_task)
         .await
         .expect("test timed out")
-        .expect("setup panicked")
-        .expect("setup should succeed despite preprocessing timeout");
+        .expect("setup panicked");
 
-    // Both sessions should be in the result.
-    assert_eq!(result.sessions.len(), 2);
+    assert!(
+        matches!(result, Err(SetupError::PreprocessingTimeout)),
+        "expected PreprocessingTimeout, got {result:?}"
+    );
 
     drop(w1);
     drop(r1);
     drop(w2);
     drop(r2);
-    for s in result.sessions {
-        drop(s.cmd_tx);
-    }
     let _ = h1.await;
     let _ = h2.await;
 }
@@ -453,7 +380,7 @@ async fn disconnect_during_setup() {
     let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx).await });
 
     // Bot A identifies then disconnects.
-    w1.write_frame(&identify_frame("BotA", "Auth", "bot-a"))
+    w1.write_frame(&identify_frame_with_agent("BotA", "Auth", "bot-a"))
         .await
         .unwrap();
     // Small delay to let session process the identify.
@@ -478,6 +405,15 @@ async fn disconnect_during_setup() {
         .expect("setup returned error");
 
     assert_eq!(result.sessions.len(), 2);
+    let bot_a = result
+        .sessions
+        .iter()
+        .find(|s| s.agent_id == "bot-a")
+        .unwrap();
+    assert_eq!(
+        bot_a.name, "BotA2",
+        "reconnected bot should replace original"
+    );
 
     drop(w2);
     drop(r2);
@@ -522,7 +458,7 @@ async fn unknown_agent_id_ignored() {
 
     // Bad bot identifies with wrong agent_id.
     w_bad
-        .write_frame(&identify_frame("BadBot", "Auth", "wrong-id"))
+        .write_frame(&identify_frame_with_agent("BadBot", "Auth", "wrong-id"))
         .await
         .unwrap();
 
@@ -589,10 +525,10 @@ async fn set_options_arrive_before_match_config() {
     let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx).await });
 
     // Both bots identify and send Ready.
-    w1.write_frame(&identify_frame("BotA", "AuthA", "bot-a"))
+    w1.write_frame(&identify_frame_with_agent("BotA", "AuthA", "bot-a"))
         .await
         .unwrap();
-    w2.write_frame(&identify_frame("BotB", "AuthB", "bot-b"))
+    w2.write_frame(&identify_frame_with_agent("BotB", "AuthB", "bot-b"))
         .await
         .unwrap();
     w1.write_frame(&ready_frame()).await.unwrap();
@@ -658,6 +594,203 @@ async fn set_options_arrive_before_match_config() {
     for s in result.sessions {
         drop(s.cmd_tx);
     }
+    let _ = h1.await;
+    let _ = h2.await;
+}
+
+// ── New strict-mode tests ───────────────────────────
+
+#[tokio::test]
+async fn disconnect_during_phase_b() {
+    let (game_tx, mut game_rx) = mpsc::channel(64);
+
+    let (mut w1, _r1, h1) = spawn_session(SessionId(1), game_tx.clone());
+    let (mut w2, _r2, h2) = spawn_session(SessionId(2), game_tx.clone());
+    drop(game_tx);
+
+    let setup = MatchSetup {
+        players: vec![
+            PlayerEntry {
+                player: Player::Rat,
+                agent_id: "bot-a".into(),
+            },
+            PlayerEntry {
+                player: Player::Python,
+                agent_id: "bot-b".into(),
+            },
+        ],
+        match_config: simple_match_config(),
+        bot_options: HashMap::new(),
+        timing: fast_timing(),
+    };
+
+    let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx).await });
+
+    // Both bots identify.
+    w1.write_frame(&identify_frame_with_agent("BotA", "AuthA", "bot-a"))
+        .await
+        .unwrap();
+    w2.write_frame(&identify_frame_with_agent("BotB", "AuthB", "bot-b"))
+        .await
+        .unwrap();
+
+    // Bot A sends Ready.
+    w1.write_frame(&ready_frame()).await.unwrap();
+
+    // Bot B disconnects during Phase B.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    drop(w2);
+    drop(_r2);
+
+    let result = timeout(Duration::from_secs(5), setup_task)
+        .await
+        .expect("test timed out")
+        .expect("setup panicked");
+
+    assert!(
+        matches!(result, Err(SetupError::BotDisconnected)),
+        "expected BotDisconnected, got {result:?}"
+    );
+
+    drop(w1);
+    drop(_r1);
+    let _ = h1.await;
+    let _ = h2.await;
+}
+
+#[tokio::test]
+async fn disconnect_during_phase_c() {
+    let (game_tx, mut game_rx) = mpsc::channel(64);
+
+    let (mut w1, mut r1, h1) = spawn_session(SessionId(1), game_tx.clone());
+    let (mut w2, mut r2, h2) = spawn_session(SessionId(2), game_tx.clone());
+    drop(game_tx);
+
+    let setup = MatchSetup {
+        players: vec![
+            PlayerEntry {
+                player: Player::Rat,
+                agent_id: "bot-a".into(),
+            },
+            PlayerEntry {
+                player: Player::Python,
+                agent_id: "bot-b".into(),
+            },
+        ],
+        match_config: simple_match_config(),
+        bot_options: HashMap::new(),
+        timing: SetupTiming {
+            startup_timeout: Duration::from_secs(5),
+            preprocessing_timeout: Duration::from_secs(5),
+        },
+    };
+
+    let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx).await });
+
+    // Both bots identify and send Ready.
+    let bot_a_setup = async {
+        w1.write_frame(&identify_frame_with_agent("BotA", "AuthA", "bot-a"))
+            .await
+            .unwrap();
+        w1.write_frame(&ready_frame()).await.unwrap();
+        // Consume host frames until StartPreprocessing.
+        loop {
+            let frame = r1.read_frame().await.unwrap();
+            let packet = flatbuffers::root::<HostPacket>(frame).unwrap();
+            if packet.message_type() == HostMessage::StartPreprocessing {
+                break;
+            }
+        }
+    };
+    let bot_b_setup = async {
+        w2.write_frame(&identify_frame_with_agent("BotB", "AuthB", "bot-b"))
+            .await
+            .unwrap();
+        w2.write_frame(&ready_frame()).await.unwrap();
+        // Consume host frames until StartPreprocessing.
+        loop {
+            let frame = r2.read_frame().await.unwrap();
+            let packet = flatbuffers::root::<HostPacket>(frame).unwrap();
+            if packet.message_type() == HostMessage::StartPreprocessing {
+                break;
+            }
+        }
+    };
+    tokio::join!(bot_a_setup, bot_b_setup);
+
+    // Bot B disconnects during preprocessing.
+    drop(w2);
+    drop(r2);
+
+    let result = timeout(Duration::from_secs(5), setup_task)
+        .await
+        .expect("test timed out")
+        .expect("setup panicked");
+
+    assert!(
+        matches!(result, Err(SetupError::BotDisconnected)),
+        "expected BotDisconnected, got {result:?}"
+    );
+
+    drop(w1);
+    drop(r1);
+    let _ = h1.await;
+    let _ = h2.await;
+}
+
+#[tokio::test]
+async fn all_disconnected_channel_closed() {
+    let (game_tx, mut game_rx) = mpsc::channel(64);
+
+    let (mut w1, _r1, h1) = spawn_session(SessionId(1), game_tx.clone());
+    let (mut w2, _r2, h2) = spawn_session(SessionId(2), game_tx.clone());
+    drop(game_tx);
+
+    let setup = MatchSetup {
+        players: vec![
+            PlayerEntry {
+                player: Player::Rat,
+                agent_id: "bot-a".into(),
+            },
+            PlayerEntry {
+                player: Player::Python,
+                agent_id: "bot-b".into(),
+            },
+        ],
+        match_config: simple_match_config(),
+        bot_options: HashMap::new(),
+        timing: fast_timing(),
+    };
+
+    let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx).await });
+
+    // Both bots identify.
+    w1.write_frame(&identify_frame_with_agent("BotA", "AuthA", "bot-a"))
+        .await
+        .unwrap();
+    w2.write_frame(&identify_frame_with_agent("BotB", "AuthB", "bot-b"))
+        .await
+        .unwrap();
+
+    // Drop all bot-side I/O — sessions will disconnect, senders will close.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    drop(w1);
+    drop(_r1);
+    drop(w2);
+    drop(_r2);
+
+    let result = timeout(Duration::from_secs(5), setup_task)
+        .await
+        .expect("test timed out")
+        .expect("setup panicked");
+
+    // Could be BotDisconnected (first disconnect arrives) or AllDisconnected
+    // (channel closes before any message). Both are acceptable failures.
+    assert!(
+        result.is_err(),
+        "expected error after all bots disconnected, got {result:?}"
+    );
+
     let _ = h1.await;
     let _ = h2.await;
 }

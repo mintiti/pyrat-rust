@@ -32,12 +32,16 @@ pub struct SetupResult {
 }
 
 /// What can go wrong during setup.
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum SetupError {
-    /// Not all player slots were claimed before the startup timeout.
+    #[error("not all player slots claimed before startup timeout")]
     StartupTimeout,
-    /// All connected sessions disconnected before setup completed.
+    #[error("all sessions disconnected")]
     AllDisconnected,
+    #[error("a bot disconnected during setup — match cannot proceed")]
+    BotDisconnected,
+    #[error("not all bots finished preprocessing before timeout")]
+    PreprocessingTimeout,
 }
 
 // ── Pending session (connected but not yet fully set up) ─
@@ -184,10 +188,10 @@ pub async fn run_setup(
                             ready_set.remove(&session_id);
                             if handles.remove(&session_id).is_some() {
                                 slots.unreserve(session_id);
+                                return Err(SetupError::BotDisconnected);
                             }
-                            if handles.is_empty() {
-                                return Err(SetupError::AllDisconnected);
-                            }
+                            // Disconnect from an untracked session (e.g. rejected
+                            // agent_id) — safe to ignore.
                         }
                         SessionMsg::Connected { session_id, .. } => {
                             debug!(session = session_id.0, "late connection during phase B — ignored");
@@ -195,6 +199,7 @@ pub async fn run_setup(
                         _ => {}
                     }
                 }
+                // startup_deadline covers both Phase A and Phase B.
                 _ = tokio::time::sleep_until(startup_deadline) => {
                     return Err(SetupError::StartupTimeout);
                 }
@@ -214,7 +219,7 @@ pub async fn run_setup(
             tokio::select! {
                 msg = game_rx.recv() => {
                     let Some(msg) = msg else {
-                        break;
+                        return Err(SetupError::AllDisconnected);
                     };
                     match msg {
                         SessionMsg::PreprocessingDone { session_id } => {
@@ -226,18 +231,20 @@ pub async fn run_setup(
                             }
                         }
                         SessionMsg::Disconnected { session_id, .. } => {
-                            handles.remove(&session_id);
-                            done_set.remove(&session_id);
-                            if handles.is_empty() || all_keys_in(&handles, &done_set) {
-                                break;
+                            if handles.remove(&session_id).is_some() {
+                                done_set.remove(&session_id);
+                                slots.unreserve(session_id);
+                                return Err(SetupError::BotDisconnected);
                             }
+                        }
+                        SessionMsg::Connected { session_id, .. } => {
+                            debug!(session = session_id.0, "late connection during phase C — ignored");
                         }
                         _ => {}
                     }
                 }
                 _ = tokio::time::sleep_until(preprocessing_deadline) => {
-                    warn!("preprocessing timeout — proceeding with available bots");
-                    break;
+                    return Err(SetupError::PreprocessingTimeout);
                 }
             }
         }

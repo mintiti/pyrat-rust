@@ -159,6 +159,19 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_agent_id_second_session_rejected() {
+        let players = entries(&[(Player::Rat, "bot-a"), (Player::Python, "bot-b")]);
+        let mut slots = PlayerSlots::new(&players);
+
+        let first = slots.reserve(SessionId(1), "bot-a");
+        assert_eq!(first, vec![Player::Rat]);
+
+        // Second session trying the same agent_id gets nothing.
+        let second = slots.reserve(SessionId(2), "bot-a");
+        assert!(second.is_empty(), "duplicate agent_id should get empty vec");
+    }
+
+    #[test]
     fn players_for_session_returns_correct_set() {
         let players = entries(&[(Player::Rat, "hive"), (Player::Python, "hive")]);
         let mut slots = PlayerSlots::new(&players);

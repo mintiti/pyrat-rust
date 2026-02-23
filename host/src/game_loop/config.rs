@@ -14,7 +14,7 @@ pub struct PlayerEntry {
 /// Host-only timing for the setup phase (not sent on wire).
 #[derive(Debug, Clone)]
 pub struct SetupTiming {
-    /// Time allowed for all bots to connect and identify.
+    /// Time allowed for all bots to connect, identify, and report ready.
     pub startup_timeout: Duration,
     /// Time allowed for preprocessing after StartPreprocessing is sent.
     pub preprocessing_timeout: Duration,
