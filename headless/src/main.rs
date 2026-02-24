@@ -56,14 +56,11 @@ struct Cli {
 impl Cli {
     fn build_game_config(&self) -> GameConfig {
         if let Some(ref preset) = self.preset {
-            let mut config = GameConfig::preset(preset).unwrap_or_else(|e| {
+            let config = GameConfig::preset(preset).unwrap_or_else(|e| {
                 eprintln!("Error: {e}");
                 std::process::exit(1);
             });
-            // Explicit flags override preset
-            // We can't mutate a GameConfig directly, so we rebuild with overrides
-            // For now, trust the preset; users who want full control skip --preset
-            let _ = &mut config;
+            // TODO: allow CLI flags to override preset fields
             config
         } else {
             GameConfig::classic(self.width, self.height, self.cheese)
@@ -111,10 +108,14 @@ struct ResultRecord {
     turns_played: u16,
 }
 
-fn build_game_record(game: &GameState, seed: Option<u64>, events: Vec<MatchEvent>) -> GameRecord {
+fn build_game_record(
+    game: &GameState,
+    seed: Option<u64>,
+    events: Vec<MatchEvent>,
+    match_result: &MatchResult,
+) -> GameRecord {
     let mut players = Vec::new();
     let mut turns = Vec::new();
-    let mut result = None;
 
     for event in events {
         match event {
@@ -135,13 +136,12 @@ fn build_game_record(game: &GameState, seed: Option<u64>, events: Vec<MatchEvent
                 });
             },
             MatchEvent::TurnPlayed {
-                turn,
                 state,
                 p1_action,
                 p2_action,
             } => {
                 turns.push(TurnRecord {
-                    turn,
+                    turn: state.turn,
                     p1_action: p1_action.0,
                     p2_action: p2_action.0,
                     p1_position: state.player1_position,
@@ -151,14 +151,10 @@ fn build_game_record(game: &GameState, seed: Option<u64>, events: Vec<MatchEvent
                     cheese_remaining: state.cheese.len(),
                 });
             },
-            MatchEvent::MatchOver { result: r } => {
-                result = Some(r);
-            },
             _ => {},
         }
     }
 
-    let match_result = result.expect("MatchOver event missing");
     let winner = match match_result.result {
         pyrat_host::wire::GameResult::Player1 => "Player1",
         pyrat_host::wire::GameResult::Player2 => "Player2",
@@ -324,7 +320,7 @@ async fn main() {
 
     // 14. Write game record
     if let Some(ref output_path) = cli.output {
-        let record = build_game_record(&game, cli.seed, events);
+        let record = build_game_record(&game, cli.seed, events, &match_result);
         let json = serde_json::to_string_pretty(&record).expect("JSON serialization failed");
         std::fs::write(output_path, json).unwrap_or_else(|e| {
             eprintln!("Error writing game record: {e}");

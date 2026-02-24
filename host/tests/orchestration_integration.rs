@@ -218,12 +218,23 @@ async fn full_flow_with_events() {
         events.push(event);
     }
 
-    // Verify we got BotIdentified events
+    // Verify BotIdentified payloads
     let identified: Vec<_> = events
         .iter()
-        .filter(|e| matches!(e, MatchEvent::BotIdentified { .. }))
+        .filter_map(|e| match e {
+            MatchEvent::BotIdentified { player, name, .. } => Some((*player, name.as_str())),
+            _ => None,
+        })
         .collect();
     assert_eq!(identified.len(), 2, "expected 2 BotIdentified events");
+    assert!(
+        identified.contains(&(Player::Player1, "BotA")),
+        "expected Player1→BotA, got {identified:?}"
+    );
+    assert!(
+        identified.contains(&(Player::Player2, "BotB")),
+        "expected Player2→BotB, got {identified:?}"
+    );
 
     // Verify SetupComplete
     assert!(
@@ -233,20 +244,30 @@ async fn full_flow_with_events() {
         "expected SetupComplete event"
     );
 
-    // Verify TurnPlayed events
-    let turns: Vec<_> = events
+    // Verify TurnPlayed turn numbers are sequential
+    let turn_numbers: Vec<u16> = events
         .iter()
-        .filter(|e| matches!(e, MatchEvent::TurnPlayed { .. }))
+        .filter_map(|e| match e {
+            MatchEvent::TurnPlayed { state, .. } => Some(state.turn),
+            _ => None,
+        })
         .collect();
-    assert_eq!(turns.len(), 3, "expected 3 TurnPlayed events");
-
-    // Verify MatchOver
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, MatchEvent::MatchOver { .. })),
-        "expected MatchOver event"
+    assert_eq!(
+        turn_numbers,
+        vec![1, 2, 3],
+        "expected sequential turns [1, 2, 3]"
     );
+
+    // Verify MatchOver payload
+    let match_over = events
+        .iter()
+        .find_map(|e| match e {
+            MatchEvent::MatchOver { result } => Some(result),
+            _ => None,
+        })
+        .expect("expected MatchOver event");
+    assert_eq!(match_over.result, GameResult::Draw);
+    assert_eq!(match_over.turns_played, 3);
 
     drop(w1);
     drop(r1);
@@ -353,14 +374,21 @@ async fn info_forwarded_as_event() {
         events.push(event);
     }
 
-    let info_events: Vec<_> = events
+    let info_event = events
         .iter()
-        .filter(|e| matches!(e, MatchEvent::BotInfo { .. }))
-        .collect();
-    assert!(
-        !info_events.is_empty(),
-        "expected at least one BotInfo event"
+        .find_map(|e| match e {
+            MatchEvent::BotInfo { player, info, .. } => Some((*player, info)),
+            _ => None,
+        })
+        .expect("expected at least one BotInfo event");
+    assert_eq!(
+        info_event.0,
+        Player::Player1,
+        "info should come from Player1"
     );
+    assert_eq!(info_event.1.message, "test info");
+    assert_eq!(info_event.1.depth, 5);
+    assert_eq!(info_event.1.nodes, 100);
 
     drop(w1);
     drop(r1);
@@ -454,13 +482,17 @@ async fn timeout_emits_event() {
         events.push(event);
     }
 
-    let timeout_events: Vec<_> = events
+    let timeout_player = events
         .iter()
-        .filter(|e| matches!(e, MatchEvent::BotTimeout { .. }))
-        .collect();
-    assert!(
-        !timeout_events.is_empty(),
-        "expected at least one BotTimeout event"
+        .find_map(|e| match e {
+            MatchEvent::BotTimeout { player, .. } => Some(*player),
+            _ => None,
+        })
+        .expect("expected at least one BotTimeout event");
+    assert_eq!(
+        timeout_player,
+        Player::Player2,
+        "Player2 was silent and should have timed out"
     );
 
     drop(w1);
@@ -565,13 +597,20 @@ async fn disconnect_emits_event() {
         events.push(event);
     }
 
-    let disconnect_events: Vec<_> = events
+    let disconnect_players: Vec<Player> = events
         .iter()
-        .filter(|e| matches!(e, MatchEvent::BotDisconnected { .. }))
+        .filter_map(|e| match e {
+            MatchEvent::BotDisconnected { player, .. } => Some(*player),
+            _ => None,
+        })
         .collect();
     assert!(
-        !disconnect_events.is_empty(),
+        !disconnect_players.is_empty(),
         "expected at least one BotDisconnected event"
+    );
+    assert!(
+        disconnect_players.contains(&Player::Player2),
+        "expected Player2 disconnect, got {disconnect_players:?}"
     );
 
     drop(w1);

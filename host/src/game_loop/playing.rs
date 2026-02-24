@@ -116,7 +116,6 @@ pub async fn run_playing(
         emit(
             event_tx,
             MatchEvent::TurnPlayed {
-                turn: current_turn,
                 state: build_turn_state(game, last_p1, last_p2),
                 p1_action: p1_wire,
                 p2_action: p2_wire,
@@ -163,7 +162,9 @@ pub async fn run_playing(
 
 fn emit(tx: Option<&mpsc::UnboundedSender<MatchEvent>>, event: MatchEvent) {
     if let Some(tx) = tx {
-        let _ = tx.send(event);
+        if tx.send(event).is_err() {
+            warn!("event receiver dropped — event lost");
+        }
     }
 }
 

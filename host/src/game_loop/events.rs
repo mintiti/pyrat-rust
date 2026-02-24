@@ -25,7 +25,6 @@ pub enum MatchEvent {
     // ── Playing ──────────────────────────────────
     /// A turn was played and the engine stepped.
     TurnPlayed {
-        turn: u16,
         state: OwnedTurnState,
         p1_action: Direction,
         p2_action: Direction,
