@@ -269,6 +269,29 @@ async fn full_flow_with_events() {
     assert_eq!(match_over.result, GameResult::Draw);
     assert_eq!(match_over.turns_played, 3);
 
+    // Verify event ordering: SetupComplete before all TurnPlayed, MatchOver last.
+    let setup_pos = events
+        .iter()
+        .position(|e| matches!(e, MatchEvent::SetupComplete))
+        .unwrap();
+    let first_turn_pos = events
+        .iter()
+        .position(|e| matches!(e, MatchEvent::TurnPlayed { .. }))
+        .unwrap();
+    let match_over_pos = events
+        .iter()
+        .position(|e| matches!(e, MatchEvent::MatchOver { .. }))
+        .unwrap();
+    assert!(
+        setup_pos < first_turn_pos,
+        "SetupComplete should precede first TurnPlayed"
+    );
+    assert_eq!(
+        match_over_pos,
+        events.len() - 1,
+        "MatchOver should be the last event"
+    );
+
     drop(w1);
     drop(r1);
     drop(w2);

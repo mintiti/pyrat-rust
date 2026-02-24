@@ -14,7 +14,7 @@ use crate::session::messages::{HostCommand, OwnedTurnState, SessionId, SessionMs
 use crate::wire::{Direction as WireDirection, GameResult, Player};
 
 use super::config::{PlayingConfig, SessionHandle};
-use super::events::MatchEvent;
+use super::events::{emit, MatchEvent};
 
 // ── Public types ─────────────────────────────────────
 
@@ -156,16 +156,6 @@ pub async fn run_playing(
     );
 
     Ok(match_result)
-}
-
-// ── Event helper ─────────────────────────────────────
-
-fn emit(tx: Option<&mpsc::UnboundedSender<MatchEvent>>, event: MatchEvent) {
-    if let Some(tx) = tx {
-        if tx.send(event).is_err() {
-            warn!("event receiver dropped — event lost");
-        }
-    }
 }
 
 // ── Helpers ──────────────────────────────────────────

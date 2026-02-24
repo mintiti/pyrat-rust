@@ -9,7 +9,7 @@ use crate::session::messages::HostCommand;
 use crate::session::{run_session, SessionConfig, SessionId, SessionMsg};
 
 use super::config::{MatchSetup, SessionHandle};
-use super::events::MatchEvent;
+use super::events::{emit, MatchEvent};
 use super::slots::PlayerSlots;
 
 // ── Public types ─────────────────────────────────────
@@ -99,13 +99,11 @@ pub async fn run_setup(
                                     "assigned to player slot(s)"
                                 );
                                 for &p in &claimed {
-                                    if let Some(tx) = event_tx {
-                                        let _ = tx.send(MatchEvent::BotIdentified {
-                                            player: p,
-                                            name: name.clone(),
-                                            author: author.clone(),
-                                        });
-                                    }
+                                    emit(event_tx, MatchEvent::BotIdentified {
+                                        player: p,
+                                        name: name.clone(),
+                                        author: author.clone(),
+                                    });
                                 }
                                 handles.insert(session_id, SessionHandle {
                                     session_id,
@@ -252,9 +250,7 @@ pub async fn run_setup(
         }
     }
 
-    if let Some(tx) = event_tx {
-        let _ = tx.send(MatchEvent::SetupComplete);
-    }
+    emit(event_tx, MatchEvent::SetupComplete);
 
     let sessions: Vec<SessionHandle> = handles.into_values().collect();
     Ok(SetupResult { sessions })

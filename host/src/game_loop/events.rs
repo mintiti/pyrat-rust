@@ -4,6 +4,9 @@
 //! a channel. Consumers (headless binary, GUI, tournament system)
 //! decide what to record, display, or discard.
 
+use tokio::sync::mpsc;
+use tracing::warn;
+
 use crate::session::messages::{DisconnectReason, OwnedInfo, OwnedTurnState};
 use crate::wire::{Direction, Player};
 
@@ -11,6 +14,7 @@ use super::playing::MatchResult;
 
 /// Events emitted during a match, from setup through game over.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum MatchEvent {
     // ── Setup ────────────────────────────────────
     /// A bot identified and was assigned to a player slot.
@@ -46,4 +50,15 @@ pub enum MatchEvent {
     // ── End ──────────────────────────────────────
     /// The match ended.
     MatchOver { result: MatchResult },
+}
+
+/// Send an event if a receiver is attached.
+///
+/// Logs a warning if the receiver has been dropped (event lost).
+pub(crate) fn emit(tx: Option<&mpsc::UnboundedSender<MatchEvent>>, event: MatchEvent) {
+    if let Some(tx) = tx {
+        if tx.send(event).is_err() {
+            warn!("event receiver dropped — event lost");
+        }
+    }
 }

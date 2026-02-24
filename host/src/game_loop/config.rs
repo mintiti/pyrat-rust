@@ -134,3 +134,37 @@ pub fn build_owned_match_config(
         preprocessing_timeout_ms,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pyrat::{Coordinates, GameBuilder};
+
+    #[test]
+    fn build_owned_match_config_round_trips_game_state() {
+        let game = GameBuilder::new(3, 3)
+            .with_open_maze()
+            .with_custom_positions(Coordinates::new(0, 0), Coordinates::new(2, 2))
+            .with_custom_cheese(vec![Coordinates::new(1, 1)])
+            .build()
+            .create(Some(42))
+            .unwrap();
+
+        let cfg = build_owned_match_config(&game, TimingMode::Wait, 500, 3000);
+
+        assert_eq!(cfg.width, 3);
+        assert_eq!(cfg.height, 3);
+        assert_eq!(cfg.max_turns, game.max_turns());
+        assert_eq!(cfg.player1_start, (0, 0));
+        assert_eq!(cfg.player2_start, (2, 2));
+        assert_eq!(cfg.cheese, vec![(1, 1)]);
+        assert!(cfg.walls.is_empty(), "open maze should have no walls");
+        assert!(
+            cfg.controlled_players.is_empty(),
+            "controlled_players left for setup"
+        );
+        assert_eq!(cfg.timing, TimingMode::Wait);
+        assert_eq!(cfg.move_timeout_ms, 500);
+        assert_eq!(cfg.preprocessing_timeout_ms, 3000);
+    }
+}

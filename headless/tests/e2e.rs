@@ -2,6 +2,8 @@
 
 use std::process::Command;
 
+// ── Tests ───────────────────────────────────────────
+
 #[test]
 fn headless_with_test_bots() {
     let headless_bin = env!("CARGO_BIN_EXE_pyrat-headless");
