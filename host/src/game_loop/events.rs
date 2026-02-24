@@ -7,7 +7,7 @@
 use tokio::sync::mpsc;
 use tracing::warn;
 
-use crate::session::messages::{DisconnectReason, OwnedInfo, OwnedTurnState};
+use crate::session::messages::{DisconnectReason, OwnedInfo, OwnedMatchConfig, OwnedTurnState};
 use crate::wire::{Direction, Player};
 
 use super::playing::MatchResult;
@@ -25,6 +25,8 @@ pub enum MatchEvent {
     },
     /// All bots connected, identified, configured, and preprocessed.
     SetupComplete,
+    /// The match is starting — includes the resolved match configuration.
+    MatchStarted { config: OwnedMatchConfig },
 
     // ── Playing ──────────────────────────────────
     /// A turn was played and the engine stepped.

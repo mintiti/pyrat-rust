@@ -127,9 +127,12 @@ pub async fn run_setup(
                     SessionMsg::PreprocessingDone { session_id } => {
                         done_set.insert(session_id);
                     }
-                    SessionMsg::Disconnected { session_id, .. } => {
+                    SessionMsg::Disconnected { session_id, reason } => {
                         pending.remove(&session_id);
-                        if handles.remove(&session_id).is_some() {
+                        if let Some(h) = handles.remove(&session_id) {
+                            for &p in &h.controlled_players {
+                                emit(event_tx, MatchEvent::BotDisconnected { player: p, reason });
+                            }
                             slots.unreserve(session_id);
                         }
                     }
@@ -192,9 +195,12 @@ pub async fn run_setup(
                         SessionMsg::PreprocessingDone { session_id } => {
                             done_set.insert(session_id);
                         }
-                        SessionMsg::Disconnected { session_id, .. } => {
+                        SessionMsg::Disconnected { session_id, reason } => {
                             ready_set.remove(&session_id);
                             if let Some(h) = handles.remove(&session_id) {
+                                for &p in &h.controlled_players {
+                                    emit(event_tx, MatchEvent::BotDisconnected { player: p, reason });
+                                }
                                 slots.unreserve(session_id);
                                 return Err(SetupError::BotDisconnected {
                                     name: h.name,
@@ -252,8 +258,11 @@ pub async fn run_setup(
                                 }
                             }
                         }
-                        SessionMsg::Disconnected { session_id, .. } => {
+                        SessionMsg::Disconnected { session_id, reason } => {
                             if let Some(h) = handles.remove(&session_id) {
+                                for &p in &h.controlled_players {
+                                    emit(event_tx, MatchEvent::BotDisconnected { player: p, reason });
+                                }
                                 done_set.remove(&session_id);
                                 slots.unreserve(session_id);
                                 return Err(SetupError::BotDisconnected {
@@ -282,6 +291,12 @@ pub async fn run_setup(
     }
 
     emit(event_tx, MatchEvent::SetupComplete);
+    emit(
+        event_tx,
+        MatchEvent::MatchStarted {
+            config: setup.match_config.clone(),
+        },
+    );
 
     let sessions: Vec<SessionHandle> = handles.into_values().collect();
     Ok(SetupResult { sessions })

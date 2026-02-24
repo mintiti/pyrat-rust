@@ -10,7 +10,9 @@ use tokio::time::timeout;
 
 use pyrat::{Coordinates, GameBuilder};
 
-use pyrat_host::game_loop::{run_playing, run_setup, MatchSetup, PlayerEntry, PlayingConfig};
+use pyrat_host::game_loop::{
+    run_playing, run_setup, MatchEvent, MatchSetup, PlayerEntry, PlayingConfig,
+};
 use pyrat_host::session::messages::*;
 use pyrat_host::session::SessionId;
 use pyrat_host::wire::framing::{FrameReader, FrameWriter};
@@ -519,6 +521,72 @@ async fn game_over_sent() {
         .expect("play timed out")
         .expect("play panicked")
         .expect("play returned error");
+
+    drop(w1);
+    drop(r1);
+    drop(w2);
+    drop(r2);
+    let _ = h1.await;
+    let _ = h2.await;
+}
+
+/// Event receiver dropped mid-game — game still completes.
+#[tokio::test]
+async fn game_completes_after_event_receiver_dropped() {
+    let (game_tx, mut game_rx) = mpsc::channel(64);
+    let (mut w1, mut r1, h1) = spawn_session(SessionId(1), game_tx.clone());
+    let (mut w2, mut r2, h2) = spawn_session(SessionId(2), game_tx.clone());
+
+    let sessions = setup_two_bots(game_tx, &mut game_rx, &mut w1, &mut r1, &mut w2, &mut r2).await;
+
+    let mut game = tiny_game(3);
+    let config = fast_playing_config();
+
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
+
+    let play_task = tokio::spawn(async move {
+        run_playing(&mut game, &sessions, &mut game_rx, &config, Some(&event_tx)).await
+    });
+
+    // Turn 0: both respond.
+    let _ = read_turn_state(&mut r1).await;
+    let _ = read_turn_state(&mut r2).await;
+    w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
+        .await
+        .unwrap();
+    w2.write_frame(&action_frame(Direction::Stay, Player::Player2))
+        .await
+        .unwrap();
+
+    // After turn 0 completes, drain events then drop the receiver.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    event_rx.close();
+    while event_rx.recv().await.is_some() {}
+    drop(event_rx);
+
+    // Turns 1–2: emit() hits a closed channel, but the game continues.
+    for _ in 1..3 {
+        let _ = read_turn_state(&mut r1).await;
+        let _ = read_turn_state(&mut r2).await;
+        w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
+            .await
+            .unwrap();
+        w2.write_frame(&action_frame(Direction::Stay, Player::Player2))
+            .await
+            .unwrap();
+    }
+
+    let _ = read_game_over(&mut r1).await;
+    let _ = read_game_over(&mut r2).await;
+
+    let result = timeout(Duration::from_secs(5), play_task)
+        .await
+        .expect("play timed out")
+        .expect("play panicked")
+        .expect("play returned error");
+
+    assert_eq!(result.result, GameResult::Draw);
+    assert_eq!(result.turns_played, 3);
 
     drop(w1);
     drop(r1);

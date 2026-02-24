@@ -5,6 +5,7 @@ mod playing;
 mod setup;
 mod slots;
 
+pub use crate::session::messages::{DisconnectReason, OwnedInfo, OwnedMatchConfig, OwnedTurnState};
 pub use config::{
     build_owned_match_config, BotConfig, MatchSetup, PlayerEntry, PlayingConfig, SessionHandle,
     SetupTiming,
