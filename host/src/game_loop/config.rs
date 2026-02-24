@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use pyrat::game::game_logic::GameState;
 use tokio::sync::mpsc;
 
 use crate::session::messages::{HostCommand, OwnedMatchConfig};
 use crate::session::SessionId;
-use crate::wire::Player;
+use crate::wire::{Player, TimingMode};
 
 /// Which player a bot controls, identified by agent_id.
 #[derive(Debug, Clone)]
@@ -83,4 +84,87 @@ pub struct MatchSetup {
     pub bot_options: HashMap<String, Vec<(String, String)>>,
     /// Setup phase timeouts.
     pub timing: SetupTiming,
+}
+
+/// Build an `OwnedMatchConfig` from engine state + timing parameters.
+///
+/// `controlled_players` is left empty — the setup phase fills it per session.
+pub fn build_owned_match_config(
+    game: &GameState,
+    timing: TimingMode,
+    move_timeout_ms: u32,
+    preprocessing_timeout_ms: u32,
+) -> OwnedMatchConfig {
+    let walls = game
+        .wall_entries()
+        .into_iter()
+        .map(|w| ((w.pos1.x, w.pos1.y), (w.pos2.x, w.pos2.y)))
+        .collect();
+
+    let mud = game
+        .mud_positions()
+        .iter()
+        .map(|((from, to), value)| {
+            let (p1, p2) = if from < to { (from, to) } else { (to, from) };
+            ((p1.x, p1.y), (p2.x, p2.y), value)
+        })
+        .collect();
+
+    let cheese = game
+        .cheese_positions()
+        .into_iter()
+        .map(|c| (c.x, c.y))
+        .collect();
+
+    let p1 = game.player1_position();
+    let p2 = game.player2_position();
+
+    OwnedMatchConfig {
+        width: game.width(),
+        height: game.height(),
+        max_turns: game.max_turns(),
+        walls,
+        mud,
+        cheese,
+        player1_start: (p1.x, p1.y),
+        player2_start: (p2.x, p2.y),
+        controlled_players: vec![],
+        timing,
+        move_timeout_ms,
+        preprocessing_timeout_ms,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pyrat::{Coordinates, GameBuilder};
+
+    #[test]
+    fn build_owned_match_config_round_trips_game_state() {
+        let game = GameBuilder::new(3, 3)
+            .with_open_maze()
+            .with_custom_positions(Coordinates::new(0, 0), Coordinates::new(2, 2))
+            .with_custom_cheese(vec![Coordinates::new(1, 1)])
+            .build()
+            .create(Some(42))
+            .unwrap();
+
+        let cfg = build_owned_match_config(&game, TimingMode::Wait, 500, 3000);
+
+        assert_eq!(cfg.width, 3);
+        assert_eq!(cfg.height, 3);
+        assert_eq!(cfg.max_turns, game.max_turns());
+        assert_eq!(cfg.player1_start, (0, 0));
+        assert_eq!(cfg.player2_start, (2, 2));
+        assert_eq!(cfg.cheese, vec![(1, 1)]);
+        assert!(cfg.walls.is_empty(), "open maze should have no walls");
+        assert!(
+            cfg.controlled_players.is_empty(),
+            "controlled_players left for setup"
+        );
+        assert_eq!(cfg.timing, TimingMode::Wait);
+        assert_eq!(cfg.move_timeout_ms, 500);
+        assert_eq!(cfg.preprocessing_timeout_ms, 3000);
+    }
 }

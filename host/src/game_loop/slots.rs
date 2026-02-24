@@ -62,6 +62,15 @@ impl PlayerSlots {
         self.slots.iter().all(|s| s.claimed_by.is_some())
     }
 
+    /// Return players whose slots have not been claimed yet.
+    pub fn unclaimed(&self) -> Vec<Player> {
+        self.slots
+            .iter()
+            .filter(|s| s.claimed_by.is_none())
+            .map(|s| s.player)
+            .collect()
+    }
+
     /// Whether both slots share the same agent_id (hivemind mode).
     #[allow(dead_code)] // Used by game loop (chunk 5+).
     pub fn is_hivemind(&self) -> bool {

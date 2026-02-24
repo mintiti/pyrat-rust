@@ -8,108 +8,19 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
-use pyrat::game::game_logic::GameState;
 use pyrat::{Coordinates, GameBuilder};
 
 use pyrat_host::game_loop::{
-    run_playing, run_setup, MatchSetup, PlayerEntry, PlayingConfig, SetupTiming,
+    run_playing, run_setup, MatchEvent, MatchSetup, PlayerEntry, PlayingConfig,
 };
 use pyrat_host::session::messages::*;
-use pyrat_host::session::{run_session, SessionConfig, SessionId};
+use pyrat_host::session::SessionId;
 use pyrat_host::wire::framing::{FrameReader, FrameWriter};
 use pyrat_host::wire::*;
 
 use common::*;
 
 // ── Test infrastructure ─────────────────────────────
-
-fn fast_timing() -> SetupTiming {
-    SetupTiming {
-        startup_timeout: Duration::from_secs(5),
-        preprocessing_timeout: Duration::from_secs(2),
-    }
-}
-
-fn fast_session_config() -> SessionConfig {
-    SessionConfig {
-        handshake_timeout: Duration::from_secs(5),
-        ..SessionConfig::default()
-    }
-}
-
-fn fast_playing_config() -> PlayingConfig {
-    PlayingConfig {
-        move_timeout: Duration::from_millis(500),
-    }
-}
-
-/// Build a tiny 3×3 open game with one cheese at (1,1) and max_turns limit.
-fn tiny_game(max_turns: u16) -> GameState {
-    GameBuilder::new(3, 3)
-        .with_max_turns(max_turns)
-        .with_open_maze()
-        .with_custom_positions(Coordinates::new(0, 0), Coordinates::new(2, 2))
-        .with_custom_cheese(vec![Coordinates::new(1, 1)])
-        .build()
-        .create(Some(42))
-        .expect("tiny game creation should not fail")
-}
-
-/// Spawn a session task connected via duplex, returning the bot-side reader/writer.
-fn spawn_session(
-    session_id: SessionId,
-    game_tx: mpsc::Sender<SessionMsg>,
-) -> (
-    FrameWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
-    FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
-    tokio::task::JoinHandle<()>,
-) {
-    let (bot_io, session_io) = tokio::io::duplex(8192);
-    let (bot_read, bot_write) = tokio::io::split(bot_io);
-    let (session_read, session_write) = tokio::io::split(session_io);
-
-    let handle = tokio::spawn(run_session(
-        session_id,
-        session_read,
-        session_write,
-        game_tx,
-        fast_session_config(),
-    ));
-
-    let bot_writer = FrameWriter::with_default_max(bot_write);
-    let bot_reader = FrameReader::with_default_max(bot_read);
-
-    (bot_writer, bot_reader, handle)
-}
-
-/// Drive a bot through the setup phase (Identify → Ready → consume MatchConfig + StartPreprocessing → PreprocessingDone).
-async fn drive_bot_through_setup(
-    writer: &mut FrameWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
-    reader: &mut FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
-    name: &str,
-    author: &str,
-    agent_id: &str,
-) {
-    writer
-        .write_frame(&identify_frame_with_agent(name, author, agent_id))
-        .await
-        .unwrap();
-    writer.write_frame(&ready_frame()).await.unwrap();
-
-    // Consume host frames until StartPreprocessing.
-    loop {
-        let frame = reader.read_frame().await.unwrap();
-        let packet = flatbuffers::root::<HostPacket>(frame).unwrap();
-        if packet.message_type() == HostMessage::StartPreprocessing {
-            break;
-        }
-    }
-
-    writer
-        .write_frame(&preprocessing_done_frame())
-        .await
-        .unwrap();
-}
 
 /// Run setup for a standard two-bot match and return the setup result + game_rx.
 async fn setup_two_bots(
@@ -146,7 +57,11 @@ async fn setup_two_bots(
                 drive_bot_through_setup(w2, r2, "BotB", "AuthB", "bot-b"),
             );
         },
-        async { run_setup(setup_ref, game_rx).await.expect("setup failed") },
+        async {
+            run_setup(setup_ref, game_rx, None)
+                .await
+                .expect("setup failed")
+        },
     );
 
     result.sessions
@@ -227,8 +142,9 @@ async fn happy_path_both_respond() {
     let mut game = tiny_game(10);
     let config = fast_playing_config();
 
-    let play_task =
-        tokio::spawn(async move { run_playing(&mut game, &sessions, &mut game_rx, &config).await });
+    let play_task = tokio::spawn(async move {
+        run_playing(&mut game, &sessions, &mut game_rx, &config, None).await
+    });
 
     // P1 needs to go Right then Up to reach (1,1).
     // Turn 0: both get TurnState.
@@ -289,8 +205,9 @@ async fn both_stay_reaches_max_turns() {
     let mut game = tiny_game(5); // Only 5 turns.
     let config = fast_playing_config();
 
-    let play_task =
-        tokio::spawn(async move { run_playing(&mut game, &sessions, &mut game_rx, &config).await });
+    let play_task = tokio::spawn(async move {
+        run_playing(&mut game, &sessions, &mut game_rx, &config, None).await
+    });
 
     for _ in 0..5 {
         let _ = read_turn_state(&mut r1).await;
@@ -338,8 +255,9 @@ async fn timeout_defaults_to_stay() {
         move_timeout: Duration::from_millis(100), // Short timeout for fast test.
     };
 
-    let play_task =
-        tokio::spawn(async move { run_playing(&mut game, &sessions, &mut game_rx, &config).await });
+    let play_task = tokio::spawn(async move {
+        run_playing(&mut game, &sessions, &mut game_rx, &config, None).await
+    });
 
     // Turn 0: P1 responds, P2 silent.
     let _ = read_turn_state(&mut r1).await;
@@ -396,8 +314,9 @@ async fn disconnect_mid_game() {
         move_timeout: Duration::from_millis(200),
     };
 
-    let play_task =
-        tokio::spawn(async move { run_playing(&mut game, &sessions, &mut game_rx, &config).await });
+    let play_task = tokio::spawn(async move {
+        run_playing(&mut game, &sessions, &mut game_rx, &config, None).await
+    });
 
     // Turn 0: both respond.
     let _ = read_turn_state(&mut r1).await;
@@ -458,8 +377,9 @@ async fn both_disconnect() {
         move_timeout: Duration::from_millis(200),
     };
 
-    let play_task =
-        tokio::spawn(async move { run_playing(&mut game, &sessions, &mut game_rx, &config).await });
+    let play_task = tokio::spawn(async move {
+        run_playing(&mut game, &sessions, &mut game_rx, &config, None).await
+    });
 
     // Turn 0: both respond.
     let _ = read_turn_state(&mut r1).await;
@@ -521,7 +441,7 @@ async fn hivemind_two_actions() {
     let (_, setup_result) = tokio::join!(
         drive_bot_through_setup(&mut w1, &mut r1, "Hive", "Auth", "hive"),
         async {
-            run_setup(setup_ref, &mut game_rx)
+            run_setup(setup_ref, &mut game_rx, None)
                 .await
                 .expect("setup failed")
         },
@@ -534,8 +454,9 @@ async fn hivemind_two_actions() {
     let mut game = tiny_game(3);
     let config = fast_playing_config();
 
-    let play_task =
-        tokio::spawn(async move { run_playing(&mut game, &sessions, &mut game_rx, &config).await });
+    let play_task = tokio::spawn(async move {
+        run_playing(&mut game, &sessions, &mut game_rx, &config, None).await
+    });
 
     for _ in 0..3 {
         let _ = read_turn_state(&mut r1).await;
@@ -576,8 +497,9 @@ async fn game_over_sent() {
     let mut game = tiny_game(1); // Just 1 turn.
     let config = fast_playing_config();
 
-    let play_task =
-        tokio::spawn(async move { run_playing(&mut game, &sessions, &mut game_rx, &config).await });
+    let play_task = tokio::spawn(async move {
+        run_playing(&mut game, &sessions, &mut game_rx, &config, None).await
+    });
 
     let _ = read_turn_state(&mut r1).await;
     let _ = read_turn_state(&mut r2).await;
@@ -599,6 +521,72 @@ async fn game_over_sent() {
         .expect("play timed out")
         .expect("play panicked")
         .expect("play returned error");
+
+    drop(w1);
+    drop(r1);
+    drop(w2);
+    drop(r2);
+    let _ = h1.await;
+    let _ = h2.await;
+}
+
+/// Event receiver dropped mid-game — game still completes.
+#[tokio::test]
+async fn game_completes_after_event_receiver_dropped() {
+    let (game_tx, mut game_rx) = mpsc::channel(64);
+    let (mut w1, mut r1, h1) = spawn_session(SessionId(1), game_tx.clone());
+    let (mut w2, mut r2, h2) = spawn_session(SessionId(2), game_tx.clone());
+
+    let sessions = setup_two_bots(game_tx, &mut game_rx, &mut w1, &mut r1, &mut w2, &mut r2).await;
+
+    let mut game = tiny_game(3);
+    let config = fast_playing_config();
+
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
+
+    let play_task = tokio::spawn(async move {
+        run_playing(&mut game, &sessions, &mut game_rx, &config, Some(&event_tx)).await
+    });
+
+    // Turn 0: both respond.
+    let _ = read_turn_state(&mut r1).await;
+    let _ = read_turn_state(&mut r2).await;
+    w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
+        .await
+        .unwrap();
+    w2.write_frame(&action_frame(Direction::Stay, Player::Player2))
+        .await
+        .unwrap();
+
+    // After turn 0 completes, drain events then drop the receiver.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    event_rx.close();
+    while event_rx.recv().await.is_some() {}
+    drop(event_rx);
+
+    // Turns 1–2: emit() hits a closed channel, but the game continues.
+    for _ in 1..3 {
+        let _ = read_turn_state(&mut r1).await;
+        let _ = read_turn_state(&mut r2).await;
+        w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
+            .await
+            .unwrap();
+        w2.write_frame(&action_frame(Direction::Stay, Player::Player2))
+            .await
+            .unwrap();
+    }
+
+    let _ = read_game_over(&mut r1).await;
+    let _ = read_game_over(&mut r2).await;
+
+    let result = timeout(Duration::from_secs(5), play_task)
+        .await
+        .expect("play timed out")
+        .expect("play panicked")
+        .expect("play returned error");
+
+    assert_eq!(result.result, GameResult::Draw);
+    assert_eq!(result.turns_played, 3);
 
     drop(w1);
     drop(r1);
@@ -635,8 +623,9 @@ async fn cheese_updates_in_state() {
 
     let config = fast_playing_config();
 
-    let play_task =
-        tokio::spawn(async move { run_playing(&mut game, &sessions, &mut game_rx, &config).await });
+    let play_task = tokio::spawn(async move {
+        run_playing(&mut game, &sessions, &mut game_rx, &config, None).await
+    });
 
     // Turn 0: 3 cheese present.
     let (turn0, cheese0) = read_turn_state(&mut r1).await;

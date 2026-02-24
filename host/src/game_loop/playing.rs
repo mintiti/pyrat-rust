@@ -14,6 +14,7 @@ use crate::session::messages::{HostCommand, OwnedTurnState, SessionId, SessionMs
 use crate::wire::{Direction as WireDirection, GameResult, Player};
 
 use super::config::{PlayingConfig, SessionHandle};
+use super::events::{emit, MatchEvent};
 
 // ── Public types ─────────────────────────────────────
 
@@ -59,6 +60,7 @@ pub async fn run_playing(
     sessions: &[SessionHandle],
     game_rx: &mut mpsc::Receiver<SessionMsg>,
     config: &PlayingConfig,
+    event_tx: Option<&mpsc::UnboundedSender<MatchEvent>>,
 ) -> Result<MatchResult, PlayingError> {
     // Build lookup: session_id → list of controlled players.
     let session_players: HashMap<SessionId, Vec<Player>> = sessions
@@ -67,8 +69,8 @@ pub async fn run_playing(
         .collect();
 
     let mut disconnected: HashSet<SessionId> = HashSet::new();
-    let mut last_p1 = WireDirection(EngineDirection::Stay as u8);
-    let mut last_p2 = WireDirection(EngineDirection::Stay as u8);
+    let mut last_p1 = WireDirection::Stay;
+    let mut last_p2 = WireDirection::Stay;
 
     loop {
         let turn_state = build_turn_state(game, last_p1, last_p2);
@@ -98,6 +100,7 @@ pub async fn run_playing(
             &session_players,
             &mut disconnected,
             config.move_timeout,
+            event_tx,
         )
         .await?;
 
@@ -108,6 +111,16 @@ pub async fn run_playing(
 
         last_p1 = engine_to_wire(p1_move);
         last_p2 = engine_to_wire(p2_move);
+
+        // Emit TurnPlayed event.
+        emit(
+            event_tx,
+            MatchEvent::TurnPlayed {
+                state: build_turn_state(game, last_p1, last_p2),
+                p1_action: p1_wire,
+                p2_action: p2_wire,
+            },
+        );
 
         if result.game_over {
             break;
@@ -134,6 +147,13 @@ pub async fn run_playing(
             );
         }
     }
+
+    emit(
+        event_tx,
+        MatchEvent::MatchOver {
+            result: match_result.clone(),
+        },
+    );
 
     Ok(match_result)
 }
@@ -177,8 +197,9 @@ async fn collect_actions(
     session_players: &HashMap<SessionId, Vec<Player>>,
     disconnected: &mut HashSet<SessionId>,
     move_timeout: Duration,
+    event_tx: Option<&mpsc::UnboundedSender<MatchEvent>>,
 ) -> Result<(WireDirection, WireDirection), PlayingError> {
-    let stay = WireDirection(EngineDirection::Stay as u8);
+    let stay = WireDirection::Stay;
     let mut p1_action: Option<WireDirection> = None;
     let mut p2_action: Option<WireDirection> = None;
 
@@ -227,11 +248,20 @@ async fn collect_actions(
                         if let Some(players) = session_players.get(&session_id) {
                             for &p in players {
                                 fill_action(p, stay, &mut p1_action, &mut p2_action);
+                                emit(event_tx, MatchEvent::BotDisconnected { player: p, reason });
                             }
                         }
                     }
-                    SessionMsg::Info { .. } => {
-                        // Forward info to observers in the future; ignore for now.
+                    SessionMsg::Info { session_id, info } => {
+                        if let Some(players) = session_players.get(&session_id) {
+                            for &p in players {
+                                emit(event_tx, MatchEvent::BotInfo {
+                                    player: p,
+                                    turn: current_turn,
+                                    info: info.clone(),
+                                });
+                            }
+                        }
                     }
                     _ => {
                         // Ignore other messages during playing phase.
@@ -258,6 +288,9 @@ async fn collect_actions(
                         let _ = s.cmd_tx.send(HostCommand::Timeout {
                             default_move: stay,
                         }).await;
+                        for &p in &s.controlled_players {
+                            emit(event_tx, MatchEvent::BotTimeout { player: p, turn: current_turn });
+                        }
                     }
                 }
 
@@ -387,6 +420,7 @@ mod tests {
             &session_players,
             &mut disconnected,
             Duration::from_millis(100),
+            None,
         )
         .await
         .expect("collect_actions should not fail");
