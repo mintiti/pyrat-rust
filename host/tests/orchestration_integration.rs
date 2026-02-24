@@ -189,11 +189,20 @@ async fn full_flow_with_events() {
     assert_eq!(match_over.result, GameResult::Draw);
     assert_eq!(match_over.turns_played, 3);
 
-    // Verify event ordering: SetupComplete before all TurnPlayed, MatchOver last.
+    // Verify event ordering:
+    // BotIdentified < SetupComplete < MatchStarted < TurnPlayed < MatchOver (last)
+    let last_identified_pos = events
+        .iter()
+        .rposition(|e| matches!(e, MatchEvent::BotIdentified { .. }))
+        .expect("expected BotIdentified events");
     let setup_pos = events
         .iter()
         .position(|e| matches!(e, MatchEvent::SetupComplete))
         .unwrap();
+    let match_started_pos = events
+        .iter()
+        .position(|e| matches!(e, MatchEvent::MatchStarted { .. }))
+        .expect("expected MatchStarted event");
     let first_turn_pos = events
         .iter()
         .position(|e| matches!(e, MatchEvent::TurnPlayed { .. }))
@@ -203,8 +212,17 @@ async fn full_flow_with_events() {
         .position(|e| matches!(e, MatchEvent::MatchOver { .. }))
         .unwrap();
     assert!(
-        setup_pos < first_turn_pos,
-        "SetupComplete should precede first TurnPlayed"
+        last_identified_pos < setup_pos,
+        "all BotIdentified events should precede SetupComplete"
+    );
+    assert_eq!(
+        match_started_pos,
+        setup_pos + 1,
+        "MatchStarted should immediately follow SetupComplete"
+    );
+    assert!(
+        match_started_pos < first_turn_pos,
+        "MatchStarted should precede first TurnPlayed"
     );
     assert_eq!(
         match_over_pos,
@@ -425,10 +443,10 @@ async fn timeout_emits_event() {
         events.push(event);
     }
 
-    let timeout_player = events
+    let (timeout_player, timeout_turn) = events
         .iter()
         .find_map(|e| match e {
-            MatchEvent::BotTimeout { player, .. } => Some(*player),
+            MatchEvent::BotTimeout { player, turn } => Some((*player, *turn)),
             _ => None,
         })
         .expect("expected at least one BotTimeout event");
@@ -437,6 +455,7 @@ async fn timeout_emits_event() {
         Player::Player2,
         "Player2 was silent and should have timed out"
     );
+    assert_eq!(timeout_turn, 0, "timeout should occur on first turn");
 
     drop(w1);
     drop(r1);
@@ -547,12 +566,14 @@ async fn disconnect_emits_event() {
             _ => None,
         })
         .collect();
-    assert!(
-        !disconnect_players.is_empty(),
-        "expected at least one BotDisconnected event"
+    assert_eq!(
+        disconnect_players.len(),
+        1,
+        "expected exactly one BotDisconnected event, got {disconnect_players:?}"
     );
-    assert!(
-        disconnect_players.contains(&Player::Player2),
+    assert_eq!(
+        disconnect_players[0],
+        Player::Player2,
         "expected Player2 disconnect, got {disconnect_players:?}"
     );
 
