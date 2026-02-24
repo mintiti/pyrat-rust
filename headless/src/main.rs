@@ -6,7 +6,7 @@ use clap::Parser;
 use serde::Serialize;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
-use tracing::info;
+use tracing::{info, warn};
 
 use pyrat::game::builder::GameConfig;
 use pyrat::game::game_logic::GameState;
@@ -17,7 +17,7 @@ use pyrat_host::game_loop::{
 };
 use pyrat_host::session::messages::SessionMsg;
 use pyrat_host::session::SessionConfig;
-use pyrat_host::wire::{Player, TimingMode};
+use pyrat_host::wire::{GameResult, Player, TimingMode};
 
 // ── CLI ──────────────────────────────────────────────
 
@@ -53,18 +53,13 @@ struct Cli {
     output: Option<PathBuf>,
 }
 
-impl Cli {
-    fn build_game_config(&self) -> GameConfig {
-        if let Some(ref preset) = self.preset {
-            let config = GameConfig::preset(preset).unwrap_or_else(|e| {
-                eprintln!("Error: {e}");
-                std::process::exit(1);
-            });
-            // TODO: allow CLI flags to override preset fields
-            config
-        } else {
-            GameConfig::classic(self.width, self.height, self.cheese)
-        }
+fn build_game_config(cli: &Cli) -> Result<GameConfig, String> {
+    if let Some(ref preset) = cli.preset {
+        let config = GameConfig::preset(preset)?;
+        // TODO: allow CLI flags to override preset fields
+        Ok(config)
+    } else {
+        Ok(GameConfig::classic(cli.width, cli.height, cli.cheese))
     }
 }
 
@@ -106,6 +101,18 @@ struct ResultRecord {
     player1_score: f32,
     player2_score: f32,
     turns_played: u16,
+}
+
+fn result_label(result: GameResult) -> &'static str {
+    match result {
+        GameResult::Player1 => "Player1",
+        GameResult::Player2 => "Player2",
+        GameResult::Draw => "Draw",
+        unknown => {
+            warn!(?unknown, "unexpected GameResult variant");
+            "Draw"
+        },
+    }
 }
 
 fn build_game_record(
@@ -155,12 +162,6 @@ fn build_game_record(
         }
     }
 
-    let winner = match match_result.result {
-        pyrat_host::wire::GameResult::Player1 => "Player1",
-        pyrat_host::wire::GameResult::Player2 => "Player2",
-        _ => "Draw",
-    };
-
     GameRecord {
         width: game.width(),
         height: game.height(),
@@ -169,7 +170,7 @@ fn build_game_record(
         players,
         turns,
         result: ResultRecord {
-            winner: winner.to_string(),
+            winner: result_label(match_result.result).to_string(),
             player1_score: match_result.player1_score,
             player2_score: match_result.player2_score,
             turns_played: match_result.turns_played,
@@ -190,12 +191,16 @@ async fn main() {
 
     let cli = Cli::parse();
 
-    // 1. Build game
-    let game_config = cli.build_game_config();
-    let mut game = game_config.create(cli.seed).unwrap_or_else(|e| {
-        eprintln!("Error creating game: {e}");
+    if let Err(e) = run(cli).await {
+        eprintln!("Error: {e}");
         std::process::exit(1);
-    });
+    }
+}
+
+async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
+    // 1. Build game
+    let game_config = build_game_config(&cli)?;
+    let mut game = game_config.create(cli.seed)?;
 
     info!(
         width = game.width(),
@@ -248,9 +253,7 @@ async fn main() {
     };
 
     // 4. Bind TCP listener
-    let listener = TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("failed to bind TCP listener");
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr().unwrap().port();
     info!(port, "listening for bot connections");
 
@@ -258,10 +261,7 @@ async fn main() {
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
 
     // 6. Launch bots
-    let _bot_processes = launch_bots(&bot_configs, port).unwrap_or_else(|e| {
-        eprintln!("Error launching bots: {e}");
-        std::process::exit(1);
-    });
+    let _bot_processes = launch_bots(&bot_configs, port)?;
 
     // 7. Accept connections
     let (game_tx, mut game_rx) = mpsc::channel::<SessionMsg>(64);
@@ -278,12 +278,7 @@ async fn main() {
     });
 
     // 9. Run setup
-    let setup_result = run_setup(&setup, &mut game_rx, Some(&event_tx))
-        .await
-        .unwrap_or_else(|e| {
-            eprintln!("Setup failed: {e}");
-            std::process::exit(1);
-        });
+    let setup_result = run_setup(&setup, &mut game_rx, Some(&event_tx)).await?;
 
     // 10. Run playing
     let playing_config = PlayingConfig {
@@ -296,11 +291,7 @@ async fn main() {
         &playing_config,
         Some(&event_tx),
     )
-    .await
-    .unwrap_or_else(|e| {
-        eprintln!("Playing failed: {e}");
-        std::process::exit(1);
-    });
+    .await?;
 
     // 11. Shutdown sessions
     for s in &setup_result.sessions {
@@ -322,21 +313,24 @@ async fn main() {
     if let Some(ref output_path) = cli.output {
         let record = build_game_record(&game, cli.seed, events, &match_result);
         let json = serde_json::to_string_pretty(&record).expect("JSON serialization failed");
-        std::fs::write(output_path, json).unwrap_or_else(|e| {
-            eprintln!("Error writing game record: {e}");
-            std::process::exit(1);
-        });
+        std::fs::write(output_path, json)?;
         info!(path = %output_path.display(), "game record written");
     }
+
+    Ok(())
 }
 
 fn print_result(result: &MatchResult) {
-    let winner = match result.result {
-        pyrat_host::wire::GameResult::Player1 => "Player 1 wins!",
-        pyrat_host::wire::GameResult::Player2 => "Player 2 wins!",
-        _ => "Draw!",
+    let label = match result.result {
+        GameResult::Player1 => "Player 1 wins!",
+        GameResult::Player2 => "Player 2 wins!",
+        GameResult::Draw => "Draw!",
+        unknown => {
+            warn!(?unknown, "unexpected GameResult variant");
+            "Draw!"
+        },
     };
-    println!("{winner}");
+    println!("{label}");
     println!(
         "Score: {:.1} - {:.1} ({} turns)",
         result.player1_score, result.player2_score, result.turns_played

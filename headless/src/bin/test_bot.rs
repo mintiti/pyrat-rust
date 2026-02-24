@@ -5,7 +5,7 @@
 //! until the game ends.
 
 use flatbuffers::FlatBufferBuilder;
-use rand::Rng;
+use rand::RngExt;
 use tokio::net::TcpStream;
 
 use pyrat_host::wire::framing::{FrameReader, FrameWriter};
