@@ -9,87 +9,10 @@ use tokio::sync::mpsc;
 use tokio::time::timeout;
 
 use pyrat_host::game_loop::{run_setup, MatchSetup, PlayerEntry, SetupError, SetupTiming};
-use pyrat_host::session::messages::*;
-use pyrat_host::session::{run_session, SessionConfig, SessionId};
-use pyrat_host::wire::framing::{FrameReader, FrameWriter};
+use pyrat_host::session::SessionId;
 use pyrat_host::wire::*;
 
 use common::*;
-
-fn fast_timing() -> SetupTiming {
-    SetupTiming {
-        startup_timeout: Duration::from_secs(5),
-        preprocessing_timeout: Duration::from_secs(2),
-    }
-}
-
-fn fast_session_config() -> SessionConfig {
-    SessionConfig {
-        handshake_timeout: Duration::from_secs(5),
-        ..SessionConfig::default()
-    }
-}
-
-/// Spawn a session task connected via duplex, returning the bot-side reader/writer.
-fn spawn_session(
-    session_id: SessionId,
-    game_tx: mpsc::Sender<SessionMsg>,
-) -> (
-    FrameWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
-    FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
-    tokio::task::JoinHandle<()>,
-) {
-    let (bot_io, session_io) = tokio::io::duplex(8192);
-    let (bot_read, bot_write) = tokio::io::split(bot_io);
-    let (session_read, session_write) = tokio::io::split(session_io);
-
-    let handle = tokio::spawn(run_session(
-        session_id,
-        session_read,
-        session_write,
-        game_tx,
-        fast_session_config(),
-    ));
-
-    let bot_writer = FrameWriter::with_default_max(bot_write);
-    let bot_reader = FrameReader::with_default_max(bot_read);
-
-    (bot_writer, bot_reader, handle)
-}
-
-/// Drive a bot through Identify → Ready → (receive MatchConfig) → (receive StartPreprocessing) → PreprocessingDone.
-async fn drive_bot_through_setup(
-    writer: &mut FrameWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
-    reader: &mut FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
-    name: &str,
-    author: &str,
-    agent_id: &str,
-) {
-    // Send Identify
-    writer
-        .write_frame(&identify_frame_with_agent(name, author, agent_id))
-        .await
-        .unwrap();
-
-    // Send Ready
-    writer.write_frame(&ready_frame()).await.unwrap();
-
-    // Read frames from host: could be SetOption(s) + MatchConfig + StartPreprocessing.
-    // We need to consume until we see StartPreprocessing.
-    loop {
-        let frame = reader.read_frame().await.unwrap();
-        let packet = flatbuffers::root::<HostPacket>(frame).unwrap();
-        if packet.message_type() == HostMessage::StartPreprocessing {
-            break;
-        }
-    }
-
-    // Send PreprocessingDone
-    writer
-        .write_frame(&preprocessing_done_frame())
-        .await
-        .unwrap();
-}
 
 // ── Tests ───────────────────────────────────────────
 
@@ -230,7 +153,7 @@ async fn startup_timeout_no_bots() {
     };
 
     let result = run_setup(&setup, &mut game_rx, None).await;
-    assert!(matches!(result, Err(SetupError::StartupTimeout)));
+    assert!(matches!(result, Err(SetupError::StartupTimeout { .. })));
 }
 
 #[tokio::test]
@@ -273,7 +196,7 @@ async fn startup_timeout_one_bot() {
         .expect("test timed out")
         .expect("setup panicked");
 
-    assert!(matches!(result, Err(SetupError::StartupTimeout)));
+    assert!(matches!(result, Err(SetupError::StartupTimeout { .. })));
 
     drop(w1);
     drop(_r1);
@@ -338,7 +261,7 @@ async fn preprocessing_timeout_errors() {
         .expect("setup panicked");
 
     assert!(
-        matches!(result, Err(SetupError::PreprocessingTimeout)),
+        matches!(result, Err(SetupError::PreprocessingTimeout { .. })),
         "expected PreprocessingTimeout, got {result:?}"
     );
 
@@ -648,7 +571,7 @@ async fn disconnect_during_phase_b() {
         .expect("setup panicked");
 
     assert!(
-        matches!(result, Err(SetupError::BotDisconnected)),
+        matches!(result, Err(SetupError::BotDisconnected { .. })),
         "expected BotDisconnected, got {result:?}"
     );
 
@@ -728,7 +651,7 @@ async fn disconnect_during_phase_c() {
         .expect("setup panicked");
 
     assert!(
-        matches!(result, Err(SetupError::BotDisconnected)),
+        matches!(result, Err(SetupError::BotDisconnected { .. })),
         "expected BotDisconnected, got {result:?}"
     );
 

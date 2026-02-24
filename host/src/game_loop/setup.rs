@@ -8,6 +8,8 @@ use tracing::{debug, info, warn};
 use crate::session::messages::HostCommand;
 use crate::session::{run_session, SessionConfig, SessionId, SessionMsg};
 
+use crate::wire::Player;
+
 use super::config::{MatchSetup, SessionHandle};
 use super::events::{emit, MatchEvent};
 use super::slots::PlayerSlots;
@@ -23,14 +25,14 @@ pub struct SetupResult {
 /// What can go wrong during setup.
 #[derive(Debug, thiserror::Error)]
 pub enum SetupError {
-    #[error("not all player slots claimed before startup timeout")]
-    StartupTimeout,
+    #[error("startup timeout — unclaimed slots: {unclaimed:?}")]
+    StartupTimeout { unclaimed: Vec<Player> },
     #[error("all sessions disconnected")]
     AllDisconnected,
-    #[error("a bot disconnected during setup — match cannot proceed")]
-    BotDisconnected,
-    #[error("not all bots finished preprocessing before timeout")]
-    PreprocessingTimeout,
+    #[error("bot {agent_id:?} ({name:?}) disconnected during setup")]
+    BotDisconnected { name: String, agent_id: String },
+    #[error("preprocessing timeout — pending bots: {pending:?}")]
+    PreprocessingTimeout { pending: Vec<String> },
 }
 
 // ── Pending session (connected but not yet fully set up) ─
@@ -136,7 +138,7 @@ pub async fn run_setup(
                 }
             }
             _ = tokio::time::sleep_until(startup_deadline) => {
-                return Err(SetupError::StartupTimeout);
+                return Err(SetupError::StartupTimeout { unclaimed: slots.unclaimed() });
             }
         }
     }
@@ -145,22 +147,30 @@ pub async fn run_setup(
     for handle in handles.values() {
         if let Some(opts) = setup.bot_options.get(&handle.agent_id) {
             for (name, value) in opts {
-                let _ = handle
+                if handle
                     .cmd_tx
                     .send(HostCommand::SetOption {
                         name: name.clone(),
                         value: value.clone(),
                     })
-                    .await;
+                    .await
+                    .is_err()
+                {
+                    warn!(session = handle.session_id.0, "SetOption send failed");
+                }
             }
         }
 
         let mut cfg = setup.match_config.clone();
         cfg.controlled_players = handle.controlled_players.clone();
-        let _ = handle
+        if handle
             .cmd_tx
             .send(HostCommand::MatchConfig(Box::new(cfg)))
-            .await;
+            .await
+            .is_err()
+        {
+            warn!(session = handle.session_id.0, "MatchConfig send failed");
+        }
     }
 
     if !all_keys_in(&handles, &ready_set) {
@@ -184,9 +194,12 @@ pub async fn run_setup(
                         }
                         SessionMsg::Disconnected { session_id, .. } => {
                             ready_set.remove(&session_id);
-                            if handles.remove(&session_id).is_some() {
+                            if let Some(h) = handles.remove(&session_id) {
                                 slots.unreserve(session_id);
-                                return Err(SetupError::BotDisconnected);
+                                return Err(SetupError::BotDisconnected {
+                                    name: h.name,
+                                    agent_id: h.agent_id,
+                                });
                             }
                             // Disconnect from an untracked session (e.g. rejected
                             // agent_id) — safe to ignore.
@@ -200,7 +213,7 @@ pub async fn run_setup(
                 }
                 // startup_deadline covers both Phase A and Phase B.
                 _ = tokio::time::sleep_until(startup_deadline) => {
-                    return Err(SetupError::StartupTimeout);
+                    return Err(SetupError::StartupTimeout { unclaimed: slots.unclaimed() });
                 }
             }
         }
@@ -208,7 +221,17 @@ pub async fn run_setup(
 
     // ── Phase C: StartPreprocessing, wait for PreprocessingDone ───
     for handle in handles.values() {
-        let _ = handle.cmd_tx.send(HostCommand::StartPreprocessing).await;
+        if handle
+            .cmd_tx
+            .send(HostCommand::StartPreprocessing)
+            .await
+            .is_err()
+        {
+            warn!(
+                session = handle.session_id.0,
+                "StartPreprocessing send failed"
+            );
+        }
     }
 
     let preprocessing_deadline = Instant::now() + setup.timing.preprocessing_timeout;
@@ -230,10 +253,13 @@ pub async fn run_setup(
                             }
                         }
                         SessionMsg::Disconnected { session_id, .. } => {
-                            if handles.remove(&session_id).is_some() {
+                            if let Some(h) = handles.remove(&session_id) {
                                 done_set.remove(&session_id);
                                 slots.unreserve(session_id);
-                                return Err(SetupError::BotDisconnected);
+                                return Err(SetupError::BotDisconnected {
+                                    name: h.name,
+                                    agent_id: h.agent_id,
+                                });
                             }
                         }
                         SessionMsg::Connected { session_id, .. } => {
@@ -244,7 +270,12 @@ pub async fn run_setup(
                     }
                 }
                 _ = tokio::time::sleep_until(preprocessing_deadline) => {
-                    return Err(SetupError::PreprocessingTimeout);
+                    let pending: Vec<String> = handles
+                        .values()
+                        .filter(|h| !done_set.contains(&h.session_id))
+                        .map(|h| h.agent_id.clone())
+                        .collect();
+                    return Err(SetupError::PreprocessingTimeout { pending });
                 }
             }
         }

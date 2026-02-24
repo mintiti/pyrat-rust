@@ -11,102 +11,20 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
-use pyrat::game::game_logic::GameState;
-use pyrat::{Coordinates, GameBuilder};
-
 use pyrat_host::game_loop::{
-    run_playing, run_setup, MatchEvent, MatchSetup, PlayerEntry, PlayingConfig, SetupTiming,
+    run_playing, run_setup, MatchEvent, MatchSetup, PlayerEntry, PlayingConfig,
 };
-use pyrat_host::session::messages::*;
-use pyrat_host::session::{run_session, SessionConfig, SessionId};
-use pyrat_host::wire::framing::{FrameReader, FrameWriter};
+use pyrat_host::session::SessionId;
 use pyrat_host::wire::*;
 
 use common::*;
 
 // ── Helpers ──────────────────────────────────────────
 
-fn fast_timing() -> SetupTiming {
-    SetupTiming {
-        startup_timeout: Duration::from_secs(5),
-        preprocessing_timeout: Duration::from_secs(2),
-    }
-}
-
-fn fast_session_config() -> SessionConfig {
-    SessionConfig {
-        handshake_timeout: Duration::from_secs(5),
-        ..SessionConfig::default()
-    }
-}
-
-fn tiny_game(max_turns: u16) -> GameState {
-    GameBuilder::new(3, 3)
-        .with_max_turns(max_turns)
-        .with_open_maze()
-        .with_custom_positions(Coordinates::new(0, 0), Coordinates::new(2, 2))
-        .with_custom_cheese(vec![Coordinates::new(1, 1)])
-        .build()
-        .create(Some(42))
-        .expect("tiny game creation should not fail")
-}
-
-fn spawn_session(
-    session_id: SessionId,
-    game_tx: mpsc::Sender<SessionMsg>,
-) -> (
-    FrameWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
-    FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
-    tokio::task::JoinHandle<()>,
-) {
-    let (bot_io, session_io) = tokio::io::duplex(8192);
-    let (bot_read, bot_write) = tokio::io::split(bot_io);
-    let (session_read, session_write) = tokio::io::split(session_io);
-
-    let handle = tokio::spawn(run_session(
-        session_id,
-        session_read,
-        session_write,
-        game_tx,
-        fast_session_config(),
-    ));
-
-    (
-        FrameWriter::with_default_max(bot_write),
-        FrameReader::with_default_max(bot_read),
-        handle,
-    )
-}
-
-async fn drive_bot_through_setup(
-    writer: &mut FrameWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
-    reader: &mut FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
-    name: &str,
-    author: &str,
-    agent_id: &str,
-) {
-    writer
-        .write_frame(&identify_frame_with_agent(name, author, agent_id))
-        .await
-        .unwrap();
-    writer.write_frame(&ready_frame()).await.unwrap();
-
-    loop {
-        let frame = reader.read_frame().await.unwrap();
-        let packet = flatbuffers::root::<HostPacket>(frame).unwrap();
-        if packet.message_type() == HostMessage::StartPreprocessing {
-            break;
-        }
-    }
-
-    writer
-        .write_frame(&preprocessing_done_frame())
-        .await
-        .unwrap();
-}
-
 async fn read_turn_state(
-    reader: &mut FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+    reader: &mut pyrat_host::wire::framing::FrameReader<
+        tokio::io::ReadHalf<tokio::io::DuplexStream>,
+    >,
 ) -> u16 {
     let frame = timeout(Duration::from_secs(2), reader.read_frame())
         .await
@@ -118,7 +36,9 @@ async fn read_turn_state(
 }
 
 async fn read_game_over(
-    reader: &mut FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+    reader: &mut pyrat_host::wire::framing::FrameReader<
+        tokio::io::ReadHalf<tokio::io::DuplexStream>,
+    >,
 ) -> GameResult {
     let frame = timeout(Duration::from_secs(2), reader.read_frame())
         .await

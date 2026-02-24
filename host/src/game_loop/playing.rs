@@ -69,8 +69,8 @@ pub async fn run_playing(
         .collect();
 
     let mut disconnected: HashSet<SessionId> = HashSet::new();
-    let mut last_p1 = WireDirection(EngineDirection::Stay as u8);
-    let mut last_p2 = WireDirection(EngineDirection::Stay as u8);
+    let mut last_p1 = WireDirection::Stay;
+    let mut last_p2 = WireDirection::Stay;
 
     loop {
         let turn_state = build_turn_state(game, last_p1, last_p2);
@@ -199,7 +199,7 @@ async fn collect_actions(
     move_timeout: Duration,
     event_tx: Option<&mpsc::UnboundedSender<MatchEvent>>,
 ) -> Result<(WireDirection, WireDirection), PlayingError> {
-    let stay = WireDirection(EngineDirection::Stay as u8);
+    let stay = WireDirection::Stay;
     let mut p1_action: Option<WireDirection> = None;
     let mut p2_action: Option<WireDirection> = None;
 

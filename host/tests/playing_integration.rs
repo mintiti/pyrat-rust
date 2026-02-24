@@ -8,108 +8,17 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
-use pyrat::game::game_logic::GameState;
 use pyrat::{Coordinates, GameBuilder};
 
-use pyrat_host::game_loop::{
-    run_playing, run_setup, MatchSetup, PlayerEntry, PlayingConfig, SetupTiming,
-};
+use pyrat_host::game_loop::{run_playing, run_setup, MatchSetup, PlayerEntry, PlayingConfig};
 use pyrat_host::session::messages::*;
-use pyrat_host::session::{run_session, SessionConfig, SessionId};
+use pyrat_host::session::SessionId;
 use pyrat_host::wire::framing::{FrameReader, FrameWriter};
 use pyrat_host::wire::*;
 
 use common::*;
 
 // ── Test infrastructure ─────────────────────────────
-
-fn fast_timing() -> SetupTiming {
-    SetupTiming {
-        startup_timeout: Duration::from_secs(5),
-        preprocessing_timeout: Duration::from_secs(2),
-    }
-}
-
-fn fast_session_config() -> SessionConfig {
-    SessionConfig {
-        handshake_timeout: Duration::from_secs(5),
-        ..SessionConfig::default()
-    }
-}
-
-fn fast_playing_config() -> PlayingConfig {
-    PlayingConfig {
-        move_timeout: Duration::from_millis(500),
-    }
-}
-
-/// Build a tiny 3×3 open game with one cheese at (1,1) and max_turns limit.
-fn tiny_game(max_turns: u16) -> GameState {
-    GameBuilder::new(3, 3)
-        .with_max_turns(max_turns)
-        .with_open_maze()
-        .with_custom_positions(Coordinates::new(0, 0), Coordinates::new(2, 2))
-        .with_custom_cheese(vec![Coordinates::new(1, 1)])
-        .build()
-        .create(Some(42))
-        .expect("tiny game creation should not fail")
-}
-
-/// Spawn a session task connected via duplex, returning the bot-side reader/writer.
-fn spawn_session(
-    session_id: SessionId,
-    game_tx: mpsc::Sender<SessionMsg>,
-) -> (
-    FrameWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
-    FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
-    tokio::task::JoinHandle<()>,
-) {
-    let (bot_io, session_io) = tokio::io::duplex(8192);
-    let (bot_read, bot_write) = tokio::io::split(bot_io);
-    let (session_read, session_write) = tokio::io::split(session_io);
-
-    let handle = tokio::spawn(run_session(
-        session_id,
-        session_read,
-        session_write,
-        game_tx,
-        fast_session_config(),
-    ));
-
-    let bot_writer = FrameWriter::with_default_max(bot_write);
-    let bot_reader = FrameReader::with_default_max(bot_read);
-
-    (bot_writer, bot_reader, handle)
-}
-
-/// Drive a bot through the setup phase (Identify → Ready → consume MatchConfig + StartPreprocessing → PreprocessingDone).
-async fn drive_bot_through_setup(
-    writer: &mut FrameWriter<tokio::io::WriteHalf<tokio::io::DuplexStream>>,
-    reader: &mut FrameReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
-    name: &str,
-    author: &str,
-    agent_id: &str,
-) {
-    writer
-        .write_frame(&identify_frame_with_agent(name, author, agent_id))
-        .await
-        .unwrap();
-    writer.write_frame(&ready_frame()).await.unwrap();
-
-    // Consume host frames until StartPreprocessing.
-    loop {
-        let frame = reader.read_frame().await.unwrap();
-        let packet = flatbuffers::root::<HostPacket>(frame).unwrap();
-        if packet.message_type() == HostMessage::StartPreprocessing {
-            break;
-        }
-    }
-
-    writer
-        .write_frame(&preprocessing_done_frame())
-        .await
-        .unwrap();
-}
 
 /// Run setup for a standard two-bot match and return the setup result + game_rx.
 async fn setup_two_bots(
