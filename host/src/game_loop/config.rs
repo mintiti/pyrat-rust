@@ -1,11 +1,12 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use pyrat::game::game_logic::GameState;
 use tokio::sync::mpsc;
 
 use crate::session::messages::{HostCommand, OwnedMatchConfig};
 use crate::session::SessionId;
-use crate::wire::Player;
+use crate::wire::{Player, TimingMode};
 
 /// Which player a bot controls, identified by agent_id.
 #[derive(Debug, Clone)]
@@ -83,4 +84,53 @@ pub struct MatchSetup {
     pub bot_options: HashMap<String, Vec<(String, String)>>,
     /// Setup phase timeouts.
     pub timing: SetupTiming,
+}
+
+/// Build an `OwnedMatchConfig` from engine state + timing parameters.
+///
+/// `controlled_players` is left empty — the setup phase fills it per session.
+pub fn build_owned_match_config(
+    game: &GameState,
+    timing: TimingMode,
+    move_timeout_ms: u32,
+    preprocessing_timeout_ms: u32,
+) -> OwnedMatchConfig {
+    let walls = game
+        .wall_entries()
+        .into_iter()
+        .map(|w| ((w.pos1.x, w.pos1.y), (w.pos2.x, w.pos2.y)))
+        .collect();
+
+    let mud = game
+        .mud_positions()
+        .iter()
+        .map(|((from, to), value)| {
+            let (p1, p2) = if from < to { (from, to) } else { (to, from) };
+            ((p1.x, p1.y), (p2.x, p2.y), value)
+        })
+        .collect();
+
+    let cheese = game
+        .cheese_positions()
+        .into_iter()
+        .map(|c| (c.x, c.y))
+        .collect();
+
+    let p1 = game.player1_position();
+    let p2 = game.player2_position();
+
+    OwnedMatchConfig {
+        width: game.width(),
+        height: game.height(),
+        max_turns: game.max_turns(),
+        walls,
+        mud,
+        cheese,
+        player1_start: (p1.x, p1.y),
+        player2_start: (p2.x, p2.y),
+        controlled_players: vec![],
+        timing,
+        move_timeout_ms,
+        preprocessing_timeout_ms,
+    }
 }

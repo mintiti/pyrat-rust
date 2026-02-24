@@ -701,58 +701,7 @@ impl PyRat {
 
     /// Extract all walls from the game state
     fn wall_entries(&self) -> Vec<crate::Wall> {
-        let mut walls = Vec::new();
-        let mut seen = std::collections::HashSet::new();
-
-        // For each position, check all adjacent cells to find walls
-        for y in 0..self.game.height() {
-            for x in 0..self.game.width() {
-                let current = Coordinates::new(x, y);
-
-                // Check all four adjacent cells
-                let adjacent = [
-                    (x.saturating_sub(1), y, x > 0, Direction::Left), // Left
-                    (
-                        x.saturating_add(1),
-                        y,
-                        x + 1 < self.game.width(),
-                        Direction::Right,
-                    ), // Right
-                    (x, y.saturating_sub(1), y > 0, Direction::Down), // Down
-                    (
-                        x,
-                        y.saturating_add(1),
-                        y + 1 < self.game.height(),
-                        Direction::Up,
-                    ), // Up
-                ];
-
-                for (adj_x, adj_y, in_bounds, direction) in adjacent {
-                    if in_bounds {
-                        let adjacent_pos = Coordinates::new(adj_x, adj_y);
-
-                        // Check if we can move to this adjacent cell
-                        if !self.game.move_table.is_move_valid(current, direction) {
-                            // Normalize wall representation (smaller position first)
-                            let (p1, p2) = if current < adjacent_pos {
-                                (current, adjacent_pos)
-                            } else {
-                                (adjacent_pos, current)
-                            };
-
-                            let wall = crate::Wall { pos1: p1, pos2: p2 };
-
-                            // Add if not already seen
-                            if seen.insert((p1, p2)) {
-                                walls.push(wall);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        walls
+        self.game.wall_entries()
     }
 
     // Game actions

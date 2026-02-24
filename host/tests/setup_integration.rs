@@ -118,7 +118,7 @@ async fn happy_path_two_bots() {
         timing: fast_timing(),
     };
 
-    let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx).await });
+    let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx, None).await });
 
     // Drive both bots concurrently.
     let ((), ()) = tokio::join!(
@@ -182,7 +182,7 @@ async fn hivemind_single_bot() {
         timing: fast_timing(),
     };
 
-    let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx).await });
+    let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx, None).await });
 
     drive_bot_through_setup(&mut w1, &mut r1, "HiveBot", "Auth", "hive").await;
 
@@ -229,7 +229,7 @@ async fn startup_timeout_no_bots() {
         },
     };
 
-    let result = run_setup(&setup, &mut game_rx).await;
+    let result = run_setup(&setup, &mut game_rx, None).await;
     assert!(matches!(result, Err(SetupError::StartupTimeout)));
 }
 
@@ -261,7 +261,7 @@ async fn startup_timeout_one_bot() {
         },
     };
 
-    let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx).await });
+    let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx, None).await });
 
     // Bot A identifies, but bot B never connects.
     w1.write_frame(&identify_frame_with_agent("BotA", "Auth", "bot-a"))
@@ -307,7 +307,7 @@ async fn preprocessing_timeout_errors() {
         },
     };
 
-    let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx).await });
+    let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx, None).await });
 
     // Run both bots concurrently. Bot A completes fully; Bot B stops
     // before PreprocessingDone to trigger the timeout.
@@ -377,7 +377,7 @@ async fn disconnect_during_setup() {
         timing: fast_timing(),
     };
 
-    let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx).await });
+    let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx, None).await });
 
     // Bot A identifies then disconnects.
     w1.write_frame(&identify_frame_with_agent("BotA", "Auth", "bot-a"))
@@ -454,7 +454,7 @@ async fn unknown_agent_id_ignored() {
         timing: fast_timing(),
     };
 
-    let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx).await });
+    let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx, None).await });
 
     // Bad bot identifies with wrong agent_id.
     w_bad
@@ -522,7 +522,7 @@ async fn set_options_arrive_before_match_config() {
         timing: fast_timing(),
     };
 
-    let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx).await });
+    let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx, None).await });
 
     // Both bots identify and send Ready.
     w1.write_frame(&identify_frame_with_agent("BotA", "AuthA", "bot-a"))
@@ -624,7 +624,7 @@ async fn disconnect_during_phase_b() {
         timing: fast_timing(),
     };
 
-    let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx).await });
+    let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx, None).await });
 
     // Both bots identify.
     w1.write_frame(&identify_frame_with_agent("BotA", "AuthA", "bot-a"))
@@ -685,7 +685,7 @@ async fn disconnect_during_phase_c() {
         },
     };
 
-    let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx).await });
+    let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx, None).await });
 
     // Both bots identify and send Ready.
     let bot_a_setup = async {
@@ -762,7 +762,7 @@ async fn all_disconnected_channel_closed() {
         timing: fast_timing(),
     };
 
-    let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx).await });
+    let setup_task = tokio::spawn(async move { run_setup(&setup, &mut game_rx, None).await });
 
     // Both bots identify.
     w1.write_frame(&identify_frame_with_agent("BotA", "AuthA", "bot-a"))

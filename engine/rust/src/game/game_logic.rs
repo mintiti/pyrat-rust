@@ -14,7 +14,7 @@
 //! - `MudMap` — HashMap lookup per move into a muddy passage;
 //!   this is the most expensive per-turn operation
 
-use crate::{CheeseBoard, Coordinates, Direction, MoveTable};
+use crate::{CheeseBoard, Coordinates, Direction, MoveTable, Wall};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -492,6 +492,35 @@ impl GameState {
     #[inline(always)]
     pub const fn mud_positions(&self) -> &MudMap {
         &self.mud
+    }
+
+    /// Reconstruct wall entries from the move table.
+    ///
+    /// Checks only Right and Up neighbors for each cell, which naturally
+    /// deduplicates (each wall is visited exactly once).
+    #[must_use]
+    pub fn wall_entries(&self) -> Vec<Wall> {
+        let mut walls = Vec::new();
+        for y in 0..self.height {
+            for x in 0..self.width {
+                let pos = Coordinates::new(x, y);
+                // Check Right neighbor
+                if x + 1 < self.width && !self.move_table.is_move_valid(pos, Direction::Right) {
+                    walls.push(Wall {
+                        pos1: pos,
+                        pos2: Coordinates::new(x + 1, y),
+                    });
+                }
+                // Check Up neighbor
+                if y + 1 < self.height && !self.move_table.is_move_valid(pos, Direction::Up) {
+                    walls.push(Wall {
+                        pos1: pos,
+                        pos2: Coordinates::new(x, y + 1),
+                    });
+                }
+            }
+        }
+        walls
     }
 
     /// Get the mud timer for player 1

@@ -9,6 +9,7 @@ use crate::session::messages::HostCommand;
 use crate::session::{run_session, SessionConfig, SessionId, SessionMsg};
 
 use super::config::{MatchSetup, SessionHandle};
+use super::events::MatchEvent;
 use super::slots::PlayerSlots;
 
 // ── Public types ─────────────────────────────────────
@@ -52,6 +53,7 @@ struct PendingSession {
 pub async fn run_setup(
     setup: &MatchSetup,
     game_rx: &mut mpsc::Receiver<SessionMsg>,
+    event_tx: Option<&mpsc::UnboundedSender<MatchEvent>>,
 ) -> Result<SetupResult, SetupError> {
     let startup_deadline = Instant::now() + setup.timing.startup_timeout;
     let mut slots = PlayerSlots::new(&setup.players);
@@ -96,6 +98,15 @@ pub async fn run_setup(
                                     players = ?claimed,
                                     "assigned to player slot(s)"
                                 );
+                                for &p in &claimed {
+                                    if let Some(tx) = event_tx {
+                                        let _ = tx.send(MatchEvent::BotIdentified {
+                                            player: p,
+                                            name: name.clone(),
+                                            author: author.clone(),
+                                        });
+                                    }
+                                }
                                 handles.insert(session_id, SessionHandle {
                                     session_id,
                                     cmd_tx: ps.cmd_tx,
@@ -239,6 +250,10 @@ pub async fn run_setup(
                 }
             }
         }
+    }
+
+    if let Some(tx) = event_tx {
+        let _ = tx.send(MatchEvent::SetupComplete);
     }
 
     let sessions: Vec<SessionHandle> = handles.into_values().collect();
