@@ -1,21 +1,23 @@
 use std::process::{Child, Command, Stdio};
 
-use tracing::info;
+use tracing::{debug, info};
 
 use super::config::BotConfig;
 
 /// Error returned when bot launching fails.
 #[derive(Debug, thiserror::Error)]
 pub enum LaunchError {
-    #[error("failed to spawn bot '{agent_id}': {source}")]
+    #[error("failed to spawn bot '{agent_id}' (command: {run_command}): {source}")]
     SpawnFailed {
         agent_id: String,
+        run_command: String,
         source: std::io::Error,
     },
 }
 
 /// RAII guard for spawned bot processes. Kills all children on drop.
 #[derive(Debug)]
+#[must_use = "dropping BotProcesses immediately kills all spawned bots"]
 pub struct BotProcesses {
     children: Vec<(String, Child)>,
 }
@@ -25,10 +27,7 @@ impl BotProcesses {
     pub fn kill_all(&mut self) {
         for (agent_id, child) in &mut self.children {
             if let Err(e) = child.kill() {
-                // Already dead is fine (InvalidInput on Unix).
-                if e.kind() != std::io::ErrorKind::InvalidInput {
-                    tracing::debug!(agent_id, error = %e, "kill failed (likely already exited)");
-                }
+                debug!(agent_id, error = %e, "kill failed (likely already exited)");
             }
             let _ = child.wait();
         }
@@ -59,6 +58,11 @@ impl Drop for BotProcesses {
 /// The spawned process receives two env vars:
 /// - `PYRAT_AGENT_ID` — the bot's agent identifier
 /// - `PYRAT_HOST_PORT` — the TCP port to connect to
+///
+/// **Note:** A successful return means processes were spawned, not that the
+/// bots are running or connected. Shell wrapping (`sh -c ...`) means a bad
+/// inner command still spawns `sh` successfully. The caller detects dead bots
+/// via connection timeout during the setup phase.
 pub fn launch_bots(bots: &[BotConfig], port: u16) -> Result<BotProcesses, LaunchError> {
     let mut children: Vec<(String, Child)> = Vec::new();
 
@@ -86,6 +90,7 @@ pub fn launch_bots(bots: &[BotConfig], port: u16) -> Result<BotProcesses, Launch
                 guard.kill_all();
                 return Err(LaunchError::SpawnFailed {
                     agent_id: bot.agent_id.clone(),
+                    run_command: bot.run_command.clone(),
                     source,
                 });
             },
@@ -104,12 +109,18 @@ fn spawn_bot(bot: &BotConfig, port: u16) -> std::io::Result<Child> {
     cmd.current_dir(&bot.working_dir)
         .env("PYRAT_AGENT_ID", &bot.agent_id)
         .env("PYRAT_HOST_PORT", port.to_string())
+        .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::inherit());
     cmd.spawn()
 }
 
 /// Build a `Command` that runs `run_command` through the platform shell.
+///
+/// NOTE: `BotProcesses::kill_all` sends SIGKILL to the direct child (`sh`),
+/// not the process tree. If the bot spawns its own subprocesses, they become
+/// orphans. Process groups (setsid / CREATE_NEW_PROCESS_GROUP) would fix this
+/// but aren't worth the complexity yet.
 #[cfg(unix)]
 fn shell_command(run_command: &str) -> Command {
     let mut cmd = Command::new("sh");
@@ -170,17 +181,44 @@ mod tests {
 
     #[test]
     fn spawn_failure_rolls_back() {
-        let cmd = idle_command();
-        // Bot A is valid, Bot B has a nonexistent working directory which
-        // makes Command::spawn() itself fail (not just the inner command).
-        let mut bad = bot("b", &cmd);
+        let pid_file =
+            std::env::temp_dir().join(format!("pyrat_test_rollback_{}", std::process::id()));
+        let _ = std::fs::remove_file(&pid_file);
+
+        // Bot A writes its PID then sleeps. Bot B has a bad working dir.
+        #[cfg(unix)]
+        let cmd_a = format!("echo $$ > {} && sleep 10", pid_file.display());
+        #[cfg(not(unix))]
+        let cmd_a = idle_command();
+
+        let mut bad = bot("b", &idle_command());
         bad.working_dir = PathBuf::from("/nonexistent_dir_that_wont_exist");
 
-        let bots = vec![bot("a", &cmd), bad];
+        let bots = vec![bot("a", &cmd_a), bad];
         let result = launch_bots(&bots, 9999);
         assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert!(err.to_string().contains("b"));
+        assert!(result.unwrap_err().to_string().contains("b"));
+
+        // Verify bot A was killed during rollback.
+        // The shell may or may not have written its PID before SIGKILL landed —
+        // on fast machines, rollback outraces sh startup. Both outcomes are correct:
+        // PID written + process dead = rollback killed a running bot.
+        // PID not written = rollback killed before first instruction.
+        #[cfg(unix)]
+        {
+            if let Ok(pid_str) = std::fs::read_to_string(&pid_file) {
+                let pid = pid_str.trim();
+                if !pid.is_empty() {
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    let status = Command::new("kill").args(["-0", pid]).status().unwrap();
+                    assert!(
+                        !status.success(),
+                        "bot A (pid {pid}) should be dead after rollback"
+                    );
+                }
+            }
+            let _ = std::fs::remove_file(&pid_file);
+        }
     }
 
     #[test]
