@@ -254,6 +254,9 @@ async fn collect_actions(
                     }
                     SessionMsg::Info { session_id, info } => {
                         if let Some(players) = session_players.get(&session_id) {
+                            // Hivemind sessions control multiple players — emit one
+                            // BotInfo per controlled player so consumers see info
+                            // attributed to each.
                             for &p in players {
                                 emit(event_tx, MatchEvent::BotInfo {
                                     player: p,

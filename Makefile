@@ -1,6 +1,6 @@
 # PyRat Monorepo Makefile
 
-.PHONY: all engine gui protocol examples cli test bench clean help sync lint lint-engine lint-protocol lint-cli test-cli test-integration generate-protocol
+.PHONY: all engine gui protocol examples cli test bench clean help sync lint lint-engine lint-protocol lint-cli test-cli test-host test-headless test-integration generate-protocol
 
 # Default target
 all: sync engine
@@ -40,12 +40,20 @@ dev-setup:
 	uv run pre-commit install && uv run pre-commit install --hook-type pre-push
 
 # Testing
-test: test-engine test-protocol test-cli
+test: test-engine test-host test-headless test-protocol test-cli
 
 test-engine:
 	@echo "Running engine tests..."
 	cargo test -p pyrat-rust --lib --no-default-features
 	cd engine && uv run pytest python/tests -v
+
+test-host:
+	@echo "Running host library tests..."
+	cargo test -p pyrat-host
+
+test-headless:
+	@echo "Running headless runner tests..."
+	cargo test -p pyrat-headless
 
 test-protocol:
 	@echo "Running protocol tests..."
@@ -129,6 +137,8 @@ help:
 	@echo "Testing:"
 	@echo "  test             - Run all tests (engine, protocol, CLI)"
 	@echo "  test-engine      - Run engine tests only"
+	@echo "  test-host        - Run host library tests"
+	@echo "  test-headless    - Run headless runner tests"
 	@echo "  test-protocol    - Run protocol tests only"
 	@echo "  test-cli         - Run CLI tests only"
 	@echo "  test-integration - Run integration tests"

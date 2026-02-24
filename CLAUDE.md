@@ -7,6 +7,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 PyRat is a monorepo containing the complete PyRat ecosystem for a competitive maze game. The repository is organized into multiple components:
 
 - **engine/**: Rust game engine with PyO3 bindings - core game logic and Python API
+- **host/**: Match hosting library — setup, turn loop, event streaming (Rust, `pyrat-host` crate)
+- **headless/**: Headless match runner binary — launches bots, runs a match, outputs JSON (`pyrat-headless` crate)
 - **protocol/**: AI communication protocol — text-based Python SDK (`pyrat_base`) and FlatBuffers wire protocol (`pyrat_protocol`)
 - **cli/**: Command-line game runner tool (`pyrat-game` command)
 
@@ -124,15 +126,19 @@ cd engine && uv run pytest python/tests -v
 ### Building and Testing
 ```bash
 # From repository root
-make test        # Run all tests
-make test-engine # Run engine tests only
+make test          # Run all tests
+make test-engine   # Run engine tests only
+make test-host     # Run host library tests
+make test-headless # Run headless runner tests
 make test-protocol # Run protocol tests only
-make test-cli    # Run CLI tests only
-make bench       # Run benchmarks
+make test-cli      # Run CLI tests only
+make bench         # Run benchmarks
 
 # Rust commands (from repo root — Cargo workspace is at root)
 cargo build -p pyrat-rust --release
 cargo test -p pyrat-rust --lib --no-default-features
+cargo test -p pyrat-host
+cargo test -p pyrat-headless
 cargo bench -p pyrat-rust --bench game_benchmarks
 
 # Build Python package with maturin
@@ -252,6 +258,21 @@ Each player receives:
 - Or use `make test-engine` from the repository root for both
 
 ## Component Details
+
+### Host Library (`host/`)
+Match hosting library. Manages bot connections, setup handshake, and the turn loop:
+- `game_loop/` — Setup phases (connect → identify → configure → preprocess), playing loop, event streaming
+- `session/` — Per-connection state machine, FlatBuffers wire codec
+- `wire/` — FlatBuffers schema types re-exported for consumers
+- `MatchEvent` — Event stream consumed by headless runner, GUI, or tournament systems
+
+**Key pattern:** The host is a pipe — it streams `MatchEvent`s through a channel. Consumers decide what to record or display.
+
+### Headless Runner (`headless/`)
+CLI binary that launches bot subprocesses, runs a match via the host library, and optionally writes a JSON game record:
+- `main.rs` — CLI parsing, bot launch, match orchestration, JSON output
+
+Command: `cargo run -p pyrat-headless -- bot1_cmd bot2_cmd`
 
 ### Protocol (`protocol/`)
 Text-based stdin/stdout protocol for AI communication. The `pyrat_base` package provides:

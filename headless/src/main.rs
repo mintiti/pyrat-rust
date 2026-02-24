@@ -9,7 +9,6 @@ use tokio::sync::mpsc;
 use tracing::{info, warn};
 
 use pyrat::game::builder::GameConfig;
-use pyrat::game::game_logic::GameState;
 
 use pyrat_host::game_loop::{
     accept_connections, build_owned_match_config, launch_bots, run_playing, run_setup, BotConfig,
@@ -116,16 +115,23 @@ fn result_label(result: GameResult) -> &'static str {
 }
 
 fn build_game_record(
-    game: &GameState,
     seed: Option<u64>,
     events: Vec<MatchEvent>,
     match_result: &MatchResult,
 ) -> GameRecord {
     let mut players = Vec::new();
     let mut turns = Vec::new();
+    let mut width: u8 = 0;
+    let mut height: u8 = 0;
+    let mut max_turns: u16 = 0;
 
     for event in events {
         match event {
+            MatchEvent::MatchStarted { config } => {
+                width = config.width;
+                height = config.height;
+                max_turns = config.max_turns;
+            },
             MatchEvent::BotIdentified {
                 player,
                 name,
@@ -163,9 +169,9 @@ fn build_game_record(
     }
 
     GameRecord {
-        width: game.width(),
-        height: game.height(),
-        max_turns: game.max_turns(),
+        width,
+        height,
+        max_turns,
         seed,
         players,
         turns,
@@ -293,14 +299,35 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
 
-    // 11. Shutdown sessions
+    // 11. Shutdown sessions and drain disconnect messages
+    let session_count = setup_result.sessions.len();
     for s in &setup_result.sessions {
         let _ = s
             .cmd_tx
             .send(pyrat_host::session::messages::HostCommand::Shutdown)
             .await;
     }
-    tokio::time::sleep(Duration::from_millis(100)).await;
+
+    let mut disconnected = 0usize;
+    let drain_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    while disconnected < session_count {
+        tokio::select! {
+            msg = game_rx.recv() => {
+                match msg {
+                    Some(SessionMsg::Disconnected { .. }) => { disconnected += 1; }
+                    Some(_) => {}
+                    None => break,
+                }
+            }
+            _ = tokio::time::sleep_until(drain_deadline) => {
+                warn!(
+                    remaining = session_count - disconnected,
+                    "shutdown drain timed out"
+                );
+                break;
+            }
+        }
+    }
 
     // 12. Collect events
     drop(event_tx);
@@ -311,7 +338,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
 
     // 14. Write game record
     if let Some(ref output_path) = cli.output {
-        let record = build_game_record(&game, cli.seed, events, &match_result);
+        let record = build_game_record(cli.seed, events, &match_result);
         let json = serde_json::to_string_pretty(&record).expect("JSON serialization failed");
         std::fs::write(output_path, json)?;
         info!(path = %output_path.display(), "game record written");

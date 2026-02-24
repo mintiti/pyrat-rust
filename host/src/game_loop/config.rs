@@ -138,6 +138,7 @@ pub fn build_owned_match_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pyrat::game::builder::GameConfig;
     use pyrat::{Coordinates, GameBuilder};
 
     #[test]
@@ -166,5 +167,22 @@ mod tests {
         assert_eq!(cfg.timing, TimingMode::Wait);
         assert_eq!(cfg.move_timeout_ms, 500);
         assert_eq!(cfg.preprocessing_timeout_ms, 3000);
+    }
+
+    #[test]
+    fn build_owned_match_config_extracts_walls_and_mud() {
+        let game = GameConfig::classic(7, 5, 3).create(Some(42)).unwrap();
+
+        let cfg = build_owned_match_config(&game, TimingMode::Wait, 500, 3000);
+
+        assert_eq!(cfg.width, 7);
+        assert_eq!(cfg.height, 5);
+        assert!(!cfg.walls.is_empty(), "classic 7×5 maze should have walls");
+
+        // Mud entries should be normalized: pos1 <= pos2.
+        for &(p1, p2, value) in &cfg.mud {
+            assert!(p1 <= p2, "mud entry not normalized: {p1:?} > {p2:?}");
+            assert!(value >= 2, "mud value should be >= 2, got {value}");
+        }
     }
 }
