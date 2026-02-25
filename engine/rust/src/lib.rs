@@ -19,7 +19,7 @@ pub use game::{
     board::MoveTable,
     builder::{GameBuilder, GameConfig, MazeParams},
     cheese_board::CheeseBoard,
-    game_logic::GameState,
+    game_logic::{GameState, MoveUndo, PlayerState},
     maze_generation::{CheeseConfig, MazeConfig},
-    types::{Coordinates, Direction, Mud, Wall},
+    types::{Coordinates, Direction, Mud, MudMap, Wall},
 };

@@ -758,6 +758,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "pyrat-engine-interface"
+version = "0.1.0"
+dependencies = [
+ "pyrat-rust",
+]
+
+[[package]]
 name = "pyrat-extension"
 version = "0.2.0"
 dependencies = [

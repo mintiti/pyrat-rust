@@ -5,7 +5,7 @@
 //! `create(Option<u64>)`, enabling reuse for RL training loops.
 //!
 //! ```rust,no_run
-//! use pyrat_engine::{GameBuilder, GameConfig, MazeParams};
+//! use pyrat::{GameBuilder, GameConfig, MazeParams};
 //!
 //! // Quick classic game
 //! let config = GameConfig::classic(21, 15, 41);
