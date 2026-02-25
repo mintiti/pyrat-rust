@@ -27,3 +27,18 @@ if cargo fmt --manifest-path "$WORKSPACE_ROOT/Cargo.toml" -p pyrat-wire 2>/dev/n
 else
     echo "Generated $TARGET (cargo fmt not available, skipping format)"
 fi
+
+# ── Python codegen ──────────────────────────────────────
+PY_OUT_DIR="$SCRIPT_DIR/../sdk-python/pyrat_sdk/_wire/generated"
+
+echo "Generating Python code from $SCHEMA..."
+flatc --python -o "$PY_OUT_DIR" "$SCHEMA"
+
+PY_TARGET="$PY_OUT_DIR/pyrat/protocol"
+if [[ ! -d "$PY_TARGET" ]]; then
+    echo "error: expected $PY_TARGET not found" >&2
+    ls -la "$PY_OUT_DIR"
+    exit 1
+fi
+
+echo "Generated Python FlatBuffers code in $PY_TARGET"
