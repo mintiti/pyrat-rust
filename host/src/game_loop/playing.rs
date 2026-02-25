@@ -19,7 +19,7 @@ use super::events::{emit, MatchEvent};
 // ── Public types ─────────────────────────────────────
 
 /// Result of a completed match.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MatchResult {
     pub result: GameResult,
     pub player1_score: f32,
@@ -36,6 +36,11 @@ pub struct PlayingState {
 }
 
 impl PlayingState {
+    /// Build initial state from the session list returned by setup.
+    ///
+    /// The same `sessions` slice must be passed to [`run_one_turn`] on every
+    /// call — `PlayingState` tracks session IDs internally and assumes
+    /// the slice identity is stable.
     pub fn new(sessions: &[SessionHandle]) -> Self {
         let session_players = sessions
             .iter()
@@ -51,12 +56,12 @@ impl PlayingState {
 }
 
 /// Outcome of a single turn.
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug, PartialEq)]
 pub enum TurnOutcome {
     /// Game continues — more turns to play.
     Continue,
-    /// Game ended this turn.
-    GameOver,
+    /// Game ended this turn — carries the final result.
+    GameOver(MatchResult),
 }
 
 /// What can go wrong during the playing phase.
@@ -83,6 +88,14 @@ fn engine_to_wire(d: EngineDirection) -> WireDirection {
 
 /// Execute one turn of the playing phase: send turn state, collect actions,
 /// step the engine, emit event, check for game over.
+///
+/// Does **not** send `GameOver` to sessions or emit `MatchOver` — the caller
+/// owns end-of-match signaling. See [`run_playing`] for an implementation
+/// that handles the full lifecycle.
+///
+/// With infinite timeout (`move_timeout = Duration::ZERO`), this function
+/// blocks until all actions arrive or sessions disconnect. The caller can
+/// send [`HostCommand::Stop`] to prompt bots to commit their moves.
 pub async fn run_one_turn(
     state: &mut PlayingState,
     game: &mut GameState,
@@ -141,7 +154,7 @@ pub async fn run_one_turn(
     );
 
     if result.game_over {
-        Ok(TurnOutcome::GameOver)
+        Ok(TurnOutcome::GameOver(determine_result(game)))
     } else {
         Ok(TurnOutcome::Continue)
     }
@@ -162,11 +175,12 @@ pub async fn run_playing(
 ) -> Result<MatchResult, PlayingError> {
     let mut state = PlayingState::new(sessions);
 
-    while run_one_turn(&mut state, game, sessions, game_rx, config, event_tx).await?
-        == TurnOutcome::Continue
-    {}
-
-    let match_result = determine_result(game);
+    let match_result = loop {
+        match run_one_turn(&mut state, game, sessions, game_rx, config, event_tx).await? {
+            TurnOutcome::Continue => continue,
+            TurnOutcome::GameOver(result) => break result,
+        }
+    };
 
     // Send GameOver to all connected sessions.
     for s in sessions {
@@ -587,5 +601,78 @@ mod tests {
             ),
             "expected BotInfo for Player1, got {event:?}"
         );
+    }
+
+    /// Zero timeout = infinite mode: disconnect fills STAY for the disconnected player.
+    #[tokio::test]
+    async fn disconnect_during_infinite_timeout_fills_stay() {
+        let (game_tx, mut game_rx) = mpsc::channel::<SessionMsg>(16);
+
+        let (cmd_tx1, _cmd_rx1) = mpsc::channel::<HostCommand>(16);
+        let (cmd_tx2, _cmd_rx2) = mpsc::channel::<HostCommand>(16);
+
+        let sessions = vec![
+            SessionHandle {
+                session_id: SessionId(1),
+                cmd_tx: cmd_tx1,
+                name: "Bot1".into(),
+                author: "A".into(),
+                agent_id: "bot-1".into(),
+                controlled_players: vec![Player::Player1],
+            },
+            SessionHandle {
+                session_id: SessionId(2),
+                cmd_tx: cmd_tx2,
+                name: "Bot2".into(),
+                author: "B".into(),
+                agent_id: "bot-2".into(),
+                controlled_players: vec![Player::Player2],
+            },
+        ];
+
+        let session_players: HashMap<SessionId, Vec<Player>> = sessions
+            .iter()
+            .map(|s| (s.session_id, s.controlled_players.clone()))
+            .collect();
+
+        let current_turn: u16 = 0;
+
+        // P1 disconnects.
+        game_tx
+            .send(SessionMsg::Disconnected {
+                session_id: SessionId(1),
+                reason: crate::session::messages::DisconnectReason::PeerClosed,
+            })
+            .await
+            .unwrap();
+
+        // P2 sends a valid action.
+        game_tx
+            .send(SessionMsg::Action {
+                session_id: SessionId(2),
+                player: Player::Player2,
+                direction: WireDirection::Down,
+                turn: current_turn,
+            })
+            .await
+            .unwrap();
+
+        let mut disconnected = HashSet::new();
+        let (p1, p2) = collect_actions(
+            &mut game_rx,
+            current_turn,
+            &sessions,
+            &session_players,
+            &mut disconnected,
+            Duration::ZERO, // infinite
+            None,
+        )
+        .await
+        .expect("collect_actions should not fail");
+
+        // Disconnected player gets STAY, other player's action is used.
+        assert_eq!(p1, WireDirection::Stay);
+        assert_eq!(p2, WireDirection::Down);
+        assert!(disconnected.contains(&SessionId(1)));
     }
 }

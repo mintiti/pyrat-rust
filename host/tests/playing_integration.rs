@@ -747,7 +747,7 @@ async fn gui_turn_by_turn_with_stop_and_infinite_timeout() {
         outcome.expect("run_one_turn failed")
     };
 
-    assert_eq!(outcome, TurnOutcome::Continue);
+    assert!(matches!(outcome, TurnOutcome::Continue));
 
     // Should have emitted a TurnPlayed event.
     let event = event_rx.try_recv().expect("should have TurnPlayed");
@@ -787,7 +787,10 @@ async fn gui_turn_by_turn_with_stop_and_infinite_timeout() {
         outcome.expect("run_one_turn failed")
     };
 
-    assert_eq!(outcome, TurnOutcome::GameOver);
+    assert!(
+        matches!(outcome, TurnOutcome::GameOver(ref r) if r.result == GameResult::Player1),
+        "expected GameOver(Player1), got {outcome:?}"
+    );
     assert_eq!(game.player1.score, 1.0);
 
     drop(event_tx);
