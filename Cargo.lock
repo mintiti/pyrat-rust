@@ -788,6 +788,7 @@ version = "0.1.0"
 dependencies = [
  "flatbuffers",
  "pyrat-rust",
+ "pyrat-wire",
  "thiserror",
  "tokio",
  "tracing",
@@ -804,6 +805,15 @@ dependencies = [
  "pyo3",
  "rand",
  "serde",
+]
+
+[[package]]
+name = "pyrat-wire"
+version = "0.1.0"
+dependencies = [
+ "flatbuffers",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]

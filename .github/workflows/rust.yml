@@ -49,6 +49,9 @@ jobs:
     - name: Run engine tests
       run: cargo test -p pyrat-rust --lib --no-default-features --verbose
 
+    - name: Run wire tests
+      run: cargo test -p pyrat-wire --verbose
+
     - name: Run host tests
       run: cargo test -p pyrat-host --verbose
 

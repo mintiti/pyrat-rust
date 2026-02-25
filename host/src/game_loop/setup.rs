@@ -8,7 +8,7 @@ use tracing::{debug, info, warn};
 use crate::session::messages::HostCommand;
 use crate::session::{run_session, SessionConfig, SessionId, SessionMsg};
 
-use crate::wire::Player;
+use pyrat_wire::Player;
 
 use super::config::{MatchSetup, SessionHandle};
 use super::events::{emit, MatchEvent};

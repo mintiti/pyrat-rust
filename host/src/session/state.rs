@@ -1,4 +1,4 @@
-use crate::wire::BotMessage;
+use pyrat_wire::BotMessage;
 
 /// Lifecycle state of a single bot session.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
