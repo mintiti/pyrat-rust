@@ -19,12 +19,49 @@ use super::events::{emit, MatchEvent};
 // ── Public types ─────────────────────────────────────
 
 /// Result of a completed match.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct MatchResult {
     pub result: GameResult,
     pub player1_score: f32,
     pub player2_score: f32,
     pub turns_played: u16,
+}
+
+/// State that persists across turns during the playing phase.
+pub struct PlayingState {
+    session_players: HashMap<SessionId, Vec<Player>>,
+    disconnected: HashSet<SessionId>,
+    last_p1: WireDirection,
+    last_p2: WireDirection,
+}
+
+impl PlayingState {
+    /// Build initial state from the session list returned by setup.
+    ///
+    /// The same `sessions` slice must be passed to [`run_one_turn`] on every
+    /// call — `PlayingState` tracks session IDs internally and assumes
+    /// the slice identity is stable.
+    pub fn new(sessions: &[SessionHandle]) -> Self {
+        let session_players = sessions
+            .iter()
+            .map(|s| (s.session_id, s.controlled_players.clone()))
+            .collect();
+        Self {
+            session_players,
+            disconnected: HashSet::new(),
+            last_p1: WireDirection::Stay,
+            last_p2: WireDirection::Stay,
+        }
+    }
+}
+
+/// Outcome of a single turn.
+#[derive(Debug, PartialEq)]
+pub enum TurnOutcome {
+    /// Game continues — more turns to play.
+    Continue,
+    /// Game ended this turn — carries the final result.
+    GameOver(MatchResult),
 }
 
 /// What can go wrong during the playing phase.
@@ -49,6 +86,80 @@ fn engine_to_wire(d: EngineDirection) -> WireDirection {
 
 // ── Turn loop ────────────────────────────────────────
 
+/// Execute one turn of the playing phase: send turn state, collect actions,
+/// step the engine, emit event, check for game over.
+///
+/// Does **not** send `GameOver` to sessions or emit `MatchOver` — the caller
+/// owns end-of-match signaling. See [`run_playing`] for an implementation
+/// that handles the full lifecycle.
+///
+/// With infinite timeout (`move_timeout = Duration::ZERO`), this function
+/// blocks until all actions arrive or sessions disconnect. The caller can
+/// send [`HostCommand::Stop`] to prompt bots to commit their moves.
+pub async fn run_one_turn(
+    state: &mut PlayingState,
+    game: &mut GameState,
+    sessions: &[SessionHandle],
+    game_rx: &mut mpsc::Receiver<SessionMsg>,
+    config: &PlayingConfig,
+    event_tx: Option<&mpsc::UnboundedSender<MatchEvent>>,
+) -> Result<TurnOutcome, PlayingError> {
+    let turn_state = build_turn_state(game, state.last_p1, state.last_p2);
+    let current_turn = game.turn;
+
+    // Send TurnState to each connected session.
+    for s in sessions {
+        if !state.disconnected.contains(&s.session_id)
+            && s.cmd_tx
+                .send(HostCommand::TurnState(Box::new(turn_state.clone())))
+                .await
+                .is_err()
+        {
+            debug!(
+                session = s.session_id.0,
+                "TurnState send failed — marking disconnected"
+            );
+            state.disconnected.insert(s.session_id);
+        }
+    }
+
+    // Collect actions.
+    let (p1_wire, p2_wire) = collect_actions(
+        game_rx,
+        current_turn,
+        sessions,
+        &state.session_players,
+        &mut state.disconnected,
+        config.move_timeout,
+        event_tx,
+    )
+    .await?;
+
+    // Step the engine.
+    let p1_move = wire_to_engine(p1_wire);
+    let p2_move = wire_to_engine(p2_wire);
+    let result = game.process_turn(p1_move, p2_move);
+
+    state.last_p1 = engine_to_wire(p1_move);
+    state.last_p2 = engine_to_wire(p2_move);
+
+    // Emit TurnPlayed event.
+    emit(
+        event_tx,
+        MatchEvent::TurnPlayed {
+            state: build_turn_state(game, state.last_p1, state.last_p2),
+            p1_action: p1_wire,
+            p2_action: p2_wire,
+        },
+    );
+
+    if result.game_over {
+        Ok(TurnOutcome::GameOver(determine_result(game)))
+    } else {
+        Ok(TurnOutcome::Continue)
+    }
+}
+
 /// Run the playing phase: send turn state, collect actions, step the engine,
 /// check for game over, repeat.
 ///
@@ -62,76 +173,18 @@ pub async fn run_playing(
     config: &PlayingConfig,
     event_tx: Option<&mpsc::UnboundedSender<MatchEvent>>,
 ) -> Result<MatchResult, PlayingError> {
-    // Build lookup: session_id → list of controlled players.
-    let session_players: HashMap<SessionId, Vec<Player>> = sessions
-        .iter()
-        .map(|s| (s.session_id, s.controlled_players.clone()))
-        .collect();
+    let mut state = PlayingState::new(sessions);
 
-    let mut disconnected: HashSet<SessionId> = HashSet::new();
-    let mut last_p1 = WireDirection::Stay;
-    let mut last_p2 = WireDirection::Stay;
-
-    loop {
-        let turn_state = build_turn_state(game, last_p1, last_p2);
-        let current_turn = game.turn;
-
-        // Send TurnState to each connected session.
-        for s in sessions {
-            if !disconnected.contains(&s.session_id)
-                && s.cmd_tx
-                    .send(HostCommand::TurnState(Box::new(turn_state.clone())))
-                    .await
-                    .is_err()
-            {
-                debug!(
-                    session = s.session_id.0,
-                    "TurnState send failed — marking disconnected"
-                );
-                disconnected.insert(s.session_id);
-            }
+    let match_result = loop {
+        match run_one_turn(&mut state, game, sessions, game_rx, config, event_tx).await? {
+            TurnOutcome::Continue => continue,
+            TurnOutcome::GameOver(result) => break result,
         }
-
-        // Collect actions.
-        let (p1_wire, p2_wire) = collect_actions(
-            game_rx,
-            current_turn,
-            sessions,
-            &session_players,
-            &mut disconnected,
-            config.move_timeout,
-            event_tx,
-        )
-        .await?;
-
-        // Step the engine.
-        let p1_move = wire_to_engine(p1_wire);
-        let p2_move = wire_to_engine(p2_wire);
-        let result = game.process_turn(p1_move, p2_move);
-
-        last_p1 = engine_to_wire(p1_move);
-        last_p2 = engine_to_wire(p2_move);
-
-        // Emit TurnPlayed event.
-        emit(
-            event_tx,
-            MatchEvent::TurnPlayed {
-                state: build_turn_state(game, last_p1, last_p2),
-                p1_action: p1_wire,
-                p2_action: p2_wire,
-            },
-        );
-
-        if result.game_over {
-            break;
-        }
-    }
-
-    let match_result = determine_result(game);
+    };
 
     // Send GameOver to all connected sessions.
     for s in sessions {
-        if !disconnected.contains(&s.session_id)
+        if !state.disconnected.contains(&s.session_id)
             && s.cmd_tx
                 .send(HostCommand::GameOver {
                     result: match_result.result,
@@ -219,6 +272,8 @@ async fn collect_actions(
         return Ok((p1_action.unwrap(), p2_action.unwrap()));
     }
 
+    // Duration::ZERO = infinite timeout (no deadline, wait for actions or disconnects).
+    let infinite = move_timeout.is_zero();
     let deadline = Instant::now() + move_timeout;
 
     loop {
@@ -275,7 +330,7 @@ async fn collect_actions(
                     return Ok((p1_action.unwrap(), p2_action.unwrap()));
                 }
             }
-            _ = tokio::time::sleep_until(deadline) => {
+            _ = tokio::time::sleep_until(deadline), if !infinite => {
                 // Timeout: fill remaining with STAY, notify timed-out sessions.
                 debug!(turn = current_turn, "move timeout — defaulting remaining players to STAY");
                 if p1_action.is_none() {
@@ -444,5 +499,180 @@ mod tests {
             cmd_rx1.try_recv().is_err(),
             "session 1 should not receive Timeout"
         );
+    }
+
+    /// Zero timeout = infinite mode: Info relayed as BotInfo, actions collected, no timeout.
+    #[tokio::test]
+    async fn infinite_timeout_collects_actions_and_relays_info() {
+        let (game_tx, mut game_rx) = mpsc::channel::<SessionMsg>(16);
+
+        let (cmd_tx1, _cmd_rx1) = mpsc::channel::<HostCommand>(16);
+        let (cmd_tx2, _cmd_rx2) = mpsc::channel::<HostCommand>(16);
+
+        let sessions = vec![
+            SessionHandle {
+                session_id: SessionId(1),
+                cmd_tx: cmd_tx1,
+                name: "Bot1".into(),
+                author: "A".into(),
+                agent_id: "bot-1".into(),
+                controlled_players: vec![Player::Player1],
+            },
+            SessionHandle {
+                session_id: SessionId(2),
+                cmd_tx: cmd_tx2,
+                name: "Bot2".into(),
+                author: "B".into(),
+                agent_id: "bot-2".into(),
+                controlled_players: vec![Player::Player2],
+            },
+        ];
+
+        let session_players: HashMap<SessionId, Vec<Player>> = sessions
+            .iter()
+            .map(|s| (s.session_id, s.controlled_players.clone()))
+            .collect();
+
+        let current_turn: u16 = 1;
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
+
+        // Bot1 sends Info first.
+        game_tx
+            .send(SessionMsg::Info {
+                session_id: SessionId(1),
+                info: crate::session::messages::OwnedInfo {
+                    target: None,
+                    depth: 5,
+                    nodes: 100,
+                    score: 0.5,
+                    path: vec![],
+                    message: "thinking".into(),
+                },
+            })
+            .await
+            .unwrap();
+
+        // Then both players send actions.
+        game_tx
+            .send(SessionMsg::Action {
+                session_id: SessionId(1),
+                player: Player::Player1,
+                direction: WireDirection::Up,
+                turn: current_turn,
+            })
+            .await
+            .unwrap();
+        game_tx
+            .send(SessionMsg::Action {
+                session_id: SessionId(2),
+                player: Player::Player2,
+                direction: WireDirection::Down,
+                turn: current_turn,
+            })
+            .await
+            .unwrap();
+
+        let mut disconnected = HashSet::new();
+        let (p1, p2) = collect_actions(
+            &mut game_rx,
+            current_turn,
+            &sessions,
+            &session_players,
+            &mut disconnected,
+            Duration::ZERO, // infinite
+            Some(&event_tx),
+        )
+        .await
+        .expect("collect_actions should not fail");
+
+        assert_eq!(p1, WireDirection::Up);
+        assert_eq!(p2, WireDirection::Down);
+
+        // Info should have been relayed as BotInfo event.
+        let event = event_rx.try_recv().expect("should have BotInfo event");
+        assert!(
+            matches!(
+                event,
+                MatchEvent::BotInfo {
+                    player: Player::Player1,
+                    turn: 1,
+                    ..
+                }
+            ),
+            "expected BotInfo for Player1, got {event:?}"
+        );
+    }
+
+    /// Zero timeout = infinite mode: disconnect fills STAY for the disconnected player.
+    #[tokio::test]
+    async fn disconnect_during_infinite_timeout_fills_stay() {
+        let (game_tx, mut game_rx) = mpsc::channel::<SessionMsg>(16);
+
+        let (cmd_tx1, _cmd_rx1) = mpsc::channel::<HostCommand>(16);
+        let (cmd_tx2, _cmd_rx2) = mpsc::channel::<HostCommand>(16);
+
+        let sessions = vec![
+            SessionHandle {
+                session_id: SessionId(1),
+                cmd_tx: cmd_tx1,
+                name: "Bot1".into(),
+                author: "A".into(),
+                agent_id: "bot-1".into(),
+                controlled_players: vec![Player::Player1],
+            },
+            SessionHandle {
+                session_id: SessionId(2),
+                cmd_tx: cmd_tx2,
+                name: "Bot2".into(),
+                author: "B".into(),
+                agent_id: "bot-2".into(),
+                controlled_players: vec![Player::Player2],
+            },
+        ];
+
+        let session_players: HashMap<SessionId, Vec<Player>> = sessions
+            .iter()
+            .map(|s| (s.session_id, s.controlled_players.clone()))
+            .collect();
+
+        let current_turn: u16 = 0;
+
+        // P1 disconnects.
+        game_tx
+            .send(SessionMsg::Disconnected {
+                session_id: SessionId(1),
+                reason: crate::session::messages::DisconnectReason::PeerClosed,
+            })
+            .await
+            .unwrap();
+
+        // P2 sends a valid action.
+        game_tx
+            .send(SessionMsg::Action {
+                session_id: SessionId(2),
+                player: Player::Player2,
+                direction: WireDirection::Down,
+                turn: current_turn,
+            })
+            .await
+            .unwrap();
+
+        let mut disconnected = HashSet::new();
+        let (p1, p2) = collect_actions(
+            &mut game_rx,
+            current_turn,
+            &sessions,
+            &session_players,
+            &mut disconnected,
+            Duration::ZERO, // infinite
+            None,
+        )
+        .await
+        .expect("collect_actions should not fail");
+
+        // Disconnected player gets STAY, other player's action is used.
+        assert_eq!(p1, WireDirection::Stay);
+        assert_eq!(p2, WireDirection::Down);
+        assert!(disconnected.contains(&SessionId(1)));
     }
 }

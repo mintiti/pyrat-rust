@@ -246,9 +246,13 @@ pub fn serialize_host_command(fbb: &mut FlatBufferBuilder<'_>, cmd: &HostCommand
             let off = wire::Ping::create(fbb, &wire::PingArgs {});
             (HostMessage::Ping, off.as_union_value())
         },
+        HostCommand::Stop => {
+            let off = wire::Stop::create(fbb, &wire::StopArgs {});
+            (HostMessage::Stop, off.as_union_value())
+        },
         HostCommand::Shutdown => {
-            // Shutdown is session-internal — no wire representation.
-            // Serialize as Stop for the wire.
+            // Shutdown is session-internal — serializes the same as Stop on the wire,
+            // but the session loop also enters drain mode.
             let off = wire::Stop::create(fbb, &wire::StopArgs {});
             (HostMessage::Stop, off.as_union_value())
         },
@@ -563,6 +567,14 @@ mod tests {
         let bytes = serialize_host_command(&mut fbb, &HostCommand::Ping);
         let packet = flatbuffers::root::<HostPacket>(&bytes).unwrap();
         assert_eq!(packet.message_type(), HostMessage::Ping);
+    }
+
+    #[test]
+    fn round_trip_stop() {
+        let mut fbb = FlatBufferBuilder::new();
+        let bytes = serialize_host_command(&mut fbb, &HostCommand::Stop);
+        let packet = flatbuffers::root::<HostPacket>(&bytes).unwrap();
+        assert_eq!(packet.message_type(), HostMessage::Stop);
     }
 
     #[test]

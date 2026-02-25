@@ -587,6 +587,108 @@ async fn default_player_inference_single_bot() {
     session_handle.await.unwrap();
 }
 
+// ── Stop command ────────────────────────────────────
+
+#[tokio::test]
+async fn stop_sends_wire_stop_and_session_stays_alive() {
+    let (bot_io, session_io) = tokio::io::duplex(8192);
+    let (bot_read, bot_write) = tokio::io::split(bot_io);
+    let (session_read, session_write) = tokio::io::split(session_io);
+
+    let (game_tx, mut game_rx) = mpsc::channel(32);
+
+    let session_handle = tokio::spawn(run_session(
+        SessionId(20),
+        session_read,
+        session_write,
+        game_tx,
+        SessionConfig::default(),
+    ));
+
+    let mut bot_writer = FrameWriter::with_default_max(bot_write);
+    let mut bot_reader = FrameReader::with_default_max(bot_read);
+
+    let cmd_tx = match recv(&mut game_rx).await {
+        SessionMsg::Connected { cmd_tx, .. } => cmd_tx,
+        other => panic!("expected Connected, got {other:?}"),
+    };
+
+    // Advance through setup to Playing.
+    bot_writer
+        .write_frame(&identify_frame("Bot", "Auth"))
+        .await
+        .unwrap();
+    let _ = recv(&mut game_rx).await; // Identified
+
+    bot_writer.write_frame(&ready_frame()).await.unwrap();
+    let _ = recv(&mut game_rx).await; // Ready
+
+    cmd_tx
+        .send(HostCommand::MatchConfig(Box::new(session_match_config())))
+        .await
+        .unwrap();
+    let _ = bot_reader.read_frame().await.unwrap(); // MatchConfig
+
+    cmd_tx.send(HostCommand::StartPreprocessing).await.unwrap();
+    let _ = bot_reader.read_frame().await.unwrap(); // StartPreprocessing
+
+    bot_writer
+        .write_frame(&preprocessing_done_frame())
+        .await
+        .unwrap();
+    let _ = recv(&mut game_rx).await; // PreprocessingDone
+
+    // Send Stop (not Shutdown) — bot should receive Stop frame.
+    cmd_tx.send(HostCommand::Stop).await.unwrap();
+    let frame = bot_reader.read_frame().await.unwrap();
+    let packet = flatbuffers::root::<HostPacket>(frame).unwrap();
+    assert_eq!(packet.message_type(), HostMessage::Stop);
+
+    // Session stays alive — send TurnState after Stop.
+    cmd_tx
+        .send(HostCommand::TurnState(Box::new(OwnedTurnState {
+            turn: 1,
+            player1_position: (20, 14),
+            player2_position: (0, 0),
+            player1_score: 0.0,
+            player2_score: 0.0,
+            player1_mud_turns: 0,
+            player2_mud_turns: 0,
+            cheese: vec![(10, 7)],
+            player1_last_move: Direction::Stay,
+            player2_last_move: Direction::Stay,
+        })))
+        .await
+        .unwrap();
+
+    let frame = bot_reader.read_frame().await.unwrap();
+    let packet = flatbuffers::root::<HostPacket>(frame).unwrap();
+    assert_eq!(
+        packet.message_type(),
+        HostMessage::TurnState,
+        "session should still be alive after Stop"
+    );
+
+    // Bot can still send actions.
+    bot_writer
+        .write_frame(&action_frame(Direction::Left, Player::Player1))
+        .await
+        .unwrap();
+    let msg = recv(&mut game_rx).await;
+    assert!(
+        matches!(msg, SessionMsg::Action { .. }),
+        "bot should still be able to send actions after Stop"
+    );
+
+    drop(bot_writer);
+    drop(bot_reader);
+
+    let msg = recv(&mut game_rx).await;
+    assert!(matches!(msg, SessionMsg::Disconnected { .. }));
+
+    session_handle.await.unwrap();
+}
+
 // ── New tests ───────────────────────────────────────
 
 #[tokio::test]

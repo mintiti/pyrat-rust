@@ -148,5 +148,8 @@ pub enum HostCommand {
         player2_score: f32,
     },
     Ping,
+    /// Tell the bot to stop thinking. Session stays alive.
+    Stop,
+    /// Send Stop on the wire, then enter drain mode and close the session.
     Shutdown,
 }

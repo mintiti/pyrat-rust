@@ -48,6 +48,10 @@ pub struct SessionHandle {
 #[derive(Debug, Clone)]
 pub struct PlayingConfig {
     /// Per-turn timeout for receiving actions from bots.
+    ///
+    /// `Duration::ZERO` means infinite timeout — no deadline, wait for actions
+    /// or disconnects. Use this with [`HostCommand::Stop`] for GUI-driven
+    /// turn-by-turn control.
     pub move_timeout: Duration,
 }
 
