@@ -11,7 +11,8 @@ use tokio::time::timeout;
 use pyrat::{Coordinates, GameBuilder};
 
 use pyrat_host::game_loop::{
-    run_playing, run_setup, MatchEvent, MatchSetup, PlayerEntry, PlayingConfig,
+    run_one_turn, run_playing, run_setup, MatchEvent, MatchSetup, PlayerEntry, PlayingConfig,
+    PlayingState, TurnOutcome,
 };
 use pyrat_host::session::messages::*;
 use pyrat_host::session::SessionId;
@@ -674,6 +675,123 @@ async fn cheese_updates_in_state() {
     assert_eq!(result.player2_score, 0.0);
     assert_eq!(result.turns_played, 2);
 
+    drop(w1);
+    drop(r1);
+    drop(w2);
+    drop(r2);
+    let _ = h1.await;
+    let _ = h2.await;
+}
+
+/// GUI use case: caller drives turns via run_one_turn + infinite timeout + Stop.
+///
+/// Each turn: host sends TurnState, caller sends Stop to bots, bots commit
+/// actions, turn completes. Verifies the composition works end-to-end.
+#[tokio::test]
+async fn gui_turn_by_turn_with_stop_and_infinite_timeout() {
+    let (game_tx, mut game_rx) = mpsc::channel(64);
+    let (mut w1, mut r1, h1) = spawn_session(SessionId(1), game_tx.clone());
+    let (mut w2, mut r2, h2) = spawn_session(SessionId(2), game_tx.clone());
+
+    let sessions = setup_two_bots(game_tx, &mut game_rx, &mut w1, &mut r1, &mut w2, &mut r2).await;
+
+    // 3×3 open maze, P1 at (0,0), cheese at (1,1), max 10 turns.
+    let mut game = tiny_game(10);
+    let config = PlayingConfig {
+        move_timeout: Duration::ZERO, // infinite — no timeout
+    };
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
+    let mut state = PlayingState::new(&sessions);
+
+    // --- Turn 0: P1 goes Right, P2 stays ---
+    // Drive bot + host concurrently: host calls run_one_turn (blocking on actions),
+    // bot tasks read TurnState, receive Stop, then send Action.
+    let outcome = {
+        let bot_side = async {
+            // Both bots read TurnState.
+            let _ = read_turn_state(&mut r1).await;
+            let _ = read_turn_state(&mut r2).await;
+
+            // GUI sends Stop to both bots (trigger: "commit your move now").
+            for s in &sessions {
+                let _ = s.cmd_tx.send(HostCommand::Stop).await;
+            }
+
+            // Bots receive Stop frame, then send their actions.
+            let frame1 = r1.read_frame().await.unwrap();
+            let p1 = flatbuffers::root::<HostPacket>(frame1).unwrap();
+            assert_eq!(p1.message_type(), HostMessage::Stop);
+
+            let frame2 = r2.read_frame().await.unwrap();
+            let p2 = flatbuffers::root::<HostPacket>(frame2).unwrap();
+            assert_eq!(p2.message_type(), HostMessage::Stop);
+
+            w1.write_frame(&action_frame(Direction::Right, Player::Player1))
+                .await
+                .unwrap();
+            w2.write_frame(&action_frame(Direction::Stay, Player::Player2))
+                .await
+                .unwrap();
+        };
+
+        let host_side = run_one_turn(
+            &mut state,
+            &mut game,
+            &sessions,
+            &mut game_rx,
+            &config,
+            Some(&event_tx),
+        );
+
+        let (_, outcome) = tokio::join!(bot_side, host_side);
+        outcome.expect("run_one_turn failed")
+    };
+
+    assert_eq!(outcome, TurnOutcome::Continue);
+
+    // Should have emitted a TurnPlayed event.
+    let event = event_rx.try_recv().expect("should have TurnPlayed");
+    assert!(matches!(event, MatchEvent::TurnPlayed { .. }));
+
+    // --- Turn 1: P1 goes Up to (1,1), collects cheese, game over ---
+    let outcome = {
+        let bot_side = async {
+            let _ = read_turn_state(&mut r1).await;
+            let _ = read_turn_state(&mut r2).await;
+
+            for s in &sessions {
+                let _ = s.cmd_tx.send(HostCommand::Stop).await;
+            }
+
+            let _ = r1.read_frame().await.unwrap(); // Stop
+            let _ = r2.read_frame().await.unwrap(); // Stop
+
+            w1.write_frame(&action_frame(Direction::Up, Player::Player1))
+                .await
+                .unwrap();
+            w2.write_frame(&action_frame(Direction::Stay, Player::Player2))
+                .await
+                .unwrap();
+        };
+
+        let host_side = run_one_turn(
+            &mut state,
+            &mut game,
+            &sessions,
+            &mut game_rx,
+            &config,
+            Some(&event_tx),
+        );
+
+        let (_, outcome) = tokio::join!(bot_side, host_side);
+        outcome.expect("run_one_turn failed")
+    };
+
+    assert_eq!(outcome, TurnOutcome::GameOver);
+    assert_eq!(game.player1.score, 1.0);
+
+    drop(event_tx);
+    drop(event_rx);
     drop(w1);
     drop(r1);
     drop(w2);
