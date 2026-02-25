@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 
 use crate::session::messages::{HostCommand, OwnedMatchConfig};
 use crate::session::SessionId;
-use crate::wire::{Player, TimingMode};
+use pyrat_wire::{Player, TimingMode};
 
 /// Which player a bot controls, identified by agent_id.
 #[derive(Debug, Clone)]

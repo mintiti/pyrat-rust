@@ -14,9 +14,9 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tracing::{debug, warn};
 
-use crate::wire::framing::{FrameError, FrameReader, FrameWriter};
-use crate::wire::Player;
 use codec::{extract_bot_packet, serialize_host_command, BotPayload};
+use pyrat_wire::framing::{FrameError, FrameReader, FrameWriter};
+use pyrat_wire::Player;
 
 /// Tunable limits for a session.
 #[derive(Debug, Clone)]

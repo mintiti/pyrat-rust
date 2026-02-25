@@ -1,5 +1,5 @@
 use crate::session::SessionId;
-use crate::wire::Player;
+use pyrat_wire::Player;
 
 use super::config::PlayerEntry;
 

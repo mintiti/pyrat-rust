@@ -1,6 +1,6 @@
 use tokio::sync::mpsc;
 
-use crate::wire::{Direction, GameResult, OptionType, Player, TimingMode};
+use pyrat_wire::{Direction, GameResult, OptionType, Player, TimingMode};
 
 // ── Session identity ────────────────────────────────
 

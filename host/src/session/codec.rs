@@ -3,7 +3,7 @@
 use flatbuffers::FlatBufferBuilder;
 
 use crate::session::messages::{HostCommand, OwnedInfo, OwnedMatchConfig, OwnedOptionDef};
-use crate::wire::{self, BotMessage, HostMessage, HostPacket, HostPacketArgs, Vec2};
+use pyrat_wire::{self as wire, BotMessage, HostMessage, HostPacket, HostPacketArgs, Vec2};
 
 // ── Helpers ─────────────────────────────────────────
 
@@ -320,7 +320,7 @@ pub fn extract_match_config(mc: &wire::MatchConfig<'_>) -> OwnedMatchConfig {
 mod tests {
     use super::*;
     use crate::session::messages::OwnedTurnState;
-    use crate::wire::{Direction, GameResult, Player, TimingMode};
+    use pyrat_wire::{Direction, GameResult, Player, TimingMode};
 
     // Helper: build a BotPacket with Identify
     fn build_identify(name: &str, author: &str) -> Vec<u8> {

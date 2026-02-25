@@ -11,7 +11,7 @@ use pyrat::game::game_logic::GameState;
 use pyrat::{Coordinates, Direction as EngineDirection};
 
 use crate::session::messages::{HostCommand, OwnedTurnState, SessionId, SessionMsg};
-use crate::wire::{Direction as WireDirection, GameResult, Player};
+use pyrat_wire::{Direction as WireDirection, GameResult, Player};
 
 use super::config::{PlayingConfig, SessionHandle};
 use super::events::{emit, MatchEvent};
@@ -408,7 +408,7 @@ fn determine_result(game: &GameState) -> MatchResult {
 mod tests {
     use super::*;
     use crate::session::messages::{HostCommand, SessionId, SessionMsg};
-    use crate::wire::{Direction as WireDirection, Player};
+    use pyrat_wire::{Direction as WireDirection, Player};
     use std::collections::{HashMap, HashSet};
     use std::time::Duration;
     use tokio::sync::mpsc;
