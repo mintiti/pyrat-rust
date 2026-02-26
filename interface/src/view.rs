@@ -53,7 +53,7 @@ impl GameView {
         cheese: Vec<Coordinates>,
         p1_start: Coordinates,
         p2_start: Coordinates,
-    ) -> Self {
+    ) -> Result<Self, String> {
         let mut wall_map: HashMap<Coordinates, Vec<Coordinates>> = HashMap::new();
         for &(a, b) in walls {
             wall_map.entry(a).or_default().push(b);
@@ -72,9 +72,9 @@ impl GameView {
             .with_custom_cheese(cheese)
             .build()
             .create(None)
-            .unwrap();
+            .map_err(|e| e.to_string())?;
 
-        Self { game }
+        Ok(Self { game })
     }
 
     // -------------------------------------------------------------------
@@ -180,8 +180,12 @@ impl GameView {
         &self.game
     }
 
-    pub fn game_mut(&mut self) -> &mut GameState {
-        &mut self.game
+    /// Clone the game state for simulation.
+    ///
+    /// The returned `GameState` is the bot's own copy — calling `make_move`
+    /// or `unmake_move` on it won't affect this view.
+    pub fn snapshot(&self) -> GameState {
+        self.game.clone()
     }
 }
 
@@ -204,6 +208,7 @@ mod tests {
             c(0, 0),
             c(4, 4),
         )
+        .unwrap()
     }
 
     #[test]
@@ -286,15 +291,30 @@ mod tests {
     }
 
     #[test]
-    fn game_mut_make_move() {
-        let mut view = simple_view();
+    fn snapshot_make_move() {
+        let view = simple_view();
         let p1_before = view.player1().position;
 
-        let undo = view.game_mut().make_move(Direction::Right, Direction::Stay);
-        assert_ne!(view.player1().position, p1_before);
+        // Snapshot, mutate the snapshot, verify view is unchanged
+        let mut snap = view.snapshot();
+        let undo = snap.make_move(Direction::Right, Direction::Stay);
+        assert_ne!(snap.player1.current_pos, p1_before);
 
-        view.game_mut().unmake_move(undo);
+        // Original view is unaffected
         assert_eq!(view.player1().position, p1_before);
+
+        // Undo works on snapshot
+        snap.unmake_move(undo);
+        assert_eq!(snap.player1.current_pos, p1_before);
+    }
+
+    #[test]
+    fn from_config_empty_maze() {
+        let result = GameView::from_config(3, 3, 100, &[], &[], vec![c(1, 1)], c(0, 0), c(2, 2));
+        assert!(result.is_ok());
+        let view = result.unwrap();
+        assert_eq!(view.width(), 3);
+        assert!(view.has_edge(c(0, 0), c(1, 0)));
     }
 
     #[test]
