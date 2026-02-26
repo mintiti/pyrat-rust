@@ -291,6 +291,11 @@ rust-project.json
 # macOS
 .DS_Store
 
+# GUI (Tauri + React)
+node_modules/
+gui/dist/
+gui/src-tauri/gen/
+
 # End of https://www.toptal.com/developers/gitignore/api/rust,rust-analyzer,jetbrains+all,python
 pyrat-rust/bin/
 pyrat-rust/pyvenv.cfg
