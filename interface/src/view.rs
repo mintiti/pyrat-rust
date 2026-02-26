@@ -8,6 +8,7 @@ use std::collections::HashMap;
 pub struct PlayerSnapshot {
     pub position: Coordinates,
     pub score: f32,
+    /// Turns remaining stuck in mud. 0 means the player can move freely.
     pub mud_turns: u8,
 }
 
@@ -18,6 +19,11 @@ impl PlayerSnapshot {
             score: ps.score,
             mud_turns: ps.mud_timer,
         }
+    }
+
+    /// Whether the player is currently stuck in mud.
+    pub fn is_in_mud(&self) -> bool {
+        self.mud_turns > 0
     }
 }
 
@@ -103,6 +109,18 @@ impl GameView {
 
     pub fn max_turns(&self) -> u16 {
         self.game.max_turns
+    }
+
+    pub fn remaining_turns(&self) -> u16 {
+        self.game.max_turns - self.game.turn
+    }
+
+    pub fn total_cheese(&self) -> u16 {
+        self.game.cheese.total_cheese()
+    }
+
+    pub fn remaining_cheese(&self) -> u16 {
+        self.game.cheese.remaining_cheese()
     }
 
     pub fn width(&self) -> u8 {
@@ -333,5 +351,26 @@ mod tests {
         let results = view.nearest_cheeses(c(0, 0));
         assert!(!results.is_empty());
         assert_eq!(results[0].target, c(3, 3));
+    }
+
+    #[test]
+    fn remaining_turns_at_start() {
+        let view = simple_view();
+        assert_eq!(view.remaining_turns(), 300);
+    }
+
+    #[test]
+    fn total_and_remaining_cheese() {
+        let view = simple_view();
+        assert_eq!(view.total_cheese(), 2);
+        assert_eq!(view.remaining_cheese(), 2);
+    }
+
+    #[test]
+    fn player_snapshot_is_in_mud() {
+        let view = simple_view();
+        let p1 = view.player1();
+        assert!(!p1.is_in_mud());
+        assert_eq!(p1.mud_turns, 0);
     }
 }
