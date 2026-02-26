@@ -5,9 +5,9 @@
 
 
 export const commands = {
-async getGameInfo() : Promise<Result<GameInfo, string>> {
+async getGameState() : Promise<Result<MazeState, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("get_game_info") };
+    return { status: "ok", data: await TAURI_INVOKE("get_game_state") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -25,7 +25,11 @@ async getGameInfo() : Promise<Result<GameInfo, string>> {
 
 /** user-defined types **/
 
-export type GameInfo = { width: number; height: number; total_cheese: number; max_turns: number; player1_position: [number, number]; player2_position: [number, number] }
+export type Coord = { x: number; y: number }
+export type MazeState = { width: number; height: number; turn: number; max_turns: number; walls: WallEntry[]; mud: MudEntry[]; cheese: Coord[]; player1: PlayerState; player2: PlayerState; total_cheese: number }
+export type MudEntry = { from: Coord; to: Coord; cost: number }
+export type PlayerState = { position: Coord; score: number }
+export type WallEntry = { from: Coord; to: Coord }
 
 /** tauri-specta globals **/
 

@@ -3,11 +3,11 @@
 
 mod commands;
 
-use commands::get_game_info;
+use commands::get_game_state;
 use tauri_specta::{collect_commands, Builder};
 
 fn main() {
-    let builder = Builder::<tauri::Wry>::new().commands(collect_commands![get_game_info]);
+    let builder = Builder::<tauri::Wry>::new().commands(collect_commands![get_game_state]);
 
     #[cfg(debug_assertions)]
     builder
