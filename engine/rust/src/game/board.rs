@@ -73,6 +73,14 @@ impl MoveTable {
         position_moves & (1 << direction as u8) != 0
     }
 
+    /// Iterator of valid cardinal directions from a position.
+    pub fn valid_directions(&self, pos: Coordinates) -> impl Iterator<Item = Direction> + '_ {
+        let mask = self.get_valid_moves(pos);
+        Direction::CARDINALS
+            .into_iter()
+            .filter(move |&dir| mask & (1 << dir as u8) != 0)
+    }
+
     /// Bulk check of all valid moves for a position
     /// Returns a bitmask of valid moves
     #[inline(always)]

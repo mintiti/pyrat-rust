@@ -3,7 +3,7 @@
 //! All functions take a [`Maze`] reference for topology.
 //! Costs are in turns — mud passages cost N turns (N >= 2), free passages cost 1.
 
-use crate::maze::{self, Maze};
+use crate::maze::Maze;
 use pyrat::{Coordinates, Direction};
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
@@ -183,14 +183,14 @@ fn relax_neighbors(
         if new_dist < dist[n_idx] {
             dist[n_idx] = new_dist;
             first_moves[n_idx] = if u == source {
-                vec![maze::direction_between(source, neighbor).unwrap()]
+                vec![Direction::between(source, neighbor).unwrap()]
             } else {
                 first_moves[u_idx].clone()
             };
             heap.push(Reverse((new_dist, neighbor)));
         } else if new_dist == dist[n_idx] {
             let moves_to_merge = if u == source {
-                vec![maze::direction_between(source, neighbor).unwrap()]
+                vec![Direction::between(source, neighbor).unwrap()]
             } else {
                 first_moves[u_idx].clone()
             };

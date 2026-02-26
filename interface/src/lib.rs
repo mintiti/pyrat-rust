@@ -10,7 +10,6 @@
 //!   simulation without affecting the view.
 //! - [`pathfinding`] — Dijkstra-based shortest paths and distance maps, all taking
 //!   `&Maze`.
-//! - [`direction_between`] — pure geometry helper (no maze data needed).
 //!
 //! ## When to use what
 //!
@@ -30,6 +29,6 @@ pub mod view;
 pub use pyrat::{Coordinates, Direction, GameState, MoveUndo, Mud, Wall};
 
 // Re-export interface types
-pub use maze::{direction_between, Maze};
+pub use maze::Maze;
 pub use pathfinding::{distances_from, nearest_cheeses, shortest_path, PathResult};
 pub use view::{GameView, PlayerSnapshot};

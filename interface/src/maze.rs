@@ -2,18 +2,8 @@
 //!
 //! [`Maze`] bundles the move table, mud map, and dimensions into a single borrow.
 //! All graph queries (neighbors, edge costs, valid moves) are methods on `Maze`.
-//!
-//! The free function [`direction_between`] is pure geometry (no maze data needed).
 
 use pyrat::{Coordinates, Direction, MoveTable, MudMap};
-
-/// All four movement directions (excludes Stay).
-const DIRECTIONS: [Direction; 4] = [
-    Direction::Up,
-    Direction::Right,
-    Direction::Down,
-    Direction::Left,
-];
 
 /// Borrow-bundle for the static maze topology.
 ///
@@ -61,25 +51,21 @@ impl<'a> Maze<'a> {
     /// Adjacent walkable cells with edge costs.
     /// Cost is 1 for free passage, N for mud (N >= 2).
     pub fn neighbors(&self, pos: Coordinates) -> Vec<(Coordinates, u8)> {
-        let mask = self.move_table.get_valid_moves(pos);
-        let mut result = Vec::with_capacity(4);
-
-        for dir in DIRECTIONS {
-            if mask & (1 << (dir as u8)) != 0 {
+        self.move_table
+            .valid_directions(pos)
+            .map(|dir| {
                 let neighbor = dir.apply_to(pos);
                 let w = self.mud.get(pos, neighbor).unwrap_or(1);
-                result.push((neighbor, w));
-            }
-        }
-
-        result
+                (neighbor, w)
+            })
+            .collect()
     }
 
     /// Edge cost between two adjacent cells.
     /// Returns `None` if there's a wall or cells aren't adjacent.
     /// 1 = free passage, N = mud (takes N turns to traverse).
     pub fn edge_cost(&self, a: Coordinates, b: Coordinates) -> Option<u8> {
-        let dir = direction_between(a, b)?;
+        let dir = Direction::between(a, b)?;
         if self.move_table.is_move_valid(a, dir) {
             Some(self.mud.get(a, b).unwrap_or(1))
         } else {
@@ -89,21 +75,12 @@ impl<'a> Maze<'a> {
 
     /// Is there a passage between two cells? (no wall)
     pub fn has_edge(&self, a: Coordinates, b: Coordinates) -> bool {
-        direction_between(a, b).is_some_and(|dir| self.move_table.is_move_valid(a, dir))
+        Direction::between(a, b).is_some_and(|dir| self.move_table.is_move_valid(a, dir))
     }
 
     /// Directions from `pos` that lead to a valid cell (not into walls or boundaries).
     pub fn valid_moves(&self, pos: Coordinates) -> Vec<Direction> {
-        let mask = self.move_table.get_valid_moves(pos);
-        let mut result = Vec::with_capacity(4);
-
-        for dir in DIRECTIONS {
-            if mask & (1 << (dir as u8)) != 0 {
-                result.push(dir);
-            }
-        }
-
-        result
+        self.move_table.valid_directions(pos).collect()
     }
 
     /// Cost of moving in a specific direction from `pos`.
@@ -115,22 +92,6 @@ impl<'a> Maze<'a> {
         }
         let dest = dir.apply_to(pos);
         Some(self.mud.get(pos, dest).unwrap_or(1))
-    }
-}
-
-/// Derive the direction needed to move from `a` to `b`.
-/// Returns `None` if the cells aren't orthogonally adjacent.
-///
-/// Pure geometry — doesn't need maze data.
-pub fn direction_between(a: Coordinates, b: Coordinates) -> Option<Direction> {
-    let dx = b.x as i16 - a.x as i16;
-    let dy = b.y as i16 - a.y as i16;
-    match (dx, dy) {
-        (0, 1) => Some(Direction::Up),
-        (0, -1) => Some(Direction::Down),
-        (1, 0) => Some(Direction::Right),
-        (-1, 0) => Some(Direction::Left),
-        _ => None,
     }
 }
 
@@ -185,27 +146,6 @@ mod tests {
             .create(None)
             .unwrap();
         (game.move_table, game.mud)
-    }
-
-    // -------------------------------------------------------------------
-    // direction_between
-    // -------------------------------------------------------------------
-
-    #[test]
-    fn direction_between_adjacent() {
-        let a = c(1, 1);
-        assert_eq!(direction_between(a, c(1, 2)), Some(Direction::Up));
-        assert_eq!(direction_between(a, c(1, 0)), Some(Direction::Down));
-        assert_eq!(direction_between(a, c(2, 1)), Some(Direction::Right));
-        assert_eq!(direction_between(a, c(0, 1)), Some(Direction::Left));
-    }
-
-    #[test]
-    fn direction_between_non_adjacent() {
-        let a = c(1, 1);
-        assert_eq!(direction_between(a, c(3, 1)), None);
-        assert_eq!(direction_between(a, c(2, 2)), None);
-        assert_eq!(direction_between(a, a), None);
     }
 
     // -------------------------------------------------------------------
