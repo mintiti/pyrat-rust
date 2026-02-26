@@ -3,19 +3,13 @@ import {
 	Center,
 	Group,
 	Loader,
-	MantineProvider,
 	Stack,
 	Text,
 	Title,
-	createTheme,
 } from "@mantine/core";
 import { useEffect, useState } from "react";
 import { commands } from "./bindings";
 import type { GameInfo } from "./bindings/generated";
-
-const theme = createTheme({
-	primaryColor: "yellow",
-});
 
 function GameCard({ info }: { info: GameInfo }) {
 	return (
@@ -85,16 +79,14 @@ export default function App() {
 	}, []);
 
 	return (
-		<MantineProvider theme={theme} defaultColorScheme="dark">
-			<Center h="100vh" p="md">
-				{error ? (
-					<Text c="red">{error}</Text>
-				) : info ? (
-					<GameCard info={info} />
-				) : (
-					<Loader />
-				)}
-			</Center>
-		</MantineProvider>
+		<Center h="100vh" p="md">
+			{error ? (
+				<Text c="red">{error}</Text>
+			) : info ? (
+				<GameCard info={info} />
+			) : (
+				<Loader />
+			)}
+		</Center>
 	);
 }
