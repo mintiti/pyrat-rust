@@ -1,3 +1,10 @@
+//! Static maze topology — the graph structure that doesn't change during a game.
+//!
+//! [`Maze`] bundles the move table, mud map, and dimensions into a single borrow.
+//! All graph queries (neighbors, edge costs, valid moves) are methods on `Maze`.
+//!
+//! The free function [`direction_between`] is pure geometry (no maze data needed).
+
 use pyrat::{Coordinates, Direction, MoveTable, MudMap};
 
 /// All four movement directions (excludes Stay).

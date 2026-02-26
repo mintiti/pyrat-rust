@@ -1,3 +1,10 @@
+//! SDK-facing game view — wraps a [`GameState`] with graph and pathfinding methods.
+//!
+//! [`GameView`] is the primary type bots interact with. It provides read-only
+//! access to game state, delegates graph queries to [`Maze`], and exposes
+//! pathfinding. Use [`GameView::snapshot`] for simulation (make/unmake moves
+//! on a copy without affecting the view).
+
 use crate::maze::Maze;
 use crate::pathfinding;
 use pyrat::{Coordinates, Direction, GameBuilder, GameState, MudMap, PlayerState};
@@ -49,6 +56,24 @@ impl GameView {
     /// - `mud`: triples of (a, b, cost) for muddy passages.
     /// - `cheese`: initial cheese positions.
     /// - `p1_start`, `p2_start`: player starting positions.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use pyrat_engine_interface::{Coordinates, GameView};
+    ///
+    /// let view = GameView::from_config(
+    ///     5, 5, 300,
+    ///     &[],  // no walls
+    ///     &[],  // no mud
+    ///     vec![Coordinates::new(2, 2)],
+    ///     Coordinates::new(0, 0),
+    ///     Coordinates::new(4, 4),
+    /// ).unwrap();
+    ///
+    /// assert_eq!(view.width(), 5);
+    /// assert_eq!(view.total_cheese(), 1);
+    /// ```
     #[allow(clippy::too_many_arguments)]
     pub fn from_config(
         width: u8,
@@ -149,22 +174,27 @@ impl GameView {
     // Graph queries (delegate to Maze)
     // -------------------------------------------------------------------
 
+    /// See [`Maze::neighbors`].
     pub fn neighbors(&self, pos: Coordinates) -> Vec<(Coordinates, u8)> {
         self.maze().neighbors(pos)
     }
 
+    /// See [`Maze::edge_cost`].
     pub fn edge_cost(&self, a: Coordinates, b: Coordinates) -> Option<u8> {
         self.maze().edge_cost(a, b)
     }
 
+    /// See [`Maze::has_edge`].
     pub fn has_edge(&self, a: Coordinates, b: Coordinates) -> bool {
         self.maze().has_edge(a, b)
     }
 
+    /// See [`Maze::valid_moves`].
     pub fn valid_moves(&self, pos: Coordinates) -> Vec<Direction> {
         self.maze().valid_moves(pos)
     }
 
+    /// See [`Maze::move_cost`].
     pub fn move_cost(&self, pos: Coordinates, dir: Direction) -> Option<u8> {
         self.maze().move_cost(pos, dir)
     }
@@ -181,6 +211,24 @@ impl GameView {
         pathfinding::shortest_path(from, to, &self.maze())
     }
 
+    /// Cheeses at minimum distance from `from`, each with first-move options.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use pyrat_engine_interface::{Coordinates, GameView};
+    ///
+    /// let view = GameView::from_config(
+    ///     5, 5, 300, &[], &[],
+    ///     vec![Coordinates::new(1, 0), Coordinates::new(4, 4)],
+    ///     Coordinates::new(0, 0),
+    ///     Coordinates::new(4, 4),
+    /// ).unwrap();
+    ///
+    /// let nearest = view.nearest_cheeses(Coordinates::new(0, 0));
+    /// // Greedy bot: pick first move toward nearest cheese
+    /// let dir = nearest[0].first_moves[0];
+    /// ```
     pub fn nearest_cheeses(&self, from: Coordinates) -> Vec<pathfinding::PathResult> {
         let cheese = self.game.cheese.get_all_cheese_positions();
         pathfinding::nearest_cheeses(from, &cheese, &self.maze())
@@ -194,14 +242,39 @@ impl GameView {
     // Engine pass-through
     // -------------------------------------------------------------------
 
+    /// Read-only access to the underlying [`GameState`].
     pub fn game(&self) -> &GameState {
         &self.game
     }
 
     /// Clone the game state for simulation.
     ///
-    /// The returned `GameState` is the bot's own copy — calling `make_move`
+    /// The returned [`GameState`] is the bot's own copy — calling `make_move`
     /// or `unmake_move` on it won't affect this view.
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use pyrat_engine_interface::{Coordinates, Direction, GameView};
+    ///
+    /// let view = GameView::from_config(
+    ///     3, 3, 100, &[], &[],
+    ///     vec![Coordinates::new(1, 0)],
+    ///     Coordinates::new(0, 0),
+    ///     Coordinates::new(2, 2),
+    /// ).unwrap();
+    ///
+    /// let mut sim = view.snapshot();
+    /// let undo = sim.make_move(Direction::Right, Direction::Stay);
+    ///
+    /// // View is unchanged
+    /// assert_eq!(view.player1().position, Coordinates::new(0, 0));
+    /// // Snapshot moved
+    /// assert_eq!(sim.player1.current_pos, Coordinates::new(1, 0));
+    ///
+    /// sim.unmake_move(undo);
+    /// assert_eq!(sim.player1.current_pos, Coordinates::new(0, 0));
+    /// ```
     pub fn snapshot(&self) -> GameState {
         self.game.clone()
     }

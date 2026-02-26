@@ -1,3 +1,8 @@
+//! Dijkstra-based pathfinding on the maze graph.
+//!
+//! All functions take a [`Maze`] reference for topology.
+//! Costs are in turns — mud passages cost N turns (N >= 2), free passages cost 1.
+
 use crate::maze::{self, Maze};
 use pyrat::{Coordinates, Direction};
 use std::cmp::Reverse;
