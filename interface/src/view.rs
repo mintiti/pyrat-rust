@@ -1,16 +1,17 @@
-use crate::{graph, pathfinding};
+use crate::maze::Maze;
+use crate::pathfinding;
 use pyrat::{Coordinates, Direction, GameBuilder, GameState, MudMap, PlayerState};
 use std::collections::HashMap;
 
 /// Snapshot of a player's state. Copy-cheap, no references.
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct Player {
+pub struct PlayerSnapshot {
     pub position: Coordinates,
     pub score: f32,
     pub mud_turns: u8,
 }
 
-impl Player {
+impl PlayerSnapshot {
     fn from_state(ps: &PlayerState) -> Self {
         Self {
             position: ps.current_pos,
@@ -21,7 +22,7 @@ impl Player {
 }
 
 /// SDK-facing view over a game. Owns a `GameState` and delegates
-/// graph queries and pathfinding to the free functions in this crate.
+/// graph queries and pathfinding to the `Maze` and pathfinding modules.
 pub struct GameView {
     game: GameState,
 }
@@ -80,12 +81,12 @@ impl GameView {
     // Player snapshots
     // -------------------------------------------------------------------
 
-    pub fn player1(&self) -> Player {
-        Player::from_state(&self.game.player1)
+    pub fn player1(&self) -> PlayerSnapshot {
+        PlayerSnapshot::from_state(&self.game.player1)
     }
 
-    pub fn player2(&self) -> Player {
-        Player::from_state(&self.game.player2)
+    pub fn player2(&self) -> PlayerSnapshot {
+        PlayerSnapshot::from_state(&self.game.player2)
     }
 
     // -------------------------------------------------------------------
@@ -113,68 +114,62 @@ impl GameView {
     }
 
     // -------------------------------------------------------------------
-    // Graph queries (delegate to graph module)
+    // Maze topology
+    // -------------------------------------------------------------------
+
+    /// Borrow the static maze topology for graph queries.
+    pub fn maze(&self) -> Maze<'_> {
+        Maze::new(
+            &self.game.move_table,
+            &self.game.mud,
+            self.game.width,
+            self.game.height,
+        )
+    }
+
+    // -------------------------------------------------------------------
+    // Graph queries (delegate to Maze)
     // -------------------------------------------------------------------
 
     pub fn neighbors(&self, pos: Coordinates) -> Vec<(Coordinates, u8)> {
-        graph::neighbors(pos, &self.game.move_table, &self.game.mud)
+        self.maze().neighbors(pos)
     }
 
-    pub fn weight(&self, a: Coordinates, b: Coordinates) -> Option<u8> {
-        graph::weight(a, b, &self.game.move_table, &self.game.mud)
+    pub fn edge_cost(&self, a: Coordinates, b: Coordinates) -> Option<u8> {
+        self.maze().edge_cost(a, b)
     }
 
     pub fn has_edge(&self, a: Coordinates, b: Coordinates) -> bool {
-        graph::has_edge(a, b, &self.game.move_table)
+        self.maze().has_edge(a, b)
     }
 
-    pub fn effective_moves(&self, pos: Coordinates) -> Vec<Direction> {
-        graph::effective_moves(pos, &self.game.move_table)
+    pub fn valid_moves(&self, pos: Coordinates) -> Vec<Direction> {
+        self.maze().valid_moves(pos)
     }
 
     pub fn move_cost(&self, pos: Coordinates, dir: Direction) -> Option<u8> {
-        graph::move_cost(pos, dir, &self.game.move_table, &self.game.mud)
+        self.maze().move_cost(pos, dir)
     }
 
     // -------------------------------------------------------------------
     // Pathfinding (delegate to pathfinding module)
     // -------------------------------------------------------------------
 
-    pub fn shortest_paths(
+    pub fn shortest_path(
         &self,
         from: Coordinates,
         to: Coordinates,
     ) -> Option<pathfinding::PathResult> {
-        pathfinding::shortest_paths(
-            from,
-            to,
-            self.game.width,
-            self.game.height,
-            &self.game.move_table,
-            &self.game.mud,
-        )
+        pathfinding::shortest_path(from, to, &self.maze())
     }
 
     pub fn nearest_cheeses(&self, from: Coordinates) -> Vec<pathfinding::PathResult> {
         let cheese = self.game.cheese.get_all_cheese_positions();
-        pathfinding::nearest_cheeses(
-            from,
-            &cheese,
-            self.game.width,
-            self.game.height,
-            &self.game.move_table,
-            &self.game.mud,
-        )
+        pathfinding::nearest_cheeses(from, &cheese, &self.maze())
     }
 
     pub fn distances_from(&self, pos: Coordinates) -> HashMap<Coordinates, u32> {
-        pathfinding::distances_from(
-            pos,
-            self.game.width,
-            self.game.height,
-            &self.game.move_table,
-            &self.game.mud,
-        )
+        pathfinding::distances_from(pos, &self.maze())
     }
 
     // -------------------------------------------------------------------
@@ -244,30 +239,34 @@ mod tests {
     fn from_config_wall() {
         let view = simple_view();
         assert!(!view.has_edge(c(1, 0), c(1, 1)));
-        assert!(view.has_edge(c(0, 0), c(1, 0))); // no wall here
+        assert!(view.has_edge(c(0, 0), c(1, 0)));
     }
 
     #[test]
     fn from_config_mud() {
         let view = simple_view();
-        assert_eq!(view.weight(c(2, 2), c(2, 3)), Some(3));
-        assert_eq!(view.weight(c(0, 0), c(1, 0)), Some(1)); // no mud
+        assert_eq!(view.edge_cost(c(2, 2), c(2, 3)), Some(3));
+        assert_eq!(view.edge_cost(c(0, 0), c(1, 0)), Some(1));
     }
 
     #[test]
     fn delegation_matches_free_functions() {
         let view = simple_view();
-        let game = view.game();
+        let maze = view.maze();
 
-        // neighbors should match
         let view_n = view.neighbors(c(0, 0));
-        let free_n = graph::neighbors(c(0, 0), &game.move_table, &game.mud);
-        assert_eq!(view_n, free_n);
+        let maze_n = maze.neighbors(c(0, 0));
+        assert_eq!(view_n, maze_n);
 
-        // effective_moves should match
-        let view_m = view.effective_moves(c(2, 2));
-        let free_m = graph::effective_moves(c(2, 2), &game.move_table);
-        assert_eq!(view_m, free_m);
+        let view_m = view.valid_moves(c(2, 2));
+        let maze_m = maze.valid_moves(c(2, 2));
+        assert_eq!(view_m, maze_m);
+
+        assert_eq!(
+            view.edge_cost(c(2, 2), c(2, 3)),
+            maze.edge_cost(c(2, 2), c(2, 3))
+        );
+        assert_eq!(view.edge_cost(c(0, 0), c(1, 0)), Some(1));
     }
 
     #[test]
@@ -291,13 +290,9 @@ mod tests {
         let mut view = simple_view();
         let p1_before = view.player1().position;
 
-        // Move player 1 right, player 2 stays
         let undo = view.game_mut().make_move(Direction::Right, Direction::Stay);
-
-        // Player 1 should have moved
         assert_ne!(view.player1().position, p1_before);
 
-        // Unmake should restore
         view.game_mut().unmake_move(undo);
         assert_eq!(view.player1().position, p1_before);
     }
@@ -305,8 +300,7 @@ mod tests {
     #[test]
     fn pathfinding_through_view() {
         let view = simple_view();
-        // (0,0) to (3,3) on 5x5 grid with one wall and one mud
-        let result = view.shortest_paths(c(0, 0), c(3, 3));
+        let result = view.shortest_path(c(0, 0), c(3, 3));
         assert!(result.is_some());
         let r = result.unwrap();
         assert_eq!(r.target, c(3, 3));
@@ -318,7 +312,6 @@ mod tests {
         let view = simple_view();
         let results = view.nearest_cheeses(c(0, 0));
         assert!(!results.is_empty());
-        // (3,3) should be closer than (4,4) from (0,0)
         assert_eq!(results[0].target, c(3, 3));
     }
 }

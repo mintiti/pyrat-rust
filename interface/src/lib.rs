@@ -1,14 +1,11 @@
-pub mod graph;
+pub mod maze;
 pub mod pathfinding;
 pub mod view;
 
 // Re-export engine types that SDKs need
-pub use pyrat::{
-    CheeseBoard, Coordinates, Direction, GameBuilder, GameConfig, GameState, MoveTable, MoveUndo,
-    Mud, MudMap, PlayerState, Wall,
-};
+pub use pyrat::{Coordinates, Direction, GameState, MoveUndo, Mud, Wall};
 
 // Re-export interface types
-pub use graph::{direction_between, effective_moves, has_edge, move_cost, neighbors, weight};
-pub use pathfinding::{distances_from, nearest_cheeses, shortest_paths, PathResult};
-pub use view::{GameView, Player};
+pub use maze::{direction_between, Maze};
+pub use pathfinding::{distances_from, nearest_cheeses, shortest_path, PathResult};
+pub use view::{GameView, PlayerSnapshot};
