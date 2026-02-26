@@ -1,27 +1,9 @@
 import { Group, SegmentedControl, Stack, Switch, Text } from "@mantine/core";
 import { useState } from "react";
 import { commands } from "../bindings";
-import type { Coord, MazeState as TauriMazeState } from "../bindings/generated";
+import type { MazeState } from "../bindings/generated";
 import MazeRenderer from "../components/MazeRenderer";
-import type { MazeState } from "../types/game";
 import { testMazeState } from "./testData";
-
-/** Convert specta's {x,y} Coord objects to [x,y] tuples used by renderer types. */
-function convertTauriState(t: TauriMazeState): MazeState {
-	const c = (coord: Coord): [number, number] => [coord.x, coord.y];
-	return {
-		width: t.width,
-		height: t.height,
-		turn: t.turn,
-		maxTurns: t.max_turns,
-		totalCheese: t.total_cheese,
-		walls: t.walls.map((w) => ({ from: c(w.from), to: c(w.to) })),
-		mud: t.mud.map((m) => ({ from: c(m.from), to: c(m.to), cost: m.cost })),
-		cheese: t.cheese.map(c),
-		player1: { position: c(t.player1.position), score: t.player1.score },
-		player2: { position: c(t.player2.position), score: t.player2.score },
-	};
-}
 
 type Source = "hardcoded" | "tauri";
 
@@ -40,7 +22,7 @@ export default function DevHarness() {
 				.getGameState()
 				.then((result) => {
 					if (result.status === "ok") {
-						setTauriState(convertTauriState(result.data));
+						setTauriState(result.data);
 					} else {
 						setError(result.error);
 					}
@@ -85,10 +67,10 @@ export default function DevHarness() {
 						{gameState.width}x{gameState.height}
 					</Text>
 					<Text size="xs" c="dimmed">
-						Turn {gameState.turn}/{gameState.maxTurns}
+						Turn {gameState.turn}/{gameState.max_turns}
 					</Text>
 					<Text size="xs" c="dimmed">
-						Cheese: {gameState.cheese.length}/{gameState.totalCheese}
+						Cheese: {gameState.cheese.length}/{gameState.total_cheese}
 					</Text>
 					{error && (
 						<Text size="xs" c="red">

@@ -6,7 +6,7 @@ import { loadAssets } from "../renderer/assets";
 import { buildDrawInstructions } from "../renderer/instructions";
 import { computeLayout } from "../renderer/layout";
 import { generateTileMap } from "../renderer/tileMap";
-import type { MazeState } from "../types/game";
+import type { MazeState } from "../bindings/generated";
 import MazeCanvas from "./MazeCanvas";
 
 type Props = {

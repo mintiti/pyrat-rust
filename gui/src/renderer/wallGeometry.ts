@@ -1,4 +1,4 @@
-import type { Wall } from "../types/game";
+import type { WallEntry } from "../bindings/generated";
 import type { LayoutMetrics } from "./layout";
 
 export type WallSegment = {
@@ -22,7 +22,7 @@ export type Corner = {
  * A wall between two cells that differ in y → horizontal segment at the shared edge.
  */
 export function computeWallSegments(
-	walls: Wall[],
+	walls: WallEntry[],
 	layout: LayoutMetrics,
 	mazeW: number,
 	mazeH: number,
@@ -32,8 +32,8 @@ export function computeWallSegments(
 
 	// Internal walls
 	for (const wall of walls) {
-		const [fx, fy] = wall.from;
-		const [tx, ty] = wall.to;
+		const { x: fx, y: fy } = wall.from;
+		const { x: tx, y: ty } = wall.to;
 
 		if (fx !== tx) {
 			// Vertical wall between horizontally adjacent cells

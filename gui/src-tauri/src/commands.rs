@@ -63,7 +63,7 @@ pub fn get_game_state() -> Result<MazeState, String> {
         .collect();
 
     let mud = game
-        .mud
+        .mud_positions()
         .iter()
         .map(|((from, to), cost)| MudEntry {
             from: Coord {
@@ -76,34 +76,33 @@ pub fn get_game_state() -> Result<MazeState, String> {
         .collect();
 
     let cheese = game
-        .cheese
-        .get_all_cheese_positions()
+        .cheese_positions()
         .into_iter()
         .map(|c| Coord { x: c.x, y: c.y })
         .collect();
 
     Ok(MazeState {
-        width: game.width,
-        height: game.height,
-        turn: game.turn,
-        max_turns: game.max_turns,
+        width: game.width(),
+        height: game.height(),
+        turn: game.turns(),
+        max_turns: game.max_turns(),
         walls,
         mud,
         cheese,
         player1: PlayerState {
             position: Coord {
-                x: game.player1.current_pos.x,
-                y: game.player1.current_pos.y,
+                x: game.player1_position().x,
+                y: game.player1_position().y,
             },
-            score: game.player1.score,
+            score: game.player1_score(),
         },
         player2: PlayerState {
             position: Coord {
-                x: game.player2.current_pos.x,
-                y: game.player2.current_pos.y,
+                x: game.player2_position().x,
+                y: game.player2_position().y,
             },
-            score: game.player2.score,
+            score: game.player2_score(),
         },
-        total_cheese: game.cheese.total_cheese(),
+        total_cheese: game.total_cheese(),
     })
 }

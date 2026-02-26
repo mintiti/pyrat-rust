@@ -1,4 +1,4 @@
-import type { MazeState } from "../types/game";
+import type { MazeState } from "../bindings/generated";
 import type { AssetMap } from "./assets";
 import type { LayoutMetrics } from "./layout";
 import { gameToCanvas } from "./layout";
@@ -51,7 +51,7 @@ export function buildDrawInstructions(
 	for (let gy = 0; gy < height; gy++) {
 		for (let gx = 0; gx < width; gx++) {
 			const tile = tileMap[gy][gx];
-			const { x, y } = gameToCanvas([gx, gy], layout, height);
+			const { x, y } = gameToCanvas({ x: gx, y: gy }, layout, height);
 			sprites.push({
 				image: assets.ground[tile.tileIndex],
 				dx: x,
@@ -67,13 +67,7 @@ export function buildDrawInstructions(
 
 	// 2. Mud sprites + 3. Mud weight labels
 	for (const mud of state.mud) {
-		const [fx, fy] = mud.from;
-		const [tx, ty] = mud.to;
-		const isVertical = fx === tx;
-
-		// Position between the two cells
-		const midGx = (fx + tx) / 2;
-		const midGy = (fy + ty) / 2;
+		const isVertical = mud.from.x === mud.to.x;
 
 		const fromCanvas = gameToCanvas(mud.from, layout, height);
 		const toCanvas = gameToCanvas(mud.to, layout, height);
@@ -106,7 +100,7 @@ export function buildDrawInstructions(
 		const indexSize = Math.max(6, Math.floor(cellSize * 0.15));
 		for (let gy = 0; gy < height; gy++) {
 			for (let gx = 0; gx < width; gx++) {
-				const { x, y } = gameToCanvas([gx, gy], layout, height);
+				const { x, y } = gameToCanvas({ x: gx, y: gy }, layout, height);
 				texts.push({
 					text: `${gx},${gy}`,
 					x: x + 3,

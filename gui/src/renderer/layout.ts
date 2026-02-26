@@ -1,4 +1,4 @@
-import type { Coordinate } from "../types/game";
+import type { Coord } from "../bindings/generated";
 
 export type LayoutMetrics = {
 	cellSize: number;
@@ -39,13 +39,12 @@ export function computeLayout(
 
 /** Convert a game coordinate to canvas pixel position (top-left of the cell). */
 export function gameToCanvas(
-	coord: Coordinate,
+	coord: Coord,
 	layout: LayoutMetrics,
 	mazeHeight: number,
 ): { x: number; y: number } {
-	const [gx, gy] = coord;
 	return {
-		x: layout.mazeX + gx * layout.cellSize,
-		y: layout.mazeY + (mazeHeight - 1 - gy) * layout.cellSize,
+		x: layout.mazeX + coord.x * layout.cellSize,
+		y: layout.mazeY + (mazeHeight - 1 - coord.y) * layout.cellSize,
 	};
 }
