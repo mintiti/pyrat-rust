@@ -2,12 +2,23 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod commands;
+mod events;
+mod match_runner;
+mod state;
 
-use commands::get_game_state;
-use tauri_specta::{collect_commands, Builder};
+use commands::{get_game_state, start_match};
+use events::{MatchErrorEvent, MatchOverEvent, MatchStartedEvent, TurnPlayedEvent};
+use tauri_specta::{collect_commands, collect_events, Builder};
 
 fn main() {
-    let builder = Builder::<tauri::Wry>::new().commands(collect_commands![get_game_state]);
+    let builder = Builder::<tauri::Wry>::new()
+        .commands(collect_commands![get_game_state, start_match])
+        .events(collect_events![
+            MatchStartedEvent,
+            TurnPlayedEvent,
+            MatchOverEvent,
+            MatchErrorEvent
+        ]);
 
     #[cfg(debug_assertions)]
     builder
@@ -20,6 +31,7 @@ fn main() {
         .expect("failed to export typescript bindings");
 
     tauri::Builder::default()
+        .manage(state::AppState::default())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {
             builder.mount_events(app);

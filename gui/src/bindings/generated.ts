@@ -12,12 +12,31 @@ async getGameState() : Promise<Result<MazeState, string>> {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async startMatch(player1Cmd: string, player2Cmd: string) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("start_match", { player1Cmd, player2Cmd }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
 /** user-defined events **/
 
 
+export const events = __makeEvents__<{
+matchErrorEvent: MatchErrorEvent,
+matchOverEvent: MatchOverEvent,
+matchStartedEvent: MatchStartedEvent,
+turnPlayedEvent: TurnPlayedEvent
+}>({
+matchErrorEvent: "match-error-event",
+matchOverEvent: "match-over-event",
+matchStartedEvent: "match-started-event",
+turnPlayedEvent: "turn-played-event"
+})
 
 /** user-defined constants **/
 
@@ -26,9 +45,26 @@ async getGameState() : Promise<Result<MazeState, string>> {
 /** user-defined types **/
 
 export type Coord = { x: number; y: number }
+/**
+ * Emitted on setup failures, bot crashes, etc.
+ */
+export type MatchErrorEvent = { message: string }
+/**
+ * Emitted when the match ends normally.
+ */
+export type MatchOverEvent = { winner: MatchWinner; player1_score: number; player2_score: number; turns_played: number }
+/**
+ * Full initial state so the frontend can initialize the renderer.
+ */
+export type MatchStartedEvent = MazeState
+export type MatchWinner = "Player1" | "Player2" | "Draw"
 export type MazeState = { width: number; height: number; turn: number; max_turns: number; walls: WallEntry[]; mud: MudEntry[]; cheese: Coord[]; player1: PlayerState; player2: PlayerState; total_cheese: number }
 export type MudEntry = { from: Coord; to: Coord; cost: number }
 export type PlayerState = { position: Coord; score: number }
+/**
+ * Per-turn delta. Walls/mud never change, so we only send positions + cheese.
+ */
+export type TurnPlayedEvent = { turn: number; player1: PlayerState; player2: PlayerState; cheese: Coord[] }
 export type WallEntry = { from: Coord; to: Coord }
 
 /** tauri-specta globals **/

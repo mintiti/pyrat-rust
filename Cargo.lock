@@ -2943,6 +2943,7 @@ dependencies = [
 name = "pyrat-gui"
 version = "0.1.0"
 dependencies = [
+ "pyrat-host",
  "pyrat-rust",
  "serde",
  "serde_json",
@@ -2951,6 +2952,8 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-specta",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

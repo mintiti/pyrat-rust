@@ -1,33 +1,38 @@
-use pyrat::GameConfig;
-use serde::Serialize;
+use pyrat::game::builder::GameConfig;
+use pyrat::game::game_logic::GameState;
+use serde::{Deserialize, Serialize};
 use specta::Type;
 
-#[derive(Serialize, Type)]
+use crate::events::{MatchErrorEvent, MatchStartedEvent};
+use crate::match_runner::run_match;
+use crate::state::{AppState, MatchPhase};
+
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct Coord {
     pub x: u8,
     pub y: u8,
 }
 
-#[derive(Serialize, Type)]
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct WallEntry {
     pub from: Coord,
     pub to: Coord,
 }
 
-#[derive(Serialize, Type)]
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct MudEntry {
     pub from: Coord,
     pub to: Coord,
     pub cost: u8,
 }
 
-#[derive(Serialize, Type)]
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct PlayerState {
     pub position: Coord,
     pub score: f32,
 }
 
-#[derive(Serialize, Type)]
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct MazeState {
     pub width: u8,
     pub height: u8,
@@ -41,12 +46,8 @@ pub struct MazeState {
     pub total_cheese: u16,
 }
 
-#[tauri::command]
-#[specta::specta]
-pub fn get_game_state() -> Result<MazeState, String> {
-    let config = GameConfig::classic(21, 15, 41);
-    let game = config.create(Some(42)).map_err(|e| e.to_string())?;
-
+/// Convert engine GameState to our serializable MazeState.
+pub fn build_maze_state(game: &GameState) -> MazeState {
     let walls = game
         .wall_entries()
         .into_iter()
@@ -81,7 +82,7 @@ pub fn get_game_state() -> Result<MazeState, String> {
         .map(|c| Coord { x: c.x, y: c.y })
         .collect();
 
-    Ok(MazeState {
+    MazeState {
         width: game.width(),
         height: game.height(),
         turn: game.turns(),
@@ -104,5 +105,60 @@ pub fn get_game_state() -> Result<MazeState, String> {
             score: game.player2_score(),
         },
         total_cheese: game.total_cheese(),
-    })
+    }
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn get_game_state() -> Result<MazeState, String> {
+    let config = GameConfig::classic(21, 15, 41);
+    let game = config.create(Some(42)).map_err(|e| e.to_string())?;
+    Ok(build_maze_state(&game))
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn start_match(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    player1_cmd: String,
+    player2_cmd: String,
+) -> Result<(), String> {
+    use tauri_specta::Event;
+
+    let mut phase = state.match_phase.lock().await;
+
+    // Abort existing match if running
+    if let MatchPhase::Running { abort_handle } = &*phase {
+        abort_handle.abort();
+    }
+
+    // Emit initial state before spawning so frontend can render immediately
+    let config = GameConfig::classic(21, 15, 41);
+    let game = config.create(None).map_err(|e| e.to_string())?;
+    let initial_state = build_maze_state(&game);
+    MatchStartedEvent(initial_state)
+        .emit(&app)
+        .map_err(|e| e.to_string())?;
+
+    let app_handle = app.clone();
+    let match_phase = state.match_phase.clone();
+
+    let join_handle = tokio::spawn(async move {
+        if let Err(e) = run_match(app_handle.clone(), game, player1_cmd, player2_cmd).await {
+            let _ = MatchErrorEvent {
+                message: e.to_string(),
+            }
+            .emit(&app_handle);
+        }
+        // Reset to idle when done
+        let mut phase = match_phase.lock().await;
+        *phase = MatchPhase::Idle;
+    });
+
+    *phase = MatchPhase::Running {
+        abort_handle: join_handle.abort_handle(),
+    };
+
+    Ok(())
 }
