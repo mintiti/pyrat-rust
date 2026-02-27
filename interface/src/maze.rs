@@ -19,6 +19,23 @@ pub struct Maze<'a> {
 }
 
 impl<'a> Maze<'a> {
+    /// Build a `Maze` from raw engine fields.
+    ///
+    /// Typically constructed from a [`GameState`](pyrat::GameState) snapshot:
+    ///
+    /// ```
+    /// use pyrat_engine_interface::{GameView, Maze};
+    ///
+    /// let view = GameView::from_config(
+    ///     3, 3, 100, &[], &[],
+    ///     vec![pyrat_engine_interface::Coordinates::new(1, 1)],
+    ///     pyrat_engine_interface::Coordinates::new(0, 0),
+    ///     pyrat_engine_interface::Coordinates::new(2, 2),
+    /// ).unwrap();
+    ///
+    /// let snap = view.snapshot();
+    /// let maze = Maze::new(&snap.move_table, &snap.mud, snap.width, snap.height);
+    /// ```
     pub fn new(move_table: &'a MoveTable, mud: &'a MudMap, width: u8, height: u8) -> Self {
         Self {
             move_table,
@@ -28,24 +45,19 @@ impl<'a> Maze<'a> {
         }
     }
 
+    /// Board width in cells.
     pub fn width(&self) -> u8 {
         self.width
     }
 
+    /// Board height in cells.
     pub fn height(&self) -> u8 {
         self.height
     }
 
+    /// Total number of cells (`width * height`).
     pub fn size(&self) -> usize {
         self.width as usize * self.height as usize
-    }
-
-    pub fn move_table(&self) -> &MoveTable {
-        self.move_table
-    }
-
-    pub fn mud(&self) -> &MudMap {
-        self.mud
     }
 
     /// Adjacent walkable cells with edge costs.

@@ -112,10 +112,12 @@ impl GameView {
     // Player snapshots
     // -------------------------------------------------------------------
 
+    /// Player 1 (Rat) state snapshot.
     pub fn player1(&self) -> PlayerSnapshot {
         PlayerSnapshot::from_state(&self.game.player1)
     }
 
+    /// Player 2 (Python) state snapshot.
     pub fn player2(&self) -> PlayerSnapshot {
         PlayerSnapshot::from_state(&self.game.player2)
     }
@@ -124,34 +126,52 @@ impl GameView {
     // Game state accessors
     // -------------------------------------------------------------------
 
+    /// Positions of all remaining cheese on the board.
     pub fn cheese(&self) -> Vec<Coordinates> {
         self.game.cheese.get_all_cheese_positions()
     }
 
+    /// Whether there is cheese at `pos`.
+    pub fn cheese_at(&self, pos: Coordinates) -> bool {
+        self.game.cheese.has_cheese(pos)
+    }
+
+    /// Current turn number (0-indexed, incremented after each move pair).
     pub fn turn(&self) -> u16 {
         self.game.turn
     }
 
+    /// Maximum turns before the game ends.
     pub fn max_turns(&self) -> u16 {
         self.game.max_turns
     }
 
+    /// Turns remaining (`max_turns - turn`).
     pub fn remaining_turns(&self) -> u16 {
         self.game.max_turns - self.game.turn
     }
 
+    /// Total cheese placed at game start (doesn't decrease).
     pub fn total_cheese(&self) -> u16 {
         self.game.cheese.total_cheese()
     }
 
+    /// Cheese still on the board.
     pub fn remaining_cheese(&self) -> u16 {
         self.game.cheese.remaining_cheese()
     }
 
+    /// Whether the game is over (a player scored majority, all cheese collected, or max turns reached).
+    pub fn is_game_over(&self) -> bool {
+        self.game.check_game_over()
+    }
+
+    /// Board width in cells.
     pub fn width(&self) -> u8 {
         self.game.width
     }
 
+    /// Board height in cells.
     pub fn height(&self) -> u8 {
         self.game.height
     }
@@ -174,27 +194,27 @@ impl GameView {
     // Graph queries (delegate to Maze)
     // -------------------------------------------------------------------
 
-    /// See [`Maze::neighbors`].
+    /// Adjacent walkable cells with edge costs. See [`Maze::neighbors`].
     pub fn neighbors(&self, pos: Coordinates) -> Vec<(Coordinates, u8)> {
         self.maze().neighbors(pos)
     }
 
-    /// See [`Maze::edge_cost`].
+    /// Edge cost between two adjacent cells, or `None` if walled. See [`Maze::edge_cost`].
     pub fn edge_cost(&self, a: Coordinates, b: Coordinates) -> Option<u8> {
         self.maze().edge_cost(a, b)
     }
 
-    /// See [`Maze::has_edge`].
+    /// Whether a passage exists between two cells (no wall). See [`Maze::has_edge`].
     pub fn has_edge(&self, a: Coordinates, b: Coordinates) -> bool {
         self.maze().has_edge(a, b)
     }
 
-    /// See [`Maze::valid_moves`].
+    /// Directions from `pos` that don't hit a wall or boundary. See [`Maze::valid_moves`].
     pub fn valid_moves(&self, pos: Coordinates) -> Vec<Direction> {
         self.maze().valid_moves(pos)
     }
 
-    /// See [`Maze::move_cost`].
+    /// Cost of moving in a direction, or `None` if blocked. See [`Maze::move_cost`].
     pub fn move_cost(&self, pos: Coordinates, dir: Direction) -> Option<u8> {
         self.maze().move_cost(pos, dir)
     }
@@ -203,6 +223,7 @@ impl GameView {
     // Pathfinding (delegate to pathfinding module)
     // -------------------------------------------------------------------
 
+    /// Shortest path between two cells. See [`pathfinding::shortest_path`].
     pub fn shortest_path(
         &self,
         from: Coordinates,
@@ -211,12 +232,13 @@ impl GameView {
         pathfinding::shortest_path(from, to, &self.maze())
     }
 
-    /// Cheeses at minimum distance from `from`, each with first-move options.
+    /// Cheeses tied at minimum distance from `from`, each with first-move options.
+    /// See [`pathfinding::nearest_cheeses`].
     ///
     /// # Example
     ///
     /// ```
-    /// use pyrat_engine_interface::{Coordinates, GameView};
+    /// use pyrat_engine_interface::{Coordinates, Direction, GameView};
     ///
     /// let view = GameView::from_config(
     ///     5, 5, 300, &[], &[],
@@ -227,13 +249,16 @@ impl GameView {
     ///
     /// let nearest = view.nearest_cheeses(Coordinates::new(0, 0));
     /// // Greedy bot: pick first move toward nearest cheese
-    /// let dir = nearest[0].first_moves[0];
+    /// let dir = nearest.first()
+    ///     .and_then(|r| r.first_moves.first().copied())
+    ///     .unwrap_or(Direction::Stay);
     /// ```
     pub fn nearest_cheeses(&self, from: Coordinates) -> Vec<pathfinding::PathResult> {
         let cheese = self.game.cheese.get_all_cheese_positions();
         pathfinding::nearest_cheeses(from, &cheese, &self.maze())
     }
 
+    /// Weighted distances from `pos` to all reachable cells. See [`pathfinding::distances_from`].
     pub fn distances_from(&self, pos: Coordinates) -> HashMap<Coordinates, u32> {
         pathfinding::distances_from(pos, &self.maze())
     }
@@ -249,10 +274,32 @@ impl GameView {
 
     /// Clone the game state for simulation.
     ///
-    /// The returned [`GameState`] is the bot's own copy — calling `make_move`
-    /// or `unmake_move` on it won't affect this view.
+    /// Returns the raw engine [`GameState`] — intentionally, not a `GameView`. This
+    /// gives bots direct access to `make_move`/`unmake_move` without wrapper overhead.
     ///
-    /// # Example
+    /// ## Field name differences
+    ///
+    /// | `PlayerSnapshot` | `GameState.playerN` (`PlayerState`) |
+    /// |------------------|-------------------------------------|
+    /// | `position`       | `current_pos`                       |
+    /// | `mud_turns`      | `mud_timer`                         |
+    /// | `score`          | `score`                             |
+    ///
+    /// ## Constructing a `Maze` from a snapshot
+    ///
+    /// ```
+    /// # use pyrat_engine_interface::{Coordinates, GameView, Maze};
+    /// # let view = GameView::from_config(
+    /// #     3, 3, 100, &[], &[], vec![Coordinates::new(1, 1)],
+    /// #     Coordinates::new(0, 0), Coordinates::new(2, 2),
+    /// # ).unwrap();
+    /// let snap = view.snapshot();
+    /// let maze = Maze::new(&snap.move_table, &snap.mud, snap.width, snap.height);
+    /// ```
+    ///
+    /// ## make_move / unmake_move (LIFO)
+    ///
+    /// `unmake_move` must be called in reverse order — it's a stack, not random access.
     ///
     /// ```
     /// use pyrat_engine_interface::{Coordinates, Direction, GameView};
@@ -265,14 +312,12 @@ impl GameView {
     /// ).unwrap();
     ///
     /// let mut sim = view.snapshot();
-    /// let undo = sim.make_move(Direction::Right, Direction::Stay);
+    /// let undo1 = sim.make_move(Direction::Right, Direction::Stay);
+    /// let undo2 = sim.make_move(Direction::Up, Direction::Stay);
     ///
-    /// // View is unchanged
-    /// assert_eq!(view.player1().position, Coordinates::new(0, 0));
-    /// // Snapshot moved
-    /// assert_eq!(sim.player1.current_pos, Coordinates::new(1, 0));
-    ///
-    /// sim.unmake_move(undo);
+    /// // Undo in reverse order
+    /// sim.unmake_move(undo2);
+    /// sim.unmake_move(undo1);
     /// assert_eq!(sim.player1.current_pos, Coordinates::new(0, 0));
     /// ```
     pub fn snapshot(&self) -> GameState {
@@ -440,10 +485,49 @@ mod tests {
     }
 
     #[test]
-    fn player_snapshot_is_in_mud() {
+    fn player_snapshot_is_in_mud_false() {
         let view = simple_view();
         let p1 = view.player1();
         assert!(!p1.is_in_mud());
         assert_eq!(p1.mud_turns, 0);
+    }
+
+    #[test]
+    fn player_snapshot_is_in_mud_true() {
+        let snap = PlayerSnapshot {
+            position: c(1, 1),
+            score: 0.0,
+            mud_turns: 2,
+        };
+        assert!(snap.is_in_mud());
+    }
+
+    #[test]
+    fn is_game_over_false_at_start() {
+        let view = simple_view();
+        assert!(!view.is_game_over());
+    }
+
+    #[test]
+    fn is_game_over_true_after_all_cheese_collected() {
+        // Single cheese, player starts on it — collect by moving away and back,
+        // or just use snapshot to force collection.
+        let view =
+            GameView::from_config(3, 3, 100, &[], &[], vec![c(1, 0)], c(0, 0), c(2, 2)).unwrap();
+
+        let mut sim = view.snapshot();
+        // Move p1 right onto the cheese
+        sim.make_move(Direction::Right, Direction::Stay);
+        let sim_view = GameView::from_game(sim);
+        assert!(sim_view.is_game_over());
+    }
+
+    #[test]
+    fn cheese_at_true_and_false() {
+        let view = simple_view();
+        assert!(view.cheese_at(c(3, 3)));
+        assert!(view.cheese_at(c(4, 4)));
+        assert!(!view.cheese_at(c(0, 0)));
+        assert!(!view.cheese_at(c(1, 1)));
     }
 }

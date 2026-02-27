@@ -19,6 +19,8 @@
 //! | Graph queries outside a game context | [`Maze`] directly |
 //! | Point-to-point pathfinding | [`shortest_path`] or [`GameView::shortest_path`] |
 //! | Nearest cheese search | [`nearest_cheeses`] or [`GameView::nearest_cheeses`] |
+//! | Check if game ended | [`GameView::is_game_over`] |
+//! | Check for cheese at a cell | [`GameView::cheese_at`] |
 //! | Simulate future moves | [`GameView::snapshot`] → `make_move` / `unmake_move` |
 
 pub mod maze;

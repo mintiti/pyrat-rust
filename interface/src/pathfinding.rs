@@ -2,6 +2,10 @@
 //!
 //! All functions take a [`Maze`] reference for topology.
 //! Costs are in turns — mud passages cost N turns (N >= 2), free passages cost 1.
+//!
+//! Costs are graph-based (edge weights from the maze topology). They don't account
+//! for a player's current mud state — if a player is partway through a mud passage,
+//! the remaining turns aren't reflected here.
 
 use crate::maze::Maze;
 use pyrat::{Coordinates, Direction};
@@ -61,7 +65,11 @@ pub fn shortest_path(from: Coordinates, to: Coordinates, maze: &Maze) -> Option<
     None
 }
 
-/// All cheeses at minimum distance from `from`, each with first-move options.
+/// All cheeses tied at minimum distance from `from`, each with first-move options.
+///
+/// Returns only cheeses at the single shortest distance — not a ranked list of all
+/// cheeses. If two cheeses are at distance 3 and one is at distance 5, only the two
+/// at distance 3 are returned.
 pub fn nearest_cheeses(from: Coordinates, cheese: &[Coordinates], maze: &Maze) -> Vec<PathResult> {
     if cheese.is_empty() {
         return vec![];
@@ -121,6 +129,9 @@ pub fn nearest_cheeses(from: Coordinates, cheese: &[Coordinates], maze: &Maze) -
 }
 
 /// Weighted distances from `pos` to all reachable cells.
+///
+/// The source cell is included at cost 0. Cells that are unreachable (walled off)
+/// are absent from the returned map.
 pub fn distances_from(pos: Coordinates, maze: &Maze) -> HashMap<Coordinates, u32> {
     let size = maze.size();
     let mut dist = vec![u32::MAX; size];
