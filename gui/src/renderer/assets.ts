@@ -1,5 +1,8 @@
 // Cheese
 import cheeseUrl from "../assets/sprites/cheese/cheese.png";
+import cheeseEatenUrl from "../assets/sprites/cheese/cheese_eaten.png";
+import cheeseHalfUrl from "../assets/sprites/cheese/cheese_half.png";
+import cheeseMissingUrl from "../assets/sprites/cheese/cheese_missing.png";
 // Ground tiles
 import tile1Url from "../assets/sprites/ground/tile1.png";
 import tile2Url from "../assets/sprites/ground/tile2.png";
@@ -43,6 +46,9 @@ export type AssetMap = {
 	corner: HTMLImageElement;
 	mud: HTMLImageElement;
 	cheese: HTMLImageElement;
+	cheeseEaten: HTMLImageElement;
+	cheeseHalf: HTMLImageElement;
+	cheeseMissing: HTMLImageElement;
 	rat: PlayerSprites;
 	python: PlayerSprites;
 };
@@ -76,6 +82,9 @@ export async function loadAssets(): Promise<AssetMap> {
 		corner,
 		mud,
 		cheese,
+		cheeseEaten,
+		cheeseHalf,
+		cheeseMissing,
 		ratNeutral,
 		ratNorth,
 		ratSouth,
@@ -92,6 +101,9 @@ export async function loadAssets(): Promise<AssetMap> {
 		loadImage(cornerUrl),
 		loadImage(mudUrl),
 		loadImage(cheeseUrl),
+		loadImage(cheeseEatenUrl),
+		loadImage(cheeseHalfUrl),
+		loadImage(cheeseMissingUrl),
 		loadImage(ratNeutralUrl),
 		loadImage(ratNorthUrl),
 		loadImage(ratSouthUrl),
@@ -110,6 +122,9 @@ export async function loadAssets(): Promise<AssetMap> {
 		corner,
 		mud,
 		cheese,
+		cheeseEaten,
+		cheeseHalf,
+		cheeseMissing,
 		rat: {
 			neutral: ratNeutral,
 			north: ratNorth,
