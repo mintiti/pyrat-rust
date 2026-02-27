@@ -161,6 +161,28 @@ pub enum Direction {
 }
 
 impl Direction {
+    /// The four cardinal directions (excludes Stay).
+    pub const CARDINALS: [Direction; 4] = [
+        Direction::Up,
+        Direction::Right,
+        Direction::Down,
+        Direction::Left,
+    ];
+
+    /// Derive the direction needed to move from `a` to `b`.
+    /// Returns `None` if the cells aren't orthogonally adjacent.
+    pub fn between(from: Coordinates, to: Coordinates) -> Option<Direction> {
+        let dx = to.x as i16 - from.x as i16;
+        let dy = to.y as i16 - from.y as i16;
+        match (dx, dy) {
+            (0, 1) => Some(Direction::Up),
+            (0, -1) => Some(Direction::Down),
+            (1, 0) => Some(Direction::Right),
+            (-1, 0) => Some(Direction::Left),
+            _ => None,
+        }
+    }
+
     /// Apply move in the mathematical coordinate system where:
     /// - x increases to the right
     /// - y increases going up
@@ -628,6 +650,41 @@ mod tests {
             assert_eq!(Direction::Right.apply_to(upper_right), upper_right);
             assert_eq!(Direction::Left.apply_to(bottom_left), bottom_left);
             assert_eq!(Direction::Down.apply_to(bottom_left), bottom_left);
+        }
+
+        #[test]
+        fn test_cardinals_excludes_stay() {
+            assert_eq!(Direction::CARDINALS.len(), 4);
+            assert!(!Direction::CARDINALS.contains(&Direction::Stay));
+        }
+
+        #[test]
+        fn test_between_adjacent() {
+            let a = Coordinates::new(1, 1);
+            assert_eq!(
+                Direction::between(a, Coordinates::new(1, 2)),
+                Some(Direction::Up)
+            );
+            assert_eq!(
+                Direction::between(a, Coordinates::new(1, 0)),
+                Some(Direction::Down)
+            );
+            assert_eq!(
+                Direction::between(a, Coordinates::new(2, 1)),
+                Some(Direction::Right)
+            );
+            assert_eq!(
+                Direction::between(a, Coordinates::new(0, 1)),
+                Some(Direction::Left)
+            );
+        }
+
+        #[test]
+        fn test_between_non_adjacent() {
+            let a = Coordinates::new(1, 1);
+            assert_eq!(Direction::between(a, Coordinates::new(3, 1)), None);
+            assert_eq!(Direction::between(a, Coordinates::new(2, 2)), None);
+            assert_eq!(Direction::between(a, a), None);
         }
 
         #[test]
