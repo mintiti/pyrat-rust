@@ -2,9 +2,40 @@
 
 from __future__ import annotations
 
+from enum import IntEnum
+from typing import NamedTuple
+
 import numpy as np
 
 from pyrat_sdk._engine import PyMaze
+
+
+class Direction(IntEnum):
+    UP = 0
+    RIGHT = 1
+    DOWN = 2
+    LEFT = 3
+    STAY = 4
+
+
+class Player(IntEnum):
+    PLAYER1 = 0
+    PLAYER2 = 1
+
+
+class PathResult(NamedTuple):
+    """Result of a shortest-path query."""
+
+    directions: list[Direction]
+    cost: int
+
+
+class NearestCheeseResult(NamedTuple):
+    """Result of a nearest-cheese query."""
+
+    position: tuple[int, int]
+    directions: list[Direction]
+    cost: int
 
 
 class GameState:
@@ -98,74 +129,156 @@ class GameState:
 
     @property
     def my_position(self) -> tuple[int, int]:
+        """(x, y) position of this bot."""
         return self._player1_pos if self._is_player1 else self._player2_pos
 
     @property
     def opponent_position(self) -> tuple[int, int]:
+        """(x, y) position of the opponent."""
         return self._player2_pos if self._is_player1 else self._player1_pos
 
     @property
     def my_score(self) -> float:
+        """Current score. 1.0 per cheese, 0.5 if both collect simultaneously."""
         return self._player1_score if self._is_player1 else self._player2_score
 
     @property
     def opponent_score(self) -> float:
+        """Opponent's current score."""
         return self._player2_score if self._is_player1 else self._player1_score
 
     @property
     def my_mud_turns(self) -> int:
+        """Turns remaining stuck in mud. 0 means free to move."""
         return self._player1_mud_turns if self._is_player1 else self._player2_mud_turns
 
     @property
     def opponent_mud_turns(self) -> int:
+        """Opponent's remaining mud turns."""
         return self._player2_mud_turns if self._is_player1 else self._player1_mud_turns
 
     @property
-    def my_last_move(self) -> int:
-        return self._player1_last_move if self._is_player1 else self._player2_last_move
+    def my_last_move(self) -> Direction:
+        """This bot's last move as a Direction."""
+        raw = self._player1_last_move if self._is_player1 else self._player2_last_move
+        return Direction(raw)
 
     @property
-    def opponent_last_move(self) -> int:
-        return self._player2_last_move if self._is_player1 else self._player1_last_move
+    def opponent_last_move(self) -> Direction:
+        """Opponent's last move as a Direction."""
+        raw = self._player2_last_move if self._is_player1 else self._player1_last_move
+        return Direction(raw)
 
     @property
-    def my_player(self) -> int:
-        """The Player enum int (0 or 1) for this bot."""
-        return 0 if self._is_player1 else 1
+    def my_player(self) -> Player:
+        """The Player enum value (PLAYER1 or PLAYER2) for this bot."""
+        return Player.PLAYER1 if self._is_player1 else Player.PLAYER2
+
+    # ── Raw player data (for HivemindBot) ─────────────
+
+    @property
+    def player1_position(self) -> tuple[int, int]:
+        """Player 1's (x, y) position."""
+        return self._player1_pos
+
+    @property
+    def player2_position(self) -> tuple[int, int]:
+        """Player 2's (x, y) position."""
+        return self._player2_pos
+
+    @property
+    def player1_score(self) -> float:
+        """Player 1's current score."""
+        return self._player1_score
+
+    @property
+    def player2_score(self) -> float:
+        """Player 2's current score."""
+        return self._player2_score
+
+    @property
+    def player1_mud_turns(self) -> int:
+        """Player 1's remaining mud turns."""
+        return self._player1_mud_turns
+
+    @property
+    def player2_mud_turns(self) -> int:
+        """Player 2's remaining mud turns."""
+        return self._player2_mud_turns
 
     # ── Layer 2 convenience ────────────────────────────
 
-    def get_effective_moves(self, pos: tuple[int, int] | None = None) -> list[int]:
-        """Directions (0-3) that don't hit a wall from *pos* (default: my position)."""
-        x, y = pos or self.my_position
-        return self.maze.valid_moves(x, y)
+    def get_effective_moves(
+        self, pos: tuple[int, int] | None = None
+    ) -> list[Direction]:
+        """Directions that don't hit a wall from *pos* (default: my position).
 
-    def get_move_cost(self, direction: int, pos: tuple[int, int] | None = None) -> int:
-        """Return -1 (wall), 0 (free), or N (mud) for *direction* from *pos*."""
-        x, y = pos or self.my_position
-        cost = self.maze.move_cost(x, y, direction)
-        if cost is None:
-            return -1
-        return 0 if cost == 1 else cost
+        Returns a list of Direction values (UP, RIGHT, DOWN, LEFT).
+        Does not include STAY.
+        """
+        if pos is None:
+            pos = self.my_position
+        x, y = pos
+        return [Direction(d) for d in self.maze.valid_moves(x, y)]
+
+    def get_move_cost(
+        self, direction: int, pos: tuple[int, int] | None = None
+    ) -> int | None:
+        """Cost of moving in *direction* from *pos*.
+
+        Returns None if there's a wall, 1 for a free passage (1 turn),
+        or N for a mud passage (N turns to traverse).
+        """
+        if pos is None:
+            pos = self.my_position
+        x, y = pos
+        return self.maze.move_cost(x, y, direction)
 
     # ── Layer 3 convenience ────────────────────────────
 
     def shortest_path(
         self, start: tuple[int, int], goal: tuple[int, int]
-    ) -> tuple[list[int], int] | None:
-        return self.maze.shortest_path(start, goal)
+    ) -> PathResult | None:
+        """Shortest path between two cells.
+
+        Returns a PathResult(directions, cost) where directions is the
+        full Direction sequence and cost is in turns (mud passages cost
+        more than 1). Returns None if unreachable.
+        """
+        result = self.maze.shortest_path(start, goal)
+        if result is None:
+            return None
+        dirs, cost = result
+        return PathResult([Direction(d) for d in dirs], cost)
 
     def nearest_cheese(
         self, pos: tuple[int, int] | None = None
-    ) -> tuple[tuple[int, int], list[int], int] | None:
-        return self.maze.nearest_cheese(
-            pos or self.my_position, self.cheese
-        )
+    ) -> NearestCheeseResult | None:
+        """Nearest cheese from *pos* (default: my position).
+
+        Returns a NearestCheeseResult(position, directions, cost) where
+        position is the cheese (x, y), directions is the full path, and
+        cost is in turns. Returns None if no cheese remains.
+        """
+        if pos is None:
+            pos = self.my_position
+        result = self.maze.nearest_cheese(pos, self.cheese)
+        if result is None:
+            return None
+        target, dirs, cost = result
+        return NearestCheeseResult(target, [Direction(d) for d in dirs], cost)
 
     def distances_from(
         self, pos: tuple[int, int] | None = None
     ) -> dict[tuple[int, int], int]:
-        return self.maze.distances_from(pos or self.my_position)
+        """Weighted distances from *pos* (default: my position) to all reachable cells.
+
+        Returns a dict of {(x, y): cost} where cost matches shortest_path costs
+        (i.e. turns, accounting for mud weights).
+        """
+        if pos is None:
+            pos = self.my_position
+        return self.maze.distances_from(pos)
 
 
 def _build_cheese_matrix(

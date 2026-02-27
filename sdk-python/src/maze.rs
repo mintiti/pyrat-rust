@@ -81,18 +81,22 @@ impl PyMaze {
     }
 
     /// Direction ints (0-3) that don't hit a wall from (x, y).
-    fn valid_moves(&self, x: u8, y: u8) -> Vec<u32> {
+    fn valid_moves(&self, x: u8, y: u8) -> Vec<u8> {
         self.view
             .valid_moves(Coordinates::new(x, y))
             .into_iter()
-            .map(|d| d as u32)
+            .map(|d| d as u8)
             .collect()
     }
 
     /// Cost of moving in a direction: None (wall), Some(1) (free), Some(N) (mud).
-    fn move_cost(&self, x: u8, y: u8, direction: u8) -> Option<u8> {
-        let dir = Direction::try_from(direction).ok()?;
-        self.view.move_cost(Coordinates::new(x, y), dir)
+    fn move_cost(&self, x: u8, y: u8, direction: u8) -> PyResult<Option<u8>> {
+        let dir = Direction::try_from(direction).map_err(|_| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "invalid direction {direction}, expected 0-4"
+            ))
+        })?;
+        Ok(self.view.move_cost(Coordinates::new(x, y), dir))
     }
 
     /// Build the (width, height, 4) int8 movement matrix.
@@ -128,11 +132,11 @@ impl PyMaze {
     /// Shortest path: returns (directions, cost) or None.
     ///
     /// `directions` is the full direction sequence (int list).
-    fn shortest_path(&self, start: (u8, u8), goal: (u8, u8)) -> Option<(Vec<u32>, u32)> {
+    fn shortest_path(&self, start: (u8, u8), goal: (u8, u8)) -> Option<(Vec<u8>, u32)> {
         let from = Coordinates::new(start.0, start.1);
         let to = Coordinates::new(goal.0, goal.1);
         let result = iface::shortest_path_full(from, to, &self.view.maze())?;
-        let dirs: Vec<u32> = result.path.iter().map(|d| *d as u32).collect();
+        let dirs: Vec<u8> = result.path.iter().map(|d| *d as u8).collect();
         Some((dirs, result.cost))
     }
 
@@ -143,7 +147,7 @@ impl PyMaze {
         &self,
         pos: (u8, u8),
         cheese: Vec<(u8, u8)>,
-    ) -> Option<((u8, u8), Vec<u32>, u32)> {
+    ) -> Option<((u8, u8), Vec<u8>, u32)> {
         let from = Coordinates::new(pos.0, pos.1);
         let cheese_coords: Vec<Coordinates> = cheese
             .iter()
@@ -156,7 +160,7 @@ impl PyMaze {
 
         // Get the full path to the nearest cheese.
         let full = iface::shortest_path_full(from, first.target, &maze)?;
-        let dirs: Vec<u32> = full.path.iter().map(|d| *d as u32).collect();
+        let dirs: Vec<u8> = full.path.iter().map(|d| *d as u8).collect();
         Some(((first.target.x, first.target.y), dirs, full.cost))
     }
 

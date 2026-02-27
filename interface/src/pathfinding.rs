@@ -71,7 +71,16 @@ pub fn shortest_path(from: Coordinates, to: Coordinates, maze: &Maze) -> Option<
             });
         }
 
-        relax_neighbors(maze, from, u, d, &mut dist, &mut first_moves, &mut heap);
+        relax_neighbors(
+            maze,
+            from,
+            u,
+            d,
+            &mut dist,
+            &mut first_moves,
+            None,
+            &mut heap,
+        );
     }
 
     None
@@ -129,14 +138,14 @@ pub fn shortest_path_full(
             });
         }
 
-        relax_neighbors_with_prev(
+        relax_neighbors(
             maze,
             from,
             u,
             d,
             &mut dist,
             &mut first_moves,
-            &mut prev,
+            Some(&mut prev),
             &mut heap,
         );
     }
@@ -183,7 +192,16 @@ pub fn nearest_cheeses(from: Coordinates, cheese: &[Coordinates], maze: &Maze) -
             min_cheese_dist = Some(d);
         }
 
-        relax_neighbors(maze, from, u, d, &mut dist, &mut first_moves, &mut heap);
+        relax_neighbors(
+            maze,
+            from,
+            u,
+            d,
+            &mut dist,
+            &mut first_moves,
+            None,
+            &mut heap,
+        );
     }
 
     let Some(min_d) = min_cheese_dist else {
@@ -254,19 +272,23 @@ pub fn distances_from(pos: Coordinates, maze: &Maze) -> HashMap<Coordinates, u32
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/// Relax all neighbors, tracking first-move provenance and predecessor for path reconstruction.
+/// Relax all neighbors of `u` in the Dijkstra search, tracking first-move provenance.
+///
+/// When `prev` is `Some`, also records predecessors for full path reconstruction.
 #[allow(clippy::too_many_arguments)]
-fn relax_neighbors_with_prev(
+fn relax_neighbors(
     maze: &Maze,
     source: Coordinates,
     u: Coordinates,
     d: u32,
     dist: &mut [u32],
     first_moves: &mut [Vec<Direction>],
-    prev: &mut [Option<Coordinates>],
+    prev: Option<&mut [Option<Coordinates>]>,
     heap: &mut BinaryHeap<Reverse<(u32, Coordinates)>>,
 ) {
     let u_idx = u.to_index(maze.width());
+    // Reborrow so we can use prev across multiple loop iterations.
+    let mut prev = prev;
 
     for (neighbor, w) in maze.neighbors(u) {
         let new_dist = d + w as u32;
@@ -274,7 +296,9 @@ fn relax_neighbors_with_prev(
 
         if new_dist < dist[n_idx] {
             dist[n_idx] = new_dist;
-            prev[n_idx] = Some(u);
+            if let Some(ref mut prev) = prev {
+                prev[n_idx] = Some(u);
+            }
             first_moves[n_idx] = if u == source {
                 vec![Direction::between(source, neighbor).unwrap()]
             } else {
@@ -294,45 +318,6 @@ fn relax_neighbors_with_prev(
             }
             // prev stays at whichever predecessor was set first — we only
             // need *one* optimal path for the full direction sequence.
-        }
-    }
-}
-
-/// Relax all neighbors of `u` in the Dijkstra search, tracking first-move provenance.
-fn relax_neighbors(
-    maze: &Maze,
-    source: Coordinates,
-    u: Coordinates,
-    d: u32,
-    dist: &mut [u32],
-    first_moves: &mut [Vec<Direction>],
-    heap: &mut BinaryHeap<Reverse<(u32, Coordinates)>>,
-) {
-    let u_idx = u.to_index(maze.width());
-
-    for (neighbor, w) in maze.neighbors(u) {
-        let new_dist = d + w as u32;
-        let n_idx = neighbor.to_index(maze.width());
-
-        if new_dist < dist[n_idx] {
-            dist[n_idx] = new_dist;
-            first_moves[n_idx] = if u == source {
-                vec![Direction::between(source, neighbor).unwrap()]
-            } else {
-                first_moves[u_idx].clone()
-            };
-            heap.push(Reverse((new_dist, neighbor)));
-        } else if new_dist == dist[n_idx] {
-            let moves_to_merge = if u == source {
-                vec![Direction::between(source, neighbor).unwrap()]
-            } else {
-                first_moves[u_idx].clone()
-            };
-            for m in moves_to_merge {
-                if !first_moves[n_idx].contains(&m) {
-                    first_moves[n_idx].push(m);
-                }
-            }
         }
     }
 }

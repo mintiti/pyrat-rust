@@ -1,7 +1,6 @@
 """Greedy bot — always moves toward the nearest cheese."""
 
-from pyrat_sdk import Bot, Context, Direction
-from pyrat_sdk.state import GameState
+from pyrat_sdk import Bot, Context, Direction, GameState
 
 
 class Greedy(Bot):
@@ -9,11 +8,12 @@ class Greedy(Bot):
     author = "PyRat SDK"
 
     def think(self, state: GameState, ctx: Context) -> Direction:
+        # nearest_cheese() returns NearestCheeseResult(position, directions, cost)
+        # or None if no cheese remains.
         result = state.nearest_cheese()
-        if result is not None:
-            _, path, _ = result
-            if path:
-                return Direction(path[0])
+        if result is not None and result.directions:
+            # directions[0] is the first step of the shortest path.
+            return result.directions[0]
         return Direction.STAY
 
 

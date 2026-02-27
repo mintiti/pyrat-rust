@@ -2,8 +2,7 @@
 
 import random
 
-from pyrat_sdk import Bot, Context, Direction
-from pyrat_sdk.state import GameState
+from pyrat_sdk import Bot, Context, Direction, GameState
 
 
 class SmartRandom(Bot):
@@ -11,9 +10,11 @@ class SmartRandom(Bot):
     author = "PyRat SDK"
 
     def think(self, state: GameState, ctx: Context) -> Direction:
+        # get_effective_moves() returns Direction values for non-wall moves
+        # from the current position (UP, RIGHT, DOWN, LEFT — never STAY).
         moves = state.get_effective_moves()
         if moves:
-            return Direction(random.choice(moves))
+            return random.choice(moves)
         return Direction.STAY
 
 
