@@ -1,13 +1,25 @@
 import {
+	ActionIcon,
 	Badge,
 	Button,
 	Group,
 	Text,
 	TextInput,
 } from "@mantine/core";
-import type { MatchOverEvent, MatchWinner } from "../bindings/generated";
-
-type MatchStatus = "idle" | "running" | "finished";
+import {
+	IconChevronLeft,
+	IconChevronRight,
+	IconChevronsLeft,
+	IconChevronsRight,
+	IconPlayerPause,
+	IconPlayerPlay,
+} from "@tabler/icons-react";
+import type {
+	BotDisconnectedEvent,
+	MatchOverEvent,
+	MatchWinner,
+} from "../bindings/generated";
+import type { MatchStatus } from "./MatchView";
 
 type Props = {
 	player1Cmd: string;
@@ -18,6 +30,15 @@ type Props = {
 	status: MatchStatus;
 	result: MatchOverEvent | null;
 	error: string | null;
+	disconnection: BotDisconnectedEvent | null;
+	currentTurn: number;
+	totalTurns: number;
+	isPlaying: boolean;
+	onGoToStart: () => void;
+	onGoToEnd: () => void;
+	onStepForward: () => void;
+	onStepBack: () => void;
+	onTogglePlay: () => void;
 };
 
 function winnerLabel(winner: MatchWinner): string {
@@ -51,6 +72,15 @@ export default function MatchToolbar({
 	status,
 	result,
 	error,
+	disconnection,
+	currentTurn,
+	totalTurns,
+	isPlaying,
+	onGoToStart,
+	onGoToEnd,
+	onStepForward,
+	onStepBack,
+	onTogglePlay,
 }: Props) {
 	const canStart = player1Cmd.trim() !== "" && player2Cmd.trim() !== "";
 
@@ -89,9 +119,64 @@ export default function MatchToolbar({
 					Start
 				</Button>
 			</Group>
+			{status !== "idle" && (
+				<Group gap={4}>
+					<ActionIcon
+						variant="subtle"
+						size="sm"
+						onClick={onGoToStart}
+						disabled={currentTurn <= -1}
+					>
+						<IconChevronsLeft size={16} />
+					</ActionIcon>
+					<ActionIcon
+						variant="subtle"
+						size="sm"
+						onClick={onStepBack}
+						disabled={currentTurn <= -1}
+					>
+						<IconChevronLeft size={16} />
+					</ActionIcon>
+					<ActionIcon variant="subtle" size="sm" onClick={onTogglePlay}>
+						{isPlaying ? (
+							<IconPlayerPause size={16} />
+						) : (
+							<IconPlayerPlay size={16} />
+						)}
+					</ActionIcon>
+					<ActionIcon
+						variant="subtle"
+						size="sm"
+						onClick={onStepForward}
+						disabled={currentTurn >= totalTurns - 1}
+					>
+						<IconChevronRight size={16} />
+					</ActionIcon>
+					<ActionIcon
+						variant="subtle"
+						size="sm"
+						onClick={onGoToEnd}
+						disabled={currentTurn >= totalTurns - 1}
+					>
+						<IconChevronsRight size={16} />
+					</ActionIcon>
+					<Text size="xs" c="dimmed" ml={4}>
+						Turn {currentTurn + 1} / {totalTurns}
+					</Text>
+				</Group>
+			)}
 			<Group gap="sm">
+				{disconnection && (
+					<Badge color="yellow" variant="filled" size="lg">
+						{disconnection.player} disconnected: {disconnection.reason}
+					</Badge>
+				)}
 				{result && (
-					<Badge color={winnerColor(result.winner)} variant="filled" size="lg">
+					<Badge
+						color={winnerColor(result.winner)}
+						variant="filled"
+						size="lg"
+					>
 						{winnerLabel(result.winner)} {result.player1_score.toFixed(1)} -{" "}
 						{result.player2_score.toFixed(1)} ({result.turns_played}t)
 					</Badge>
