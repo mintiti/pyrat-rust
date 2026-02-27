@@ -1,3 +1,5 @@
+use std::sync::atomic::Ordering;
+
 use pyrat::game::builder::GameConfig;
 use pyrat::game::game_logic::GameState;
 use serde::{Deserialize, Serialize};
@@ -125,40 +127,74 @@ pub async fn start_match(
     player2_cmd: String,
 ) -> Result<(), String> {
     use tauri_specta::Event;
+    use tokio_util::sync::CancellationToken;
 
-    let mut phase = state.match_phase.lock().await;
-
-    // Abort existing match if running
-    if let MatchPhase::Running { abort_handle } = &*phase {
-        abort_handle.abort();
+    // Cancel existing match (cooperative, not abort)
+    {
+        let phase = state.match_phase.lock().await;
+        if let MatchPhase::Running { cancel, .. } = &*phase {
+            cancel.cancel();
+        }
     }
+    // Lock dropped — old task will clean itself up
+
+    let match_id = state.next_match_id.fetch_add(1, Ordering::Relaxed);
+    let cancel = CancellationToken::new();
 
     // Emit initial state before spawning so frontend can render immediately
     let config = GameConfig::classic(21, 15, 41);
     let game = config.create(None).map_err(|e| e.to_string())?;
     let initial_state = build_maze_state(&game);
-    MatchStartedEvent(initial_state)
-        .emit(&app)
-        .map_err(|e| e.to_string())?;
+    MatchStartedEvent {
+        match_id,
+        maze: initial_state,
+    }
+    .emit(&app)
+    .map_err(|e| e.to_string())?;
+
+    // Set Running BEFORE spawn to avoid race where a fast-failing task
+    // tries to reset phase before it's been set to Running.
+    {
+        let mut phase = state.match_phase.lock().await;
+        *phase = MatchPhase::Running {
+            match_id,
+            cancel: cancel.clone(),
+        };
+    }
 
     let app_handle = app.clone();
     let match_phase = state.match_phase.clone();
 
-    let join_handle = tokio::spawn(async move {
-        if let Err(e) = run_match(app_handle.clone(), game, player1_cmd, player2_cmd).await {
+    tokio::spawn(async move {
+        let result = run_match(
+            app_handle.clone(),
+            game,
+            player1_cmd,
+            player2_cmd,
+            cancel,
+            match_id,
+        )
+        .await;
+
+        if let Err(e) = &result {
             let _ = MatchErrorEvent {
+                match_id,
                 message: e.to_string(),
             }
             .emit(&app_handle);
         }
-        // Reset to idle when done
-        let mut phase = match_phase.lock().await;
-        *phase = MatchPhase::Idle;
-    });
 
-    *phase = MatchPhase::Running {
-        abort_handle: join_handle.abort_handle(),
-    };
+        // Only reset to Idle if this is still the current match
+        let mut phase = match_phase.lock().await;
+        if let MatchPhase::Running {
+            match_id: current, ..
+        } = &*phase
+        {
+            if *current == match_id {
+                *phase = MatchPhase::Idle;
+            }
+        }
+    });
 
     Ok(())
 }

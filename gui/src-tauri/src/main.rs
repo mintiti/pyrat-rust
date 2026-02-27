@@ -7,7 +7,9 @@ mod match_runner;
 mod state;
 
 use commands::{get_game_state, start_match};
-use events::{MatchErrorEvent, MatchOverEvent, MatchStartedEvent, TurnPlayedEvent};
+use events::{
+    BotDisconnectedEvent, MatchErrorEvent, MatchOverEvent, MatchStartedEvent, TurnPlayedEvent,
+};
 use tauri_specta::{collect_commands, collect_events, Builder};
 
 fn main() {
@@ -17,7 +19,8 @@ fn main() {
             MatchStartedEvent,
             TurnPlayedEvent,
             MatchOverEvent,
-            MatchErrorEvent
+            MatchErrorEvent,
+            BotDisconnectedEvent
         ]);
 
     #[cfg(debug_assertions)]

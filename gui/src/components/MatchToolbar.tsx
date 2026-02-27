@@ -3,8 +3,8 @@ import {
 	Badge,
 	Button,
 	Group,
+	Select,
 	Text,
-	TextInput,
 } from "@mantine/core";
 import {
 	IconChevronLeft,
@@ -22,10 +22,10 @@ import type {
 import type { MatchStatus } from "./MatchView";
 
 type Props = {
-	player1Cmd: string;
-	player2Cmd: string;
-	onPlayer1CmdChange: (value: string) => void;
-	onPlayer2CmdChange: (value: string) => void;
+	player1Cmd: string | null;
+	player2Cmd: string | null;
+	onPlayer1CmdChange: (value: string | null) => void;
+	onPlayer2CmdChange: (value: string | null) => void;
 	onStart: () => void;
 	status: MatchStatus;
 	result: MatchOverEvent | null;
@@ -63,6 +63,8 @@ function winnerColor(winner: MatchWinner): string {
 	}
 }
 
+const BOT_OPTIONS = [{ value: "__random__", label: "Random Bot" }];
+
 export default function MatchToolbar({
 	player1Cmd,
 	player2Cmd,
@@ -82,7 +84,7 @@ export default function MatchToolbar({
 	onStepBack,
 	onTogglePlay,
 }: Props) {
-	const canStart = player1Cmd.trim() !== "" && player2Cmd.trim() !== "";
+	const canStart = player1Cmd != null && player2Cmd != null;
 
 	return (
 		<Group
@@ -94,21 +96,25 @@ export default function MatchToolbar({
 			}}
 		>
 			<Group gap="sm">
-				<TextInput
+				<Select
 					size="xs"
-					placeholder="Player 1 command"
+					placeholder="Player 1"
+					data={BOT_OPTIONS}
 					value={player1Cmd}
-					onChange={(e) => onPlayer1CmdChange(e.currentTarget.value)}
-					style={{ width: 220 }}
+					onChange={onPlayer1CmdChange}
+					style={{ width: 180 }}
 					disabled={status === "running"}
+					allowDeselect={false}
 				/>
-				<TextInput
+				<Select
 					size="xs"
-					placeholder="Player 2 command"
+					placeholder="Player 2"
+					data={BOT_OPTIONS}
 					value={player2Cmd}
-					onChange={(e) => onPlayer2CmdChange(e.currentTarget.value)}
-					style={{ width: 220 }}
+					onChange={onPlayer2CmdChange}
+					style={{ width: 180 }}
 					disabled={status === "running"}
+					allowDeselect={false}
 				/>
 				<Button
 					size="xs"

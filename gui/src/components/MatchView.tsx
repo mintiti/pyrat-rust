@@ -13,8 +13,8 @@ import MatchToolbar from "./MatchToolbar";
 export type MatchStatus = "idle" | "running" | "finished";
 
 export default function MatchView() {
-	const [player1Cmd, setPlayer1Cmd] = useState("");
-	const [player2Cmd, setPlayer2Cmd] = useState("");
+	const [player1Cmd, setPlayer1Cmd] = useState<string | null>("__random__");
+	const [player2Cmd, setPlayer2Cmd] = useState<string | null>("__random__");
 	const [status, setStatus] = useState<MatchStatus>("idle");
 	const [result, setResult] = useState<MatchOverEvent | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -117,6 +117,7 @@ export default function MatchView() {
 	}, []);
 
 	const handleStart = async () => {
+		if (!player1Cmd || !player2Cmd) return;
 		setError(null);
 		setResult(null);
 		setDisconnection(null);

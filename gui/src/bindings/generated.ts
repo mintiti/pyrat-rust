@@ -27,11 +27,13 @@ async startMatch(player1Cmd: string, player2Cmd: string) : Promise<Result<null, 
 
 
 export const events = __makeEvents__<{
+botDisconnectedEvent: BotDisconnectedEvent,
 matchErrorEvent: MatchErrorEvent,
 matchOverEvent: MatchOverEvent,
 matchStartedEvent: MatchStartedEvent,
 turnPlayedEvent: TurnPlayedEvent
 }>({
+botDisconnectedEvent: "bot-disconnected-event",
 matchErrorEvent: "match-error-event",
 matchOverEvent: "match-over-event",
 matchStartedEvent: "match-started-event",
@@ -44,19 +46,23 @@ turnPlayedEvent: "turn-played-event"
 
 /** user-defined types **/
 
+/**
+ * Emitted when a bot disconnects mid-game.
+ */
+export type BotDisconnectedEvent = { match_id: number; player: string; reason: string }
 export type Coord = { x: number; y: number }
 /**
  * Emitted on setup failures, bot crashes, etc.
  */
-export type MatchErrorEvent = { message: string }
+export type MatchErrorEvent = { match_id: number; message: string }
 /**
  * Emitted when the match ends normally.
  */
-export type MatchOverEvent = { winner: MatchWinner; player1_score: number; player2_score: number; turns_played: number }
+export type MatchOverEvent = { match_id: number; winner: MatchWinner; player1_score: number; player2_score: number; turns_played: number }
 /**
  * Full initial state so the frontend can initialize the renderer.
  */
-export type MatchStartedEvent = MazeState
+export type MatchStartedEvent = { match_id: number; maze: MazeState }
 export type MatchWinner = "Player1" | "Player2" | "Draw"
 export type MazeState = { width: number; height: number; turn: number; max_turns: number; walls: WallEntry[]; mud: MudEntry[]; cheese: Coord[]; player1: PlayerState; player2: PlayerState; total_cheese: number }
 export type MudEntry = { from: Coord; to: Coord; cost: number }
@@ -64,7 +70,7 @@ export type PlayerState = { position: Coord; score: number }
 /**
  * Per-turn delta. Walls/mud never change, so we only send positions + cheese.
  */
-export type TurnPlayedEvent = { turn: number; player1: PlayerState; player2: PlayerState; cheese: Coord[] }
+export type TurnPlayedEvent = { match_id: number; turn: number; player1: PlayerState; player2: PlayerState; cheese: Coord[] }
 export type WallEntry = { from: Coord; to: Coord }
 
 /** tauri-specta globals **/
