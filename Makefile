@@ -1,6 +1,6 @@
 # PyRat Monorepo Makefile
 
-.PHONY: all engine gui protocol examples cli test bench clean help sync lint lint-engine lint-protocol lint-cli test-cli test-wire test-host test-headless test-integration generate-protocol
+.PHONY: all engine gui protocol examples cli test bench clean help sync lint lint-engine lint-protocol lint-cli test-cli test-sdk-python test-wire test-host test-headless test-integration generate-protocol
 
 # Default target
 all: sync engine
@@ -40,7 +40,7 @@ dev-setup:
 	uv run pre-commit install && uv run pre-commit install --hook-type pre-push
 
 # Testing
-test: test-engine test-wire test-host test-headless test-protocol test-cli
+test: test-engine test-wire test-host test-headless test-protocol test-cli test-sdk-python
 
 test-engine:
 	@echo "Running engine tests..."
@@ -67,6 +67,10 @@ test-cli:
 	@echo "Running CLI tests..."
 	uv run pytest cli/tests -v
 
+test-sdk-python:
+	@echo "Running SDK Python tests..."
+	cd sdk-python && uv run pytest tests -v
+
 test-integration:
 	@echo "Running integration tests..."
 	uv run pytest tests/integration -v
@@ -81,15 +85,15 @@ bench:
 fmt:
 	@echo "Formatting code..."
 	cargo fmt --all
-	uv run ruff format engine/python protocol/pyrat_base cli
+	uv run ruff format engine/python protocol/pyrat_base cli sdk-python/pyrat_sdk
 
 check:
 	@echo "Running checks..."
 	cargo fmt --all -- --check
 	cargo clippy -p pyrat-rust --all-targets --no-default-features -- -D warnings
 	cargo clippy --all-targets --all-features -- -D warnings -A non-local-definitions
-	uv run ruff check engine/python protocol/pyrat_base cli
-	uv run mypy engine/python/pyrat_engine protocol/pyrat_base/pyrat_base cli/pyrat_runner --ignore-missing-imports
+	uv run ruff check engine/python protocol/pyrat_base cli sdk-python/pyrat_sdk
+	uv run mypy engine/python/pyrat_engine protocol/pyrat_base/pyrat_base cli/pyrat_runner sdk-python/pyrat_sdk --ignore-missing-imports
 
 # Linting targets
 lint: lint-engine lint-protocol lint-cli
@@ -146,6 +150,7 @@ help:
 	@echo "  test-headless    - Run headless runner tests"
 	@echo "  test-protocol    - Run protocol tests only"
 	@echo "  test-cli         - Run CLI tests only"
+	@echo "  test-sdk-python  - Run SDK Python tests"
 	@echo "  test-integration - Run integration tests"
 	@echo ""
 	@echo "Code Quality:"

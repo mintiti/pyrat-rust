@@ -17,10 +17,10 @@ repos:
         -   id: ruff
             args: [--fix]
             types_or: [python, pyi]
-            files: ^(engine/python/|protocol/pyrat_base/|cli/)
+            files: ^(engine/python/|protocol/pyrat_base/|cli/|sdk-python/)
         -   id: ruff-format
             types_or: [python, pyi]
-            files: ^(engine/python/|protocol/pyrat_base/|cli/)
+            files: ^(engine/python/|protocol/pyrat_base/|cli/|sdk-python/)
 
   # Python type checking - run same as CI for consistency
   -   repo: local

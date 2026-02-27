@@ -2,6 +2,8 @@
 
 Python SDK for writing PyRat bots. Your bot connects to the host over FlatBuffers, receives game state each turn, and returns a direction.
 
+Requires **Python 3.10+**.
+
 ## Quick start
 
 ```bash
@@ -34,6 +36,8 @@ if __name__ == "__main__":
     MyBot().run()
 ```
 
+You can use `print()` for debugging — the SDK communicates over TCP, not stdin/stdout.
+
 ## The `Bot` contract
 
 1. Subclass `Bot`
@@ -43,7 +47,11 @@ if __name__ == "__main__":
 
 `think()` is called every turn. Return a `Direction`. If it raises, the SDK catches it and defaults to `STAY`.
 
-`preprocess()` runs once before the game starts, with a separate time budget.
+`preprocess()` runs once before the game starts, with a separate time budget. Use it to precompute distance tables or other data expensive to rebuild each turn.
+
+## Coordinate system
+
+Coordinates are `(x, y)` with `(0, 0)` at the bottom-left. `UP` increases `y`, `RIGHT` increases `x`.
 
 ## `GameState` reference
 
@@ -63,7 +71,16 @@ if __name__ == "__main__":
 
 ### Properties — raw (for HivemindBot)
 
-`player1_position`, `player2_position`, `player1_score`, `player2_score`, `player1_mud_turns`, `player2_mud_turns`
+| Property | Type | Description |
+|---|---|---|
+| `player1_position` | `(int, int)` | Player 1's position |
+| `player2_position` | `(int, int)` | Player 2's position |
+| `player1_score` | `float` | Player 1's score |
+| `player2_score` | `float` | Player 2's score |
+| `player1_mud_turns` | `int` | Player 1's mud turns |
+| `player2_mud_turns` | `int` | Player 2's mud turns |
+| `player1_last_move` | `Direction` | Player 1's last move |
+| `player2_last_move` | `Direction` | Player 2's last move |
 
 ### Properties — shared
 
@@ -71,10 +88,25 @@ if __name__ == "__main__":
 |---|---|---|
 | `cheese` | `list[(int, int)]` | Current cheese positions |
 | `cheese_matrix` | `ndarray (w, h)` | uint8 matrix, 1 where cheese exists |
-| `movement_matrix` | `ndarray (w, h, 4)` | int8: -1=wall, 0=free, N=mud cost per direction |
+| `movement_matrix` | `ndarray (w, h, 4)` | int8 encoding of moves per direction (see below) |
 | `turn` | `int` | Current turn number |
 | `width`, `height` | `int` | Maze dimensions |
 | `max_turns` | `int` | Turn limit |
+
+#### `movement_matrix` encoding
+
+The matrix is indexed `[x, y, direction]` where direction is 0=UP, 1=RIGHT, 2=DOWN, 3=LEFT.
+
+- `-1` — wall (can't move)
+- `0` — free passage (costs 1 turn)
+- `N > 0` — mud passage (costs N turns)
+
+```python
+matrix = state.movement_matrix
+# Check if you can move UP from (x, y):
+if matrix[x, y, 0] != -1:
+    cost = max(1, matrix[x, y, 0])  # free passages are 0 in the matrix, 1 turn actual cost
+```
 
 ### Methods
 
@@ -106,7 +138,20 @@ Passed to `think()` and `preprocess()`. Provides:
 
 - `time_remaining_ms()` — milliseconds left in this phase
 - `should_stop()` — True when time is up (for iterative deepening)
-- `send_info(target=, depth=, nodes=, score=, path=, message=)` — send debug data to the host/GUI
+- `send_info(...)` — send debug data to the host/GUI
+
+### `send_info()` parameters
+
+All keyword-only, all optional:
+
+| Parameter | Type | Description |
+|---|---|---|
+| `target` | `(int, int)` | Cell the bot is heading toward (shown in GUI) |
+| `depth` | `int` | Search depth reached |
+| `nodes` | `int` | Nodes evaluated |
+| `score` | `float` | Evaluation score |
+| `path` | `list[(int, int)]` | Planned path (shown in GUI) |
+| `message` | `str` | Free-form debug message |
 
 ## `HivemindBot`
 
@@ -121,3 +166,29 @@ def think(self, state, ctx) -> dict[Player, Direction]:
 ```
 
 Uses the raw `player1_*`/`player2_*` properties on `GameState` for per-player data.
+
+## Options
+
+Declare tunable parameters as class attributes. The host can override them via `SetOption` before the game starts.
+
+```python
+from pyrat_sdk import Bot, Direction, Spin, Check, Combo, Str
+
+class MyBot(Bot):
+    name = "Greedy+"
+    depth = Spin(default=3, min=1, max=10)
+    avoid_mud = Check(default=True)
+    strategy = Combo(default="greedy", choices=["greedy", "defensive"])
+    model_path = Str(default="")
+
+    def think(self, state, ctx):
+        if self.depth > 5:  # resolves to int (default or host-set)
+            ...
+```
+
+| Type | Description | Example |
+|---|---|---|
+| `Spin(default, min, max)` | Integer in a range | `Spin(default=3, min=1, max=10)` |
+| `Check(default)` | Boolean | `Check(default=True)` |
+| `Combo(default, choices)` | String from fixed set | `Combo(default="greedy", choices=[...])` |
+| `Str(default)` | Free-form string | `Str(default="")` |

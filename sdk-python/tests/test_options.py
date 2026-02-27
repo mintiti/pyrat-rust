@@ -2,39 +2,32 @@
 
 from __future__ import annotations
 
-import sys
-from unittest.mock import patch
-
-import flatbuffers
 import pytest
+from conftest import (
+    MockConnection,
+    build_host_packet,
+    build_set_option,
+    make_lifecycle_frames,
+)
+from pyrat.protocol.BotMessage import BotMessage
+from pyrat.protocol.BotPacket import BotPacket
+from pyrat.protocol.HostMessage import HostMessage
+from pyrat.protocol.Identify import Identify
 
 # Ensure generated FlatBuffers modules are importable.
 import pyrat_sdk._wire  # noqa: F401
-
-from pyrat.protocol import HostPacket as HostPacketMod
-from pyrat.protocol import MatchConfig as MatchConfigMod
-from pyrat.protocol import SetOption as SetOptionMod
-from pyrat.protocol import StartPreprocessing as StartPreprocessingMod
-from pyrat.protocol import GameOver as GameOverMod
-from pyrat.protocol.HostMessage import HostMessage
-from pyrat.protocol.Identify import Identify
-from pyrat.protocol.BotPacket import BotPacket
-from pyrat.protocol.BotMessage import BotMessage
-from pyrat.protocol.Vec2 import CreateVec2
-
+from pyrat_sdk._wire import codec
+from pyrat_sdk.bot import _run_lifecycle, _validate_direction
 from pyrat_sdk.options import (
     Check,
     Combo,
     Spin,
     Str,
-    _OptionDescriptor,
     apply_set_option,
     collect_options,
     options_to_wire,
 )
-from pyrat_sdk._wire import codec
-from pyrat_sdk.bot import _run_lifecycle
-
+from pyrat_sdk.state import Direction
 
 # ── Test bot classes ─────────────────────────────────────
 
@@ -50,12 +43,14 @@ class FakeBot:
 
 class PlainBot:
     """Bot with no options."""
+
     name = "Plain"
     author = "Nobody"
 
 
 class ChildBot(FakeBot):
     """Subclass that overrides an option."""
+
     depth = Spin(default=5, min=1, max=20)
 
 
@@ -306,9 +301,9 @@ class TestCodecRoundtrip:
         assert ident.OptionsIsNone()
 
     def test_extract_set_option(self):
-        buf = _build_host_packet(
+        buf = build_host_packet(
             HostMessage.SetOption,
-            lambda b: _build_set_option(b, "depth", "7"),
+            lambda b: build_set_option(b, "depth", "7"),
         )
         msg_type, table = codec.decode_host_packet(buf)
         assert msg_type == HostMessage.SetOption
@@ -322,50 +317,16 @@ class TestCodecRoundtrip:
 # ══════════════════════════════════════════════════════════
 
 
-class MockConnection:
-    def __init__(self, incoming: list[bytes]):
-        self._incoming = list(incoming)
-        self.sent: list[bytes] = []
-        self._idx = 0
-
-    def send_frame(self, payload: bytes):
-        self.sent.append(payload)
-
-    def recv_frame(self) -> bytes:
-        frame = self._incoming[self._idx]
-        self._idx += 1
-        return frame
-
-    def close(self):
-        pass
-
-
 class TestLifecycleIntegration:
     def test_set_option_applied(self):
         bot = FakeBot()
         assert bot.depth == 3  # default
 
-        frames = [
-            _build_host_packet(
-                HostMessage.SetOption,
-                lambda b: _build_set_option(b, "depth", "7"),
-            ),
-            _build_host_packet(
-                HostMessage.MatchConfig,
-                lambda b: _build_minimal_match_config(b),
-            ),
-            _build_host_packet(
-                HostMessage.StartPreprocessing,
-                lambda b: _build_empty(b, StartPreprocessingMod),
-            ),
-            _build_host_packet(
-                HostMessage.GameOver,
-                lambda b: _build_game_over(b),
-            ),
-        ]
+        frames = make_lifecycle_frames(set_options=[("depth", "7")])
         conn = MockConnection(frames)
         _run_lifecycle(
-            conn, "",
+            conn,
+            "",
             bot=bot,
             preprocess_fn=lambda state, ctx: None,
             turn_fn=lambda state, ctx, c: None,
@@ -374,23 +335,11 @@ class TestLifecycleIntegration:
 
     def test_defaults_preserved_without_set_option(self):
         bot = FakeBot()
-        frames = [
-            _build_host_packet(
-                HostMessage.MatchConfig,
-                lambda b: _build_minimal_match_config(b),
-            ),
-            _build_host_packet(
-                HostMessage.StartPreprocessing,
-                lambda b: _build_empty(b, StartPreprocessingMod),
-            ),
-            _build_host_packet(
-                HostMessage.GameOver,
-                lambda b: _build_game_over(b),
-            ),
-        ]
+        frames = make_lifecycle_frames()
         conn = MockConnection(frames)
         _run_lifecycle(
-            conn, "",
+            conn,
+            "",
             bot=bot,
             preprocess_fn=lambda state, ctx: None,
             turn_fn=lambda state, ctx, c: None,
@@ -399,65 +348,99 @@ class TestLifecycleIntegration:
         assert bot.avoid_mud is True
         assert bot.strategy == "greedy"
 
+    def test_turn_fn_called(self):
+        """TurnState frame before GameOver triggers turn_fn."""
+        bot = PlainBot()
+        calls = []
+
+        def turn_fn(state, ctx, conn):
+            calls.append(state.turn)
+
+        frames = make_lifecycle_frames(turn_states=2)
+        conn = MockConnection(frames)
+        _run_lifecycle(
+            conn,
+            "",
+            bot=bot,
+            preprocess_fn=lambda state, ctx: None,
+            turn_fn=turn_fn,
+        )
+        assert calls == [1, 2]
+
+    def test_ping_gets_pong(self):
+        """Ping frame triggers a Pong response."""
+        bot = PlainBot()
+        frames = make_lifecycle_frames(include_ping=True)
+        conn = MockConnection(frames)
+        _run_lifecycle(
+            conn,
+            "",
+            bot=bot,
+            preprocess_fn=lambda state, ctx: None,
+            turn_fn=lambda state, ctx, c: None,
+        )
+        # Find the Pong in sent frames (after Identify, Ready, PreprocessingDone).
+        pong_found = False
+        for frame in conn.sent:
+            packet = BotPacket.GetRootAs(frame)
+            if packet.MessageType() == BotMessage.Pong:
+                pong_found = True
+                break
+        assert pong_found
+
 
 # ══════════════════════════════════════════════════════════
-# Test helpers — build host-side FlatBuffers frames
+# 8. Bot._handle_turn and _validate_direction
 # ══════════════════════════════════════════════════════════
 
 
-def _build_host_packet(msg_type: int, build_fn) -> bytes:
-    builder = flatbuffers.Builder(256)
-    msg_offset = build_fn(builder)
-    HostPacketMod.Start(builder)
-    HostPacketMod.AddMessageType(builder, msg_type)
-    HostPacketMod.AddMessage(builder, msg_offset)
-    packet = HostPacketMod.End(builder)
-    builder.Finish(packet)
-    return bytes(builder.Output())
+class TestHandleTurn:
+    def test_think_raises_sends_stay(self):
+        """If think() raises, STAY is sent."""
+        from pyrat.protocol.Action import Action
+
+        from pyrat_sdk.bot import Bot
+
+        class CrashBot(Bot):
+            name = "Crash"
+            author = "Test"
+
+            def think(self, state, ctx):
+                raise RuntimeError("boom")
+
+        bot = CrashBot()
+        frames = make_lifecycle_frames(turn_states=1)
+        conn = MockConnection(frames)
+        _run_lifecycle(
+            conn,
+            "",
+            bot=bot,
+            preprocess_fn=bot.preprocess,
+            turn_fn=bot._handle_turn,
+        )
+        # Last sent frame should be an Action with STAY (4).
+        action_frame = conn.sent[-1]
+        packet = BotPacket.GetRootAs(action_frame)
+        assert packet.MessageType() == BotMessage.Action
+        action = Action()
+        action.Init(packet.Message().Bytes, packet.Message().Pos)
+        assert action.Direction() == 4  # STAY
 
 
-def _build_set_option(builder, name: str, value: str):
-    n = builder.CreateString(name)
-    v = builder.CreateString(value)
-    SetOptionMod.Start(builder)
-    SetOptionMod.AddName(builder, n)
-    SetOptionMod.AddValue(builder, v)
-    return SetOptionMod.End(builder)
+class TestValidateDirection:
+    def test_direction_enum(self):
+        assert _validate_direction(Direction.UP, "test") == Direction.UP
+        assert _validate_direction(Direction.STAY, "test") == Direction.STAY
 
+    def test_raw_int_0_to_4(self):
+        for i in range(5):
+            assert _validate_direction(i, "test") == Direction(i)
 
-def _build_minimal_match_config(builder):
-    """Build a MatchConfig with just enough fields for GameState to initialize."""
-    # Controlled players vector: [0] (Player1)
-    MatchConfigMod.StartControlledPlayersVector(builder, 1)
-    builder.PrependUint8(0)
-    cp_vec = builder.EndVector()
+    def test_out_of_range_defaults_to_stay(self):
+        assert _validate_direction(99, "test") == Direction.STAY
 
-    # Cheese vector: one cheese at (1, 1)
-    MatchConfigMod.StartCheeseVector(builder, 1)
-    CreateVec2(builder, 1, 1)
-    cheese_vec = builder.EndVector()
+    def test_none_defaults_to_stay(self):
+        assert _validate_direction(None, "test") == Direction.STAY
 
-    MatchConfigMod.Start(builder)
-    MatchConfigMod.AddWidth(builder, 3)
-    MatchConfigMod.AddHeight(builder, 3)
-    MatchConfigMod.AddMaxTurns(builder, 10)
-    MatchConfigMod.AddControlledPlayers(builder, cp_vec)
-    MatchConfigMod.AddCheese(builder, cheese_vec)
-    MatchConfigMod.AddPlayer1Start(builder, CreateVec2(builder, 0, 0))
-    MatchConfigMod.AddPlayer2Start(builder, CreateVec2(builder, 2, 2))
-    MatchConfigMod.AddMoveTimeoutMs(builder, 1000)
-    MatchConfigMod.AddPreprocessingTimeoutMs(builder, 1000)
-    return MatchConfigMod.End(builder)
-
-
-def _build_empty(builder, mod):
-    mod.Start(builder)
-    return mod.End(builder)
-
-
-def _build_game_over(builder):
-    GameOverMod.Start(builder)
-    GameOverMod.AddResult(builder, 0)
-    GameOverMod.AddPlayer1Score(builder, 0.0)
-    GameOverMod.AddPlayer2Score(builder, 0.0)
-    return GameOverMod.End(builder)
+    def test_string_defaults_to_stay(self):
+        assert _validate_direction("UP", "test") == Direction.STAY

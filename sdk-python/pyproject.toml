@@ -18,3 +18,49 @@ build-backend = "maturin"
 manifest-path = "Cargo.toml"
 module-name = "pyrat_sdk._engine"
 python-source = "."
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+lint.select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "B",   # flake8-bugbear
+    "I",   # isort
+    "C",   # flake8-comprehensions
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "PL",  # pylint
+    "RUF", # ruff-specific rules
+    "TID", # flake8-tidy-imports
+    "TCH", # flake8-type-checking
+    "ERA", # eradicate
+]
+
+lint.ignore = [
+    "E501",      # Line too long (handled by formatter)
+    "PLR0913",   # Too many arguments to function call
+    "B008",      # Do not perform function call in argument defaults
+]
+
+exclude = ["pyrat_sdk/_wire/generated"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["PLC0415", "PLR2004", "PLR0915"]
+# Side-effect import (pyrat_sdk._wire) must precede pyrat.protocol imports for sys.path setup.
+# FlatBuffers boilerplate is inherently complex.
+"pyrat_sdk/_wire/codec.py" = ["I001", "C901"]
+"pyrat_sdk/bot.py" = ["I001", "C901", "PLR0912", "PLR0915"]
+"pyrat_sdk/options.py" = ["I001"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q"
+testpaths = ["tests"]
+python_files = ["test_*.py"]

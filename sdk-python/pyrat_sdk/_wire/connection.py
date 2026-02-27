@@ -25,8 +25,12 @@ class Connection:
     def recv_frame(self) -> bytes:
         header = self._recv_exact(4)
         (length,) = struct.unpack(">I", header)
+        if length == 0:
+            raise ConnectionError("received empty frame")
         if length > MAX_PAYLOAD:
-            raise RuntimeError(f"payload too large: {length} bytes (max {MAX_PAYLOAD})")
+            raise ConnectionError(
+                f"payload too large: {length} bytes (max {MAX_PAYLOAD})"
+            )
         return self._recv_exact(length)
 
     def close(self) -> None:
@@ -37,6 +41,6 @@ class Connection:
         while len(buf) < n:
             chunk = self._sock.recv(n - len(buf))
             if not chunk:
-                raise ConnectionError("peer disconnected")
+                raise ConnectionError("host closed the connection")
             buf.extend(chunk)
         return bytes(buf)

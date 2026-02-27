@@ -10,6 +10,7 @@ import os
 import sys
 import time
 import traceback
+from typing import Any
 
 from pyrat_sdk._wire.connection import Connection
 from pyrat_sdk._wire import codec
@@ -48,14 +49,19 @@ class Context:
         message: str = "",
     ) -> None:
         """Send an Info message to the host (for GUI / debugging)."""
-        self._conn.send_frame(codec.encode_info(
-            target=target,
-            depth=depth,
-            nodes=nodes,
-            score=score,
-            path=path,
-            message=message,
-        ))
+        try:
+            self._conn.send_frame(
+                codec.encode_info(
+                    target=target,
+                    depth=depth,
+                    nodes=nodes,
+                    score=score,
+                    path=path,
+                    message=message,
+                )
+            )
+        except Exception as e:
+            print(f"send_info() failed: {e}", file=sys.stderr)
 
 
 # ── Bot base class ─────────────────────────────────────
@@ -81,39 +87,23 @@ class Bot:
 
     def run(self) -> None:
         """Entry point.  Reads env vars, connects, plays, exits."""
-        port = _parse_port()
-        agent_id = os.environ.get("PYRAT_AGENT_ID", "")
+        _run_bot(self, self.preprocess, self._handle_turn)
 
-        conn: Connection | None = None
-        try:
-            conn = Connection("127.0.0.1", port)
-            _run_lifecycle(
-                conn,
-                agent_id,
-                bot=self,
-                preprocess_fn=self.preprocess,
-                turn_fn=self._handle_turn,
-            )
-        except ConnectionError as e:
-            if str(e):
-                print(f"Connection lost: {e}", file=sys.stderr)
-        finally:
-            if conn is not None:
-                conn.close()
-
-    def _handle_turn(
-        self, state: GameState, ctx: Context, conn: Connection
-    ) -> None:
+    def _handle_turn(self, state: GameState, ctx: Context, conn: Connection) -> None:
         try:
             direction = self.think(state, ctx)
         except Exception:
             traceback.print_exc()
             direction = Direction.STAY
 
+        if ctx.should_stop():
+            print(
+                "think() exceeded time limit. The host may have used STAY.",
+                file=sys.stderr,
+            )
+
         direction = _validate_direction(direction, "think()")
-        conn.send_frame(
-            codec.encode_action(int(direction), int(state.my_player))
-        )
+        conn.send_frame(codec.encode_action(int(direction), int(state.my_player)))
 
 
 # ── HivemindBot ───────────────────────────────────────
@@ -138,34 +128,20 @@ class HivemindBot:
         pass
 
     def run(self) -> None:
-        port = _parse_port()
-        agent_id = os.environ.get("PYRAT_AGENT_ID", "")
+        _run_bot(self, self.preprocess, self._handle_turn)
 
-        conn: Connection | None = None
-        try:
-            conn = Connection("127.0.0.1", port)
-            _run_lifecycle(
-                conn,
-                agent_id,
-                bot=self,
-                preprocess_fn=self.preprocess,
-                turn_fn=self._handle_turn,
-            )
-        except ConnectionError as e:
-            if str(e):
-                print(f"Connection lost: {e}", file=sys.stderr)
-        finally:
-            if conn is not None:
-                conn.close()
-
-    def _handle_turn(
-        self, state: GameState, ctx: Context, conn: Connection
-    ) -> None:
+    def _handle_turn(self, state: GameState, ctx: Context, conn: Connection) -> None:
         try:
             moves = self.think(state, ctx)
         except Exception:
             traceback.print_exc()
             moves = {}
+
+        if ctx.should_stop():
+            print(
+                "think() exceeded time limit. The host may have used STAY.",
+                file=sys.stderr,
+            )
 
         if not isinstance(moves, dict):
             print(
@@ -178,9 +154,7 @@ class HivemindBot:
         for player in (Player.PLAYER1, Player.PLAYER2):
             direction = moves.get(player, Direction.STAY)
             direction = _validate_direction(direction, f"think()[{player.name}]")
-            conn.send_frame(
-                codec.encode_action(int(direction), int(player))
-            )
+            conn.send_frame(codec.encode_action(int(direction), int(player)))
 
 
 # ── Shared lifecycle ──────────────────────────────────
@@ -202,7 +176,7 @@ def _parse_port() -> int:
     return port
 
 
-def _validate_direction(value: object, source: str) -> Direction:
+def _validate_direction(value: Any, source: str) -> Direction:
     """Coerce a think() return to Direction. Defaults to STAY on failure."""
     try:
         return Direction(value)
@@ -215,13 +189,43 @@ def _validate_direction(value: object, source: str) -> Direction:
         return Direction.STAY
 
 
+def _run_bot(bot: Any, preprocess_fn: Any, turn_fn: Any) -> None:
+    """Shared entry point for Bot and HivemindBot."""
+    port = _parse_port()
+    agent_id = os.environ.get("PYRAT_AGENT_ID", "")
+
+    try:
+        conn = Connection("127.0.0.1", port)
+    except OSError as e:
+        print(
+            f"Could not connect to host on port {port}: {e}\n"
+            f"Make sure the host is running.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    try:
+        _run_lifecycle(
+            conn,
+            agent_id,
+            bot=bot,
+            preprocess_fn=preprocess_fn,
+            turn_fn=turn_fn,
+        )
+    except ConnectionError as e:
+        if str(e):
+            print(f"Connection lost: {e}", file=sys.stderr)
+    finally:
+        conn.close()
+
+
 def _run_lifecycle(
     conn: Connection,
     agent_id: str,
     *,
-    bot: object,
-    preprocess_fn,
-    turn_fn,
+    bot: Any,
+    preprocess_fn: Any,
+    turn_fn: Any,
 ) -> None:
     """Shared connect → identify → ready → config → preprocess → turn-loop."""
     # 1. Collect options and Identify + Ready.
@@ -233,14 +237,28 @@ def _run_lifecycle(
     # 2. Wait for SetOption*, MatchConfig, and StartPreprocessing.
     config: dict | None = None
     while True:
-        msg_type, table = codec.decode_host_packet(conn.recv_frame())
+        try:
+            msg_type, table = codec.decode_host_packet(conn.recv_frame())
+        except ConnectionError:
+            raise
+        except Exception as e:
+            raise ConnectionError(f"Failed to decode host message: {e}") from e
+
         if msg_type == HostMessage.SetOption:
             name, value = codec.extract_set_option(table)
             apply_set_option(bot, option_defs, name, value)
         elif msg_type == HostMessage.MatchConfig:
-            config = codec.extract_match_config(table)
+            try:
+                config = codec.extract_match_config(table)
+            except Exception as e:
+                raise ConnectionError(f"Failed to decode MatchConfig: {e}") from e
         elif msg_type == HostMessage.StartPreprocessing:
             break
+        else:
+            print(
+                f"Unexpected message during setup: type={msg_type}. Ignoring.",
+                file=sys.stderr,
+            )
 
     if config is None:
         raise RuntimeError(
@@ -255,14 +273,23 @@ def _run_lifecycle(
         preprocess_fn(state, ctx)
     except Exception:
         traceback.print_exc()
+        print("preprocess() crashed, but the game will continue.", file=sys.stderr)
     conn.send_frame(codec.encode_preprocessing_done())
 
     # 4. Turn loop.
     while True:
-        msg_type, table = codec.decode_host_packet(conn.recv_frame())
+        try:
+            msg_type, table = codec.decode_host_packet(conn.recv_frame())
+        except ConnectionError:
+            raise
+        except Exception as e:
+            raise ConnectionError(f"Failed to decode host message: {e}") from e
 
         if msg_type == HostMessage.TurnState:
-            ts = codec.extract_turn_state(table)
+            try:
+                ts = codec.extract_turn_state(table)
+            except Exception as e:
+                raise ConnectionError(f"Failed to decode TurnState: {e}") from e
             state.update(ts)
             ctx = Context(config["move_timeout_ms"], conn)
             turn_fn(state, ctx, conn)

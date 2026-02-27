@@ -10,24 +10,21 @@ import flatbuffers
 
 # Ensure generated/ is on sys.path before importing generated modules.
 import pyrat_sdk._wire  # noqa: F401
-
-from pyrat.protocol.HostPacket import HostPacket
-from pyrat.protocol.HostMessage import HostMessage
-from pyrat.protocol.BotMessage import BotMessage
-from pyrat.protocol.MatchConfig import MatchConfig as FBMatchConfig
-from pyrat.protocol.TurnState import TurnState as FBTurnState
-from pyrat.protocol.GameOver import GameOver as FBGameOver
-from pyrat.protocol.Timeout import Timeout as FBTimeout
-
+from pyrat.protocol import Action as ActionMod
 from pyrat.protocol import BotPacket as BotPacketMod
 from pyrat.protocol import Identify as IdentifyMod
-from pyrat.protocol import OptionDef as OptionDefMod
-from pyrat.protocol import Ready as ReadyMod
-from pyrat.protocol import PreprocessingDone as PreprocessingDoneMod
-from pyrat.protocol import Action as ActionMod
-from pyrat.protocol import Pong as PongMod
 from pyrat.protocol import Info as InfoMod
+from pyrat.protocol import OptionDef as OptionDefMod
+from pyrat.protocol import Pong as PongMod
+from pyrat.protocol import PreprocessingDone as PreprocessingDoneMod
+from pyrat.protocol import Ready as ReadyMod
+from pyrat.protocol.BotMessage import BotMessage
+from pyrat.protocol.GameOver import GameOver as FBGameOver
+from pyrat.protocol.HostPacket import HostPacket
+from pyrat.protocol.MatchConfig import MatchConfig as FBMatchConfig
 from pyrat.protocol.SetOption import SetOption as FBSetOption
+from pyrat.protocol.Timeout import Timeout as FBTimeout
+from pyrat.protocol.TurnState import TurnState as FBTurnState
 from pyrat.protocol.Vec2 import CreateVec2
 
 # ---------------------------------------------------------------------------
@@ -164,7 +161,10 @@ def _build_bot_packet(msg_type: int, build_fn) -> bytes:
 
 
 def encode_identify(
-    name: str, author: str, agent_id: str = "", options: list[dict] | None = None,
+    name: str,
+    author: str,
+    agent_id: str = "",
+    options: list[dict] | None = None,
 ) -> bytes:
     def build(b):
         # Pre-create all strings (FlatBuffers requires strings before Start()).
@@ -215,6 +215,7 @@ def encode_identify(
         if aid is not None:
             IdentifyMod.AddAgentId(b, aid)
         return IdentifyMod.End(b)
+
     return _build_bot_packet(BotMessage.Identify, build)
 
 
@@ -222,6 +223,7 @@ def encode_ready() -> bytes:
     def build(b):
         ReadyMod.Start(b)
         return ReadyMod.End(b)
+
     return _build_bot_packet(BotMessage.Ready, build)
 
 
@@ -229,6 +231,7 @@ def encode_preprocessing_done() -> bytes:
     def build(b):
         PreprocessingDoneMod.Start(b)
         return PreprocessingDoneMod.End(b)
+
     return _build_bot_packet(BotMessage.PreprocessingDone, build)
 
 
@@ -238,6 +241,7 @@ def encode_action(direction: int, player: int) -> bytes:
         ActionMod.AddDirection(b, direction)
         ActionMod.AddPlayer(b, player)
         return ActionMod.End(b)
+
     return _build_bot_packet(BotMessage.Action, build)
 
 
@@ -245,6 +249,7 @@ def encode_pong() -> bytes:
     def build(b):
         PongMod.Start(b)
         return PongMod.End(b)
+
     return _build_bot_packet(BotMessage.Pong, build)
 
 
@@ -279,4 +284,5 @@ def encode_info(
         if msg_off is not None:
             InfoMod.AddMessage(b, msg_off)
         return InfoMod.End(b)
+
     return _build_bot_packet(BotMessage.Info, build)

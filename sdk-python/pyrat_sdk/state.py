@@ -50,7 +50,7 @@ class GameState:
     width: int
     height: int
     max_turns: int
-    maze: PyMaze
+    _maze: PyMaze
     movement_matrix: np.ndarray
     move_timeout_ms: int
     preprocessing_timeout_ms: int
@@ -84,19 +84,17 @@ class GameState:
         self.controlled_players = config["controlled_players"]
         self._is_player1 = 0 in self.controlled_players
 
-        self.maze = PyMaze(
+        self._maze = PyMaze(
             self.width,
             self.height,
             config["walls"],
             config["mud"],
         )
-        self.movement_matrix = self.maze.build_movement_matrix()
+        self.movement_matrix = self._maze.build_movement_matrix()
 
         # Initial cheese from config.
         self.cheese = config["cheese"]
-        self.cheese_matrix = _build_cheese_matrix(
-            self.cheese, self.width, self.height
-        )
+        self.cheese_matrix = _build_cheese_matrix(self.cheese, self.width, self.height)
 
         # Initial positions.
         self._player1_pos = config["player1_start"]
@@ -121,9 +119,7 @@ class GameState:
         self._player1_last_move = ts["player1_last_move"]
         self._player2_last_move = ts["player2_last_move"]
         self.cheese = ts["cheese"]
-        self.cheese_matrix = _build_cheese_matrix(
-            self.cheese, self.width, self.height
-        )
+        self.cheese_matrix = _build_cheese_matrix(self.cheese, self.width, self.height)
 
     # ── My / opponent perspective ──────────────────────
 
@@ -206,6 +202,16 @@ class GameState:
         """Player 2's remaining mud turns."""
         return self._player2_mud_turns
 
+    @property
+    def player1_last_move(self) -> Direction:
+        """Player 1's last move as a Direction."""
+        return Direction(self._player1_last_move)
+
+    @property
+    def player2_last_move(self) -> Direction:
+        """Player 2's last move as a Direction."""
+        return Direction(self._player2_last_move)
+
     # ── Layer 2 convenience ────────────────────────────
 
     def get_effective_moves(
@@ -219,10 +225,10 @@ class GameState:
         if pos is None:
             pos = self.my_position
         x, y = pos
-        return [Direction(d) for d in self.maze.valid_moves(x, y)]
+        return [Direction(d) for d in self._maze.valid_moves(x, y)]
 
     def get_move_cost(
-        self, direction: int, pos: tuple[int, int] | None = None
+        self, direction: Direction | int, pos: tuple[int, int] | None = None
     ) -> int | None:
         """Cost of moving in *direction* from *pos*.
 
@@ -232,7 +238,7 @@ class GameState:
         if pos is None:
             pos = self.my_position
         x, y = pos
-        return self.maze.move_cost(x, y, direction)
+        return self._maze.move_cost(x, y, direction)
 
     # ── Layer 3 convenience ────────────────────────────
 
@@ -245,7 +251,7 @@ class GameState:
         full Direction sequence and cost is in turns (mud passages cost
         more than 1). Returns None if unreachable.
         """
-        result = self.maze.shortest_path(start, goal)
+        result = self._maze.shortest_path(start, goal)
         if result is None:
             return None
         dirs, cost = result
@@ -262,7 +268,7 @@ class GameState:
         """
         if pos is None:
             pos = self.my_position
-        result = self.maze.nearest_cheese(pos, self.cheese)
+        result = self._maze.nearest_cheese(pos, self.cheese)
         if result is None:
             return None
         target, dirs, cost = result
@@ -278,7 +284,7 @@ class GameState:
         """
         if pos is None:
             pos = self.my_position
-        return self.maze.distances_from(pos)
+        return self._maze.distances_from(pos)
 
 
 def _build_cheese_matrix(
