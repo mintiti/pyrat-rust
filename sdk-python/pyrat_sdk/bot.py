@@ -13,6 +13,7 @@ import traceback
 
 from pyrat_sdk._wire.connection import Connection
 from pyrat_sdk._wire import codec
+from pyrat_sdk.options import apply_set_option, collect_options, options_to_wire
 from pyrat_sdk.state import Direction, GameState, Player
 
 # Ensure generated/ is importable.
@@ -89,8 +90,7 @@ class Bot:
             _run_lifecycle(
                 conn,
                 agent_id,
-                name=self.name,
-                author=self.author,
+                bot=self,
                 preprocess_fn=self.preprocess,
                 turn_fn=self._handle_turn,
             )
@@ -147,8 +147,7 @@ class HivemindBot:
             _run_lifecycle(
                 conn,
                 agent_id,
-                name=self.name,
-                author=self.author,
+                bot=self,
                 preprocess_fn=self.preprocess,
                 turn_fn=self._handle_turn,
             )
@@ -220,21 +219,25 @@ def _run_lifecycle(
     conn: Connection,
     agent_id: str,
     *,
-    name: str,
-    author: str,
+    bot: object,
     preprocess_fn,
     turn_fn,
 ) -> None:
     """Shared connect → identify → ready → config → preprocess → turn-loop."""
-    # 1. Identify + Ready
-    conn.send_frame(codec.encode_identify(name, author, agent_id))
+    # 1. Collect options and Identify + Ready.
+    option_defs = collect_options(type(bot))
+    wire_options = options_to_wire(option_defs) if option_defs else None
+    conn.send_frame(codec.encode_identify(bot.name, bot.author, agent_id, wire_options))
     conn.send_frame(codec.encode_ready())
 
-    # 2. Wait for MatchConfig and StartPreprocessing.
+    # 2. Wait for SetOption*, MatchConfig, and StartPreprocessing.
     config: dict | None = None
     while True:
         msg_type, table = codec.decode_host_packet(conn.recv_frame())
-        if msg_type == HostMessage.MatchConfig:
+        if msg_type == HostMessage.SetOption:
+            name, value = codec.extract_set_option(table)
+            apply_set_option(bot, option_defs, name, value)
+        elif msg_type == HostMessage.MatchConfig:
             config = codec.extract_match_config(table)
         elif msg_type == HostMessage.StartPreprocessing:
             break

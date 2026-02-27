@@ -21,11 +21,13 @@ from pyrat.protocol.Timeout import Timeout as FBTimeout
 
 from pyrat.protocol import BotPacket as BotPacketMod
 from pyrat.protocol import Identify as IdentifyMod
+from pyrat.protocol import OptionDef as OptionDefMod
 from pyrat.protocol import Ready as ReadyMod
 from pyrat.protocol import PreprocessingDone as PreprocessingDoneMod
 from pyrat.protocol import Action as ActionMod
 from pyrat.protocol import Pong as PongMod
 from pyrat.protocol import Info as InfoMod
+from pyrat.protocol.SetOption import SetOption as FBSetOption
 from pyrat.protocol.Vec2 import CreateVec2
 
 # ---------------------------------------------------------------------------
@@ -132,6 +134,18 @@ def extract_timeout(table) -> int:
     return t.DefaultMove()
 
 
+def extract_set_option(table) -> tuple[str, str]:
+    """Extract (name, value) from a SetOption union table."""
+    so = FBSetOption()
+    so.Init(table.Bytes, table.Pos)
+    name = so.Name()
+    value = so.Value()
+    return (
+        name.decode("utf-8") if isinstance(name, bytes) else (name or ""),
+        value.decode("utf-8") if isinstance(value, bytes) else (value or ""),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Encoding (bot → host)
 # ---------------------------------------------------------------------------
@@ -149,14 +163,55 @@ def _build_bot_packet(msg_type: int, build_fn) -> bytes:
     return bytes(builder.Output())
 
 
-def encode_identify(name: str, author: str, agent_id: str = "") -> bytes:
+def encode_identify(
+    name: str, author: str, agent_id: str = "", options: list[dict] | None = None,
+) -> bytes:
     def build(b):
+        # Pre-create all strings (FlatBuffers requires strings before Start()).
         n = b.CreateString(name)
         a = b.CreateString(author)
         aid = b.CreateString(agent_id) if agent_id else None
+
+        # Build option defs if provided.
+        opts_vec = None
+        if options:
+            opt_offsets = []
+            for opt in options:
+                oname = b.CreateString(opt["name"])
+                odefault = b.CreateString(opt["default_str"])
+                choice_offsets = []
+                for c in opt.get("choices", []):
+                    choice_offsets.append(b.CreateString(c))
+
+                choices_vec = None
+                if choice_offsets:
+                    OptionDefMod.StartChoicesVector(b, len(choice_offsets))
+                    for co in reversed(choice_offsets):
+                        b.PrependUOffsetTRelative(co)
+                    choices_vec = b.EndVector()
+
+                OptionDefMod.Start(b)
+                OptionDefMod.AddName(b, oname)
+                OptionDefMod.AddType(b, opt["wire_type"])
+                OptionDefMod.AddDefaultValue(b, odefault)
+                if "min" in opt:
+                    OptionDefMod.AddMin(b, opt["min"])
+                if "max" in opt:
+                    OptionDefMod.AddMax(b, opt["max"])
+                if choices_vec is not None:
+                    OptionDefMod.AddChoices(b, choices_vec)
+                opt_offsets.append(OptionDefMod.End(b))
+
+            IdentifyMod.StartOptionsVector(b, len(opt_offsets))
+            for oo in reversed(opt_offsets):
+                b.PrependUOffsetTRelative(oo)
+            opts_vec = b.EndVector()
+
         IdentifyMod.Start(b)
         IdentifyMod.AddName(b, n)
         IdentifyMod.AddAuthor(b, a)
+        if opts_vec is not None:
+            IdentifyMod.AddOptions(b, opts_vec)
         if aid is not None:
             IdentifyMod.AddAgentId(b, aid)
         return IdentifyMod.End(b)
