@@ -4,9 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from pyrat_sdk.maze import Maze
-from pyrat_sdk import lookups
-from pyrat_sdk import pathfinding
+from pyrat_sdk._engine import PyMaze
 
 
 class GameState:
@@ -21,7 +19,7 @@ class GameState:
     width: int
     height: int
     max_turns: int
-    maze: Maze
+    maze: PyMaze
     movement_matrix: np.ndarray
     move_timeout_ms: int
     preprocessing_timeout_ms: int
@@ -55,17 +53,17 @@ class GameState:
         self.controlled_players = config["controlled_players"]
         self._is_player1 = 0 in self.controlled_players
 
-        self.maze = Maze(
+        self.maze = PyMaze(
             self.width,
             self.height,
             config["walls"],
             config["mud"],
         )
-        self.movement_matrix = lookups.build_movement_matrix(self.maze)
+        self.movement_matrix = self.maze.build_movement_matrix()
 
         # Initial cheese from config.
         self.cheese = config["cheese"]
-        self.cheese_matrix = lookups.build_cheese_matrix(
+        self.cheese_matrix = _build_cheese_matrix(
             self.cheese, self.width, self.height
         )
 
@@ -92,7 +90,7 @@ class GameState:
         self._player1_last_move = ts["player1_last_move"]
         self._player2_last_move = ts["player2_last_move"]
         self.cheese = ts["cheese"]
-        self.cheese_matrix = lookups.build_cheese_matrix(
+        self.cheese_matrix = _build_cheese_matrix(
             self.cheese, self.width, self.height
         )
 
@@ -139,27 +137,42 @@ class GameState:
 
     def get_effective_moves(self, pos: tuple[int, int] | None = None) -> list[int]:
         """Directions (0-3) that don't hit a wall from *pos* (default: my position)."""
-        return lookups.get_effective_moves(self.movement_matrix, pos or self.my_position)
+        x, y = pos or self.my_position
+        return self.maze.valid_moves(x, y)
 
     def get_move_cost(self, direction: int, pos: tuple[int, int] | None = None) -> int:
         """Return -1 (wall), 0 (free), or N (mud) for *direction* from *pos*."""
-        return lookups.get_move_cost(self.movement_matrix, pos or self.my_position, direction)
+        x, y = pos or self.my_position
+        cost = self.maze.move_cost(x, y, direction)
+        if cost is None:
+            return -1
+        return 0 if cost == 1 else cost
 
     # ── Layer 3 convenience ────────────────────────────
 
     def shortest_path(
         self, start: tuple[int, int], goal: tuple[int, int]
     ) -> tuple[list[int], int] | None:
-        return pathfinding.shortest_path(self.maze, start, goal)
+        return self.maze.shortest_path(start, goal)
 
     def nearest_cheese(
         self, pos: tuple[int, int] | None = None
     ) -> tuple[tuple[int, int], list[int], int] | None:
-        return pathfinding.nearest_cheese(
-            self.maze, pos or self.my_position, set(self.cheese)
+        return self.maze.nearest_cheese(
+            pos or self.my_position, self.cheese
         )
 
     def distances_from(
         self, pos: tuple[int, int] | None = None
     ) -> dict[tuple[int, int], int]:
-        return pathfinding.distances_from(self.maze, pos or self.my_position)
+        return self.maze.distances_from(pos or self.my_position)
+
+
+def _build_cheese_matrix(
+    cheese: list[tuple[int, int]], width: int, height: int
+) -> np.ndarray:
+    """Shape ``(width, height)``, dtype uint8.  1 where cheese exists."""
+    mat = np.zeros((width, height), dtype=np.uint8)
+    for x, y in cheese:
+        mat[x, y] = 1
+    return mat
