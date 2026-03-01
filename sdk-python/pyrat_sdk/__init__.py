@@ -2,6 +2,7 @@
 
 __version__ = "0.1.0"
 
+from pyrat_sdk._engine import GameSim
 from pyrat_sdk.bot import Bot, Context, HivemindBot
 from pyrat_sdk.options import Check, Combo, Spin, Str
 from pyrat_sdk.state import (
@@ -18,6 +19,7 @@ __all__ = [
     "Combo",
     "Context",
     "Direction",
+    "GameSim",
     "GameState",
     "HivemindBot",
     "NearestCheeseResult",

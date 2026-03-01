@@ -212,6 +212,26 @@ class GameState:
         """Player 2's last move as a Direction."""
         return Direction(self._player2_last_move)
 
+    # ── Layer 4: simulation ───────────────────────────
+
+    def simulate(self):
+        """Mutable game snapshot for make_move / unmake_move tree search.
+
+        Returns a Rust-backed ``GameSim`` with the current maze topology
+        and game state. Uses objective player1/player2 naming — no
+        my/opponent mapping.
+        """
+        return self._maze.simulate(
+            self._player1_pos,
+            self._player2_pos,
+            self._player1_score,
+            self._player2_score,
+            self._player1_mud_turns,
+            self._player2_mud_turns,
+            self.cheese,
+            self.turn,
+        )
+
     # ── Layer 2 convenience ────────────────────────────
 
     def get_effective_moves(

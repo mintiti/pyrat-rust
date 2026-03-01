@@ -1,9 +1,11 @@
 use ndarray::Array3;
 use numpy::PyArray3;
 use pyo3::prelude::*;
-use pyrat::{Coordinates, Direction};
+use pyrat::{Coordinates, Direction, GameState};
 use pyrat_engine_interface::{self as iface, GameView};
 use std::collections::HashMap;
+
+use crate::sim::PyGameSim;
 
 /// Wire tuple for a wall: ((x1, y1), (x2, y2)).
 type WallTuple = ((u8, u8), (u8, u8));
@@ -171,5 +173,35 @@ impl PyMaze {
             .into_iter()
             .map(|(c, d)| ((c.x, c.y), d))
             .collect()
+    }
+
+    /// Create a mutable game snapshot for make_move / unmake_move search.
+    ///
+    /// The returned `GameSim` carries the maze topology (walls, mud) from
+    /// this `PyMaze` and the dynamic state (positions, scores, cheese, turn)
+    /// passed in from the current `GameState`.
+    #[pyo3(signature = (p1_pos, p2_pos, p1_score, p2_score, p1_mud, p2_mud, cheese, turn))]
+    #[allow(clippy::too_many_arguments)]
+    fn simulate(
+        &self,
+        p1_pos: (u8, u8),
+        p2_pos: (u8, u8),
+        p1_score: f32,
+        p2_score: f32,
+        p1_mud: u8,
+        p2_mud: u8,
+        cheese: Vec<(u8, u8)>,
+        turn: u16,
+    ) -> PyGameSim {
+        PyGameSim::from_maze(
+            self, p1_pos, p2_pos, p1_score, p2_score, p1_mud, p2_mud, &cheese, turn,
+        )
+    }
+}
+
+/// Rust-only accessors (not exposed to Python).
+impl PyMaze {
+    pub(crate) fn snapshot(&self) -> GameState {
+        self.view.snapshot()
     }
 }
