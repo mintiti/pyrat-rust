@@ -52,6 +52,15 @@ repos:
             files: ^cli/
             types: [python]
 
+        -   id: mypy-sdk-python
+            name: mypy SDK Python
+            description: Type check SDK Python package (matches CI)
+            entry: uv run --directory sdk-python mypy pyrat_sdk --ignore-missing-imports
+            language: system
+            pass_filenames: false
+            files: ^sdk-python/
+            types: [python]
+
   # Rust checks
   -   repo: local
       hooks:
@@ -93,6 +102,14 @@ repos:
         -   id: pytest-cli
             name: pytest CLI
             entry: uv run pytest cli/tests
+            language: system
+            pass_filenames: false
+            always_run: true
+            stages: [pre-push]  # Only run on push, not on every commit
+
+        -   id: pytest-sdk-python
+            name: pytest SDK Python
+            entry: uv run --directory sdk-python pytest tests
             language: system
             pass_filenames: false
             always_run: true

@@ -59,6 +59,10 @@ quote-style = "double"
 indent-style = "space"
 line-ending = "lf"
 
+[tool.mypy]
+strict = true
+exclude = ["pyrat_sdk/_wire"]
+
 [tool.pytest.ini_options]
 minversion = "7.0"
 addopts = "-ra -q"

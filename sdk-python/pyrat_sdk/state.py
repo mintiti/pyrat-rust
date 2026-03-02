@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from enum import IntEnum
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import numpy as np
 
-from pyrat_sdk._engine import PyMaze
+from pyrat_sdk._engine import GameSim, PyMaze
 
 
 class Direction(IntEnum):
@@ -75,7 +75,7 @@ class GameState:
     _player1_last_move: int
     _player2_last_move: int
 
-    def __init__(self, config: dict) -> None:
+    def __init__(self, config: dict[str, Any]) -> None:
         self.width = config["width"]
         self.height = config["height"]
         self.max_turns = config["max_turns"]
@@ -107,7 +107,7 @@ class GameState:
         self._player2_last_move = 4
         self.turn = 0
 
-    def update(self, ts: dict) -> None:
+    def update(self, ts: dict[str, Any]) -> None:
         """Apply a TurnState dict (from ``codec.extract_turn_state``)."""
         self.turn = ts["turn"]
         self._player1_pos = ts["player1_position"]
@@ -214,7 +214,7 @@ class GameState:
 
     # ── Layer 4: simulation ───────────────────────────
 
-    def simulate(self):
+    def simulate(self) -> GameSim:
         """Mutable game snapshot for make_move / unmake_move tree search.
 
         Returns a Rust-backed ``GameSim`` with the current maze topology
@@ -258,7 +258,8 @@ class GameState:
         if pos is None:
             pos = self.my_position
         x, y = pos
-        return self._maze.move_cost(x, y, direction)
+        result: int | None = self._maze.move_cost(x, y, direction)
+        return result
 
     # ── Layer 3 convenience ────────────────────────────
 
@@ -304,7 +305,8 @@ class GameState:
         """
         if pos is None:
             pos = self.my_position
-        return self._maze.distances_from(pos)
+        result: dict[tuple[int, int], int] = self._maze.distances_from(pos)
+        return result
 
 
 def _build_cheese_matrix(

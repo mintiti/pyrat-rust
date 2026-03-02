@@ -122,6 +122,27 @@ if matrix[x, y, 0] != -1:
 
 `NearestCheeseResult` is a NamedTuple: `(position: (int, int), directions: list[Direction], cost: int)`
 
+### Simulation (tree search)
+
+`state.simulate()` returns a `GameSim` — a mutable snapshot of the game backed by Rust. Use it for game-tree search (minimax, MCTS, etc.) via `make_move` / `unmake_move`.
+
+```python
+sim = state.simulate()
+
+# Advance one turn: both players move simultaneously.
+undo = sim.make_move(int(Direction.RIGHT), int(Direction.LEFT))
+print(sim.player1_score, sim.is_game_over)
+
+# Revert to the previous state.
+sim.unmake_move(undo)
+```
+
+**`GameSim` properties:** `player1_position`, `player2_position`, `player1_score`, `player2_score`, `player1_mud_turns`, `player2_mud_turns`, `cheese_positions`, `turn`, `max_turns`, `is_game_over`
+
+**`MoveUndo`** is the undo token returned by `make_move`. Apply tokens in LIFO order (most recent first). Properties: `p1_pos`, `p2_pos`, `p1_score`, `p2_score`, `p1_mud`, `p2_mud`, `collected_cheese`, `turn`.
+
+Both `GameSim` and `MoveUndo` are importable from `pyrat_sdk`.
+
 ## Direction values
 
 | Name | Value |

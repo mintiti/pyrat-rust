@@ -235,7 +235,7 @@ def _run_lifecycle(
     conn.send_frame(codec.encode_ready())
 
     # 2. Wait for SetOption*, MatchConfig, and StartPreprocessing.
-    config: dict | None = None
+    config: dict[str, Any] | None = None
     while True:
         try:
             msg_type, table = codec.decode_host_packet(conn.recv_frame())

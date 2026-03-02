@@ -168,7 +168,7 @@ class Combo(_OptionDescriptor):
         return raw
 
     def to_wire_default(self) -> str:
-        return self.default
+        return str(self.default)
 
 
 class Str(_OptionDescriptor):
@@ -190,7 +190,7 @@ class Str(_OptionDescriptor):
         return raw
 
     def to_wire_default(self) -> str:
-        return self.default
+        return str(self.default)
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +212,7 @@ def collect_options(cls: type) -> dict[str, _OptionDescriptor]:
 
 def options_to_wire(
     options: dict[str, _OptionDescriptor],
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Convert collected descriptors to dicts the codec can serialize."""
     result = []
     for name, desc in options.items():

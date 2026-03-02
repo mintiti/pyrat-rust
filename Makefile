@@ -1,6 +1,6 @@
 # PyRat Monorepo Makefile
 
-.PHONY: all engine gui protocol examples cli test bench clean help sync lint lint-engine lint-protocol lint-cli test-cli test-sdk-python test-wire test-host test-headless test-integration generate-protocol
+.PHONY: all engine gui protocol examples cli test bench clean help sync lint lint-engine lint-protocol lint-cli lint-sdk-python test-cli test-sdk-python test-wire test-host test-headless test-integration generate-protocol
 
 # Default target
 all: sync engine
@@ -96,7 +96,7 @@ check:
 	uv run mypy engine/python/pyrat_engine protocol/pyrat_base/pyrat_base cli/pyrat_runner sdk-python/pyrat_sdk --ignore-missing-imports
 
 # Linting targets
-lint: lint-engine lint-protocol lint-cli
+lint: lint-engine lint-protocol lint-cli lint-sdk-python
 
 lint-engine:
 	@echo "Linting engine Python code..."
@@ -112,6 +112,11 @@ lint-cli:
 	@echo "Linting CLI code..."
 	uv run ruff check cli
 	uv run mypy cli/pyrat_runner --ignore-missing-imports
+
+lint-sdk-python:
+	@echo "Linting SDK Python code..."
+	uv run ruff check sdk-python
+	uv run mypy sdk-python/pyrat_sdk --ignore-missing-imports
 
 # Clean build artifacts
 generate-protocol:

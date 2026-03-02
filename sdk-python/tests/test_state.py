@@ -274,3 +274,65 @@ class TestConvenienceMethods:
         assert dists[(0, 0)] == 0
         # Adjacent cell costs 1
         assert dists[(1, 0)] == 1 or dists[(0, 1)] == 1
+
+
+# ══════════════════════════════════════════════════════════
+# 7. Simulation (Layer 4)
+# ══════════════════════════════════════════════════════════
+
+
+class TestSimulation:
+    def test_simulate_returns_game_sim(self):
+        from pyrat_sdk._engine import GameSim
+
+        state = GameState(_make_config())
+        sim = state.simulate()
+        assert isinstance(sim, GameSim)
+
+    def test_make_move_changes_state(self):
+        state = GameState(_make_config())
+        sim = state.simulate()
+
+        pos_before = sim.player1_position
+        # Move player1 RIGHT (1), player2 stays (4)
+        undo = sim.make_move(1, 4)
+        pos_after = sim.player1_position
+        assert pos_after != pos_before
+
+        # Undo restores original state.
+        sim.unmake_move(undo)
+        assert sim.player1_position == pos_before
+
+    def test_round_trip_restores_scores(self):
+        state = GameState(_make_config(cheese=[(1, 0)]))
+        sim = state.simulate()
+
+        score_before = sim.player1_score
+        # Move player1 RIGHT toward cheese at (1,0)
+        undo = sim.make_move(1, 4)
+        # Score may have changed if cheese was collected
+        sim.unmake_move(undo)
+        assert sim.player1_score == score_before
+
+    def test_is_game_over_after_all_cheese_collected(self):
+        # Single cheese at (1,0), player1 starts at (0,0)
+        state = GameState(_make_config(cheese=[(1, 0)]))
+        sim = state.simulate()
+        assert not sim.is_game_over
+
+        # Player1 moves RIGHT to collect the cheese
+        sim.make_move(1, 4)
+        assert sim.is_game_over
+
+    def test_move_undo_properties(self):
+        from pyrat_sdk._engine import MoveUndo
+
+        state = GameState(_make_config())
+        sim = state.simulate()
+        undo = sim.make_move(4, 4)  # Both STAY
+        assert isinstance(undo, MoveUndo)
+        # MoveUndo captures pre-move state
+        assert undo.p1_pos == (0, 0)
+        assert undo.p2_pos == (2, 2)
+        assert undo.turn == 0
+        sim.unmake_move(undo)
