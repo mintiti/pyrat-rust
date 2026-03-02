@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+import os
+import sys
+
+# Make generated FlatBuffers modules (pyrat.protocol.*) importable.
+sys.path.insert(
+    0, os.path.join(os.path.dirname(__file__), "..", "pyrat_sdk", "_wire", "generated")
+)
+
 import flatbuffers
 from pyrat.protocol import GameOver as GameOverMod
 from pyrat.protocol import HostPacket as HostPacketMod
@@ -11,9 +19,6 @@ from pyrat.protocol import SetOption as SetOptionMod
 from pyrat.protocol import StartPreprocessing as StartPreprocessingMod
 from pyrat.protocol import TurnState as TurnStateMod
 from pyrat.protocol.Vec2 import CreateVec2
-
-# Ensure generated FlatBuffers modules are importable.
-import pyrat_sdk._wire  # noqa: F401
 
 
 class MockConnection:

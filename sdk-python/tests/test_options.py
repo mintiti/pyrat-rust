@@ -14,8 +14,6 @@ from pyrat.protocol.BotPacket import BotPacket
 from pyrat.protocol.HostMessage import HostMessage
 from pyrat.protocol.Identify import Identify
 
-# Ensure generated FlatBuffers modules are importable.
-import pyrat_sdk._wire  # noqa: F401
 from pyrat_sdk._wire import codec
 from pyrat_sdk.bot import _run_lifecycle, _validate_direction
 from pyrat_sdk.options import (

@@ -17,7 +17,6 @@ from pyrat.protocol.HostMessage import HostMessage
 from pyrat.protocol.Info import Info
 from pyrat.protocol.Vec2 import CreateVec2
 
-import pyrat_sdk._wire  # noqa: F401
 from pyrat_sdk._wire import codec
 
 # ── Helpers ───────────────────────────────────────────
