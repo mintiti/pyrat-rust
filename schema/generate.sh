@@ -29,16 +29,28 @@ else
 fi
 
 # ── Python codegen ──────────────────────────────────────
-PY_OUT_DIR="$SCRIPT_DIR/../sdk-python/pyrat_sdk/_wire/generated"
+PY_FINAL_DIR="$SCRIPT_DIR/../sdk-python/pyrat_sdk/_wire/protocol"
+PY_TMP_DIR=$(mktemp -d)
 
 echo "Generating Python code from $SCHEMA..."
-flatc --python -o "$PY_OUT_DIR" "$SCHEMA"
+flatc --python -o "$PY_TMP_DIR" "$SCHEMA"
 
-PY_TARGET="$PY_OUT_DIR/pyrat/protocol"
-if [[ ! -d "$PY_TARGET" ]]; then
-    echo "error: expected $PY_TARGET not found" >&2
-    ls -la "$PY_OUT_DIR"
+PY_TMP_TARGET="$PY_TMP_DIR/pyrat/protocol"
+if [[ ! -d "$PY_TMP_TARGET" ]]; then
+    echo "error: expected $PY_TMP_TARGET not found" >&2
+    ls -la "$PY_TMP_DIR"
+    rm -rf "$PY_TMP_DIR"
     exit 1
 fi
 
-echo "Generated Python FlatBuffers code in $PY_TARGET"
+rm -rf "$PY_FINAL_DIR"
+mkdir -p "$PY_FINAL_DIR"
+cp "$PY_TMP_TARGET/"*.py "$PY_FINAL_DIR/"
+
+# Rewrite internal imports so standard Python resolution works.
+# macOS sed needs '' after -i; use a temp suffix and remove backup files.
+sed -i.bak 's/from pyrat\.protocol\./from pyrat_sdk._wire.protocol./g' "$PY_FINAL_DIR/"*.py
+rm -f "$PY_FINAL_DIR/"*.bak
+rm -rf "$PY_TMP_DIR"
+
+echo "Generated Python FlatBuffers code in $PY_FINAL_DIR"

@@ -12,15 +12,11 @@ import time
 import traceback
 from typing import Any
 
-from pyrat_sdk._wire.connection import Connection
 from pyrat_sdk._wire import codec
+from pyrat_sdk._wire.connection import Connection
+from pyrat_sdk._wire.protocol.HostMessage import HostMessage
 from pyrat_sdk.options import apply_set_option, collect_options, options_to_wire
 from pyrat_sdk.state import Direction, GameState, Player
-
-# Ensure generated/ is importable.
-import pyrat_sdk._wire  # noqa: F401
-from pyrat.protocol.HostMessage import HostMessage
-
 
 # ── Context ────────────────────────────────────────────
 

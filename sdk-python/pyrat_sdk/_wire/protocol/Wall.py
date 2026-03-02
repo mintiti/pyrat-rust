@@ -6,79 +6,66 @@ import flatbuffers
 from flatbuffers.compat import import_numpy
 np = import_numpy()
 
-class Mud(object):
+class Wall(object):
     __slots__ = ['_tab']
 
     @classmethod
     def GetRootAs(cls, buf, offset=0):
         n = flatbuffers.encode.Get(flatbuffers.packer.uoffset, buf, offset)
-        x = Mud()
+        x = Wall()
         x.Init(buf, n + offset)
         return x
 
     @classmethod
-    def GetRootAsMud(cls, buf, offset=0):
+    def GetRootAsWall(cls, buf, offset=0):
         """This method is deprecated. Please switch to GetRootAs."""
         return cls.GetRootAs(buf, offset)
-    # Mud
+    # Wall
     def Init(self, buf, pos):
         self._tab = flatbuffers.table.Table(buf, pos)
 
-    # Mud
+    # Wall
     def Pos1(self):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(4))
         if o != 0:
             x = o + self._tab.Pos
-            from pyrat.protocol.Vec2 import Vec2
+            from pyrat_sdk._wire.protocol.Vec2 import Vec2
             obj = Vec2()
             obj.Init(self._tab.Bytes, x)
             return obj
         return None
 
-    # Mud
+    # Wall
     def Pos2(self):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(6))
         if o != 0:
             x = o + self._tab.Pos
-            from pyrat.protocol.Vec2 import Vec2
+            from pyrat_sdk._wire.protocol.Vec2 import Vec2
             obj = Vec2()
             obj.Init(self._tab.Bytes, x)
             return obj
         return None
 
-    # Mud
-    def Value(self):
-        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(8))
-        if o != 0:
-            return self._tab.Get(flatbuffers.number_types.Uint8Flags, o + self._tab.Pos)
-        return 0
-
-def MudStart(builder):
-    builder.StartObject(3)
+def WallStart(builder):
+    builder.StartObject(2)
 
 def Start(builder):
-    MudStart(builder)
+    WallStart(builder)
 
-def MudAddPos1(builder, pos1):
+def WallAddPos1(builder, pos1):
     builder.PrependStructSlot(0, flatbuffers.number_types.UOffsetTFlags.py_type(pos1), 0)
 
 def AddPos1(builder, pos1):
-    MudAddPos1(builder, pos1)
+    WallAddPos1(builder, pos1)
 
-def MudAddPos2(builder, pos2):
+def WallAddPos2(builder, pos2):
     builder.PrependStructSlot(1, flatbuffers.number_types.UOffsetTFlags.py_type(pos2), 0)
 
 def AddPos2(builder, pos2):
-    MudAddPos2(builder, pos2)
+    WallAddPos2(builder, pos2)
 
-def MudAddValue(builder, value):
-    builder.PrependUint8Slot(2, value, 0)
-
-def AddValue(builder, value):
-    MudAddValue(builder, value)
-
-def MudEnd(builder):
+def WallEnd(builder):
     return builder.EndObject()
 
 def End(builder):
-    return MudEnd(builder)
+    return WallEnd(builder)

@@ -52,7 +52,7 @@ class MatchConfig(object):
             x = self._tab.Vector(o)
             x += flatbuffers.number_types.UOffsetTFlags.py_type(j) * 4
             x = self._tab.Indirect(x)
-            from pyrat.protocol.Wall import Wall
+            from pyrat_sdk._wire.protocol.Wall import Wall
             obj = Wall()
             obj.Init(self._tab.Bytes, x)
             return obj
@@ -77,7 +77,7 @@ class MatchConfig(object):
             x = self._tab.Vector(o)
             x += flatbuffers.number_types.UOffsetTFlags.py_type(j) * 4
             x = self._tab.Indirect(x)
-            from pyrat.protocol.Mud import Mud
+            from pyrat_sdk._wire.protocol.Mud import Mud
             obj = Mud()
             obj.Init(self._tab.Bytes, x)
             return obj
@@ -101,7 +101,7 @@ class MatchConfig(object):
         if o != 0:
             x = self._tab.Vector(o)
             x += flatbuffers.number_types.UOffsetTFlags.py_type(j) * 2
-            from pyrat.protocol.Vec2 import Vec2
+            from pyrat_sdk._wire.protocol.Vec2 import Vec2
             obj = Vec2()
             obj.Init(self._tab.Bytes, x)
             return obj
@@ -124,7 +124,7 @@ class MatchConfig(object):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(16))
         if o != 0:
             x = o + self._tab.Pos
-            from pyrat.protocol.Vec2 import Vec2
+            from pyrat_sdk._wire.protocol.Vec2 import Vec2
             obj = Vec2()
             obj.Init(self._tab.Bytes, x)
             return obj
@@ -135,7 +135,7 @@ class MatchConfig(object):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(18))
         if o != 0:
             x = o + self._tab.Pos
-            from pyrat.protocol.Vec2 import Vec2
+            from pyrat_sdk._wire.protocol.Vec2 import Vec2
             obj = Vec2()
             obj.Init(self._tab.Bytes, x)
             return obj

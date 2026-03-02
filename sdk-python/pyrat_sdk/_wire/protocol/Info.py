@@ -29,7 +29,7 @@ class Info(object):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(4))
         if o != 0:
             x = o + self._tab.Pos
-            from pyrat.protocol.Vec2 import Vec2
+            from pyrat_sdk._wire.protocol.Vec2 import Vec2
             obj = Vec2()
             obj.Init(self._tab.Bytes, x)
             return obj
@@ -62,7 +62,7 @@ class Info(object):
         if o != 0:
             x = self._tab.Vector(o)
             x += flatbuffers.number_types.UOffsetTFlags.py_type(j) * 2
-            from pyrat.protocol.Vec2 import Vec2
+            from pyrat_sdk._wire.protocol.Vec2 import Vec2
             obj = Vec2()
             obj.Init(self._tab.Bytes, x)
             return obj

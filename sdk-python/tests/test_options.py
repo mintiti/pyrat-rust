@@ -9,12 +9,12 @@ from conftest import (
     build_set_option,
     make_lifecycle_frames,
 )
-from pyrat.protocol.BotMessage import BotMessage
-from pyrat.protocol.BotPacket import BotPacket
-from pyrat.protocol.HostMessage import HostMessage
-from pyrat.protocol.Identify import Identify
 
 from pyrat_sdk._wire import codec
+from pyrat_sdk._wire.protocol.BotMessage import BotMessage
+from pyrat_sdk._wire.protocol.BotPacket import BotPacket
+from pyrat_sdk._wire.protocol.HostMessage import HostMessage
+from pyrat_sdk._wire.protocol.Identify import Identify
 from pyrat_sdk.bot import _run_lifecycle, _validate_direction
 from pyrat_sdk.options import (
     Check,
@@ -395,8 +395,7 @@ class TestLifecycleIntegration:
 class TestHandleTurn:
     def test_think_raises_sends_stay(self):
         """If think() raises, STAY is sent."""
-        from pyrat.protocol.Action import Action
-
+        from pyrat_sdk._wire.protocol.Action import Action
         from pyrat_sdk.bot import Bot
 
         class CrashBot(Bot):

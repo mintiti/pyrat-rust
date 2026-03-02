@@ -3,21 +3,21 @@
 from __future__ import annotations
 
 import flatbuffers
-from pyrat.protocol import GameOver as GameOverMod
-from pyrat.protocol import HostPacket as HostPacketMod
-from pyrat.protocol import MatchConfig as MatchConfigMod
-from pyrat.protocol import Mud as MudMod
-from pyrat.protocol import Timeout as TimeoutMod
-from pyrat.protocol import TurnState as TurnStateMod
-from pyrat.protocol import Wall as WallMod
-from pyrat.protocol.Action import Action
-from pyrat.protocol.BotMessage import BotMessage
-from pyrat.protocol.BotPacket import BotPacket
-from pyrat.protocol.HostMessage import HostMessage
-from pyrat.protocol.Info import Info
-from pyrat.protocol.Vec2 import CreateVec2
 
 from pyrat_sdk._wire import codec
+from pyrat_sdk._wire.protocol import GameOver as GameOverMod
+from pyrat_sdk._wire.protocol import HostPacket as HostPacketMod
+from pyrat_sdk._wire.protocol import MatchConfig as MatchConfigMod
+from pyrat_sdk._wire.protocol import Mud as MudMod
+from pyrat_sdk._wire.protocol import Timeout as TimeoutMod
+from pyrat_sdk._wire.protocol import TurnState as TurnStateMod
+from pyrat_sdk._wire.protocol import Wall as WallMod
+from pyrat_sdk._wire.protocol.Action import Action
+from pyrat_sdk._wire.protocol.BotMessage import BotMessage
+from pyrat_sdk._wire.protocol.BotPacket import BotPacket
+from pyrat_sdk._wire.protocol.HostMessage import HostMessage
+from pyrat_sdk._wire.protocol.Info import Info
+from pyrat_sdk._wire.protocol.Vec2 import CreateVec2
 
 # ── Helpers ───────────────────────────────────────────
 

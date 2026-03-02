@@ -2,23 +2,16 @@
 
 from __future__ import annotations
 
-import os
-import sys
-
-# Make generated FlatBuffers modules (pyrat.protocol.*) importable.
-sys.path.insert(
-    0, os.path.join(os.path.dirname(__file__), "..", "pyrat_sdk", "_wire", "generated")
-)
-
 import flatbuffers
-from pyrat.protocol import GameOver as GameOverMod
-from pyrat.protocol import HostPacket as HostPacketMod
-from pyrat.protocol import MatchConfig as MatchConfigMod
-from pyrat.protocol import Ping as PingMod
-from pyrat.protocol import SetOption as SetOptionMod
-from pyrat.protocol import StartPreprocessing as StartPreprocessingMod
-from pyrat.protocol import TurnState as TurnStateMod
-from pyrat.protocol.Vec2 import CreateVec2
+
+from pyrat_sdk._wire.protocol import GameOver as GameOverMod
+from pyrat_sdk._wire.protocol import HostPacket as HostPacketMod
+from pyrat_sdk._wire.protocol import MatchConfig as MatchConfigMod
+from pyrat_sdk._wire.protocol import Ping as PingMod
+from pyrat_sdk._wire.protocol import SetOption as SetOptionMod
+from pyrat_sdk._wire.protocol import StartPreprocessing as StartPreprocessingMod
+from pyrat_sdk._wire.protocol import TurnState as TurnStateMod
+from pyrat_sdk._wire.protocol.Vec2 import CreateVec2
 
 
 class MockConnection:
@@ -148,7 +141,7 @@ def make_lifecycle_frames(
     include_ping: bool = False,
 ) -> list[bytes]:
     """Build a standard sequence of host frames for lifecycle tests."""
-    from pyrat.protocol.HostMessage import HostMessage
+    from pyrat_sdk._wire.protocol.HostMessage import HostMessage
 
     frames: list[bytes] = []
 

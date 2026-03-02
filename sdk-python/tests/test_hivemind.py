@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from conftest import MockConnection, make_lifecycle_frames
-from pyrat.protocol.Action import Action
-from pyrat.protocol.BotMessage import BotMessage
-from pyrat.protocol.BotPacket import BotPacket
 
+from pyrat_sdk._wire.protocol.Action import Action
+from pyrat_sdk._wire.protocol.BotMessage import BotMessage
+from pyrat_sdk._wire.protocol.BotPacket import BotPacket
 from pyrat_sdk.bot import HivemindBot, _run_lifecycle
 from pyrat_sdk.state import Direction, Player
 

@@ -8,24 +8,22 @@ from __future__ import annotations
 
 import flatbuffers
 
-# Ensure generated/ is on sys.path before importing generated modules.
-import pyrat_sdk._wire  # noqa: F401
-from pyrat.protocol import Action as ActionMod
-from pyrat.protocol import BotPacket as BotPacketMod
-from pyrat.protocol import Identify as IdentifyMod
-from pyrat.protocol import Info as InfoMod
-from pyrat.protocol import OptionDef as OptionDefMod
-from pyrat.protocol import Pong as PongMod
-from pyrat.protocol import PreprocessingDone as PreprocessingDoneMod
-from pyrat.protocol import Ready as ReadyMod
-from pyrat.protocol.BotMessage import BotMessage
-from pyrat.protocol.GameOver import GameOver as FBGameOver
-from pyrat.protocol.HostPacket import HostPacket
-from pyrat.protocol.MatchConfig import MatchConfig as FBMatchConfig
-from pyrat.protocol.SetOption import SetOption as FBSetOption
-from pyrat.protocol.Timeout import Timeout as FBTimeout
-from pyrat.protocol.TurnState import TurnState as FBTurnState
-from pyrat.protocol.Vec2 import CreateVec2
+from pyrat_sdk._wire.protocol import Action as ActionMod
+from pyrat_sdk._wire.protocol import BotPacket as BotPacketMod
+from pyrat_sdk._wire.protocol import Identify as IdentifyMod
+from pyrat_sdk._wire.protocol import Info as InfoMod
+from pyrat_sdk._wire.protocol import OptionDef as OptionDefMod
+from pyrat_sdk._wire.protocol import Pong as PongMod
+from pyrat_sdk._wire.protocol import PreprocessingDone as PreprocessingDoneMod
+from pyrat_sdk._wire.protocol import Ready as ReadyMod
+from pyrat_sdk._wire.protocol.BotMessage import BotMessage
+from pyrat_sdk._wire.protocol.GameOver import GameOver as FBGameOver
+from pyrat_sdk._wire.protocol.HostPacket import HostPacket
+from pyrat_sdk._wire.protocol.MatchConfig import MatchConfig as FBMatchConfig
+from pyrat_sdk._wire.protocol.SetOption import SetOption as FBSetOption
+from pyrat_sdk._wire.protocol.Timeout import Timeout as FBTimeout
+from pyrat_sdk._wire.protocol.TurnState import TurnState as FBTurnState
+from pyrat_sdk._wire.protocol.Vec2 import CreateVec2
 
 # ---------------------------------------------------------------------------
 # Decoding (host → bot)
