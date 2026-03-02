@@ -63,7 +63,7 @@ jobs:
       run: uv run --directory engine maturin develop --release
 
     - name: Upload Rust extension artifact
-      uses: actions/upload-artifact@v6
+      uses: actions/upload-artifact@v7
       with:
         name: rust-extension
         path: |
