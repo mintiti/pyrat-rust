@@ -815,6 +815,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "pyrat-sdk"
+version = "0.1.0"
+dependencies = [
+ "flatbuffers",
+ "pyrat-engine-interface",
+ "pyrat-rust",
+ "pyrat-sdk-derive",
+ "pyrat-wire",
+ "rand",
+ "tokio",
+]
+
+[[package]]
+name = "pyrat-sdk-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
 name = "pyrat-sdk-python"
 version = "0.1.0"
 dependencies = [

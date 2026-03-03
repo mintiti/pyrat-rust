@@ -286,6 +286,9 @@ class GameState:
         Returns a NearestCheeseResult(position, directions, cost) where
         position is the cheese (x, y), directions is the full path, and
         cost is in turns. Returns None if no cheese remains.
+
+        When multiple cheeses tie at the minimum distance, returns the first
+        one in the cheese list. Use ``nearest_cheeses`` to get all tied results.
         """
         if pos is None:
             pos = self.my_position
@@ -294,6 +297,22 @@ class GameState:
             return None
         target, dirs, cost = result
         return NearestCheeseResult(target, [Direction(d) for d in dirs], cost)
+
+    def nearest_cheeses(
+        self, pos: tuple[int, int] | None = None
+    ) -> list[NearestCheeseResult]:
+        """All cheeses tied at the minimum distance from *pos* (default: my position).
+
+        Each result has the full path reconstructed. Returns an empty list
+        if no cheese remains.
+        """
+        if pos is None:
+            pos = self.my_position
+        results = self._maze.nearest_cheeses(pos, self.cheese)
+        return [
+            NearestCheeseResult(target, [Direction(d) for d in dirs], cost)
+            for target, dirs, cost in results
+        ]
 
     def distances_from(
         self, pos: tuple[int, int] | None = None

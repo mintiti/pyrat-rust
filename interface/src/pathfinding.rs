@@ -225,6 +225,90 @@ pub fn nearest_cheeses(from: Coordinates, cheese: &[Coordinates], maze: &Maze) -
         .collect()
 }
 
+/// All cheeses tied at minimum distance, each with full direction sequences.
+///
+/// Single-pass Dijkstra with predecessor tracking — avoids the N+1 Dijkstra
+/// pattern of calling `nearest_cheeses` + `shortest_path_full` per result.
+pub fn nearest_cheeses_full(
+    from: Coordinates,
+    cheese: &[Coordinates],
+    maze: &Maze,
+) -> Vec<FullPathResult> {
+    if cheese.is_empty() {
+        return vec![];
+    }
+
+    let size = maze.size();
+    let mut dist = vec![u32::MAX; size];
+    let mut first_moves: Vec<Vec<Direction>> = vec![vec![]; size];
+    let mut prev: Vec<Option<Coordinates>> = vec![None; size];
+    let mut heap: BinaryHeap<Reverse<(u32, Coordinates)>> = BinaryHeap::new();
+
+    dist[from.to_index(maze.width())] = 0;
+    heap.push(Reverse((0, from)));
+
+    let mut min_cheese_dist: Option<u32> = None;
+
+    while let Some(Reverse((d, u))) = heap.pop() {
+        let u_idx = u.to_index(maze.width());
+
+        if d > dist[u_idx] {
+            continue;
+        }
+
+        if let Some(min_d) = min_cheese_dist {
+            if d > min_d {
+                break;
+            }
+        }
+
+        if cheese.contains(&u) && min_cheese_dist.is_none() {
+            min_cheese_dist = Some(d);
+        }
+
+        relax_neighbors(
+            maze,
+            from,
+            u,
+            d,
+            &mut dist,
+            &mut first_moves,
+            Some(&mut prev),
+            &mut heap,
+        );
+    }
+
+    let Some(min_d) = min_cheese_dist else {
+        return vec![];
+    };
+
+    cheese
+        .iter()
+        .filter_map(|&c| {
+            let idx = c.to_index(maze.width());
+            if dist[idx] != min_d {
+                return None;
+            }
+
+            // Reconstruct path from prev chain.
+            let mut path = Vec::new();
+            let mut cur = c;
+            while let Some(p) = prev[cur.to_index(maze.width())] {
+                path.push(Direction::between(p, cur).unwrap());
+                cur = p;
+            }
+            path.reverse();
+
+            Some(FullPathResult {
+                target: c,
+                path,
+                first_moves: first_moves[idx].clone(),
+                cost: min_d,
+            })
+        })
+        .collect()
+}
+
 /// Weighted distances from `pos` to all reachable cells.
 ///
 /// The source cell is included at cost 0. Cells that are unreachable (walled off)
@@ -667,6 +751,88 @@ mod tests {
         assert_eq!(results[0].target, c(1, 1));
         assert_eq!(results[0].cost, 0);
         assert!(results[0].first_moves.is_empty());
+    }
+
+    // -----------------------------------------------------------------------
+    // nearest_cheeses_full tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn nearest_cheeses_full_matches_combo() {
+        // Verify that nearest_cheeses_full produces the same results as
+        // nearest_cheeses + shortest_path_full per result.
+        let (mt, mud, w, h) = open_grid(5, 5);
+        let maze = Maze::new(&mt, &mud, w, h);
+        let cheese = vec![c(1, 0), c(4, 4)];
+        let from = c(0, 0);
+
+        let full_results = nearest_cheeses_full(from, &cheese, &maze);
+        let combo_results: Vec<_> = nearest_cheeses(from, &cheese, &maze)
+            .into_iter()
+            .filter_map(|pr| shortest_path_full(from, pr.target, &maze))
+            .collect();
+
+        assert_eq!(full_results.len(), combo_results.len());
+        for (full, combo) in full_results.iter().zip(combo_results.iter()) {
+            assert_eq!(full.target, combo.target);
+            assert_eq!(full.cost, combo.cost);
+            assert_eq!(full.path.len(), combo.path.len());
+            // Verify both paths actually reach the target.
+            let mut pos = from;
+            for &dir in &full.path {
+                pos = dir.apply_to(pos);
+            }
+            assert_eq!(pos, full.target);
+        }
+    }
+
+    #[test]
+    fn nearest_cheeses_full_equidistant() {
+        let (mt, mud, w, h) = open_grid(5, 5);
+        let maze = Maze::new(&mt, &mud, w, h);
+        let cheese = vec![c(1, 2), c(3, 2)];
+        let results = nearest_cheeses_full(c(2, 2), &cheese, &maze);
+        assert_eq!(results.len(), 2);
+        assert!(results.iter().all(|r| r.cost == 1));
+        // Each path is length 1.
+        assert!(results.iter().all(|r| r.path.len() == 1));
+    }
+
+    #[test]
+    fn nearest_cheeses_full_empty() {
+        let (mt, mud, w, h) = open_grid(3, 3);
+        let maze = Maze::new(&mt, &mud, w, h);
+        assert!(nearest_cheeses_full(c(0, 0), &[], &maze).is_empty());
+    }
+
+    #[test]
+    fn nearest_cheeses_full_on_position() {
+        let (mt, mud, w, h) = open_grid(3, 3);
+        let maze = Maze::new(&mt, &mud, w, h);
+        let cheese = vec![c(1, 1), c(2, 2)];
+        let results = nearest_cheeses_full(c(1, 1), &cheese, &maze);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].target, c(1, 1));
+        assert_eq!(results[0].cost, 0);
+        assert!(results[0].path.is_empty());
+    }
+
+    #[test]
+    fn nearest_cheeses_full_with_mud() {
+        let (mt, mud, w, h) = grid_with_mud(5, 5, &[(c(0, 0), c(1, 0), 4)]);
+        let maze = Maze::new(&mt, &mud, w, h);
+        // Cheese at (1,0) costs 4 direct (mud), cheese at (0,1) costs 1.
+        let cheese = vec![c(1, 0), c(0, 1)];
+        let results = nearest_cheeses_full(c(0, 0), &cheese, &maze);
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].target, c(0, 1));
+        assert_eq!(results[0].cost, 1);
+        // Verify path reaches target.
+        let mut pos = c(0, 0);
+        for &dir in &results[0].path {
+            pos = dir.apply_to(pos);
+        }
+        assert_eq!(pos, c(0, 1));
     }
 
     // -----------------------------------------------------------------------

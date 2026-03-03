@@ -33,6 +33,7 @@ pub use pyrat::{Coordinates, Direction, GameState, MoveUndo, Mud, Wall};
 // Re-export interface types
 pub use maze::Maze;
 pub use pathfinding::{
-    distances_from, nearest_cheeses, shortest_path, shortest_path_full, FullPathResult, PathResult,
+    distances_from, nearest_cheeses, nearest_cheeses_full, shortest_path, shortest_path_full,
+    FullPathResult, PathResult,
 };
 pub use view::{GameView, PlayerSnapshot};
