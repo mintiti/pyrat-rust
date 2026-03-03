@@ -58,5 +58,11 @@ jobs:
     - name: Run headless tests
       run: cargo test -p pyrat-headless --verbose
 
+    - name: Run SDK Rust tests
+      run: cargo test -p pyrat-sdk --verbose
+
+    - name: Run interface tests
+      run: cargo test -p pyrat-engine-interface --verbose
+
     - name: Build release
       run: cargo build -p pyrat-rust --release --no-default-features --verbose

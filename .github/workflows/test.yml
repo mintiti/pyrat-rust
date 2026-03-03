@@ -33,19 +33,19 @@ jobs:
       uses: actions/cache@v5
       with:
         path: ~/.cargo/registry
-        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('engine/Cargo.lock') }}
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('Cargo.lock') }}
 
     - name: Cache cargo index
       uses: actions/cache@v5
       with:
         path: ~/.cargo/git
-        key: ${{ runner.os }}-cargo-index-${{ hashFiles('engine/Cargo.lock') }}
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('Cargo.lock') }}
 
     - name: Cache cargo build
       uses: actions/cache@v5
       with:
-        path: engine/target
-        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('engine/Cargo.lock') }}
+        path: target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('Cargo.lock') }}
 
     - name: Install uv
       uses: astral-sh/setup-uv@v7
@@ -54,8 +54,6 @@ jobs:
         cache-dependency-glob: |
           pyproject.toml
           engine/pyproject.toml
-          protocol/pyrat_base/pyproject.toml
-          cli/pyproject.toml
 
     - name: Sync workspace dependencies
       run: uv sync --all-extras
@@ -66,8 +64,8 @@ jobs:
     - name: Run Engine tests
       run: uv run --directory engine pytest python/tests -v
 
-  test-protocol:
-    name: Protocol Tests (Python ${{ matrix.python-version }})
+  test-sdk-python:
+    name: SDK Python Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     needs: lint
     strategy:
@@ -89,19 +87,19 @@ jobs:
       uses: actions/cache@v5
       with:
         path: ~/.cargo/registry
-        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('engine/Cargo.lock') }}
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('Cargo.lock') }}
 
     - name: Cache cargo index
       uses: actions/cache@v5
       with:
         path: ~/.cargo/git
-        key: ${{ runner.os }}-cargo-index-${{ hashFiles('engine/Cargo.lock') }}
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('Cargo.lock') }}
 
     - name: Cache cargo build
       uses: actions/cache@v5
       with:
-        path: engine/target
-        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('engine/Cargo.lock') }}
+        path: target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('Cargo.lock') }}
 
     - name: Install uv
       uses: astral-sh/setup-uv@v7
@@ -109,71 +107,13 @@ jobs:
         enable-cache: true
         cache-dependency-glob: |
           pyproject.toml
-          engine/pyproject.toml
-          protocol/pyrat_base/pyproject.toml
-          cli/pyproject.toml
+          sdk-python/pyproject.toml
 
     - name: Sync workspace dependencies
       run: uv sync --all-extras
 
-    - name: Build Rust extension
-      run: uv run --directory engine maturin develop --release
+    - name: Build SDK Python extension
+      run: uv run --directory sdk-python maturin develop --release
 
-    - name: Run Protocol tests
-      run: uv run --directory protocol/pyrat_base pytest tests -v -n auto
-
-  test-cli:
-    name: CLI Tests (Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
-    needs: lint
-    strategy:
-      matrix:
-        python-version: ["3.8", "3.9", "3.10", "3.11"]
-
-    steps:
-    - uses: actions/checkout@v6
-
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v6
-      with:
-        python-version: ${{ matrix.python-version }}
-
-    - name: Install Rust toolchain
-      uses: dtolnay/rust-toolchain@stable
-
-    - name: Cache cargo registry
-      uses: actions/cache@v5
-      with:
-        path: ~/.cargo/registry
-        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('engine/Cargo.lock') }}
-
-    - name: Cache cargo index
-      uses: actions/cache@v5
-      with:
-        path: ~/.cargo/git
-        key: ${{ runner.os }}-cargo-index-${{ hashFiles('engine/Cargo.lock') }}
-
-    - name: Cache cargo build
-      uses: actions/cache@v5
-      with:
-        path: engine/target
-        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('engine/Cargo.lock') }}
-
-    - name: Install uv
-      uses: astral-sh/setup-uv@v7
-      with:
-        enable-cache: true
-        cache-dependency-glob: |
-          pyproject.toml
-          engine/pyproject.toml
-          protocol/pyrat_base/pyproject.toml
-          cli/pyproject.toml
-
-    - name: Sync workspace dependencies
-      run: uv sync --all-extras
-
-    - name: Build Rust extension
-      run: uv run --directory engine maturin develop --release
-
-    - name: Run CLI tests
-      run: uv run pytest cli/tests -v
+    - name: Run SDK Python tests
+      run: uv run --directory sdk-python pytest tests -v

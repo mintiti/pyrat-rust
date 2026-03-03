@@ -4,13 +4,9 @@ on:
   workflow_call:
 
 jobs:
-  build:
-    uses: ./.github/workflows/build.yml
-
   lint:
     name: Lint All Components
     runs-on: ubuntu-latest
-    needs: build
 
     steps:
     - uses: actions/checkout@v6
@@ -20,11 +16,6 @@ jobs:
       with:
         python-version: '3.11'
 
-    - name: Download build artifact
-      uses: actions/download-artifact@v7
-      with:
-        name: rust-extension
-
     - name: Install uv
       uses: astral-sh/setup-uv@v7
       with:
@@ -32,8 +23,6 @@ jobs:
         cache-dependency-glob: |
           pyproject.toml
           engine/pyproject.toml
-          protocol/pyrat_base/pyproject.toml
-          cli/pyproject.toml
 
     - name: Sync workspace dependencies
       run: uv sync --all-extras
@@ -44,14 +33,8 @@ jobs:
     - name: Type check Engine Python
       run: uv run --directory engine mypy python/pyrat_engine --ignore-missing-imports
 
-    - name: Check Protocol formatting
-      run: uv run --directory protocol/pyrat_base ruff check pyrat_base
+    - name: Check SDK Python formatting
+      run: uv run --directory sdk-python ruff check pyrat_sdk
 
-    - name: Type check Protocol
-      run: uv run --directory protocol/pyrat_base mypy pyrat_base --ignore-missing-imports
-
-    - name: Check CLI formatting
-      run: uv run --directory cli ruff check pyrat_runner
-
-    - name: Type check CLI
-      run: uv run --directory cli mypy pyrat_runner --ignore-missing-imports
+    - name: Type check SDK Python
+      run: uv run --directory sdk-python mypy pyrat_sdk --ignore-missing-imports

@@ -1,6 +1,6 @@
 # PyRat Monorepo Makefile
 
-.PHONY: all engine gui protocol examples cli test bench clean help sync lint lint-engine lint-protocol lint-cli lint-sdk-python test-cli test-sdk-python test-wire test-host test-headless test-integration generate-protocol
+.PHONY: all engine gui examples test bench clean help sync lint lint-engine lint-sdk-python test-engine test-sdk-python test-wire test-host test-headless generate-wire fmt check dev-setup
 
 # Default target
 all: sync engine
@@ -15,21 +15,12 @@ engine: sync
 	@echo "Building PyRat Engine..."
 	cd engine && uv run maturin develop --release
 
-# Build the protocol component
-protocol: sync
-	@echo "Protocol component ready for development"
-	@echo "Base library at protocol/pyrat_base/"
-
 # Future components (placeholders)
 gui:
 	@echo "GUI component not yet implemented"
 
 examples:
 	@echo "Examples not yet implemented"
-
-cli: sync
-	@echo "CLI component ready for development"
-	@echo "Command-line game runner at cli/"
 
 # Development tasks
 dev-setup:
@@ -40,7 +31,7 @@ dev-setup:
 	uv run pre-commit install && uv run pre-commit install --hook-type pre-push
 
 # Testing
-test: test-engine test-wire test-host test-headless test-protocol test-cli test-sdk-python
+test: test-engine test-wire test-host test-headless test-sdk-python
 
 test-engine:
 	@echo "Running engine tests..."
@@ -59,21 +50,9 @@ test-headless:
 	@echo "Running headless runner tests..."
 	cargo test -p pyrat-headless
 
-test-protocol:
-	@echo "Running protocol tests..."
-	cd protocol/pyrat_base && uv run pytest tests -v -n auto || echo "No tests yet"
-
-test-cli:
-	@echo "Running CLI tests..."
-	uv run pytest cli/tests -v
-
 test-sdk-python:
 	@echo "Running SDK Python tests..."
 	cd sdk-python && uv run pytest tests -v
-
-test-integration:
-	@echo "Running integration tests..."
-	uv run pytest tests/integration -v
 
 # Benchmarking
 bench:
@@ -85,33 +64,23 @@ bench:
 fmt:
 	@echo "Formatting code..."
 	cargo fmt --all
-	uv run ruff format engine/python protocol/pyrat_base cli sdk-python/pyrat_sdk
+	uv run ruff format engine/python sdk-python/pyrat_sdk
 
 check:
 	@echo "Running checks..."
 	cargo fmt --all -- --check
 	cargo clippy -p pyrat-rust --all-targets --no-default-features -- -D warnings
 	cargo clippy --all-targets --all-features -- -D warnings -A non-local-definitions
-	uv run ruff check engine/python protocol/pyrat_base cli sdk-python/pyrat_sdk
-	uv run mypy engine/python/pyrat_engine protocol/pyrat_base/pyrat_base cli/pyrat_runner sdk-python/pyrat_sdk --ignore-missing-imports
+	uv run ruff check engine/python sdk-python/pyrat_sdk
+	uv run mypy engine/python/pyrat_engine sdk-python/pyrat_sdk --ignore-missing-imports
 
 # Linting targets
-lint: lint-engine lint-protocol lint-cli lint-sdk-python
+lint: lint-engine lint-sdk-python
 
 lint-engine:
 	@echo "Linting engine Python code..."
 	uv run ruff check engine/python
 	uv run mypy engine/python/pyrat_engine --ignore-missing-imports
-
-lint-protocol:
-	@echo "Linting protocol code..."
-	uv run ruff check protocol/pyrat_base
-	uv run mypy protocol/pyrat_base/pyrat_base --ignore-missing-imports
-
-lint-cli:
-	@echo "Linting CLI code..."
-	uv run ruff check cli
-	uv run mypy cli/pyrat_runner --ignore-missing-imports
 
 lint-sdk-python:
 	@echo "Linting SDK Python code..."
@@ -119,8 +88,8 @@ lint-sdk-python:
 	uv run mypy sdk-python/pyrat_sdk --ignore-missing-imports
 
 # Clean build artifacts
-generate-protocol:
-	@echo "Generating protocol FlatBuffers code..."
+generate-wire:
+	@echo "Generating FlatBuffers code..."
 	./schema/generate.sh
 
 clean:
@@ -143,38 +112,25 @@ help:
 	@echo "  all              - Sync dependencies and build all components"
 	@echo "  sync             - Sync workspace dependencies with uv"
 	@echo "  engine           - Build the PyRat engine"
-	@echo "  protocol         - Info about protocol component"
-	@echo "  cli              - Info about CLI component"
 	@echo "  dev-setup        - Set up development environment"
 	@echo ""
 	@echo "Testing:"
-	@echo "  test             - Run all tests (engine, protocol, CLI)"
+	@echo "  test             - Run all tests"
 	@echo "  test-engine      - Run engine tests only"
 	@echo "  test-wire        - Run wire protocol tests"
 	@echo "  test-host        - Run host library tests"
 	@echo "  test-headless    - Run headless runner tests"
-	@echo "  test-protocol    - Run protocol tests only"
-	@echo "  test-cli         - Run CLI tests only"
 	@echo "  test-sdk-python  - Run SDK Python tests"
-	@echo "  test-integration - Run integration tests"
 	@echo ""
 	@echo "Code Quality:"
 	@echo "  fmt              - Format all code"
 	@echo "  check            - Run all code quality checks"
 	@echo "  lint             - Lint all Python components"
 	@echo "  lint-engine      - Lint engine Python code"
-	@echo "  lint-protocol    - Lint protocol code"
-	@echo "  lint-cli         - Lint CLI code"
+	@echo "  lint-sdk-python  - Lint SDK Python code"
 	@echo ""
 	@echo "Other:"
 	@echo "  bench              - Run performance benchmarks"
-	@echo "  generate-protocol  - Regenerate FlatBuffers Rust code (requires flatc)"
+	@echo "  generate-wire      - Regenerate FlatBuffers code (requires flatc)"
 	@echo "  clean              - Remove build artifacts"
 	@echo "  help               - Show this help message"
-	@echo ""
-	@echo "Components:"
-	@echo "  engine           - High-performance Rust game engine (implemented)"
-	@echo "  protocol         - AI communication protocol (implemented)"
-	@echo "  cli              - Command-line game runner (implemented)"
-	@echo "  gui              - PyRat GUI (planned)"
-	@echo "  examples         - Example AI implementations (planned)"

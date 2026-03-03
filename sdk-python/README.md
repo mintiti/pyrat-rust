@@ -12,7 +12,9 @@ uv sync --all-extras
 cd sdk-python && uv run maturin develop --release && cd ..
 
 # Run a match (the host sets PYRAT_HOST_PORT for you)
-pyrat-game sdk-python/examples/greedy.py sdk-python/examples/smart_random.py
+cargo run -p pyrat-headless -- \
+  "uv run python sdk-python/examples/greedy.py" \
+  "uv run python sdk-python/examples/smart_random.py"
 ```
 
 ### Minimal bot
