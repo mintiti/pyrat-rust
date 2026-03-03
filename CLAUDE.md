@@ -265,7 +265,7 @@ Each player receives:
 Match hosting library. Manages bot connections, setup handshake, and the turn loop:
 - `game_loop/` — Setup phases (connect → identify → configure → preprocess), playing loop, event streaming
 - `session/` — Per-connection state machine, FlatBuffers wire codec
-- `wire/` — FlatBuffers schema types re-exported for consumers
+- `pub use pyrat_wire as wire` — Re-exports FlatBuffers schema types from `server/wire/` for consumers
 - `MatchEvent` — Event stream consumed by headless runner, GUI, or tournament systems
 
 **Key pattern:** The host is a pipe — it streams `MatchEvent`s through a channel. Consumers decide what to record or display.
