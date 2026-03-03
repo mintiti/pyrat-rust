@@ -1,11 +1,13 @@
 import { produce } from "immer";
 import { useMemo } from "react";
 import { create } from "zustand";
+import { commands } from "../bindings";
 import type {
 	BotDisconnectedEvent,
 	BotInfoEvent,
 	Coord,
 	Direction,
+	MatchConfigParams,
 	MatchOverEvent,
 	MazeState,
 	MudEntry,
@@ -83,6 +85,11 @@ interface MatchState {
 	cursor: number[]; // path into tree, [] = root
 	mainlineDepth: number; // number of turns appended, drives useMainlineLength
 
+	// Preview (idle state — no match running)
+	previewMaze: MazeState | null;
+	previewSeed: number | null;
+	previewError: string | null;
+
 	// Viewer
 	viewerMode: ViewerMode;
 	playbackSpeed: number; // ms between frames
@@ -125,6 +132,9 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	root: null,
 	cursor: [],
 	mainlineDepth: 0,
+	previewMaze: null,
+	previewSeed: null,
+	previewError: null,
 	viewerMode: "empty",
 	playbackSpeed: 200,
 
@@ -161,6 +171,9 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 			pendingResult: null,
 			error: null,
 			disconnection: null,
+			previewMaze: null,
+			previewSeed: null,
+			previewError: null,
 		});
 	},
 
@@ -288,25 +301,28 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 export function useDisplayState(): MazeState | null {
 	const mazeConfig = useMatchStore((s) => s.mazeConfig);
 	const cursor = useMatchStore((s) => s.cursor);
+	const previewMaze = useMatchStore((s) => s.previewMaze);
 
 	return useMemo(() => {
-		if (!mazeConfig) return null;
-		const root = useMatchStore.getState().root;
-		if (!root) return null;
-		const node = getNodeAtPath(root, cursor) ?? root;
-		return {
-			width: mazeConfig.width,
-			height: mazeConfig.height,
-			walls: mazeConfig.walls,
-			mud: mazeConfig.mud,
-			max_turns: mazeConfig.max_turns,
-			total_cheese: mazeConfig.total_cheese,
-			turn: node.turn,
-			player1: node.player1,
-			player2: node.player2,
-			cheese: node.cheese,
-		};
-	}, [mazeConfig, cursor]);
+		if (mazeConfig) {
+			const root = useMatchStore.getState().root;
+			if (!root) return previewMaze;
+			const node = getNodeAtPath(root, cursor) ?? root;
+			return {
+				width: mazeConfig.width,
+				height: mazeConfig.height,
+				walls: mazeConfig.walls,
+				mud: mazeConfig.mud,
+				max_turns: mazeConfig.max_turns,
+				total_cheese: mazeConfig.total_cheese,
+				turn: node.turn,
+				player1: node.player1,
+				player2: node.player2,
+				cheese: node.cheese,
+			};
+		}
+		return previewMaze;
+	}, [mazeConfig, cursor, previewMaze]);
 }
 
 /** Current node's bot info, or null if at root with nothing. */
@@ -326,4 +342,43 @@ export function useMainlineLength(): number {
 /** Current cursor depth (which turn we're viewing). */
 export function useCursorDepth(): number {
 	return useMatchStore((s) => s.cursor.length);
+}
+
+// ── Preview generation ──────────────────────────────────────────
+
+let previewVersion = 0;
+
+function randomSeed(): number {
+	return Math.floor(Math.random() * 2 ** 32);
+}
+
+/** Generate a maze preview for the given config. Stale responses are discarded. */
+export async function generatePreview(
+	config: MatchConfigParams,
+	seedOverride?: number,
+) {
+	const version = ++previewVersion;
+	const seed = seedOverride ?? config.seed ?? randomSeed();
+
+	const res = await commands.getGameState({ ...config, seed });
+	if (version !== previewVersion) return; // stale
+
+	if (res.status === "ok") {
+		useMatchStore.setState({
+			previewMaze: res.data,
+			previewSeed: seed,
+			previewError: null,
+		});
+	} else {
+		useMatchStore.setState({
+			previewMaze: null,
+			previewSeed: null,
+			previewError: res.error,
+		});
+	}
+}
+
+/** Re-roll: generate preview with a fresh random seed, ignoring config.seed. */
+export async function rerollPreview(config: MatchConfigParams) {
+	return generatePreview(config, randomSeed());
 }

@@ -4,7 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import { events, commands } from "../bindings";
 import { botsAtom } from "../stores/botConfigAtom";
 import { matchConfigAtom } from "../stores/matchConfigAtom";
-import { useDisplayState, useMatchStore } from "../stores/matchStore";
+import {
+	generatePreview,
+	useDisplayState,
+	useMatchStore,
+} from "../stores/matchStore";
 import MatchConfigDrawer from "./MatchConfigDrawer";
 import MatchToolbar from "./MatchToolbar";
 import MazeRenderer from "./MazeRenderer";
@@ -22,6 +26,7 @@ export default function MatchView({ onNavigate }: Props) {
 
 	const viewerMode = useMatchStore((s) => s.viewerMode);
 	const playbackSpeed = useMatchStore((s) => s.playbackSpeed);
+	const previewError = useMatchStore((s) => s.previewError);
 	const player1BotId = useMatchStore((s) => s.player1BotId);
 	const player2BotId = useMatchStore((s) => s.player2BotId);
 
@@ -80,6 +85,12 @@ export default function MatchView({ onNavigate }: Props) {
 		return () => clearInterval(id);
 	}, [viewerMode, playbackSpeed]);
 
+	// Generate maze preview when idle
+	useEffect(() => {
+		if (viewerMode !== "empty") return;
+		generatePreview(matchConfig);
+	}, [viewerMode, matchConfig]);
+
 	const resolveBotId = (botId: string) => {
 		if (botId === "__random__") return { cmd: "__random__", workingDir: null };
 		const bot = bots.find((b) => b.id === botId);
@@ -96,12 +107,17 @@ export default function MatchView({ onNavigate }: Props) {
 			return;
 		}
 		useMatchStore.setState({ error: null, result: null, disconnection: null });
+		const { previewSeed } = useMatchStore.getState();
+		const configWithSeed = {
+			...matchConfig,
+			seed: matchConfig.seed ?? previewSeed,
+		};
 		const res = await commands.startMatch(
 			p1.cmd,
 			p2.cmd,
 			p1.workingDir,
 			p2.workingDir,
-			matchConfig,
+			configWithSeed,
 		);
 		if (res.status === "error") {
 			useMatchStore.getState().onError(res.error);
@@ -122,10 +138,16 @@ export default function MatchView({ onNavigate }: Props) {
 			<div style={{ flex: 1, overflow: "hidden" }}>
 				{displayState ? (
 					<MazeRenderer gameState={displayState} />
+				) : previewError ? (
+					<Center h="100%">
+						<Text c="red" size="sm">
+							{previewError}
+						</Text>
+					</Center>
 				) : (
 					<Center h="100%">
 						<Text c="dimmed" size="sm">
-							Enter bot commands and click Start to begin a match.
+							Generating preview…
 						</Text>
 					</Center>
 				)}

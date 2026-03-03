@@ -210,9 +210,7 @@ pub fn build_maze_state(game: &GameState) -> MazeState {
 pub fn get_game_state(config: Option<MatchConfigParams>) -> Result<MazeState, String> {
     let params = config.unwrap_or_default();
     let game_config = params.to_game_config()?;
-    let game = game_config
-        .create(params.seed.or(Some(42)))
-        .map_err(|e| e.to_string())?;
+    let game = game_config.create(params.seed).map_err(|e| e.to_string())?;
     Ok(build_maze_state(&game))
 }
 

@@ -1,10 +1,19 @@
-import { ActionIcon, Badge, Button, Group, Select, Text } from "@mantine/core";
+import {
+	ActionIcon,
+	Badge,
+	Button,
+	Group,
+	Select,
+	Text,
+	Tooltip,
+} from "@mantine/core";
 import {
 	IconAdjustments,
 	IconChevronLeft,
 	IconChevronRight,
 	IconChevronsLeft,
 	IconChevronsRight,
+	IconDice,
 	IconPlayerPause,
 	IconPlayerPlay,
 	IconSettings,
@@ -15,6 +24,7 @@ import type { MatchWinner } from "../bindings/generated";
 import { botsAtom } from "../stores/botConfigAtom";
 import { matchConfigAtom } from "../stores/matchConfigAtom";
 import {
+	rerollPreview,
 	useCursorDepth,
 	useMainlineLength,
 	useMatchStore,
@@ -71,6 +81,7 @@ export default function MatchToolbar({
 	const playbackSpeed = useMatchStore((s) => s.playbackSpeed);
 	const result = useMatchStore((s) => s.result);
 	const error = useMatchStore((s) => s.error);
+	const previewSeed = useMatchStore((s) => s.previewSeed);
 	const disconnection = useMatchStore((s) => s.disconnection);
 
 	const {
@@ -155,12 +166,29 @@ export default function MatchToolbar({
 				>
 					<IconAdjustments size={16} />
 				</ActionIcon>
-				<Badge variant="light" size="sm" color="gray">
-					{matchConfig.preset === "custom"
-						? `${matchConfig.width}×${matchConfig.height}`
-						: matchConfig.preset.charAt(0).toUpperCase() +
-							matchConfig.preset.slice(1)}
-				</Badge>
+				<Tooltip
+					label={previewSeed != null ? `Seed: ${previewSeed}` : "No preview"}
+					position="bottom"
+					withArrow
+				>
+					<Badge variant="light" size="sm" color="gray">
+						{matchConfig.preset === "custom"
+							? `${matchConfig.width}×${matchConfig.height}`
+							: matchConfig.preset.charAt(0).toUpperCase() +
+								matchConfig.preset.slice(1)}
+					</Badge>
+				</Tooltip>
+				{!hasMatch && (
+					<ActionIcon
+						variant="subtle"
+						size="sm"
+						onClick={() => rerollPreview(matchConfig)}
+						disabled={matchConfig.seed != null}
+						title="Re-roll maze"
+					>
+						<IconDice size={16} />
+					</ActionIcon>
+				)}
 			</Group>
 			{hasMatch && (
 				<Group gap={4}>
