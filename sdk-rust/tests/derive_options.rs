@@ -1,6 +1,6 @@
 //! Compile + runtime tests for the Options derive macro.
 
-use pyrat_sdk::{DeriveOptions, Options, SdkOptionType};
+use pyrat_sdk::{DeriveOptions, OptionType, Options};
 
 #[derive(DeriveOptions)]
 struct AllOptionTypes {
@@ -44,7 +44,7 @@ fn spin_option_def() {
     let bot = AllOptionTypes::new();
     let defs = bot.option_defs();
     let spin = defs.iter().find(|d| d.name == "depth").unwrap();
-    assert_eq!(spin.option_type, SdkOptionType::Spin.to_wire());
+    assert_eq!(spin.option_type, OptionType::Spin);
     assert_eq!(spin.default_value, "3");
     assert_eq!(spin.min, 1);
     assert_eq!(spin.max, 10);
@@ -55,7 +55,7 @@ fn check_option_def() {
     let bot = AllOptionTypes::new();
     let defs = bot.option_defs();
     let check = defs.iter().find(|d| d.name == "pruning").unwrap();
-    assert_eq!(check.option_type, SdkOptionType::Check.to_wire());
+    assert_eq!(check.option_type, OptionType::Check);
     assert_eq!(check.default_value, "true");
 }
 
@@ -64,7 +64,7 @@ fn combo_option_def() {
     let bot = AllOptionTypes::new();
     let defs = bot.option_defs();
     let combo = defs.iter().find(|d| d.name == "strategy").unwrap();
-    assert_eq!(combo.option_type, SdkOptionType::Combo.to_wire());
+    assert_eq!(combo.option_type, OptionType::Combo);
     assert_eq!(combo.default_value, "greedy");
     assert_eq!(combo.choices, vec!["greedy", "defensive", "balanced"]);
 }
@@ -74,7 +74,7 @@ fn str_option_def() {
     let bot = AllOptionTypes::new();
     let defs = bot.option_defs();
     let s = defs.iter().find(|d| d.name == "label").unwrap();
-    assert_eq!(s.option_type, SdkOptionType::String.to_wire());
+    assert_eq!(s.option_type, OptionType::String);
     assert_eq!(s.default_value, "hello");
 }
 

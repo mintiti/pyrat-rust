@@ -53,7 +53,7 @@ fn impl_options(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                     option_def_exprs.push(quote! {
                         ::pyrat_sdk::SdkOptionDef {
                             name: #field_name.to_owned(),
-                            option_type: ::pyrat_sdk::SdkOptionType::Spin.to_wire(),
+                            option_type: ::pyrat_sdk::OptionType::Spin,
                             default_value: #default.to_string(),
                             min: #min,
                             max: #max,
@@ -74,7 +74,7 @@ fn impl_options(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                     option_def_exprs.push(quote! {
                         ::pyrat_sdk::SdkOptionDef {
                             name: #field_name.to_owned(),
-                            option_type: ::pyrat_sdk::SdkOptionType::Check.to_wire(),
+                            option_type: ::pyrat_sdk::OptionType::Check,
                             default_value: #default_str.to_owned(),
                             min: 0,
                             max: 0,
@@ -99,7 +99,7 @@ fn impl_options(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                     option_def_exprs.push(quote! {
                         ::pyrat_sdk::SdkOptionDef {
                             name: #field_name.to_owned(),
-                            option_type: ::pyrat_sdk::SdkOptionType::Combo.to_wire(),
+                            option_type: ::pyrat_sdk::OptionType::Combo,
                             default_value: #default.to_owned(),
                             min: 0,
                             max: 0,
@@ -118,7 +118,7 @@ fn impl_options(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                     option_def_exprs.push(quote! {
                         ::pyrat_sdk::SdkOptionDef {
                             name: #field_name.to_owned(),
-                            option_type: ::pyrat_sdk::SdkOptionType::String.to_wire(),
+                            option_type: ::pyrat_sdk::OptionType::String,
                             default_value: #default.to_owned(),
                             min: 0,
                             max: 0,
@@ -189,6 +189,8 @@ fn parse_spin_attr(attr: &syn::Attribute) -> syn::Result<(i32, i32, i32)> {
             let value = meta.value()?;
             let lit: LitInt = value.parse()?;
             max = lit.base10_parse()?;
+        } else {
+            return Err(meta.error("unknown spin attribute key (expected `default`, `min`, `max`)"));
         }
         Ok(())
     })?;
@@ -204,6 +206,8 @@ fn parse_check_attr(attr: &syn::Attribute) -> syn::Result<bool> {
             let value = meta.value()?;
             let lit: LitBool = value.parse()?;
             default = lit.value;
+        } else {
+            return Err(meta.error("unknown check attribute key (expected `default`)"));
         }
         Ok(())
     })?;
@@ -232,6 +236,8 @@ fn parse_combo_attr(attr: &syn::Attribute) -> syn::Result<(String, Vec<String>)>
                     let _ = content.parse::<syn::Token![,]>();
                 }
             }
+        } else {
+            return Err(meta.error("unknown combo attribute key (expected `default`, `choices`)"));
         }
         Ok(())
     })?;
@@ -247,6 +253,8 @@ fn parse_str_opt_attr(attr: &syn::Attribute) -> syn::Result<String> {
             let value = meta.value()?;
             let lit: LitStr = value.parse()?;
             default = lit.value();
+        } else {
+            return Err(meta.error("unknown str_opt attribute key (expected `default`)"));
         }
         Ok(())
     })?;

@@ -152,25 +152,12 @@ impl PyMaze {
         pos: (u8, u8),
         cheese: Vec<(u8, u8)>,
     ) -> Option<((u8, u8), Vec<u8>, u32)> {
-        let from = Coordinates::new(pos.0, pos.1);
-        let cheese_coords: Vec<Coordinates> = cheese
-            .iter()
-            .map(|&(x, y)| Coordinates::new(x, y))
-            .collect();
-
-        let maze = self.view.maze();
-        let nearest = iface::nearest_cheeses(from, &cheese_coords, &maze);
-        let first = nearest.first()?;
-
-        // Get the full path to the nearest cheese.
-        let full = iface::shortest_path_full(from, first.target, &maze)?;
-        let dirs: Vec<u8> = full.path.iter().map(|d| *d as u8).collect();
-        Some(((first.target.x, first.target.y), dirs, full.cost))
+        self.nearest_cheeses(pos, cheese).into_iter().next()
     }
 
     /// All cheeses tied at the minimum distance: list of ((x, y), directions, cost).
     ///
-    /// Each entry has a full direction sequence reconstructed via shortest_path_full.
+    /// Each entry has a full direction sequence from a single-pass Dijkstra.
     /// Returns an empty list if no cheese remains.
     fn nearest_cheeses(
         &self,
@@ -183,15 +170,11 @@ impl PyMaze {
             .map(|&(x, y)| Coordinates::new(x, y))
             .collect();
 
-        let maze = self.view.maze();
-        let nearest = iface::nearest_cheeses(from, &cheese_coords, &maze);
-
-        nearest
-            .iter()
-            .filter_map(|pr| {
-                let full = iface::shortest_path_full(from, pr.target, &maze)?;
+        iface::nearest_cheeses_full(from, &cheese_coords, &self.view.maze())
+            .into_iter()
+            .map(|full| {
                 let dirs: Vec<u8> = full.path.iter().map(|d| *d as u8).collect();
-                Some(((full.target.x, full.target.y), dirs, full.cost))
+                ((full.target.x, full.target.y), dirs, full.cost)
             })
             .collect()
     }

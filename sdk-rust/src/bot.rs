@@ -60,3 +60,83 @@ pub trait Hivemind: Options {
     /// Called when the game ends.
     fn on_game_over(&mut self, _result: GameResult, _scores: (f32, f32)) {}
 }
+
+// ── Private Runner trait for turn-loop unification ────
+
+/// Unified lifecycle used by the generic `run_async` / `turn_loop`.
+/// Not exported — Bot and Hivemind are the public API.
+pub(crate) trait Runner: Options {
+    type Actions: IntoIterator<Item = (Player, Direction)>;
+
+    fn runner_preprocess(&mut self, state: &GameState, ctx: &Context);
+    fn runner_think(&mut self, state: &GameState, ctx: &Context) -> Self::Actions;
+    fn runner_stay(state: &GameState) -> Self::Actions;
+    fn runner_on_game_over(&mut self, result: GameResult, scores: (f32, f32));
+}
+
+/// Newtype wrapper so Bot can implement Runner without blanket-impl conflicts.
+pub(crate) struct BotRunner<'a, B: Bot>(pub &'a mut B);
+
+impl<B: Bot> Options for BotRunner<'_, B> {
+    fn option_defs(&self) -> Vec<crate::options::SdkOptionDef> {
+        self.0.option_defs()
+    }
+    fn apply_option(&mut self, name: &str, value: &str) -> Result<(), String> {
+        self.0.apply_option(name, value)
+    }
+}
+
+impl<B: Bot> Runner for BotRunner<'_, B> {
+    type Actions = [(Player, Direction); 1];
+
+    fn runner_preprocess(&mut self, state: &GameState, ctx: &Context) {
+        self.0.preprocess(state, ctx);
+    }
+
+    fn runner_think(&mut self, state: &GameState, ctx: &Context) -> Self::Actions {
+        [(state.my_player(), self.0.think(state, ctx))]
+    }
+
+    fn runner_stay(state: &GameState) -> Self::Actions {
+        [(state.my_player(), Direction::Stay)]
+    }
+
+    fn runner_on_game_over(&mut self, result: GameResult, scores: (f32, f32)) {
+        self.0.on_game_over(result, scores);
+    }
+}
+
+/// Newtype wrapper so Hivemind can implement Runner without blanket-impl conflicts.
+pub(crate) struct HivemindRunner<'a, H: Hivemind>(pub &'a mut H);
+
+impl<H: Hivemind> Options for HivemindRunner<'_, H> {
+    fn option_defs(&self) -> Vec<crate::options::SdkOptionDef> {
+        self.0.option_defs()
+    }
+    fn apply_option(&mut self, name: &str, value: &str) -> Result<(), String> {
+        self.0.apply_option(name, value)
+    }
+}
+
+impl<H: Hivemind> Runner for HivemindRunner<'_, H> {
+    type Actions = [(Player, Direction); 2];
+
+    fn runner_preprocess(&mut self, state: &GameState, ctx: &Context) {
+        self.0.preprocess(state, ctx);
+    }
+
+    fn runner_think(&mut self, state: &GameState, ctx: &Context) -> Self::Actions {
+        self.0.think(state, ctx)
+    }
+
+    fn runner_stay(_state: &GameState) -> Self::Actions {
+        [
+            (Player::Player1, Direction::Stay),
+            (Player::Player2, Direction::Stay),
+        ]
+    }
+
+    fn runner_on_game_over(&mut self, result: GameResult, scores: (f32, f32)) {
+        self.0.on_game_over(result, scores);
+    }
+}

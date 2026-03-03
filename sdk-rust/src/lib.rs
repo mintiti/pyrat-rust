@@ -19,19 +19,20 @@
 //! # }
 //! ```
 
-pub mod bot;
-pub mod options;
-pub mod state;
+mod bot;
+mod options;
+mod state;
 mod wire;
 
 // Re-export public API
 pub use bot::{Bot, Context, Hivemind};
-pub use options::{Options, SdkOptionDef, SdkOptionType};
+pub use options::{Options, SdkOptionDef};
+pub use pyrat_wire::OptionType;
 pub use state::{GameSim, GameState};
 
 // Re-export engine types bots need
 pub use pyrat::{Coordinates, Direction, MoveUndo};
-pub use pyrat_engine_interface::pathfinding::{FullPathResult, PathResult};
+pub use pyrat_engine_interface::pathfinding::FullPathResult;
 
 // Re-export wire types bots need
 pub use pyrat_wire::{GameResult, Player};
@@ -63,7 +64,7 @@ pub fn run(mut bot: impl Bot, name: &str, author: &str) {
         .enable_all()
         .build()
         .expect("failed to build tokio runtime");
-    rt.block_on(run_bot_async(&mut bot, name, author));
+    rt.block_on(run_async(&mut bot::BotRunner(&mut bot), name, author));
 }
 
 /// Run a hivemind bot controlling both players. Blocks until the game ends.
@@ -72,7 +73,7 @@ pub fn run_hivemind(mut bot: impl Hivemind, name: &str, author: &str) {
         .enable_all()
         .build()
         .expect("failed to build tokio runtime");
-    rt.block_on(run_hivemind_async(&mut bot, name, author));
+    rt.block_on(run_async(&mut bot::HivemindRunner(&mut bot), name, author));
 }
 
 async fn connect() -> TcpStream {
@@ -92,26 +93,7 @@ fn get_agent_id() -> String {
 
 // ── Bot lifecycle ────────────────────────────────────
 
-async fn run_bot_async(bot: &mut impl Bot, name: &str, author: &str) {
-    let stream = connect().await;
-    let (read, write) = tokio::io::split(stream);
-    let mut reader = FrameReader::with_default_max(read);
-    let mut writer = FrameWriter::with_default_max(write);
-    let agent_id = get_agent_id();
-
-    // Send Identify + Ready
-    let identify = build_identify(name, author, &agent_id, &bot.option_defs());
-    send_frame(&mut writer, &identify).await;
-    send_frame(&mut writer, &build_ready()).await;
-
-    // Setup phase: SetOption, MatchConfig, StartPreprocessing
-    let mut state = setup_phase(bot, &mut reader).await;
-
-    // Turn loop
-    turn_loop_bot(bot, &mut state, &mut reader, &mut writer).await;
-}
-
-async fn run_hivemind_async(bot: &mut impl Hivemind, name: &str, author: &str) {
+async fn run_async(bot: &mut impl bot::Runner, name: &str, author: &str) {
     let stream = connect().await;
     let (read, write) = tokio::io::split(stream);
     let mut reader = FrameReader::with_default_max(read);
@@ -123,7 +105,7 @@ async fn run_hivemind_async(bot: &mut impl Hivemind, name: &str, author: &str) {
     send_frame(&mut writer, &build_ready()).await;
 
     let mut state = setup_phase(bot, &mut reader).await;
-    turn_loop_hivemind(bot, &mut state, &mut reader, &mut writer).await;
+    turn_loop(bot, &mut state, &mut reader, &mut writer).await;
 }
 
 // ── Setup phase ──────────────────────────────────────
@@ -174,10 +156,10 @@ async fn setup_phase<O: options::Options, R: AsyncRead + Unpin>(
     game_state.expect("MatchConfig never received before StartPreprocessing")
 }
 
-// ── Turn loops ───────────────────────────────────────
+// ── Turn loop ────────────────────────────────────────
 
-async fn turn_loop_bot<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
-    bot: &mut impl Bot,
+async fn turn_loop<T: bot::Runner, R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
+    bot: &mut T,
     state: &mut state::GameState,
     reader: &mut FrameReader<R>,
     writer: &mut FrameWriter<W>,
@@ -187,7 +169,7 @@ async fn turn_loop_bot<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
         let deadline =
             Instant::now() + Duration::from_millis(state.preprocessing_timeout_ms().into());
         let ctx = Context::new(deadline);
-        bot.preprocess(state, &ctx);
+        bot.runner_preprocess(state, &ctx);
         send_frame(writer, &build_preprocessing_done()).await;
     }
 
@@ -200,86 +182,20 @@ async fn turn_loop_bot<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
 
         match extract_host_msg(frame) {
             Ok(HostMsg::TurnState(ts)) => {
-                state.update(&ts);
+                state.update(ts);
 
                 let timeout_ms =
                     u64::from(state.move_timeout_ms()).saturating_sub(MOVE_SAFETY_MARGIN_MS);
                 let deadline = Instant::now() + Duration::from_millis(timeout_ms);
                 let ctx = Context::new(deadline);
 
-                let direction = match catch_unwind(AssertUnwindSafe(|| bot.think(state, &ctx))) {
-                    Ok(d) => d,
-                    Err(panic) => {
-                        let msg = panic_message(&panic);
-                        eprintln!("[sdk] think() panicked: {msg}");
-                        Direction::Stay
-                    },
-                };
-
-                let player = state.my_player();
-                send_frame(writer, &build_action(player, direction)).await;
-            },
-            Ok(HostMsg::Ping) => {
-                send_frame(writer, &build_pong()).await;
-            },
-            Ok(HostMsg::Timeout { .. }) => {
-                eprintln!("[sdk] timeout received");
-            },
-            Ok(HostMsg::GameOver(go)) => {
-                bot.on_game_over(go.result, (go.player1_score, go.player2_score));
-                break;
-            },
-            Ok(HostMsg::Stop) => break,
-            Ok(other) => {
-                eprintln!("[sdk] unexpected message during play: {}", msg_name(&other));
-            },
-            Err(e) => {
-                eprintln!("[sdk] play parse error: {e}");
-            },
-        }
-    }
-}
-
-async fn turn_loop_hivemind<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
-    bot: &mut impl Hivemind,
-    state: &mut state::GameState,
-    reader: &mut FrameReader<R>,
-    writer: &mut FrameWriter<W>,
-) {
-    // Preprocessing
-    {
-        let deadline =
-            Instant::now() + Duration::from_millis(state.preprocessing_timeout_ms().into());
-        let ctx = Context::new(deadline);
-        bot.preprocess(state, &ctx);
-        send_frame(writer, &build_preprocessing_done()).await;
-    }
-
-    // Play turns
-    loop {
-        let frame = match reader.read_frame().await {
-            Ok(f) => f,
-            Err(_) => break,
-        };
-
-        match extract_host_msg(frame) {
-            Ok(HostMsg::TurnState(ts)) => {
-                state.update(&ts);
-
-                let timeout_ms =
-                    u64::from(state.move_timeout_ms()).saturating_sub(MOVE_SAFETY_MARGIN_MS);
-                let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-                let ctx = Context::new(deadline);
-
-                let actions = match catch_unwind(AssertUnwindSafe(|| bot.think(state, &ctx))) {
+                let actions = match catch_unwind(AssertUnwindSafe(|| bot.runner_think(state, &ctx)))
+                {
                     Ok(a) => a,
                     Err(panic) => {
                         let msg = panic_message(&panic);
                         eprintln!("[sdk] think() panicked: {msg}");
-                        [
-                            (Player::Player1, Direction::Stay),
-                            (Player::Player2, Direction::Stay),
-                        ]
+                        T::runner_stay(state)
                     },
                 };
 
@@ -294,7 +210,7 @@ async fn turn_loop_hivemind<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                 eprintln!("[sdk] timeout received");
             },
             Ok(HostMsg::GameOver(go)) => {
-                bot.on_game_over(go.result, (go.player1_score, go.player2_score));
+                bot.runner_on_game_over(go.result, (go.player1_score, go.player2_score));
                 break;
             },
             Ok(HostMsg::Stop) => break,

@@ -81,7 +81,7 @@ impl GameState {
     }
 
     /// Update dynamic state from a TurnState message.
-    pub fn update(&mut self, ts: &TurnStateData) {
+    pub fn update(&mut self, ts: TurnStateData) {
         self.turn = ts.turn;
         self.player1_position = ts.player1_position;
         self.player2_position = ts.player2_position;
@@ -91,7 +91,23 @@ impl GameState {
         self.player2_mud_turns = ts.player2_mud_turns;
         self.player1_last_move = ts.player1_last_move;
         self.player2_last_move = ts.player2_last_move;
-        self.cheese = ts.cheese.clone();
+        self.cheese = ts.cheese;
+    }
+
+    // ── Perspective helpers ─────────────────────────
+
+    fn pick<T: Copy>(&self, p1: T, p2: T) -> T {
+        match self.my_player {
+            Player::Player1 => p1,
+            _ => p2,
+        }
+    }
+
+    fn pick_opponent<T: Copy>(&self, p1: T, p2: T) -> T {
+        match self.my_player {
+            Player::Player1 => p2,
+            _ => p1,
+        }
     }
 
     // ── Perspective-mapped accessors ─────────────────
@@ -107,59 +123,35 @@ impl GameState {
     }
 
     pub fn my_position(&self) -> Coordinates {
-        match self.my_player {
-            Player::Player1 => self.player1_position,
-            _ => self.player2_position,
-        }
+        self.pick(self.player1_position, self.player2_position)
     }
 
     pub fn opponent_position(&self) -> Coordinates {
-        match self.my_player {
-            Player::Player1 => self.player2_position,
-            _ => self.player1_position,
-        }
+        self.pick_opponent(self.player1_position, self.player2_position)
     }
 
     pub fn my_score(&self) -> f32 {
-        match self.my_player {
-            Player::Player1 => self.player1_score,
-            _ => self.player2_score,
-        }
+        self.pick(self.player1_score, self.player2_score)
     }
 
     pub fn opponent_score(&self) -> f32 {
-        match self.my_player {
-            Player::Player1 => self.player2_score,
-            _ => self.player1_score,
-        }
+        self.pick_opponent(self.player1_score, self.player2_score)
     }
 
     pub fn my_mud_turns(&self) -> u8 {
-        match self.my_player {
-            Player::Player1 => self.player1_mud_turns,
-            _ => self.player2_mud_turns,
-        }
+        self.pick(self.player1_mud_turns, self.player2_mud_turns)
     }
 
     pub fn opponent_mud_turns(&self) -> u8 {
-        match self.my_player {
-            Player::Player1 => self.player2_mud_turns,
-            _ => self.player1_mud_turns,
-        }
+        self.pick_opponent(self.player1_mud_turns, self.player2_mud_turns)
     }
 
     pub fn my_last_move(&self) -> Direction {
-        match self.my_player {
-            Player::Player1 => self.player1_last_move,
-            _ => self.player2_last_move,
-        }
+        self.pick(self.player1_last_move, self.player2_last_move)
     }
 
     pub fn opponent_last_move(&self) -> Direction {
-        match self.my_player {
-            Player::Player1 => self.player2_last_move,
-            _ => self.player1_last_move,
-        }
+        self.pick_opponent(self.player1_last_move, self.player2_last_move)
     }
 
     // ── Raw (objective) accessors ────────────────────
@@ -244,25 +236,14 @@ impl GameState {
     /// in the cheese list. Use [`nearest_cheeses`](Self::nearest_cheeses) to get
     /// all tied results.
     pub fn nearest_cheese(&self, pos: Option<Coordinates>) -> Option<FullPathResult> {
-        let from = pos.unwrap_or_else(|| self.my_position());
-        let nearest =
-            pyrat_engine_interface::nearest_cheeses(from, &self.cheese, &self.view.maze());
-        nearest.into_iter().next().and_then(|pr| {
-            // nearest_cheeses returns PathResult (first_moves only).
-            // Get the full path for the first nearest cheese.
-            pyrat_engine_interface::shortest_path_full(from, pr.target, &self.view.maze())
-        })
+        self.nearest_cheeses(pos).into_iter().next()
     }
 
     /// All cheeses tied at the minimum distance from `pos`, each with a full
     /// direction sequence. Defaults to `my_position()` if `pos` is `None`.
     pub fn nearest_cheeses(&self, pos: Option<Coordinates>) -> Vec<FullPathResult> {
         let from = pos.unwrap_or_else(|| self.my_position());
-        let maze = self.view.maze();
-        pyrat_engine_interface::nearest_cheeses(from, &self.cheese, &maze)
-            .into_iter()
-            .filter_map(|pr| pyrat_engine_interface::shortest_path_full(from, pr.target, &maze))
-            .collect()
+        pyrat_engine_interface::nearest_cheeses_full(from, &self.cheese, &self.view.maze())
     }
 
     /// Weighted distances from `pos` to all reachable cells.
@@ -407,7 +388,7 @@ mod tests {
         assert_eq!(state.cheese().len(), 2);
 
         let ts = test_turn_state();
-        state.update(&ts);
+        state.update(ts);
 
         assert_eq!(state.turn(), 5);
         assert_eq!(state.my_position(), Coordinates::new(1, 1));
@@ -428,7 +409,7 @@ mod tests {
         let mut state = GameState::from_config(&cfg).unwrap();
 
         let ts = test_turn_state();
-        state.update(&ts);
+        state.update(ts);
 
         // Perspective is flipped
         assert_eq!(state.my_player(), Player::Player2);
@@ -443,7 +424,7 @@ mod tests {
     #[test]
     fn raw_accessors() {
         let mut state = GameState::from_config(&test_config()).unwrap();
-        state.update(&test_turn_state());
+        state.update(test_turn_state());
 
         assert_eq!(state.player1_position(), Coordinates::new(1, 1));
         assert_eq!(state.player2_position(), Coordinates::new(3, 3));
@@ -490,7 +471,7 @@ mod tests {
     #[test]
     fn simulate_reflects_current_state() {
         let mut state = GameState::from_config(&test_config()).unwrap();
-        state.update(&test_turn_state());
+        state.update(test_turn_state());
 
         let sim = state.simulate();
         assert_eq!(sim.player1_position(), Coordinates::new(1, 1));

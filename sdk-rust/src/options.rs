@@ -13,26 +13,6 @@ pub struct SdkOptionDef {
     pub choices: Vec<String>,
 }
 
-/// SDK option type enum matching wire OptionType for derive macro codegen.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SdkOptionType {
-    Check,
-    Spin,
-    Combo,
-    String,
-}
-
-impl SdkOptionType {
-    pub fn to_wire(self) -> OptionType {
-        match self {
-            Self::Check => OptionType::Check,
-            Self::Spin => OptionType::Spin,
-            Self::Combo => OptionType::Combo,
-            Self::String => OptionType::String,
-        }
-    }
-}
-
 /// Trait for bot option declaration and application.
 ///
 /// Bots without options: `impl Options for MyBot {}` (gets empty defaults).
