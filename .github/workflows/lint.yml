@@ -32,8 +32,6 @@ jobs:
         cache-dependency-glob: |
           pyproject.toml
           engine/pyproject.toml
-          protocol/pyrat_base/pyproject.toml
-          cli/pyproject.toml
 
     - name: Sync workspace dependencies
       run: uv sync --all-extras
@@ -44,14 +42,8 @@ jobs:
     - name: Type check Engine Python
       run: uv run --directory engine mypy python/pyrat_engine --ignore-missing-imports
 
-    - name: Check Protocol formatting
-      run: uv run --directory protocol/pyrat_base ruff check pyrat_base
+    - name: Check SDK Python formatting
+      run: uv run --directory sdk-python ruff check pyrat_sdk
 
-    - name: Type check Protocol
-      run: uv run --directory protocol/pyrat_base mypy pyrat_base --ignore-missing-imports
-
-    - name: Check CLI formatting
-      run: uv run --directory cli ruff check pyrat_runner
-
-    - name: Type check CLI
-      run: uv run --directory cli mypy pyrat_runner --ignore-missing-imports
+    - name: Type check SDK Python
+      run: uv run --directory sdk-python mypy pyrat_sdk --ignore-missing-imports

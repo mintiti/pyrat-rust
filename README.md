@@ -7,8 +7,11 @@ A high-performance game engine and ecosystem for the PyRat maze game, where a Ra
 This is a monorepo containing all PyRat ecosystem components:
 
 - **[engine/](engine/)** - High-performance Rust game engine with Python bindings
-- **[protocol/](protocol/)** - AI communication protocol and base library
-- **[cli/](cli/)** - Command-line game runner with enhanced visualization
+- **[host/](host/)** - Match hosting library — setup, turn loop, event streaming
+- **[headless/](headless/)** - Headless match runner binary — launches bots, runs a match, outputs JSON
+- **[wire/](wire/)** - FlatBuffers schema and generated types, shared by host and SDKs
+- **[sdk-rust/](sdk-rust/)** - Rust bot SDK
+- **[sdk-python/](sdk-python/)** - Python bot SDK
 
 ## Quick Start
 
@@ -38,12 +41,11 @@ uv run maturin develop --release
 ### Run a Game
 
 ```bash
-# Run a game between two AIs
-pyrat-game protocol/pyrat_base/pyrat_base/examples/greedy_ai.py \
-           protocol/pyrat_base/pyrat_base/examples/random_ai.py
+# Run a headless match between two Rust bots
+cargo run -p pyrat-headless -- "cargo run -p pyrat-sdk --example greedy" "cargo run -p pyrat-sdk --example random"
 
-# Custom configuration
-pyrat-game --width 31 --height 21 --cheese 85 --seed 42 bot1.py bot2.py
+# Run a match with Python bots
+cargo run -p pyrat-headless -- "uv run python sdk-python/examples/greedy.py" "uv run python sdk-python/examples/random_ai.py"
 ```
 
 ### Run Tests
@@ -53,9 +55,10 @@ pyrat-game --width 31 --height 21 --cheese 85 --seed 42 bot1.py bot2.py
 make test
 
 # Test specific components
-make test-engine    # Engine tests
-make test-protocol  # Protocol tests
-make test-cli       # CLI tests
+make test-engine      # Engine tests
+make test-host        # Host library tests
+make test-headless    # Headless runner tests
+make test-sdk-python  # SDK Python tests
 ```
 
 ### Development Commands
@@ -75,18 +78,15 @@ High-performance Rust game engine with Python bindings. Use it to:
 - Simulate games programmatically
 - Benchmark AI strategies
 
-### Protocol & Base Library
-Write AIs in any language using a simple text-based protocol (stdin/stdout):
-- `protocol/spec.md` - Protocol specification
-- `protocol/pyrat_base/` - Python SDK with base classes and helpers
-- Example AIs included: dummy (stays still), random (random moves), greedy (Dijkstra pathfinding)
+### Host
+Match hosting library. Manages bot connections, setup handshake, and the turn loop. Streams `MatchEvent`s through a channel for consumers (headless runner, GUI, tournament systems) to process.
 
-### CLI
-Run and visualize games between AI scripts:
-```bash
-pyrat-game my_ai.py opponent_ai.py
-```
-Features color visualization, configurable game parameters, and graceful error handling. See [cli/README.md](cli/README.md) for details.
+### Headless Runner
+CLI binary that launches bot subprocesses, runs a match via the host library, and optionally writes a JSON game record.
+
+### SDKs
+- **sdk-rust/** — Rust bot SDK. Example: `cargo run -p pyrat-sdk --example greedy`
+- **sdk-python/** — Python bot SDK. Example: `uv run python sdk-python/examples/greedy.py`
 
 ## Development
 

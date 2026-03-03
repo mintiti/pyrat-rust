@@ -1,8 +1,6 @@
 [tool.uv.workspace]
 members = [
     "engine",
-    "protocol/pyrat_base",
-    "cli",
     "sdk-python",
 ]
 
@@ -10,4 +8,4 @@ members = [
 python_version = "3.8"
 namespace_packages = true
 explicit_package_bases = true
-files = ["engine/python", "protocol/pyrat_base"]
+files = ["engine/python"]

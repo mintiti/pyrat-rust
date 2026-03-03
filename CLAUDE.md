@@ -9,8 +9,9 @@ PyRat is a monorepo containing the complete PyRat ecosystem for a competitive ma
 - **engine/**: Rust game engine with PyO3 bindings - core game logic and Python API
 - **host/**: Match hosting library — setup, turn loop, event streaming (Rust, `pyrat-host` crate)
 - **headless/**: Headless match runner binary — launches bots, runs a match, outputs JSON (`pyrat-headless` crate)
-- **protocol/**: AI communication protocol — text-based Python SDK (`pyrat_base`) and FlatBuffers wire protocol (`pyrat_protocol`)
-- **cli/**: Command-line game runner tool (`pyrat-game` command)
+- **wire/**: FlatBuffers schema and generated types, shared by host and SDKs (`pyrat-wire` crate)
+- **sdk-rust/**: Rust bot SDK (`pyrat-sdk` crate)
+- **sdk-python/**: Python bot SDK (`pyrat_sdk` package)
 
 This monorepo structure enables clean separation of concerns while maintaining a cohesive ecosystem.
 
@@ -78,7 +79,7 @@ uv sync --all-extras  # Sync all workspace dependencies with dev tools
 
 # This automatically:
 # - Creates a virtual environment at .venv
-# - Installs all workspace members (engine, protocol/pyrat_base)
+# - Installs all workspace members (engine, sdk-python)
 # - Resolves cross-dependencies correctly
 # - Installs dev dependencies like maturin, pytest, ruff, etc.
 
@@ -130,8 +131,6 @@ make test          # Run all tests
 make test-engine   # Run engine tests only
 make test-host     # Run host library tests
 make test-headless # Run headless runner tests
-make test-protocol # Run protocol tests only
-make test-cli      # Run CLI tests only
 make bench         # Run benchmarks
 
 # Rust commands (from repo root — Cargo workspace is at root)
@@ -145,19 +144,17 @@ cargo bench -p pyrat-rust --bench game_benchmarks
 cd engine && uv run maturin develop --release
 ```
 
-### Running Games with CLI
+### Running Games
 ```bash
-# From repository root (after uv sync --all-extras)
-# Run game between two AIs
-pyrat-game protocol/pyrat_base/pyrat_base/examples/greedy_ai.py \
-           protocol/pyrat_base/pyrat_base/examples/random_ai.py
+# Run a headless match between two Rust bots
+cargo run -p pyrat-headless -- \
+    "cargo run -p pyrat-sdk --example greedy" \
+    "cargo run -p pyrat-sdk --example random"
 
-# Custom game configuration
-pyrat-game --width 31 --height 21 --cheese 85 --seed 42 \
-           --delay 0.1 --timeout 1.0 bot1.py bot2.py
-
-# See all options
-pyrat-game --help
+# Run a match with Python bots
+cargo run -p pyrat-headless -- \
+    "uv run python sdk-python/examples/greedy.py" \
+    "uv run python sdk-python/examples/random_ai.py"
 ```
 
 ### CI Debugging
@@ -274,22 +271,12 @@ CLI binary that launches bot subprocesses, runs a match via the host library, an
 
 Command: `cargo run -p pyrat-headless -- bot1_cmd bot2_cmd`
 
-### Protocol (`protocol/`)
-Text-based stdin/stdout protocol for AI communication. The `pyrat_base` package provides:
-- `BaseAI` class - Extend this to implement your AI
-- `IOHandler` - Manages command queue and async communication
-- `ProtocolState` - Tracks game state from protocol messages
-- Example AIs in `pyrat_base/examples/`: `dummy_ai.py`, `random_ai.py`, `greedy_ai.py`
+### SDKs
 
-**Key pattern:** Commands arriving during move calculation are re-queued to prevent state desynchronization.
+**Rust SDK (`sdk-rust/`):**
+Bot SDK for writing Rust bots. Provides trait-based bot interface with FlatBuffers wire protocol.
+- Examples: `cargo run -p pyrat-sdk --example greedy`
 
-### CLI (`cli/`)
-Game runner subprocess manager. Architecture:
-- `cli.py` - Entry point and argparse configuration
-- `ai_process.py` - Subprocess communication via protocol
-- `game_runner.py` - Game loop orchestration, handles AI failures
-- `display.py` - Terminal rendering with ANSI colors and Unicode
-
-Command: `pyrat-game bot1.py bot2.py`
-
-**Key pattern:** AI crashes and timeouts default to STAY action to keep game running.
+**Python SDK (`sdk-python/`):**
+Bot SDK for writing Python bots. Uses PyO3/maturin for engine bindings.
+- Examples: `uv run python sdk-python/examples/greedy.py`

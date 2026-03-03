@@ -53,8 +53,6 @@ jobs:
         cache-dependency-glob: |
           pyproject.toml
           engine/pyproject.toml
-          protocol/pyrat_base/pyproject.toml
-          cli/pyproject.toml
 
     - name: Sync workspace dependencies
       run: uv sync --all-extras
