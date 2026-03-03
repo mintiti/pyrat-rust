@@ -15,9 +15,10 @@
     "@mantine/hooks": "^8.0.0",
     "@tabler/icons-react": "^3.37.1",
     "@tauri-apps/api": "^2.0.0",
+    "immer": "^10.0.0",
+    "jotai": "^2.18.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "immer": "^10.0.0",
     "zustand": "^5.0.11"
   },
   "devDependencies": {

@@ -1,11 +1,13 @@
 // Prevents additional console window on Windows in release.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod bot_config;
 mod commands;
 mod events;
 mod match_runner;
 mod state;
 
+use bot_config::{load_bot_configs, save_bot_configs};
 use commands::{get_game_state, start_match};
 use events::{
     BotDisconnectedEvent, BotInfoEvent, MatchErrorEvent, MatchOverEvent, MatchStartedEvent,
@@ -14,8 +16,20 @@ use events::{
 use tauri_specta::{collect_commands, collect_events, Builder};
 
 fn main() {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "pyrat_gui=debug,pyrat_host=debug,warn".parse().unwrap()),
+        )
+        .init();
+
     let builder = Builder::<tauri::Wry>::new()
-        .commands(collect_commands![get_game_state, start_match])
+        .commands(collect_commands![
+            get_game_state,
+            start_match,
+            load_bot_configs,
+            save_bot_configs
+        ])
         .events(collect_events![
             MatchStartedEvent,
             TurnPlayedEvent,

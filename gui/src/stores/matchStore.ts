@@ -71,8 +71,8 @@ interface MatchState {
 	// Match metadata
 	matchId: number | null;
 	mazeConfig: MazeConfig | null;
-	player1Cmd: string | null;
-	player2Cmd: string | null;
+	player1BotId: string | null;
+	player2BotId: string | null;
 	result: MatchOverEvent | null;
 	pendingResult: MatchOverEvent | null;
 	error: string | null;
@@ -88,8 +88,8 @@ interface MatchState {
 	playbackSpeed: number; // ms between frames
 
 	// Setters for bot selectors
-	setPlayer1Cmd: (cmd: string | null) => void;
-	setPlayer2Cmd: (cmd: string | null) => void;
+	setPlayer1BotId: (cmd: string | null) => void;
+	setPlayer2BotId: (cmd: string | null) => void;
 
 	// Event handlers
 	onMatchStarted: (maze: MazeState, matchId: number) => void;
@@ -116,8 +116,8 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	// ── Initial state ────────────────────────────────────────
 	matchId: null,
 	mazeConfig: null,
-	player1Cmd: "__random__",
-	player2Cmd: "__random__",
+	player1BotId: "__random__",
+	player2BotId: "__random__",
 	result: null,
 	pendingResult: null,
 	error: null,
@@ -129,8 +129,8 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	playbackSpeed: 200,
 
 	// ── Setters ──────────────────────────────────────────────
-	setPlayer1Cmd: (cmd) => set({ player1Cmd: cmd }),
-	setPlayer2Cmd: (cmd) => set({ player2Cmd: cmd }),
+	setPlayer1BotId: (cmd) => set({ player1BotId: cmd }),
+	setPlayer2BotId: (cmd) => set({ player2BotId: cmd }),
 
 	// ── Event handlers ───────────────────────────────────────
 	onMatchStarted: (maze, matchId) => {

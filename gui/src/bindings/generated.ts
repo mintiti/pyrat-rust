@@ -13,9 +13,25 @@ async getGameState() : Promise<Result<MazeState, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async startMatch(player1Cmd: string, player2Cmd: string) : Promise<Result<null, string>> {
+async startMatch(player1Cmd: string, player2Cmd: string, player1WorkingDir: string | null, player2WorkingDir: string | null) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("start_match", { player1Cmd, player2Cmd }) };
+    return { status: "ok", data: await TAURI_INVOKE("start_match", { player1Cmd, player2Cmd, player1WorkingDir, player2WorkingDir }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async loadBotConfigs() : Promise<Result<BotConfigEntry[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("load_bot_configs") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async saveBotConfigs(configs: BotConfigEntry[]) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_bot_configs", { configs }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -48,6 +64,7 @@ turnPlayedEvent: "turn-played-event"
 
 /** user-defined types **/
 
+export type BotConfigEntry = { id: string; name: string; command: string; working_dir: string | null }
 /**
  * Emitted when a bot disconnects mid-game.
  */

@@ -1,18 +1,25 @@
 import { Center, Stack, Text } from "@mantine/core";
+import { useAtomValue } from "jotai";
 import { useEffect, useRef } from "react";
 import { events, commands } from "../bindings";
+import { botsAtom } from "../stores/botConfigAtom";
 import { useDisplayState, useMatchStore } from "../stores/matchStore";
 import MatchToolbar from "./MatchToolbar";
 import MazeRenderer from "./MazeRenderer";
 
-export default function MatchView() {
+type Props = {
+	onNavigate: (view: "match" | "bots") => void;
+};
+
+export default function MatchView({ onNavigate }: Props) {
 	const matchIdRef = useRef<number>(-1);
 	const displayState = useDisplayState();
+	const bots = useAtomValue(botsAtom);
 
 	const viewerMode = useMatchStore((s) => s.viewerMode);
 	const playbackSpeed = useMatchStore((s) => s.playbackSpeed);
-	const player1Cmd = useMatchStore((s) => s.player1Cmd);
-	const player2Cmd = useMatchStore((s) => s.player2Cmd);
+	const player1BotId = useMatchStore((s) => s.player1BotId);
+	const player2BotId = useMatchStore((s) => s.player2BotId);
 
 	const {
 		onMatchStarted,
@@ -69,10 +76,28 @@ export default function MatchView() {
 		return () => clearInterval(id);
 	}, [viewerMode, playbackSpeed]);
 
+	const resolveBotId = (botId: string) => {
+		if (botId === "__random__") return { cmd: "__random__", workingDir: null };
+		const bot = bots.find((b) => b.id === botId);
+		if (!bot) return null;
+		return { cmd: bot.command, workingDir: bot.working_dir };
+	};
+
 	const handleStart = async () => {
-		if (!player1Cmd || !player2Cmd) return;
+		if (!player1BotId || !player2BotId) return;
+		const p1 = resolveBotId(player1BotId);
+		const p2 = resolveBotId(player2BotId);
+		if (!p1 || !p2) {
+			useMatchStore.getState().onError("Selected bot no longer exists.");
+			return;
+		}
 		useMatchStore.setState({ error: null, result: null, disconnection: null });
-		const res = await commands.startMatch(player1Cmd, player2Cmd);
+		const res = await commands.startMatch(
+			p1.cmd,
+			p2.cmd,
+			p1.workingDir,
+			p2.workingDir,
+		);
 		if (res.status === "error") {
 			useMatchStore.getState().onError(res.error);
 		}
@@ -80,7 +105,7 @@ export default function MatchView() {
 
 	return (
 		<Stack h="100vh" gap={0}>
-			<MatchToolbar onStart={handleStart} />
+			<MatchToolbar onStart={handleStart} onNavigate={onNavigate} />
 			<div style={{ flex: 1, overflow: "hidden" }}>
 				{displayState ? (
 					<MazeRenderer gameState={displayState} />

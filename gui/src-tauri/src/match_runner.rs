@@ -44,6 +44,12 @@ fn player_side(p: Player) -> PlayerSide {
 /// Sentinel command value that means "use the built-in random stub bot".
 const STUB_SENTINEL: &str = "__random__";
 
+/// Per-player config passed from the command layer.
+pub struct PlayerSetup {
+    pub command: String,
+    pub working_dir: Option<String>,
+}
+
 /// Run a full match, emitting Tauri events for each phase.
 ///
 /// Follows the same pattern as `headless/src/main.rs`.
@@ -51,13 +57,13 @@ const STUB_SENTINEL: &str = "__random__";
 pub async fn run_match(
     app: tauri::AppHandle,
     mut game: GameState,
-    player1_cmd: String,
-    player2_cmd: String,
+    players: [PlayerSetup; 2],
     cancel: CancellationToken,
     match_id: u32,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let p1_is_stub = player1_cmd == STUB_SENTINEL;
-    let p2_is_stub = player2_cmd == STUB_SENTINEL;
+    let [ref p1, ref p2] = players;
+    let p1_is_stub = p1.command == STUB_SENTINEL;
+    let p2_is_stub = p2.command == STUB_SENTINEL;
 
     // 1. Build match config
     let match_config = build_owned_match_config(&game, TimingMode::Wait, 3000, 10000);
@@ -126,20 +132,28 @@ pub async fn run_match(
         let port = listener.local_addr()?.port();
         info!(port, "listening for bot connections");
 
-        let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let default_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let mut bot_configs = Vec::new();
 
         if !p1_is_stub {
             bot_configs.push(BotConfig {
-                run_command: player1_cmd,
-                working_dir: cwd.clone(),
+                run_command: p1.command.clone(),
+                working_dir: p1
+                    .working_dir
+                    .as_deref()
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| default_cwd.clone()),
                 agent_id: "player1".into(),
             });
         }
         if !p2_is_stub {
             bot_configs.push(BotConfig {
-                run_command: player2_cmd,
-                working_dir: cwd,
+                run_command: p2.command.clone(),
+                working_dir: p2
+                    .working_dir
+                    .as_deref()
+                    .map(PathBuf::from)
+                    .unwrap_or(default_cwd),
                 agent_id: "player2".into(),
             });
         }

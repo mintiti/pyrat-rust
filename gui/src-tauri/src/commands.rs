@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 
 use crate::events::{MatchErrorEvent, MatchStartedEvent};
-use crate::match_runner::run_match;
+use crate::match_runner::{run_match, PlayerSetup};
 use crate::state::{AppState, MatchPhase};
 
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
@@ -122,6 +122,8 @@ pub async fn start_match(
     state: tauri::State<'_, AppState>,
     player1_cmd: String,
     player2_cmd: String,
+    player1_working_dir: Option<String>,
+    player2_working_dir: Option<String>,
 ) -> Result<(), String> {
     use std::time::Duration;
     use tauri_specta::Event;
@@ -165,8 +167,16 @@ pub async fn start_match(
         let result = run_match(
             app_handle.clone(),
             game,
-            player1_cmd,
-            player2_cmd,
+            [
+                PlayerSetup {
+                    command: player1_cmd,
+                    working_dir: player1_working_dir,
+                },
+                PlayerSetup {
+                    command: player2_cmd,
+                    working_dir: player2_working_dir,
+                },
+            ],
             cancel,
             match_id,
         )

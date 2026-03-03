@@ -1,11 +1,4 @@
-import {
-	ActionIcon,
-	Badge,
-	Button,
-	Group,
-	Select,
-	Text,
-} from "@mantine/core";
+import { ActionIcon, Badge, Button, Group, Select, Text } from "@mantine/core";
 import {
 	IconChevronLeft,
 	IconChevronRight,
@@ -13,8 +6,12 @@ import {
 	IconChevronsRight,
 	IconPlayerPause,
 	IconPlayerPlay,
+	IconSettings,
 } from "@tabler/icons-react";
-import type { MatchWinner, PlayerSide } from "../bindings/generated";
+import { useAtomValue } from "jotai";
+import { useMemo } from "react";
+import type { MatchWinner } from "../bindings/generated";
+import { botsAtom } from "../stores/botConfigAtom";
 import {
 	useCursorDepth,
 	useMainlineLength,
@@ -23,6 +20,7 @@ import {
 
 type Props = {
 	onStart: () => void;
+	onNavigate: (view: "match" | "bots") => void;
 };
 
 function winnerLabel(winner: MatchWinner): string {
@@ -47,8 +45,6 @@ function winnerColor(winner: MatchWinner): string {
 	}
 }
 
-const BOT_OPTIONS = [{ value: "__random__", label: "Random Bot" }];
-
 const SPEED_OPTIONS = [
 	{ value: "800", label: "0.25x" },
 	{ value: "400", label: "0.5x" },
@@ -58,9 +54,10 @@ const SPEED_OPTIONS = [
 	{ value: "20", label: "10x" },
 ];
 
-export default function MatchToolbar({ onStart }: Props) {
-	const player1Cmd = useMatchStore((s) => s.player1Cmd);
-	const player2Cmd = useMatchStore((s) => s.player2Cmd);
+export default function MatchToolbar({ onStart, onNavigate }: Props) {
+	const bots = useAtomValue(botsAtom);
+	const player1BotId = useMatchStore((s) => s.player1BotId);
+	const player2BotId = useMatchStore((s) => s.player2BotId);
 	const viewerMode = useMatchStore((s) => s.viewerMode);
 	const playbackSpeed = useMatchStore((s) => s.playbackSpeed);
 	const result = useMatchStore((s) => s.result);
@@ -68,8 +65,8 @@ export default function MatchToolbar({ onStart }: Props) {
 	const disconnection = useMatchStore((s) => s.disconnection);
 
 	const {
-		setPlayer1Cmd,
-		setPlayer2Cmd,
+		setPlayer1BotId,
+		setPlayer2BotId,
 		goToStart,
 		goToEnd,
 		stepForward,
@@ -81,12 +78,22 @@ export default function MatchToolbar({ onStart }: Props) {
 	const cursorDepth = useCursorDepth();
 	const totalTurns = useMainlineLength();
 
-	const canStart = player1Cmd != null && player2Cmd != null;
+	const botOptions = useMemo(
+		() => [
+			{ value: "__random__", label: "Random Bot" },
+			...bots.map((b) => ({ value: b.id, label: b.name })),
+		],
+		[bots],
+	);
+
+	const canStart = player1BotId != null && player2BotId != null;
 	const hasMatch = viewerMode !== "empty";
 
 	const handleStartClick = () => {
 		if (hasMatch) {
-			if (!window.confirm("Start a new match? Current match data will be lost."))
+			if (
+				!window.confirm("Start a new match? Current match data will be lost.")
+			)
 				return;
 		}
 		onStart();
@@ -105,28 +112,32 @@ export default function MatchToolbar({ onStart }: Props) {
 				<Select
 					size="xs"
 					placeholder="Player 1"
-					data={BOT_OPTIONS}
-					value={player1Cmd}
-					onChange={setPlayer1Cmd}
+					data={botOptions}
+					value={player1BotId}
+					onChange={setPlayer1BotId}
 					style={{ width: 180 }}
 					allowDeselect={false}
 				/>
 				<Select
 					size="xs"
 					placeholder="Player 2"
-					data={BOT_OPTIONS}
-					value={player2Cmd}
-					onChange={setPlayer2Cmd}
+					data={botOptions}
+					value={player2BotId}
+					onChange={setPlayer2BotId}
 					style={{ width: 180 }}
 					allowDeselect={false}
 				/>
-				<Button
-					size="xs"
-					onClick={handleStartClick}
-					disabled={!canStart}
-				>
+				<Button size="xs" onClick={handleStartClick} disabled={!canStart}>
 					{!hasMatch ? "Start" : "New Match"}
 				</Button>
+				<ActionIcon
+					variant="subtle"
+					size="sm"
+					onClick={() => onNavigate("bots")}
+					title="Bot settings"
+				>
+					<IconSettings size={16} />
+				</ActionIcon>
 			</Group>
 			{hasMatch && (
 				<Group gap={4}>
@@ -185,16 +196,12 @@ export default function MatchToolbar({ onStart }: Props) {
 			<Group gap="sm">
 				{disconnection && (
 					<Badge color="yellow" variant="filled" size="lg">
-						{disconnection.player === "Player1" ? "Rat" : "Python"} disconnected:{" "}
-						{disconnection.reason}
+						{disconnection.player === "Player1" ? "Rat" : "Python"}{" "}
+						disconnected: {disconnection.reason}
 					</Badge>
 				)}
 				{result && (
-					<Badge
-						color={winnerColor(result.winner)}
-						variant="filled"
-						size="lg"
-					>
+					<Badge color={winnerColor(result.winner)} variant="filled" size="lg">
 						{winnerLabel(result.winner)} {result.player1_score.toFixed(1)} -{" "}
 						{result.player2_score.toFixed(1)} ({result.turns_played}t)
 					</Badge>
