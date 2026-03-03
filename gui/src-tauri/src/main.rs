@@ -4,6 +4,7 @@
 mod bot_config;
 mod commands;
 mod events;
+mod match_config;
 mod match_runner;
 mod state;
 
@@ -13,6 +14,7 @@ use events::{
     BotDisconnectedEvent, BotInfoEvent, MatchErrorEvent, MatchOverEvent, MatchStartedEvent,
     TurnPlayedEvent,
 };
+use match_config::{load_match_config, save_match_config};
 use tauri_specta::{collect_commands, collect_events, Builder};
 
 fn main() {
@@ -28,7 +30,9 @@ fn main() {
             get_game_state,
             start_match,
             load_bot_configs,
-            save_bot_configs
+            save_bot_configs,
+            load_match_config,
+            save_match_config
         ])
         .events(collect_events![
             MatchStartedEvent,

@@ -1,5 +1,6 @@
 import { ActionIcon, Badge, Button, Group, Select, Text } from "@mantine/core";
 import {
+	IconAdjustments,
 	IconChevronLeft,
 	IconChevronRight,
 	IconChevronsLeft,
@@ -11,17 +12,19 @@ import {
 import { useAtomValue } from "jotai";
 import { useMemo, useState } from "react";
 import type { MatchWinner } from "../bindings/generated";
-import ConfirmModal from "./common/ConfirmModal";
 import { botsAtom } from "../stores/botConfigAtom";
+import { matchConfigAtom } from "../stores/matchConfigAtom";
 import {
 	useCursorDepth,
 	useMainlineLength,
 	useMatchStore,
 } from "../stores/matchStore";
+import ConfirmModal from "./common/ConfirmModal";
 
 type Props = {
 	onStart: () => void;
 	onNavigate: (view: "match" | "bots") => void;
+	onOpenConfig: () => void;
 };
 
 function winnerLabel(winner: MatchWinner): string {
@@ -55,8 +58,13 @@ const SPEED_OPTIONS = [
 	{ value: "20", label: "10x" },
 ];
 
-export default function MatchToolbar({ onStart, onNavigate }: Props) {
+export default function MatchToolbar({
+	onStart,
+	onNavigate,
+	onOpenConfig,
+}: Props) {
 	const bots = useAtomValue(botsAtom);
+	const matchConfig = useAtomValue(matchConfigAtom);
 	const player1BotId = useMatchStore((s) => s.player1BotId);
 	const player2BotId = useMatchStore((s) => s.player2BotId);
 	const viewerMode = useMatchStore((s) => s.viewerMode);
@@ -139,6 +147,20 @@ export default function MatchToolbar({ onStart, onNavigate }: Props) {
 				>
 					<IconSettings size={16} />
 				</ActionIcon>
+				<ActionIcon
+					variant="subtle"
+					size="sm"
+					onClick={onOpenConfig}
+					title="Match configuration"
+				>
+					<IconAdjustments size={16} />
+				</ActionIcon>
+				<Badge variant="light" size="sm" color="gray">
+					{matchConfig.preset === "custom"
+						? `${matchConfig.width}×${matchConfig.height}`
+						: matchConfig.preset.charAt(0).toUpperCase() +
+							matchConfig.preset.slice(1)}
+				</Badge>
 			</Group>
 			{hasMatch && (
 				<Group gap={4}>

@@ -1,9 +1,11 @@
 import { Center, Stack, Text } from "@mantine/core";
 import { useAtomValue } from "jotai";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { events, commands } from "../bindings";
 import { botsAtom } from "../stores/botConfigAtom";
+import { matchConfigAtom } from "../stores/matchConfigAtom";
 import { useDisplayState, useMatchStore } from "../stores/matchStore";
+import MatchConfigDrawer from "./MatchConfigDrawer";
 import MatchToolbar from "./MatchToolbar";
 import MazeRenderer from "./MazeRenderer";
 
@@ -15,6 +17,8 @@ export default function MatchView({ onNavigate }: Props) {
 	const matchIdRef = useRef<number>(-1);
 	const displayState = useDisplayState();
 	const bots = useAtomValue(botsAtom);
+	const matchConfig = useAtomValue(matchConfigAtom);
+	const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
 
 	const viewerMode = useMatchStore((s) => s.viewerMode);
 	const playbackSpeed = useMatchStore((s) => s.playbackSpeed);
@@ -97,6 +101,7 @@ export default function MatchView({ onNavigate }: Props) {
 			p2.cmd,
 			p1.workingDir,
 			p2.workingDir,
+			matchConfig,
 		);
 		if (res.status === "error") {
 			useMatchStore.getState().onError(res.error);
@@ -105,7 +110,15 @@ export default function MatchView({ onNavigate }: Props) {
 
 	return (
 		<Stack h="100vh" gap={0}>
-			<MatchToolbar onStart={handleStart} onNavigate={onNavigate} />
+			<MatchToolbar
+				onStart={handleStart}
+				onNavigate={onNavigate}
+				onOpenConfig={() => setConfigDrawerOpen(true)}
+			/>
+			<MatchConfigDrawer
+				opened={configDrawerOpen}
+				onClose={() => setConfigDrawerOpen(false)}
+			/>
 			<div style={{ flex: 1, overflow: "hidden" }}>
 				{displayState ? (
 					<MazeRenderer gameState={displayState} />

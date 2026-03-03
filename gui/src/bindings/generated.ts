@@ -5,17 +5,17 @@
 
 
 export const commands = {
-async getGameState() : Promise<Result<MazeState, string>> {
+async getGameState(config: MatchConfigParams | null) : Promise<Result<MazeState, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("get_game_state") };
+    return { status: "ok", data: await TAURI_INVOKE("get_game_state", { config }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async startMatch(player1Cmd: string, player2Cmd: string, player1WorkingDir: string | null, player2WorkingDir: string | null) : Promise<Result<null, string>> {
+async startMatch(player1Cmd: string, player2Cmd: string, player1WorkingDir: string | null, player2WorkingDir: string | null, config: MatchConfigParams | null) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("start_match", { player1Cmd, player2Cmd, player1WorkingDir, player2WorkingDir }) };
+    return { status: "ok", data: await TAURI_INVOKE("start_match", { player1Cmd, player2Cmd, player1WorkingDir, player2WorkingDir, config }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -32,6 +32,22 @@ async loadBotConfigs() : Promise<Result<BotConfigEntry[], string>> {
 async saveBotConfigs(configs: BotConfigEntry[]) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("save_bot_configs", { configs }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async loadMatchConfig() : Promise<Result<MatchConfigParams, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("load_match_config") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async saveMatchConfig(config: MatchConfigParams) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("save_match_config", { config }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -78,6 +94,19 @@ export type Coord = { x: number; y: number }
  * Movement direction — specta-friendly mirror of pyrat_wire::Direction.
  */
 export type Direction = "Up" | "Right" | "Down" | "Left" | "Stay"
+export type MatchConfigParams = {
+/**
+ * Named preset, or "custom" for manual configuration.
+ */
+preset: string; width: number; height: number; max_turns: number; wall_density: number; mud_density: number; mud_range: number; connected: boolean; symmetric: boolean; cheese_count: number; cheese_symmetric: boolean;
+/**
+ * "corners" or "random".
+ */
+player_start: string;
+/**
+ * Seed for RNG. None = OS entropy.
+ */
+seed: number | null }
 /**
  * Emitted on setup failures, bot crashes, etc.
  */

@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering;
 
-use pyrat::game::builder::GameConfig;
+use pyrat::game::builder::{GameBuilder, GameConfig, MazeParams};
 use pyrat::game::game_logic::GameState;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -8,6 +8,104 @@ use specta::Type;
 use crate::events::{MatchErrorEvent, MatchStartedEvent};
 use crate::match_runner::{run_match, PlayerSetup};
 use crate::state::{AppState, MatchPhase};
+
+// ---------------------------------------------------------------------------
+// MatchConfigParams — flat DTO for the frontend
+// ---------------------------------------------------------------------------
+
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct MatchConfigParams {
+    /// Named preset, or "custom" for manual configuration.
+    pub preset: String,
+    pub width: u8,
+    pub height: u8,
+    pub max_turns: u16,
+    pub wall_density: f64,
+    pub mud_density: f64,
+    pub mud_range: u8,
+    pub connected: bool,
+    pub symmetric: bool,
+    pub cheese_count: u16,
+    pub cheese_symmetric: bool,
+    /// "corners" or "random".
+    pub player_start: String,
+    /// Seed for RNG. None = OS entropy.
+    pub seed: Option<u64>,
+}
+
+impl Default for MatchConfigParams {
+    fn default() -> Self {
+        Self {
+            preset: "medium".into(),
+            width: 21,
+            height: 15,
+            max_turns: 300,
+            wall_density: 0.7,
+            mud_density: 0.1,
+            mud_range: 3,
+            connected: true,
+            symmetric: true,
+            cheese_count: 41,
+            cheese_symmetric: true,
+            player_start: "corners".into(),
+            seed: None,
+        }
+    }
+}
+
+impl MatchConfigParams {
+    /// Convert to engine GameConfig, validating all fields.
+    pub fn to_game_config(&self) -> Result<GameConfig, String> {
+        if self.preset != "custom" {
+            return GameConfig::preset(&self.preset);
+        }
+
+        if self.width < 2 {
+            return Err("Width must be at least 2".into());
+        }
+        if self.height < 2 {
+            return Err("Height must be at least 2".into());
+        }
+        if self.max_turns == 0 {
+            return Err("Max turns must be at least 1".into());
+        }
+        if self.cheese_count == 0 {
+            return Err("Cheese count must be at least 1".into());
+        }
+        if !(0.0..=1.0).contains(&self.wall_density) {
+            return Err("Wall density must be 0–1".into());
+        }
+        if !(0.0..=1.0).contains(&self.mud_density) {
+            return Err("Mud density must be 0–1".into());
+        }
+        if self.mud_density > 0.0 && self.mud_range < 2 {
+            return Err("Mud range must be ≥ 2 when mud density > 0".into());
+        }
+
+        let maze_params = MazeParams {
+            wall_density: self.wall_density as f32,
+            connected: self.connected,
+            symmetric: self.symmetric,
+            mud_density: self.mud_density as f32,
+            mud_range: self.mud_range,
+        };
+
+        let builder = GameBuilder::new(self.width, self.height)
+            .with_max_turns(self.max_turns)
+            .with_random_maze(maze_params);
+
+        let builder = match self.player_start.as_str() {
+            "random" => builder.with_random_positions(),
+            _ => builder.with_corner_positions(),
+        };
+
+        let config = builder
+            .with_random_cheese(self.cheese_count, self.cheese_symmetric)
+            .build();
+
+        Ok(config)
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct Coord {
@@ -109,9 +207,12 @@ pub fn build_maze_state(game: &GameState) -> MazeState {
 
 #[tauri::command]
 #[specta::specta]
-pub fn get_game_state() -> Result<MazeState, String> {
-    let config = GameConfig::classic(21, 15, 41);
-    let game = config.create(Some(42)).map_err(|e| e.to_string())?;
+pub fn get_game_state(config: Option<MatchConfigParams>) -> Result<MazeState, String> {
+    let params = config.unwrap_or_default();
+    let game_config = params.to_game_config()?;
+    let game = game_config
+        .create(params.seed.or(Some(42)))
+        .map_err(|e| e.to_string())?;
     Ok(build_maze_state(&game))
 }
 
@@ -124,10 +225,13 @@ pub async fn start_match(
     player2_cmd: String,
     player1_working_dir: Option<String>,
     player2_working_dir: Option<String>,
+    config: Option<MatchConfigParams>,
 ) -> Result<(), String> {
     use std::time::Duration;
     use tauri_specta::Event;
     use tokio_util::sync::CancellationToken;
+
+    let params = config.unwrap_or_default();
 
     // Cancel existing match and wait for cleanup before proceeding.
     let old_handle = {
@@ -149,8 +253,8 @@ pub async fn start_match(
     let cancel_for_phase = cancel.clone();
 
     // Emit initial state before spawning so frontend can render immediately
-    let config = GameConfig::classic(21, 15, 41);
-    let game = config.create(None).map_err(|e| e.to_string())?;
+    let game_config = params.to_game_config()?;
+    let game = game_config.create(params.seed).map_err(|e| e.to_string())?;
     let initial_state = build_maze_state(&game);
     MatchStartedEvent {
         match_id,
