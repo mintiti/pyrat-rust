@@ -145,6 +145,8 @@ impl PyMaze {
     /// Nearest cheese: returns ((x, y), directions, cost) or None.
     ///
     /// Finds the nearest cheese by Dijkstra, then reconstructs the full path to it.
+    /// When multiple cheeses tie at the minimum distance, returns the first one in
+    /// the cheese list — use `nearest_cheeses` to get all tied results.
     fn nearest_cheese(
         &self,
         pos: (u8, u8),
@@ -164,6 +166,34 @@ impl PyMaze {
         let full = iface::shortest_path_full(from, first.target, &maze)?;
         let dirs: Vec<u8> = full.path.iter().map(|d| *d as u8).collect();
         Some(((first.target.x, first.target.y), dirs, full.cost))
+    }
+
+    /// All cheeses tied at the minimum distance: list of ((x, y), directions, cost).
+    ///
+    /// Each entry has a full direction sequence reconstructed via shortest_path_full.
+    /// Returns an empty list if no cheese remains.
+    fn nearest_cheeses(
+        &self,
+        pos: (u8, u8),
+        cheese: Vec<(u8, u8)>,
+    ) -> Vec<((u8, u8), Vec<u8>, u32)> {
+        let from = Coordinates::new(pos.0, pos.1);
+        let cheese_coords: Vec<Coordinates> = cheese
+            .iter()
+            .map(|&(x, y)| Coordinates::new(x, y))
+            .collect();
+
+        let maze = self.view.maze();
+        let nearest = iface::nearest_cheeses(from, &cheese_coords, &maze);
+
+        nearest
+            .iter()
+            .filter_map(|pr| {
+                let full = iface::shortest_path_full(from, pr.target, &maze)?;
+                let dirs: Vec<u8> = full.path.iter().map(|d| *d as u8).collect();
+                Some(((full.target.x, full.target.y), dirs, full.cost))
+            })
+            .collect()
     }
 
     /// Distances from pos to all reachable cells: dict of {(x,y): cost}.

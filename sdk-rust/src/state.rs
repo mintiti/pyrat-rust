@@ -240,7 +240,9 @@ impl GameState {
     /// Nearest cheese from `pos`. Returns the full path to the closest cheese.
     /// Defaults to `my_position()` if `pos` is `None`.
     ///
-    /// Uses the current turn's cheese list, not the initial configuration.
+    /// When multiple cheeses tie at the minimum distance, returns the first one
+    /// in the cheese list. Use [`nearest_cheeses`](Self::nearest_cheeses) to get
+    /// all tied results.
     pub fn nearest_cheese(&self, pos: Option<Coordinates>) -> Option<FullPathResult> {
         let from = pos.unwrap_or_else(|| self.my_position());
         let nearest =
@@ -250,6 +252,17 @@ impl GameState {
             // Get the full path for the first nearest cheese.
             pyrat_engine_interface::shortest_path_full(from, pr.target, &self.view.maze())
         })
+    }
+
+    /// All cheeses tied at the minimum distance from `pos`, each with a full
+    /// direction sequence. Defaults to `my_position()` if `pos` is `None`.
+    pub fn nearest_cheeses(&self, pos: Option<Coordinates>) -> Vec<FullPathResult> {
+        let from = pos.unwrap_or_else(|| self.my_position());
+        let maze = self.view.maze();
+        pyrat_engine_interface::nearest_cheeses(from, &self.cheese, &maze)
+            .into_iter()
+            .filter_map(|pr| pyrat_engine_interface::shortest_path_full(from, pr.target, &maze))
+            .collect()
     }
 
     /// Weighted distances from `pos` to all reachable cells.
