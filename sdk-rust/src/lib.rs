@@ -10,7 +10,7 @@
 //! impl Options for MyBot {}
 //! impl Bot for MyBot {
 //!     fn think(&mut self, state: &GameState, _ctx: &Context) -> Direction {
-//!         state.effective_moves(None).first().copied().unwrap_or(Direction::Stay)
+//!         state.valid_moves(None).first().copied().unwrap_or(Direction::Stay)
 //!     }
 //! }
 //!
@@ -33,6 +33,7 @@ pub use state::{GameSim, GameState};
 // Re-export engine types bots need
 pub use pyrat::{Coordinates, Direction, MoveUndo};
 pub use pyrat_engine_interface::pathfinding::FullPathResult;
+pub use pyrat_engine_interface::GameView;
 
 // Re-export wire types bots need
 pub use pyrat_wire::{GameResult, Player};
@@ -153,7 +154,11 @@ async fn setup_phase<O: options::Options, R: AsyncRead + Unpin>(
         }
     }
 
-    game_state.expect("MatchConfig never received before StartPreprocessing")
+    let Some(state) = game_state else {
+        eprintln!("[sdk] MatchConfig never received before StartPreprocessing");
+        std::process::exit(1);
+    };
+    state
 }
 
 // ── Turn loop ────────────────────────────────────────
@@ -177,7 +182,11 @@ async fn turn_loop<T: bot::Runner, R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     loop {
         let frame = match reader.read_frame().await {
             Ok(f) => f,
-            Err(_) => break,
+            Err(pyrat_wire::framing::FrameError::Disconnected) => break,
+            Err(e) => {
+                eprintln!("[sdk] play read error: {e}");
+                break;
+            },
         };
 
         match extract_host_msg(frame) {

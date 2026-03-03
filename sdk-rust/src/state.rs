@@ -210,9 +210,17 @@ impl GameState {
 
     // ── Convenience (delegate to GameView/pathfinding) ──
 
+    pub fn width(&self) -> u8 {
+        self.view.width()
+    }
+
+    pub fn height(&self) -> u8 {
+        self.view.height()
+    }
+
     /// Directions from `pos` that don't hit a wall or boundary.
     /// Defaults to `my_position()` if `pos` is `None`.
-    pub fn effective_moves(&self, pos: Option<Coordinates>) -> Vec<Direction> {
+    pub fn valid_moves(&self, pos: Option<Coordinates>) -> Vec<Direction> {
         self.view
             .valid_moves(pos.unwrap_or_else(|| self.my_position()))
     }
@@ -247,8 +255,10 @@ impl GameState {
     }
 
     /// Weighted distances from `pos` to all reachable cells.
-    pub fn distances_from(&self, pos: Coordinates) -> HashMap<Coordinates, u32> {
-        self.view.distances_from(pos)
+    /// Defaults to `my_position()` if `pos` is `None`.
+    pub fn distances_from(&self, pos: Option<Coordinates>) -> HashMap<Coordinates, u32> {
+        self.view
+            .distances_from(pos.unwrap_or_else(|| self.my_position()))
     }
 
     /// Clone the game into a mutable simulation state.
@@ -284,6 +294,7 @@ impl GameState {
 }
 
 /// Mutable game snapshot for make_move / unmake_move tree search.
+#[derive(Clone)]
 pub struct GameSim {
     game: pyrat::GameState,
 }
@@ -433,9 +444,9 @@ mod tests {
     }
 
     #[test]
-    fn effective_moves() {
+    fn valid_moves() {
         let state = GameState::from_config(&test_config()).unwrap();
-        let moves = state.effective_moves(None);
+        let moves = state.valid_moves(None);
         // From (0,0) on a 5x5 open grid: Right and Up
         assert!(moves.contains(&Direction::Right));
         assert!(moves.contains(&Direction::Up));
@@ -484,7 +495,7 @@ mod tests {
     #[test]
     fn distances_from_works() {
         let state = GameState::from_config(&test_config()).unwrap();
-        let dists = state.distances_from(Coordinates::new(0, 0));
+        let dists = state.distances_from(Some(Coordinates::new(0, 0)));
         assert_eq!(dists[&Coordinates::new(0, 0)], 0);
         assert_eq!(dists[&Coordinates::new(1, 0)], 1);
         assert_eq!(dists[&Coordinates::new(4, 4)], 8);
