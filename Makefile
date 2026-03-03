@@ -90,7 +90,7 @@ lint-sdk-python:
 # Clean build artifacts
 generate-wire:
 	@echo "Generating FlatBuffers code..."
-	./schema/generate.sh
+	./server/schema/generate.sh
 
 clean:
 	@echo "Cleaning build artifacts..."

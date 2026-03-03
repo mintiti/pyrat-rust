@@ -1,5 +1,5 @@
 [workspace]
-members = ["engine", "engine/extension", "headless", "host", "wire", "interface", "sdk-python", "sdk-rust", "sdk-rust/derive"]
+members = ["engine", "engine/extension", "server/headless", "server/host", "server/wire", "interface", "sdk-python", "sdk-rust", "sdk-rust/derive"]
 resolver = "2"
 
 [workspace.lints.clippy]
