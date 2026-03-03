@@ -1,6 +1,6 @@
 //! Wire codec: extract HostPackets to owned types, build BotPackets.
 //!
-//! Mirror of `host/src/session/codec.rs` but in the opposite direction —
+//! Mirror of `server/host/src/session/codec.rs` but in the opposite direction —
 //! we extract `HostPacket`s and build `BotPacket`s.
 
 use flatbuffers::FlatBufferBuilder;

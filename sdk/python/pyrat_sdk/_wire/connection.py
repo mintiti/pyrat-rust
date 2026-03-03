@@ -1,6 +1,6 @@
 """Synchronous TCP socket with 4-byte BE length-prefix framing.
 
-Mirrors the wire format from ``wire/src/framing.rs``:
+Mirrors the wire format from ``server/wire/src/framing.rs``:
 ``[u32 BE payload length][payload bytes]``
 """
 
