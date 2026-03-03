@@ -9,8 +9,9 @@ import {
 	IconSettings,
 } from "@tabler/icons-react";
 import { useAtomValue } from "jotai";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { MatchWinner } from "../bindings/generated";
+import ConfirmModal from "./common/ConfirmModal";
 import { botsAtom } from "../stores/botConfigAtom";
 import {
 	useCursorDepth,
@@ -86,17 +87,17 @@ export default function MatchToolbar({ onStart, onNavigate }: Props) {
 		[bots],
 	);
 
+	const [confirmOpen, setConfirmOpen] = useState(false);
+
 	const canStart = player1BotId != null && player2BotId != null;
 	const hasMatch = viewerMode !== "empty";
 
 	const handleStartClick = () => {
 		if (hasMatch) {
-			if (
-				!window.confirm("Start a new match? Current match data will be lost.")
-			)
-				return;
+			setConfirmOpen(true);
+		} else {
+			onStart();
 		}
-		onStart();
 	};
 
 	return (
@@ -212,6 +213,17 @@ export default function MatchToolbar({ onStart, onNavigate }: Props) {
 					</Text>
 				)}
 			</Group>
+			<ConfirmModal
+				title="Start new match?"
+				description="Current match data will be lost."
+				opened={confirmOpen}
+				onClose={() => setConfirmOpen(false)}
+				onConfirm={() => {
+					setConfirmOpen(false);
+					onStart();
+				}}
+				confirmLabel="New Match"
+			/>
 		</Group>
 	);
 }
