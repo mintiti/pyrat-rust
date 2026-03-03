@@ -1,6 +1,6 @@
 # PyRat Monorepo Makefile
 
-.PHONY: all engine gui examples test bench clean help sync lint lint-engine lint-sdk-python test-sdk-python test-wire test-host test-headless generate-protocol
+.PHONY: all engine gui examples test bench clean help sync lint lint-engine lint-sdk-python test-engine test-sdk-python test-wire test-host test-headless generate-wire fmt check dev-setup
 
 # Default target
 all: sync engine
@@ -88,8 +88,8 @@ lint-sdk-python:
 	uv run mypy sdk-python/pyrat_sdk --ignore-missing-imports
 
 # Clean build artifacts
-generate-protocol:
-	@echo "Generating protocol FlatBuffers code..."
+generate-wire:
+	@echo "Generating FlatBuffers code..."
 	./schema/generate.sh
 
 clean:
@@ -127,9 +127,10 @@ help:
 	@echo "  check            - Run all code quality checks"
 	@echo "  lint             - Lint all Python components"
 	@echo "  lint-engine      - Lint engine Python code"
+	@echo "  lint-sdk-python  - Lint SDK Python code"
 	@echo ""
 	@echo "Other:"
 	@echo "  bench              - Run performance benchmarks"
-	@echo "  generate-protocol  - Regenerate FlatBuffers Rust code (requires flatc)"
+	@echo "  generate-wire      - Regenerate FlatBuffers code (requires flatc)"
 	@echo "  clean              - Remove build artifacts"
 	@echo "  help               - Show this help message"

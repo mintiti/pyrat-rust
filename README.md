@@ -45,7 +45,7 @@ uv run maturin develop --release
 cargo run -p pyrat-headless -- "cargo run -p pyrat-sdk --example greedy" "cargo run -p pyrat-sdk --example random"
 
 # Run a match with Python bots
-cargo run -p pyrat-headless -- "uv run python sdk-python/examples/greedy.py" "uv run python sdk-python/examples/random_ai.py"
+cargo run -p pyrat-headless -- "uv run python sdk-python/examples/greedy.py" "uv run python sdk-python/examples/smart_random.py"
 ```
 
 ### Run Tests

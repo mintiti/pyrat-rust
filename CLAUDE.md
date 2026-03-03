@@ -129,15 +129,19 @@ cd engine && uv run pytest python/tests -v
 # From repository root
 make test          # Run all tests
 make test-engine   # Run engine tests only
+make test-wire     # Run wire protocol tests
 make test-host     # Run host library tests
 make test-headless # Run headless runner tests
+make test-sdk-python # Run SDK Python tests
 make bench         # Run benchmarks
 
 # Rust commands (from repo root — Cargo workspace is at root)
 cargo build -p pyrat-rust --release
 cargo test -p pyrat-rust --lib --no-default-features
+cargo test -p pyrat-wire
 cargo test -p pyrat-host
 cargo test -p pyrat-headless
+cargo test -p pyrat-sdk
 cargo bench -p pyrat-rust --bench game_benchmarks
 
 # Build Python package with maturin
@@ -154,7 +158,7 @@ cargo run -p pyrat-headless -- \
 # Run a match with Python bots
 cargo run -p pyrat-headless -- \
     "uv run python sdk-python/examples/greedy.py" \
-    "uv run python sdk-python/examples/random_ai.py"
+    "uv run python sdk-python/examples/smart_random.py"
 ```
 
 ### CI Debugging

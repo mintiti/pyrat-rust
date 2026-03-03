@@ -37,8 +37,9 @@ fn main() {
 
 ```bash
 # From the repo root
-cargo build -p pyrat-sdk --examples
-pyrat-game target/debug/examples/greedy target/debug/examples/smart_random
+cargo run -p pyrat-headless -- \
+  "cargo run -p pyrat-sdk --example greedy" \
+  "cargo run -p pyrat-sdk --example smart_random"
 ```
 
 ## The `Bot` contract
