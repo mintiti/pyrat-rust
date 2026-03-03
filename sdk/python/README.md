@@ -9,12 +9,12 @@ Requires **Python 3.10+**.
 ```bash
 # From the repo root
 uv sync --all-extras
-cd sdk-python && uv run maturin develop --release && cd ..
+cd sdk/python && uv run maturin develop --release && cd ../..
 
 # Run a match (the host sets PYRAT_HOST_PORT for you)
 cargo run -p pyrat-headless -- \
-  "uv run python sdk-python/examples/greedy.py" \
-  "uv run python sdk-python/examples/smart_random.py"
+  "uv run python sdk/python/examples/greedy.py" \
+  "uv run python sdk/python/examples/smart_random.py"
 ```
 
 ### Minimal bot

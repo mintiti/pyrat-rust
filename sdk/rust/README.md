@@ -8,7 +8,7 @@ Add the dependency (path-based within the monorepo):
 
 ```toml
 [dependencies]
-pyrat-sdk = { path = "../sdk-rust" }
+pyrat-sdk = { path = "../sdk/rust" }
 ```
 
 ### Minimal bot

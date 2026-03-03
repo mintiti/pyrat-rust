@@ -21,7 +21,7 @@ if [[ ! -f "$TARGET" ]]; then
 fi
 
 # Format the generated code to match project style
-WORKSPACE_ROOT="$SCRIPT_DIR/.."
+WORKSPACE_ROOT="$SCRIPT_DIR/../.."
 if cargo fmt --manifest-path "$WORKSPACE_ROOT/Cargo.toml" -p pyrat-wire 2>/dev/null; then
     echo "Generated and formatted $TARGET"
 else
@@ -29,7 +29,7 @@ else
 fi
 
 # ── Python codegen ──────────────────────────────────────
-PY_FINAL_DIR="$SCRIPT_DIR/../sdk-python/pyrat_sdk/_wire/protocol"
+PY_FINAL_DIR="$SCRIPT_DIR/../../sdk/python/pyrat_sdk/_wire/protocol"
 PY_TMP_DIR=$(mktemp -d)
 
 echo "Generating Python code from $SCHEMA..."

@@ -7,11 +7,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 PyRat is a monorepo containing the complete PyRat ecosystem for a competitive maze game. The repository is organized into multiple components:
 
 - **engine/**: Rust game engine with PyO3 bindings - core game logic and Python API
-- **host/**: Match hosting library — setup, turn loop, event streaming (Rust, `pyrat-host` crate)
-- **headless/**: Headless match runner binary — launches bots, runs a match, outputs JSON (`pyrat-headless` crate)
-- **wire/**: FlatBuffers schema and generated types, shared by host and SDKs (`pyrat-wire` crate)
-- **sdk-rust/**: Rust bot SDK (`pyrat-sdk` crate)
-- **sdk-python/**: Python bot SDK (`pyrat_sdk` package)
+- **server/host/**: Match hosting library — setup, turn loop, event streaming (Rust, `pyrat-host` crate)
+- **server/headless/**: Headless match runner binary — launches bots, runs a match, outputs JSON (`pyrat-headless` crate)
+- **server/wire/**: FlatBuffers schema and generated types, shared by host and SDKs (`pyrat-wire` crate)
+- **server/schema/**: FlatBuffers schema source and codegen script
+- **sdk/rust/**: Rust bot SDK (`pyrat-sdk` crate)
+- **sdk/python/**: Python bot SDK (`pyrat_sdk` package)
 
 This monorepo structure enables clean separation of concerns while maintaining a cohesive ecosystem.
 
@@ -79,7 +80,7 @@ uv sync --all-extras  # Sync all workspace dependencies with dev tools
 
 # This automatically:
 # - Creates a virtual environment at .venv
-# - Installs all workspace members (engine, sdk-python)
+# - Installs all workspace members (engine, sdk/python)
 # - Resolves cross-dependencies correctly
 # - Installs dev dependencies like maturin, pytest, ruff, etc.
 
@@ -132,8 +133,8 @@ make test-engine   # Run engine tests only
 make test-wire     # Run wire protocol tests
 make test-host     # Run host library tests
 make test-headless # Run headless runner tests
-make test-sdk-python # Run SDK Python tests
-make bench         # Run benchmarks
+make test-sdk-python  # Run SDK Python tests
+make bench            # Run benchmarks
 
 # Rust commands (from repo root — Cargo workspace is at root)
 cargo build -p pyrat-rust --release
@@ -157,8 +158,8 @@ cargo run -p pyrat-headless -- \
 
 # Run a match with Python bots
 cargo run -p pyrat-headless -- \
-    "uv run python sdk-python/examples/greedy.py" \
-    "uv run python sdk-python/examples/smart_random.py"
+    "uv run python sdk/python/examples/greedy.py" \
+    "uv run python sdk/python/examples/smart_random.py"
 ```
 
 ### CI Debugging
@@ -260,7 +261,7 @@ Each player receives:
 
 ## Component Details
 
-### Host Library (`host/`)
+### Host Library (`server/host/`)
 Match hosting library. Manages bot connections, setup handshake, and the turn loop:
 - `game_loop/` — Setup phases (connect → identify → configure → preprocess), playing loop, event streaming
 - `session/` — Per-connection state machine, FlatBuffers wire codec
@@ -269,7 +270,7 @@ Match hosting library. Manages bot connections, setup handshake, and the turn lo
 
 **Key pattern:** The host is a pipe — it streams `MatchEvent`s through a channel. Consumers decide what to record or display.
 
-### Headless Runner (`headless/`)
+### Headless Runner (`server/headless/`)
 CLI binary that launches bot subprocesses, runs a match via the host library, and optionally writes a JSON game record:
 - `main.rs` — CLI parsing, bot launch, match orchestration, JSON output
 
@@ -277,10 +278,10 @@ Command: `cargo run -p pyrat-headless -- bot1_cmd bot2_cmd`
 
 ### SDKs
 
-**Rust SDK (`sdk-rust/`):**
+**Rust SDK (`sdk/rust/`):**
 Bot SDK for writing Rust bots. Provides trait-based bot interface with FlatBuffers wire protocol.
 - Examples: `cargo run -p pyrat-sdk --example greedy`
 
-**Python SDK (`sdk-python/`):**
+**Python SDK (`sdk/python/`):**
 Bot SDK for writing Python bots. Uses PyO3/maturin for engine bindings.
-- Examples: `uv run python sdk-python/examples/greedy.py`
+- Examples: `uv run python sdk/python/examples/greedy.py`

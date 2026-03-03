@@ -16,7 +16,7 @@ path = "src/bin/test_bot.rs"
 clap = { version = "4", features = ["derive"] }
 flatbuffers = "25.2.10"
 pyrat-host = { path = "../host" }
-pyrat-rust = { path = "../engine", default-features = false }
+pyrat-rust = { path = "../../engine", default-features = false }
 rand = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

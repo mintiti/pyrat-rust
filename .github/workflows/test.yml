@@ -107,13 +107,13 @@ jobs:
         enable-cache: true
         cache-dependency-glob: |
           pyproject.toml
-          sdk-python/pyproject.toml
+          sdk/python/pyproject.toml
 
     - name: Sync workspace dependencies
       run: uv sync --all-extras
 
     - name: Build SDK Python extension
-      run: uv run --directory sdk-python maturin develop --release
+      run: uv run --directory sdk/python maturin develop --release
 
     - name: Run SDK Python tests
-      run: uv run --directory sdk-python pytest tests -v
+      run: uv run --directory sdk/python pytest tests -v

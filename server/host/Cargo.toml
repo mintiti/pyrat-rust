@@ -6,7 +6,7 @@ publish = false
 
 [dependencies]
 flatbuffers = "25.2.10"
-pyrat-rust = { path = "../engine", default-features = false }
+pyrat-rust = { path = "../../engine", default-features = false }
 pyrat-wire = { path = "../wire" }
 tokio = { version = "1", features = ["sync", "macros", "io-util", "time", "net", "rt"] }
 tracing = "0.1"
