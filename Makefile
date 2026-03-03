@@ -1,6 +1,6 @@
 # PyRat Monorepo Makefile
 
-.PHONY: all engine gui examples test bench clean help sync lint lint-engine lint-sdk-python test-sdk-python test-wire test-host test-headless test-integration generate-protocol
+.PHONY: all engine gui examples test bench clean help sync lint lint-engine lint-sdk-python test-sdk-python test-wire test-host test-headless generate-protocol
 
 # Default target
 all: sync engine
@@ -53,10 +53,6 @@ test-headless:
 test-sdk-python:
 	@echo "Running SDK Python tests..."
 	cd sdk-python && uv run pytest tests -v
-
-test-integration:
-	@echo "Running integration tests..."
-	uv run pytest tests/integration -v
 
 # Benchmarking
 bench:
@@ -125,7 +121,6 @@ help:
 	@echo "  test-host        - Run host library tests"
 	@echo "  test-headless    - Run headless runner tests"
 	@echo "  test-sdk-python  - Run SDK Python tests"
-	@echo "  test-integration - Run integration tests"
 	@echo ""
 	@echo "Code Quality:"
 	@echo "  fmt              - Format all code"
