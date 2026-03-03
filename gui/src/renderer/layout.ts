@@ -4,6 +4,8 @@ export type LayoutMetrics = {
 	cellSize: number;
 	mazeX: number;
 	mazeY: number;
+	mazeW: number;
+	mazeH: number;
 	wallThickness: number;
 	cornerSize: number;
 	canvasWidth: number;
@@ -30,6 +32,8 @@ export function computeLayout(
 		cellSize,
 		mazeX,
 		mazeY,
+		mazeW,
+		mazeH,
 		wallThickness,
 		cornerSize,
 		canvasWidth: containerW,
@@ -41,10 +45,9 @@ export function computeLayout(
 export function gameToCanvas(
 	coord: Coord,
 	layout: LayoutMetrics,
-	mazeHeight: number,
 ): { x: number; y: number } {
 	return {
 		x: layout.mazeX + coord.x * layout.cellSize,
-		y: layout.mazeY + (mazeHeight - 1 - coord.y) * layout.cellSize,
+		y: layout.mazeY + (layout.mazeH - 1 - coord.y) * layout.cellSize,
 	};
 }

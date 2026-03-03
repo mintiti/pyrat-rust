@@ -14,11 +14,11 @@ import {
 	IconPlayerPause,
 	IconPlayerPlay,
 } from "@tabler/icons-react";
-import type { MatchWinner } from "../bindings/generated";
+import type { MatchWinner, PlayerSide } from "../bindings/generated";
 import {
-	useMatchStore,
 	useCursorDepth,
 	useMainlineLength,
+	useMatchStore,
 } from "../stores/matchStore";
 
 type Props = {
@@ -185,7 +185,8 @@ export default function MatchToolbar({ onStart }: Props) {
 			<Group gap="sm">
 				{disconnection && (
 					<Badge color="yellow" variant="filled" size="lg">
-						{disconnection.player} disconnected: {disconnection.reason}
+						{disconnection.player === "Player1" ? "Rat" : "Python"} disconnected:{" "}
+						{disconnection.reason}
 					</Badge>
 				)}
 				{result && (

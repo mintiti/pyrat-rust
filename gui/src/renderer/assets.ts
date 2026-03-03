@@ -62,7 +62,18 @@ function loadImage(url: string): Promise<HTMLImageElement> {
 	});
 }
 
-export async function loadAssets(): Promise<AssetMap> {
+let cached: Promise<AssetMap> | null = null;
+
+export function loadAssets(): Promise<AssetMap> {
+	if (cached) return cached;
+	cached = loadAssetsImpl().catch((e) => {
+		cached = null;
+		throw e;
+	});
+	return cached;
+}
+
+async function loadAssetsImpl(): Promise<AssetMap> {
 	const groundUrls = [
 		tile1Url,
 		tile2Url,

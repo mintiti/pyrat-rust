@@ -20,7 +20,7 @@ use tauri_specta::Event;
 use crate::commands::{Coord, PlayerState};
 use crate::events::{
     BotDisconnectedEvent, BotInfoEvent, Direction as SpectaDirection, MatchOverEvent, MatchWinner,
-    TurnPlayedEvent,
+    PlayerSide, TurnPlayedEvent,
 };
 
 fn wire_to_specta(d: WireDirection) -> SpectaDirection {
@@ -30,6 +30,14 @@ fn wire_to_specta(d: WireDirection) -> SpectaDirection {
         WireDirection::Down => SpectaDirection::Down,
         WireDirection::Left => SpectaDirection::Left,
         _ => SpectaDirection::Stay,
+    }
+}
+
+fn player_side(p: Player) -> PlayerSide {
+    if p == Player::Player1 {
+        PlayerSide::Player1
+    } else {
+        PlayerSide::Player2
     }
 }
 
@@ -243,34 +251,23 @@ async fn forward_events(
                     match_id,
                     turn: state.turn,
                     player1: PlayerState {
-                        position: Coord {
-                            x: state.player1_position.0,
-                            y: state.player1_position.1,
-                        },
+                        position: state.player1_position.into(),
                         score: state.player1_score,
                     },
                     player2: PlayerState {
-                        position: Coord {
-                            x: state.player2_position.0,
-                            y: state.player2_position.1,
-                        },
+                        position: state.player2_position.into(),
                         score: state.player2_score,
                     },
-                    cheese: state.cheese.iter().map(|&(x, y)| Coord { x, y }).collect(),
+                    cheese: state.cheese.iter().copied().map(Coord::from).collect(),
                     player1_action: wire_to_specta(p1_action),
                     player2_action: wire_to_specta(p2_action),
                 };
                 let _ = payload.emit(&app);
             },
             MatchEvent::BotDisconnected { player, reason } => {
-                let player_name = if player == Player::Player1 {
-                    "Rat"
-                } else {
-                    "Python"
-                };
                 let _ = BotDisconnectedEvent {
                     match_id,
-                    player: player_name.to_string(),
+                    player: player_side(player),
                     reason: format!("{reason:?}"),
                 }
                 .emit(&app);
@@ -296,20 +293,15 @@ async fn forward_events(
                 .emit(&app);
             },
             MatchEvent::BotInfo { player, turn, info } => {
-                let player_str = if player == Player::Player1 {
-                    "player1"
-                } else {
-                    "player2"
-                };
                 let _ = BotInfoEvent {
                     match_id,
-                    player: player_str.into(),
+                    player: player_side(player),
                     turn,
-                    target: info.target.map(|(x, y)| Coord { x, y }),
+                    target: info.target.map(Coord::from),
                     depth: info.depth,
                     nodes: info.nodes,
                     score: info.score,
-                    path: info.path.iter().map(|&(x, y)| Coord { x, y }).collect(),
+                    path: info.path.iter().copied().map(Coord::from).collect(),
                     message: info.message,
                 }
                 .emit(&app);

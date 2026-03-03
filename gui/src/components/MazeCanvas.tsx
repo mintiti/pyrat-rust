@@ -32,7 +32,28 @@ function drawSprite(ctx: CanvasRenderingContext2D, s: SpriteInstruction) {
 
 export default function MazeCanvas({ instructions, width, height }: Props) {
 	const canvasRef = useRef<HTMLCanvasElement>(null);
+	const dimsRef = useRef({ width: 0, height: 0, dpr: 0 });
 
+	// Resize canvas backing buffer only when dimensions change
+	useEffect(() => {
+		const canvas = canvasRef.current;
+		if (!canvas) return;
+
+		const dpr = window.devicePixelRatio || 1;
+		if (
+			dimsRef.current.width !== width ||
+			dimsRef.current.height !== height ||
+			dimsRef.current.dpr !== dpr
+		) {
+			canvas.width = width * dpr;
+			canvas.height = height * dpr;
+			canvas.style.width = `${width}px`;
+			canvas.style.height = `${height}px`;
+			dimsRef.current = { width, height, dpr };
+		}
+	}, [width, height]);
+
+	// Draw instructions
 	useEffect(() => {
 		const canvas = canvasRef.current;
 		if (!canvas) return;
@@ -41,11 +62,7 @@ export default function MazeCanvas({ instructions, width, height }: Props) {
 		if (!ctx) return;
 
 		const dpr = window.devicePixelRatio || 1;
-		canvas.width = width * dpr;
-		canvas.height = height * dpr;
-		canvas.style.width = `${width}px`;
-		canvas.style.height = `${height}px`;
-		ctx.scale(dpr, dpr);
+		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
 		// Background
 		ctx.fillStyle = instructions.background;

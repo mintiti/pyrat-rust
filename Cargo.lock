@@ -3009,7 +3009,7 @@ dependencies = [
  "pyrat-rust",
  "pyrat-sdk-derive",
  "pyrat-wire",
- "rand",
+ "rand 0.10.0",
  "tokio",
 ]
 
@@ -3019,7 +3019,7 @@ version = "0.1.0"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn",
+ "syn 2.0.117",
 ]
 
 [[package]]

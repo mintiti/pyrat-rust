@@ -14,6 +14,13 @@ pub enum Direction {
     Stay,
 }
 
+/// Player identity — specta-friendly mirror of pyrat_wire::Player.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Type)]
+pub enum PlayerSide {
+    Player1,
+    Player2,
+}
+
 /// Full initial state so the frontend can initialize the renderer.
 #[derive(Serialize, Deserialize, Debug, Clone, Type, Event)]
 pub struct MatchStartedEvent {
@@ -54,7 +61,7 @@ pub struct MatchErrorEvent {
 #[derive(Serialize, Deserialize, Debug, Clone, Type, Event)]
 pub struct BotDisconnectedEvent {
     pub match_id: u32,
-    pub player: String,
+    pub player: PlayerSide,
     pub reason: String,
 }
 
@@ -62,7 +69,7 @@ pub struct BotDisconnectedEvent {
 #[derive(Serialize, Deserialize, Debug, Clone, Type, Event)]
 pub struct BotInfoEvent {
     pub match_id: u32,
-    pub player: String,
+    pub player: PlayerSide,
     pub turn: u16,
     pub target: Option<Coord>,
     pub depth: u16,

@@ -1,13 +1,9 @@
 import { Center, Stack, Text } from "@mantine/core";
 import { useEffect, useRef } from "react";
-import { commands, events } from "../bindings";
-import {
-	useMatchStore,
-	useDisplayState,
-	mainlineLength,
-} from "../stores/matchStore";
-import MazeRenderer from "./MazeRenderer";
+import { events, commands } from "../bindings";
+import { useDisplayState, useMatchStore } from "../stores/matchStore";
 import MatchToolbar from "./MatchToolbar";
+import MazeRenderer from "./MazeRenderer";
 
 export default function MatchView() {
 	const matchIdRef = useRef<number>(-1);
@@ -15,8 +11,6 @@ export default function MatchView() {
 
 	const viewerMode = useMatchStore((s) => s.viewerMode);
 	const playbackSpeed = useMatchStore((s) => s.playbackSpeed);
-	const cursor = useMatchStore((s) => s.cursor);
-	const pendingResult = useMatchStore((s) => s.pendingResult);
 	const player1Cmd = useMatchStore((s) => s.player1Cmd);
 	const player2Cmd = useMatchStore((s) => s.player2Cmd);
 
@@ -28,7 +22,6 @@ export default function MatchView() {
 		onError,
 		onDisconnect,
 		advanceCursor,
-		applyPendingResult,
 	} = useMatchStore.getState();
 
 	// Event listeners — wire Tauri events to store actions
@@ -75,18 +68,6 @@ export default function MatchView() {
 		}, playbackSpeed);
 		return () => clearInterval(id);
 	}, [viewerMode, playbackSpeed]);
-
-	// Apply pending result once cursor reaches mainline end
-	useEffect(() => {
-		if (!pendingResult) return;
-		// Read root directly — its reference is stable (mutated in place),
-		// so we always get the fully-built tree here.
-		const { root } = useMatchStore.getState();
-		if (!root) return;
-		if (cursor.length >= mainlineLength(root)) {
-			applyPendingResult();
-		}
-	}, [cursor, pendingResult]);
 
 	const handleStart = async () => {
 		if (!player1Cmd || !player2Cmd) return;

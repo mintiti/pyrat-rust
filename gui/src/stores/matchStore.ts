@@ -1,3 +1,4 @@
+import { produce } from "immer";
 import { useMemo } from "react";
 import { create } from "zustand";
 import type {
@@ -7,10 +8,10 @@ import type {
 	Direction,
 	MatchOverEvent,
 	MazeState,
+	MudEntry,
 	PlayerState,
 	TurnPlayedEvent,
 	WallEntry,
-	MudEntry,
 } from "../bindings/generated";
 
 // ── Types ────────────────────────────────────────────────────────
@@ -32,7 +33,7 @@ export interface GameNode {
 	player2: PlayerState;
 	cheese: Coord[];
 	actions: { player1: Direction; player2: Direction } | null;
-	botInfo: { player1: BotInfoEvent[]; player2: BotInfoEvent[] };
+	botInfo: { Player1: BotInfoEvent[]; Player2: BotInfoEvent[] };
 	children: GameNode[];
 }
 
@@ -41,10 +42,7 @@ export type ViewerMode = "empty" | "playing" | "paused";
 // ── Tree helpers ─────────────────────────────────────────────────
 
 /** Walk the tree following `path` indices. Returns null if the path is invalid. */
-export function getNodeAtPath(
-	root: GameNode,
-	path: number[],
-): GameNode | null {
+export function getNodeAtPath(root: GameNode, path: number[]): GameNode | null {
 	let node = root;
 	for (const idx of path) {
 		if (idx < 0 || idx >= node.children.length) return null;
@@ -60,17 +58,6 @@ export function getMainlineEnd(root: GameNode): GameNode {
 		node = node.children[0];
 	}
 	return node;
-}
-
-/** Depth of the first-child chain (number of turns after root). */
-export function mainlineLength(root: GameNode): number {
-	let n = 0;
-	let node = root;
-	while (node.children.length > 0) {
-		node = node.children[0];
-		n++;
-	}
-	return n;
 }
 
 /** Build a cursor path of `n` zeros (follow mainline for n steps). */
@@ -94,7 +81,7 @@ interface MatchState {
 	// Game tree
 	root: GameNode | null;
 	cursor: number[]; // path into tree, [] = root
-	treeVersion: number; // bumped on every tree mutation to trigger selectors
+	mainlineDepth: number; // number of turns appended, drives useMainlineLength
 
 	// Viewer
 	viewerMode: ViewerMode;
@@ -111,9 +98,6 @@ interface MatchState {
 	onBotInfo: (e: BotInfoEvent) => void;
 	onError: (message: string) => void;
 	onDisconnect: (e: BotDisconnectedEvent) => void;
-
-	// Apply pending result (called when cursor reaches the end)
-	applyPendingResult: () => void;
 
 	// Navigation
 	goToStart: () => void;
@@ -140,7 +124,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	disconnection: null,
 	root: null,
 	cursor: [],
-	treeVersion: 0,
+	mainlineDepth: 0,
 	viewerMode: "empty",
 	playbackSpeed: 200,
 
@@ -156,7 +140,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 			player2: maze.player2,
 			cheese: maze.cheese,
 			actions: null,
-			botInfo: { player1: [], player2: [] },
+			botInfo: { Player1: [], Player2: [] },
 			children: [],
 		};
 		set({
@@ -171,6 +155,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 			},
 			root,
 			cursor: [],
+			mainlineDepth: 0,
 			viewerMode: "playing",
 			result: null,
 			pendingResult: null,
@@ -180,41 +165,48 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	},
 
 	onTurnPlayed: (e) => {
-		const { root } = get();
-		if (!root) return;
+		set(
+			produce((state: MatchState) => {
+				if (!state.root) return;
 
-		const newChild: GameNode = {
-			turn: e.turn,
-			player1: e.player1,
-			player2: e.player2,
-			cheese: e.cheese,
-			actions: { player1: e.player1_action, player2: e.player2_action },
-			botInfo: { player1: [], player2: [] },
-			children: [],
-		};
+				const newChild: GameNode = {
+					turn: e.turn,
+					player1: e.player1,
+					player2: e.player2,
+					cheese: e.cheese,
+					actions: {
+						player1: e.player1_action,
+						player2: e.player2_action,
+					},
+					botInfo: { Player1: [], Player2: [] },
+					children: [],
+				};
 
-		// Append to mainline end — mutate in place, bump version to notify selectors.
-		const end = getMainlineEnd(root);
-		end.children.push(newChild);
-		set({ treeVersion: get().treeVersion + 1 });
+				const end = getMainlineEnd(state.root);
+				end.children.push(newChild);
+				state.mainlineDepth += 1;
+			}),
+		);
 	},
 
 	onMatchOver: (e) => {
-		set({ pendingResult: e });
+		const { cursor, mainlineDepth } = get();
+		if (cursor.length >= mainlineDepth) {
+			set({ result: e, pendingResult: null, viewerMode: "paused" });
+		} else {
+			set({ pendingResult: e });
+		}
 	},
 
 	onBotInfo: (e) => {
-		const { root } = get();
-		if (!root) return;
-
-		// Find the node for this turn.
-		const path = mainlinePath(e.turn);
-		const node = getNodeAtPath(root, path);
-		if (!node) return;
-
-		const key = e.player as "player1" | "player2";
-		node.botInfo[key].push(e);
-		set({ treeVersion: get().treeVersion + 1 });
+		set(
+			produce((state: MatchState) => {
+				if (!state.root) return;
+				const node = getNodeAtPath(state.root, mainlinePath(e.turn));
+				if (!node) return;
+				node.botInfo[e.player].push(e);
+			}),
+		);
 	},
 
 	onError: (message) => {
@@ -225,26 +217,14 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		set({ disconnection: e });
 	},
 
-	applyPendingResult: () => {
-		const { pendingResult } = get();
-		if (!pendingResult) return;
-		set({
-			result: pendingResult,
-			pendingResult: null,
-			viewerMode: "paused",
-		});
-	},
-
 	// ── Navigation ───────────────────────────────────────────
 	goToStart: () => {
 		set({ cursor: [], viewerMode: "paused" });
 	},
 
 	goToEnd: () => {
-		const { root } = get();
-		if (!root) return;
-		const len = mainlineLength(root);
-		set({ cursor: mainlinePath(len), viewerMode: "paused" });
+		const { mainlineDepth } = get();
+		set({ cursor: mainlinePath(mainlineDepth), viewerMode: "paused" });
 	},
 
 	stepForward: () => {
@@ -280,7 +260,17 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		const { root, cursor } = get();
 		if (!root) return;
 		const node = getNodeAtPath(root, cursor);
-		if (!node || node.children.length === 0) return;
+		if (!node || node.children.length === 0) {
+			const { pendingResult } = get();
+			if (pendingResult) {
+				set({
+					result: pendingResult,
+					pendingResult: null,
+					viewerMode: "paused",
+				});
+			}
+			return;
+		}
 		set({ cursor: [...cursor, 0] });
 	},
 }));
@@ -290,18 +280,19 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 /**
  * Compute the MazeState the renderer expects from config + current node.
  *
- * Uses separate subscriptions so the component only re-renders when cursor
- * moves or mazeConfig changes — not on every tree mutation (turn arrival).
- * Root is mutated in place (same reference) so it doesn't trigger re-renders,
- * but the tree is up-to-date when we walk it after a cursor change.
+ * Subscribes to mazeConfig and cursor only. Root is read via getState() so
+ * immer-produced new references on every turn don't cause re-renders during
+ * live playback. Cursor changes trigger the memo, and getState() always
+ * returns the latest tree.
  */
 export function useDisplayState(): MazeState | null {
 	const mazeConfig = useMatchStore((s) => s.mazeConfig);
-	const root = useMatchStore((s) => s.root);
 	const cursor = useMatchStore((s) => s.cursor);
 
 	return useMemo(() => {
-		if (!mazeConfig || !root) return null;
+		if (!mazeConfig) return null;
+		const root = useMatchStore.getState().root;
+		if (!root) return null;
 		const node = getNodeAtPath(root, cursor) ?? root;
 		return {
 			width: mazeConfig.width,
@@ -315,7 +306,7 @@ export function useDisplayState(): MazeState | null {
 			player2: node.player2,
 			cheese: node.cheese,
 		};
-	}, [mazeConfig, root, cursor]);
+	}, [mazeConfig, cursor]);
 }
 
 /** Current node's bot info, or null if at root with nothing. */
@@ -329,14 +320,7 @@ export function useCurrentBotInfo() {
 
 /** Number of turns in the mainline (for "Turn X / Y" display). */
 export function useMainlineLength(): number {
-	const root = useMatchStore((s) => s.root);
-	const treeVersion = useMatchStore((s) => s.treeVersion);
-	return useMemo(() => {
-		if (!root) return 0;
-		return mainlineLength(root);
-		// treeVersion triggers recomputation when the tree is mutated in place
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [root, treeVersion]);
+	return useMatchStore((s) => s.mainlineDepth);
 }
 
 /** Current cursor depth (which turn we're viewing). */

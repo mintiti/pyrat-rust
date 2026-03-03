@@ -51,11 +51,11 @@ turnPlayedEvent: "turn-played-event"
 /**
  * Emitted when a bot disconnects mid-game.
  */
-export type BotDisconnectedEvent = { match_id: number; player: string; reason: string }
+export type BotDisconnectedEvent = { match_id: number; player: PlayerSide; reason: string }
 /**
  * Bot debug/analysis info forwarded from the host event stream.
  */
-export type BotInfoEvent = { match_id: number; player: string; turn: number; target: Coord | null; depth: number; nodes: number; score: number; path: Coord[]; message: string }
+export type BotInfoEvent = { match_id: number; player: PlayerSide; turn: number; target: Coord | null; depth: number; nodes: number; score: number; path: Coord[]; message: string }
 export type Coord = { x: number; y: number }
 /**
  * Movement direction — specta-friendly mirror of pyrat_wire::Direction.
@@ -76,6 +76,10 @@ export type MatchStartedEvent = { match_id: number; maze: MazeState }
 export type MatchWinner = "Player1" | "Player2" | "Draw"
 export type MazeState = { width: number; height: number; turn: number; max_turns: number; walls: WallEntry[]; mud: MudEntry[]; cheese: Coord[]; player1: PlayerState; player2: PlayerState; total_cheese: number }
 export type MudEntry = { from: Coord; to: Coord; cost: number }
+/**
+ * Player identity — specta-friendly mirror of pyrat_wire::Player.
+ */
+export type PlayerSide = "Player1" | "Player2"
 export type PlayerState = { position: Coord; score: number }
 /**
  * Per-turn delta. Walls/mud never change, so we only send positions + cheese.

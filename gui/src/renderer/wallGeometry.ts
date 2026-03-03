@@ -24,10 +24,8 @@ export type Corner = {
 export function computeWallSegments(
 	walls: WallEntry[],
 	layout: LayoutMetrics,
-	mazeW: number,
-	mazeH: number,
 ): WallSegment[] {
-	const { mazeX, mazeY, cellSize } = layout;
+	const { mazeX, mazeY, mazeW, mazeH, cellSize } = layout;
 	const segments: WallSegment[] = [];
 
 	// Internal walls
@@ -87,10 +85,8 @@ export function computeWallSegments(
 export function computeCorners(
 	wallSegments: WallSegment[],
 	layout: LayoutMetrics,
-	mazeW: number,
-	mazeH: number,
 ): Corner[] {
-	const { mazeX, mazeY, cellSize } = layout;
+	const { mazeX, mazeY, mazeW, mazeH, cellSize } = layout;
 	const cornerSet = new Set<string>();
 
 	const addCorner = (x: number, y: number) => {

@@ -1,9 +1,14 @@
-import type { MazeState } from "../bindings/generated";
+import type { MazeState, WallEntry } from "../bindings/generated";
 import type { AssetMap } from "./assets";
 import type { LayoutMetrics } from "./layout";
 import { gameToCanvas } from "./layout";
 import type { TileAssignment } from "./tileMap";
-import { computeCorners, computeWallSegments } from "./wallGeometry";
+import {
+	type Corner,
+	type WallSegment,
+	computeCorners,
+	computeWallSegments,
+} from "./wallGeometry";
 
 export type SpriteInstruction = {
 	image: HTMLImageElement;
@@ -35,11 +40,28 @@ export type DrawOptions = {
 	showCellIndices?: boolean;
 };
 
+/** Pre-computed static geometry — walls and corners don't change per turn. */
+export type StaticGeometry = {
+	wallSegments: WallSegment[];
+	corners: Corner[];
+};
+
+/** Compute static geometry from walls + layout. Cache this per maze config + layout. */
+export function computeStaticGeometry(
+	walls: WallEntry[],
+	layout: LayoutMetrics,
+): StaticGeometry {
+	const wallSegments = computeWallSegments(walls, layout);
+	const corners = computeCorners(wallSegments, layout);
+	return { wallSegments, corners };
+}
+
 export function buildDrawInstructions(
 	state: MazeState,
 	layout: LayoutMetrics,
 	assets: AssetMap,
 	tileMap: TileAssignment[][],
+	staticGeo: StaticGeometry,
 	options: DrawOptions = {},
 ): DrawInstructions {
 	const sprites: SpriteInstruction[] = [];
@@ -51,7 +73,7 @@ export function buildDrawInstructions(
 	for (let gy = 0; gy < height; gy++) {
 		for (let gx = 0; gx < width; gx++) {
 			const tile = tileMap[gy][gx];
-			const { x, y } = gameToCanvas({ x: gx, y: gy }, layout, height);
+			const { x, y } = gameToCanvas({ x: gx, y: gy }, layout);
 			sprites.push({
 				image: assets.ground[tile.tileIndex],
 				dx: x,
@@ -69,8 +91,8 @@ export function buildDrawInstructions(
 	for (const mud of state.mud) {
 		const isVertical = mud.from.x === mud.to.x;
 
-		const fromCanvas = gameToCanvas(mud.from, layout, height);
-		const toCanvas = gameToCanvas(mud.to, layout, height);
+		const fromCanvas = gameToCanvas(mud.from, layout);
+		const toCanvas = gameToCanvas(mud.to, layout);
 		const midPx = (fromCanvas.x + toCanvas.x) / 2;
 		const midPy = (fromCanvas.y + toCanvas.y) / 2;
 
@@ -100,7 +122,7 @@ export function buildDrawInstructions(
 		const indexSize = Math.max(6, Math.floor(cellSize * 0.15));
 		for (let gy = 0; gy < height; gy++) {
 			for (let gx = 0; gx < width; gx++) {
-				const { x, y } = gameToCanvas({ x: gx, y: gy }, layout, height);
+				const { x, y } = gameToCanvas({ x: gx, y: gy }, layout);
 				texts.push({
 					text: `${gx},${gy}`,
 					x: x + 3,
@@ -114,11 +136,10 @@ export function buildDrawInstructions(
 	}
 
 	// 5. Walls
-	const wallSegments = computeWallSegments(state.walls, layout, width, height);
 	const { wallThickness } = layout;
 	const halfThick = wallThickness / 2;
 
-	for (const seg of wallSegments) {
+	for (const seg of staticGeo.wallSegments) {
 		if (seg.horizontal) {
 			sprites.push({
 				image: assets.wall,
@@ -142,11 +163,10 @@ export function buildDrawInstructions(
 	}
 
 	// 6. Corners
-	const corners = computeCorners(wallSegments, layout, width, height);
 	const { cornerSize } = layout;
 	const halfCorner = cornerSize / 2;
 
-	for (const c of corners) {
+	for (const c of staticGeo.corners) {
 		sprites.push({
 			image: assets.corner,
 			dx: c.x - halfCorner,
@@ -161,7 +181,7 @@ export function buildDrawInstructions(
 	const cheeseOffset = (cellSize - cheeseDim) / 2;
 
 	for (const pos of state.cheese) {
-		const { x, y } = gameToCanvas(pos, layout, height);
+		const { x, y } = gameToCanvas(pos, layout);
 		sprites.push({
 			image: assets.cheese,
 			dx: x + cheeseOffset,
@@ -176,7 +196,7 @@ export function buildDrawInstructions(
 	const playerOffset = (cellSize - playerDim) / 2;
 
 	// Rat (player 1)
-	const p1Canvas = gameToCanvas(state.player1.position, layout, height);
+	const p1Canvas = gameToCanvas(state.player1.position, layout);
 	sprites.push({
 		image: assets.rat.neutral,
 		dx: p1Canvas.x + playerOffset,
@@ -186,7 +206,7 @@ export function buildDrawInstructions(
 	});
 
 	// Python (player 2)
-	const p2Canvas = gameToCanvas(state.player2.position, layout, height);
+	const p2Canvas = gameToCanvas(state.player2.position, layout);
 	sprites.push({
 		image: assets.python.neutral,
 		dx: p2Canvas.x + playerOffset,

@@ -1,12 +1,15 @@
 import { Center, Loader } from "@mantine/core";
 import { useElementSize } from "@mantine/hooks";
 import { useEffect, useMemo, useState } from "react";
+import type { MazeState } from "../bindings/generated";
 import type { AssetMap } from "../renderer/assets";
 import { loadAssets } from "../renderer/assets";
-import { buildDrawInstructions } from "../renderer/instructions";
+import {
+	buildDrawInstructions,
+	computeStaticGeometry,
+} from "../renderer/instructions";
 import { computeLayout } from "../renderer/layout";
 import { generateTileMap } from "../renderer/tileMap";
-import type { MazeState } from "../bindings/generated";
 import MazeCanvas from "./MazeCanvas";
 
 type Props = {
@@ -32,12 +35,23 @@ export default function MazeRenderer({ gameState, showCellIndices }: Props) {
 		[gameState.width, gameState.height],
 	);
 
+	// Static geometry (walls + corners) — only changes when walls or layout change
+	const staticGeo = useMemo(() => {
+		if (!layout) return null;
+		return computeStaticGeometry(gameState.walls, layout);
+	}, [gameState.walls, layout]);
+
 	const instructions = useMemo(() => {
-		if (!assets || !layout) return null;
-		return buildDrawInstructions(gameState, layout, assets, tileMap, {
-			showCellIndices,
-		});
-	}, [gameState, layout, assets, tileMap, showCellIndices]);
+		if (!assets || !layout || !staticGeo) return null;
+		return buildDrawInstructions(
+			gameState,
+			layout,
+			assets,
+			tileMap,
+			staticGeo,
+			{ showCellIndices },
+		);
+	}, [gameState, layout, assets, tileMap, staticGeo, showCellIndices]);
 
 	return (
 		<div ref={ref} style={{ width: "100%", height: "100%", minHeight: 200 }}>
