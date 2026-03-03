@@ -218,10 +218,7 @@ export default function MatchToolbar({ onStart, onNavigate }: Props) {
 				description="Current match data will be lost."
 				opened={confirmOpen}
 				onClose={() => setConfirmOpen(false)}
-				onConfirm={() => {
-					setConfirmOpen(false);
-					onStart();
-				}}
+				onConfirm={onStart}
 				confirmLabel="New Match"
 			/>
 		</Group>

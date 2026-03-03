@@ -30,7 +30,7 @@ export default function ConfirmModal({
 					<Button variant="default" onClick={onClose}>
 						Cancel
 					</Button>
-					<Button color="red" onClick={onConfirm}>
+					<Button color="red" onClick={() => { onClose(); onConfirm(); }}>
 						{confirmLabel ?? "Confirm"}
 					</Button>
 				</Group>
