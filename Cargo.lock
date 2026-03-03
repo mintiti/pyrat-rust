@@ -815,6 +815,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "pyrat-sdk-python"
+version = "0.1.0"
+dependencies = [
+ "ndarray",
+ "numpy",
+ "pyo3",
+ "pyrat-engine-interface",
+ "pyrat-rust",
+]
+
+[[package]]
 name = "pyrat-wire"
 version = "0.1.0"
 dependencies = [

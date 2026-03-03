@@ -12,7 +12,7 @@ use pyrat::{Coordinates, Direction};
 use std::cmp::Reverse;
 use std::collections::{BinaryHeap, HashMap};
 
-/// Result of a shortest-path query.
+/// Result of a shortest-path query (first moves only).
 ///
 /// `cost` is the number of turns to reach `target` (mud passages cost N turns).
 /// `first_moves` contains every direction that starts an optimal path — there
@@ -20,6 +20,18 @@ use std::collections::{BinaryHeap, HashMap};
 #[derive(Debug, Clone, PartialEq)]
 pub struct PathResult {
     pub target: Coordinates,
+    pub first_moves: Vec<Direction>,
+    pub cost: u32,
+}
+
+/// Result of a shortest-path query with the full direction sequence.
+///
+/// `path` is the complete list of directions from source to target.
+/// `first_moves` contains all optimal first steps (same as `PathResult`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FullPathResult {
+    pub target: Coordinates,
+    pub path: Vec<Direction>,
     pub first_moves: Vec<Direction>,
     pub cost: u32,
 }
@@ -59,7 +71,83 @@ pub fn shortest_path(from: Coordinates, to: Coordinates, maze: &Maze) -> Option<
             });
         }
 
-        relax_neighbors(maze, from, u, d, &mut dist, &mut first_moves, &mut heap);
+        relax_neighbors(
+            maze,
+            from,
+            u,
+            d,
+            &mut dist,
+            &mut first_moves,
+            None,
+            &mut heap,
+        );
+    }
+
+    None
+}
+
+/// Shortest path with the full direction sequence. Returns `None` if unreachable.
+///
+/// Same Dijkstra as [`shortest_path`], but also tracks predecessors to reconstruct
+/// the complete path. When `from == to`, returns cost 0 with empty `path`/`first_moves`.
+pub fn shortest_path_full(
+    from: Coordinates,
+    to: Coordinates,
+    maze: &Maze,
+) -> Option<FullPathResult> {
+    if from == to {
+        return Some(FullPathResult {
+            target: to,
+            path: vec![],
+            first_moves: vec![],
+            cost: 0,
+        });
+    }
+
+    let size = maze.size();
+    let mut dist = vec![u32::MAX; size];
+    let mut first_moves: Vec<Vec<Direction>> = vec![vec![]; size];
+    let mut prev: Vec<Option<Coordinates>> = vec![None; size];
+    let mut heap: BinaryHeap<Reverse<(u32, Coordinates)>> = BinaryHeap::new();
+
+    dist[from.to_index(maze.width())] = 0;
+    heap.push(Reverse((0, from)));
+
+    while let Some(Reverse((d, u))) = heap.pop() {
+        let u_idx = u.to_index(maze.width());
+
+        if d > dist[u_idx] {
+            continue;
+        }
+
+        if u == to {
+            // Reconstruct full path from prev chain.
+            let mut path = Vec::new();
+            let mut cur = to;
+            while let Some(p) = prev[cur.to_index(maze.width())] {
+                path.push(Direction::between(p, cur).unwrap());
+                cur = p;
+            }
+            path.reverse();
+
+            return Some(FullPathResult {
+                target: to,
+                path,
+                first_moves: first_moves[u_idx].clone(),
+                cost: d,
+            });
+        }
+
+        relax_neighbors(
+            maze,
+            from,
+            u,
+            d,
+            &mut dist,
+            &mut first_moves,
+            Some(&mut prev),
+            &mut heap,
+        );
     }
 
     None
@@ -104,7 +192,16 @@ pub fn nearest_cheeses(from: Coordinates, cheese: &[Coordinates], maze: &Maze) -
             min_cheese_dist = Some(d);
         }
 
-        relax_neighbors(maze, from, u, d, &mut dist, &mut first_moves, &mut heap);
+        relax_neighbors(
+            maze,
+            from,
+            u,
+            d,
+            &mut dist,
+            &mut first_moves,
+            None,
+            &mut heap,
+        );
     }
 
     let Some(min_d) = min_cheese_dist else {
@@ -176,6 +273,9 @@ pub fn distances_from(pos: Coordinates, maze: &Maze) -> HashMap<Coordinates, u32
 // ---------------------------------------------------------------------------
 
 /// Relax all neighbors of `u` in the Dijkstra search, tracking first-move provenance.
+///
+/// When `prev` is `Some`, also records predecessors for full path reconstruction.
+#[allow(clippy::too_many_arguments)]
 fn relax_neighbors(
     maze: &Maze,
     source: Coordinates,
@@ -183,9 +283,12 @@ fn relax_neighbors(
     d: u32,
     dist: &mut [u32],
     first_moves: &mut [Vec<Direction>],
+    prev: Option<&mut [Option<Coordinates>]>,
     heap: &mut BinaryHeap<Reverse<(u32, Coordinates)>>,
 ) {
     let u_idx = u.to_index(maze.width());
+    // Reborrow so we can use prev across multiple loop iterations.
+    let mut prev = prev;
 
     for (neighbor, w) in maze.neighbors(u) {
         let new_dist = d + w as u32;
@@ -193,6 +296,9 @@ fn relax_neighbors(
 
         if new_dist < dist[n_idx] {
             dist[n_idx] = new_dist;
+            if let Some(ref mut prev) = prev {
+                prev[n_idx] = Some(u);
+            }
             first_moves[n_idx] = if u == source {
                 vec![Direction::between(source, neighbor).unwrap()]
             } else {
@@ -210,6 +316,8 @@ fn relax_neighbors(
                     first_moves[n_idx].push(m);
                 }
             }
+            // prev stays at whichever predecessor was set first — we only
+            // need *one* optimal path for the full direction sequence.
         }
     }
 }
@@ -415,6 +523,105 @@ mod tests {
         let result = shortest_path(c(0, 0), c(1, 0), &maze).unwrap();
         assert_eq!(result.cost, 4);
         assert_eq!(result.first_moves, vec![Direction::Up]);
+    }
+
+    // -----------------------------------------------------------------------
+    // shortest_path_full tests
+    // -----------------------------------------------------------------------
+
+    #[test]
+    fn full_same_position() {
+        let (mt, mud, w, h) = open_grid(3, 3);
+        let maze = Maze::new(&mt, &mud, w, h);
+        let result = shortest_path_full(c(1, 1), c(1, 1), &maze).unwrap();
+        assert_eq!(result.cost, 0);
+        assert!(result.path.is_empty());
+        assert!(result.first_moves.is_empty());
+    }
+
+    #[test]
+    fn full_adjacent() {
+        let (mt, mud, w, h) = open_grid(3, 3);
+        let maze = Maze::new(&mt, &mud, w, h);
+        let result = shortest_path_full(c(0, 0), c(1, 0), &maze).unwrap();
+        assert_eq!(result.cost, 1);
+        assert_eq!(result.path, vec![Direction::Right]);
+        assert_eq!(result.first_moves, vec![Direction::Right]);
+    }
+
+    #[test]
+    fn full_path_length_matches_cost_on_open_grid() {
+        let (mt, mud, w, h) = open_grid(5, 5);
+        let maze = Maze::new(&mt, &mud, w, h);
+        let result = shortest_path_full(c(0, 0), c(4, 4), &maze).unwrap();
+        assert_eq!(result.cost, 8);
+        assert_eq!(result.path.len(), 8);
+    }
+
+    #[test]
+    fn full_path_reaches_target() {
+        let (mt, mud, w, h) = open_grid(5, 5);
+        let maze = Maze::new(&mt, &mud, w, h);
+        let result = shortest_path_full(c(0, 0), c(3, 2), &maze).unwrap();
+        // Walk the path and verify we arrive at the target.
+        let mut pos = c(0, 0);
+        for &dir in &result.path {
+            pos = dir.apply_to(pos);
+        }
+        assert_eq!(pos, c(3, 2));
+    }
+
+    #[test]
+    fn full_path_with_wall_detour() {
+        let (mt, mud, w, h) = grid_with_walls(3, 3, &[(c(1, 0), c(1, 1))]);
+        let maze = Maze::new(&mt, &mud, w, h);
+        let result = shortest_path_full(c(1, 0), c(1, 1), &maze).unwrap();
+        assert_eq!(result.cost, 3);
+        assert_eq!(result.path.len(), 3);
+        // Walk the path.
+        let mut pos = c(1, 0);
+        for &dir in &result.path {
+            pos = dir.apply_to(pos);
+        }
+        assert_eq!(pos, c(1, 1));
+    }
+
+    #[test]
+    fn full_path_with_mud() {
+        // Mud=3 between (0,0) and (0,1). Path length is 1 (single step) but cost is 3.
+        let (mt, mud, w, h) = grid_with_mud(3, 3, &[(c(0, 0), c(0, 1), 3)]);
+        let maze = Maze::new(&mt, &mud, w, h);
+        let result = shortest_path_full(c(0, 0), c(0, 1), &maze).unwrap();
+        assert_eq!(result.cost, 3);
+        // The path goes through mud — could be direct (1 step, cost 3) or around (3 steps, cost 3).
+        // Either way, verify it reaches the target.
+        let mut pos = c(0, 0);
+        for &dir in &result.path {
+            pos = dir.apply_to(pos);
+        }
+        assert_eq!(pos, c(0, 1));
+    }
+
+    #[test]
+    fn full_unreachable_returns_none() {
+        let (mt, mud, w, h) = grid_with_walls(3, 3, &[(c(1, 2), c(2, 2)), (c(2, 1), c(2, 2))]);
+        let maze = Maze::new(&mt, &mud, w, h);
+        assert!(shortest_path_full(c(0, 0), c(2, 2), &maze).is_none());
+    }
+
+    #[test]
+    fn full_first_moves_match_shortest_path() {
+        // first_moves should be identical between shortest_path and shortest_path_full
+        let (mt, mud, w, h) = open_grid(5, 5);
+        let maze = Maze::new(&mt, &mud, w, h);
+        let sp = shortest_path(c(0, 0), c(3, 3), &maze).unwrap();
+        let spf = shortest_path_full(c(0, 0), c(3, 3), &maze).unwrap();
+        assert_eq!(sp.cost, spf.cost);
+        let mut sp_moves = sp.first_moves;
+        let mut spf_moves = spf.first_moves;
+        sp_moves.sort_by_key(|d| *d as u8);
+        spf_moves.sort_by_key(|d| *d as u8);
+        assert_eq!(sp_moves, spf_moves);
     }
 
     // -----------------------------------------------------------------------

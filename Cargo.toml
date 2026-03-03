@@ -1,5 +1,5 @@
 [workspace]
-members = ["engine", "engine/extension", "headless", "host", "wire", "interface"]
+members = ["engine", "engine/extension", "headless", "host", "wire", "interface", "sdk-python"]
 resolver = "2"
 
 [workspace.lints.clippy]

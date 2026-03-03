@@ -1,0 +1,19 @@
+[package]
+name = "pyrat-sdk-python"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+name = "pyrat_sdk_engine"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyrat-engine-interface = { path = "../interface" }
+pyrat = { package = "pyrat-rust", path = "../engine", default-features = false }
+pyo3 = { version = "0.25", features = ["extension-module"] }
+numpy = "0.25"
+ndarray = "0.16"
+
+[lints]
+workspace = true

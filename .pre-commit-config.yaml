@@ -17,10 +17,10 @@ repos:
         -   id: ruff
             args: [--fix]
             types_or: [python, pyi]
-            files: ^(engine/python/|protocol/pyrat_base/|cli/)
+            files: ^(engine/python/|protocol/pyrat_base/|cli/|sdk-python/)
         -   id: ruff-format
             types_or: [python, pyi]
-            files: ^(engine/python/|protocol/pyrat_base/|cli/)
+            files: ^(engine/python/|protocol/pyrat_base/|cli/|sdk-python/)
 
   # Python type checking - run same as CI for consistency
   -   repo: local
@@ -50,6 +50,15 @@ repos:
             language: system
             pass_filenames: false
             files: ^cli/
+            types: [python]
+
+        -   id: mypy-sdk-python
+            name: mypy SDK Python
+            description: Type check SDK Python package (matches CI)
+            entry: uv run --directory sdk-python mypy pyrat_sdk --ignore-missing-imports
+            language: system
+            pass_filenames: false
+            files: ^sdk-python/
             types: [python]
 
   # Rust checks
@@ -93,6 +102,14 @@ repos:
         -   id: pytest-cli
             name: pytest CLI
             entry: uv run pytest cli/tests
+            language: system
+            pass_filenames: false
+            always_run: true
+            stages: [pre-push]  # Only run on push, not on every commit
+
+        -   id: pytest-sdk-python
+            name: pytest SDK Python
+            entry: uv run --directory sdk-python pytest tests
             language: system
             pass_filenames: false
             always_run: true

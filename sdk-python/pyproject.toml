@@ -1,0 +1,67 @@
+[project]
+name = "pyrat-sdk"
+version = "0.1.0"
+description = "Python SDK for building PyRat bots"
+authors = [{ name = "PyRat Team" }]
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "flatbuffers>=24.0.0",
+    "numpy>=1.20.0",
+]
+
+[build-system]
+requires = ["maturin>=1.4,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+manifest-path = "Cargo.toml"
+module-name = "pyrat_sdk._engine"
+python-source = "."
+
+[tool.ruff]
+line-length = 88
+target-version = "py310"
+
+lint.select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "B",   # flake8-bugbear
+    "I",   # isort
+    "C",   # flake8-comprehensions
+    "N",   # pep8-naming
+    "UP",  # pyupgrade
+    "PL",  # pylint
+    "RUF", # ruff-specific rules
+    "TID", # flake8-tidy-imports
+    "TCH", # flake8-type-checking
+    "ERA", # eradicate
+]
+
+lint.ignore = [
+    "E501",      # Line too long (handled by formatter)
+    "PLR0913",   # Too many arguments to function call
+    "B008",      # Do not perform function call in argument defaults
+]
+
+exclude = ["pyrat_sdk/_wire/protocol"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["PLC0415", "PLR2004", "PLR0915"]
+"pyrat_sdk/_wire/codec.py" = ["C901"]
+"pyrat_sdk/bot.py" = ["C901", "PLR0912", "PLR0915"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.mypy]
+strict = true
+exclude = ["pyrat_sdk/_wire"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra -q"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
