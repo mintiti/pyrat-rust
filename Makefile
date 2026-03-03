@@ -52,7 +52,7 @@ test-headless:
 
 test-sdk-python:
 	@echo "Running SDK Python tests..."
-	cd sdk-python && uv run pytest tests -v
+	cd sdk/python && uv run pytest tests -v
 
 # Benchmarking
 bench:
@@ -64,15 +64,15 @@ bench:
 fmt:
 	@echo "Formatting code..."
 	cargo fmt --all
-	uv run ruff format engine/python sdk-python/pyrat_sdk
+	uv run ruff format engine/python sdk/python/pyrat_sdk
 
 check:
 	@echo "Running checks..."
 	cargo fmt --all -- --check
 	cargo clippy -p pyrat-rust --all-targets --no-default-features -- -D warnings
 	cargo clippy --all-targets --all-features -- -D warnings -A non-local-definitions
-	uv run ruff check engine/python sdk-python/pyrat_sdk
-	uv run mypy engine/python/pyrat_engine sdk-python/pyrat_sdk --ignore-missing-imports
+	uv run ruff check engine/python sdk/python/pyrat_sdk
+	uv run mypy engine/python/pyrat_engine sdk/python/pyrat_sdk --ignore-missing-imports
 
 # Linting targets
 lint: lint-engine lint-sdk-python
@@ -84,8 +84,8 @@ lint-engine:
 
 lint-sdk-python:
 	@echo "Linting SDK Python code..."
-	uv run ruff check sdk-python
-	uv run mypy sdk-python/pyrat_sdk --ignore-missing-imports
+	uv run ruff check sdk/python
+	uv run mypy sdk/python/pyrat_sdk --ignore-missing-imports
 
 # Clean build artifacts
 generate-wire:

@@ -34,7 +34,7 @@ jobs:
       run: uv run --directory engine mypy python/pyrat_engine --ignore-missing-imports
 
     - name: Check SDK Python formatting
-      run: uv run --directory sdk-python ruff check pyrat_sdk
+      run: uv run --directory sdk/python ruff check pyrat_sdk
 
     - name: Type check SDK Python
-      run: uv run --directory sdk-python mypy pyrat_sdk --ignore-missing-imports
+      run: uv run --directory sdk/python mypy pyrat_sdk --ignore-missing-imports

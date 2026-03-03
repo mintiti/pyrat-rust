@@ -29,7 +29,7 @@ else
 fi
 
 # ── Python codegen ──────────────────────────────────────
-PY_FINAL_DIR="$SCRIPT_DIR/../../sdk-python/pyrat_sdk/_wire/protocol"
+PY_FINAL_DIR="$SCRIPT_DIR/../../sdk/python/pyrat_sdk/_wire/protocol"
 PY_TMP_DIR=$(mktemp -d)
 
 echo "Generating Python code from $SCHEMA..."

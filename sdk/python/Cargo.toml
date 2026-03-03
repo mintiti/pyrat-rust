@@ -9,8 +9,8 @@ name = "pyrat_sdk_engine"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyrat-engine-interface = { path = "../interface" }
-pyrat = { package = "pyrat-rust", path = "../engine", default-features = false }
+pyrat-engine-interface = { path = "../../interface" }
+pyrat = { package = "pyrat-rust", path = "../../engine", default-features = false }
 pyo3 = { version = "0.25", features = ["extension-module"] }
 numpy = "0.25"
 ndarray = "0.16"
