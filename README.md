@@ -7,11 +7,11 @@ A high-performance game engine and ecosystem for the PyRat maze game, where a Ra
 This is a monorepo containing all PyRat ecosystem components:
 
 - **[engine/](engine/)** - High-performance Rust game engine with Python bindings
-- **[host/](host/)** - Match hosting library — setup, turn loop, event streaming
-- **[headless/](headless/)** - Headless match runner binary — launches bots, runs a match, outputs JSON
-- **[wire/](wire/)** - FlatBuffers schema and generated types, shared by host and SDKs
-- **[sdk-rust/](sdk-rust/)** - Rust bot SDK
-- **[sdk-python/](sdk-python/)** - Python bot SDK
+- **[server/host/](server/host/)** - Match hosting library — setup, turn loop, event streaming
+- **[server/headless/](server/headless/)** - Headless match runner binary — launches bots, runs a match, outputs JSON
+- **[server/wire/](server/wire/)** - FlatBuffers schema and generated types, shared by host and SDKs
+- **[sdk/rust/](sdk/rust/)** - Rust bot SDK
+- **[sdk/python/](sdk/python/)** - Python bot SDK
 
 ## Quick Start
 
@@ -45,7 +45,7 @@ uv run maturin develop --release
 cargo run -p pyrat-headless -- "cargo run -p pyrat-sdk --example greedy" "cargo run -p pyrat-sdk --example random"
 
 # Run a match with Python bots
-cargo run -p pyrat-headless -- "uv run python sdk-python/examples/greedy.py" "uv run python sdk-python/examples/smart_random.py"
+cargo run -p pyrat-headless -- "uv run python sdk/python/examples/greedy.py" "uv run python sdk/python/examples/smart_random.py"
 ```
 
 ### Run Tests
@@ -85,8 +85,8 @@ Match hosting library. Manages bot connections, setup handshake, and the turn lo
 CLI binary that launches bot subprocesses, runs a match via the host library, and optionally writes a JSON game record.
 
 ### SDKs
-- **sdk-rust/** — Rust bot SDK. Example: `cargo run -p pyrat-sdk --example greedy`
-- **sdk-python/** — Python bot SDK. Example: `uv run python sdk-python/examples/greedy.py`
+- **sdk/rust/** — Rust bot SDK. Example: `cargo run -p pyrat-sdk --example greedy`
+- **sdk/python/** — Python bot SDK. Example: `uv run python sdk/python/examples/greedy.py`
 
 ## Development
 
