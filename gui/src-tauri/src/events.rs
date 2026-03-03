@@ -4,6 +4,16 @@ use tauri_specta::Event;
 
 use crate::commands::{Coord, MazeState, PlayerState};
 
+/// Movement direction — specta-friendly mirror of pyrat_wire::Direction.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Type)]
+pub enum Direction {
+    Up,
+    Right,
+    Down,
+    Left,
+    Stay,
+}
+
 /// Full initial state so the frontend can initialize the renderer.
 #[derive(Serialize, Deserialize, Debug, Clone, Type, Event)]
 pub struct MatchStartedEvent {
@@ -19,6 +29,8 @@ pub struct TurnPlayedEvent {
     pub player1: PlayerState,
     pub player2: PlayerState,
     pub cheese: Vec<Coord>,
+    pub player1_action: Direction,
+    pub player2_action: Direction,
 }
 
 /// Emitted when the match ends normally.
@@ -44,6 +56,20 @@ pub struct BotDisconnectedEvent {
     pub match_id: u32,
     pub player: String,
     pub reason: String,
+}
+
+/// Bot debug/analysis info forwarded from the host event stream.
+#[derive(Serialize, Deserialize, Debug, Clone, Type, Event)]
+pub struct BotInfoEvent {
+    pub match_id: u32,
+    pub player: String,
+    pub turn: u16,
+    pub target: Option<Coord>,
+    pub depth: u16,
+    pub nodes: u32,
+    pub score: f32,
+    pub path: Vec<Coord>,
+    pub message: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]

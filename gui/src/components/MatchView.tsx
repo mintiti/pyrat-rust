@@ -1,111 +1,62 @@
 import { Center, Stack, Text } from "@mantine/core";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { commands, events } from "../bindings";
-import type {
-	BotDisconnectedEvent,
-	MatchOverEvent,
-	MazeState,
-	TurnPlayedEvent,
-} from "../bindings/generated";
+import {
+	useMatchStore,
+	useDisplayState,
+	mainlineLength,
+} from "../stores/matchStore";
 import MazeRenderer from "./MazeRenderer";
 import MatchToolbar from "./MatchToolbar";
 
-export type MatchStatus = "idle" | "running" | "finished";
-
 export default function MatchView() {
-	const [player1Cmd, setPlayer1Cmd] = useState<string | null>("__random__");
-	const [player2Cmd, setPlayer2Cmd] = useState<string | null>("__random__");
-	const [status, setStatus] = useState<MatchStatus>("idle");
-	const [result, setResult] = useState<MatchOverEvent | null>(null);
-	const [error, setError] = useState<string | null>(null);
-	const [disconnection, setDisconnection] =
-		useState<BotDisconnectedEvent | null>(null);
-
-	// Accumulate-then-navigate replay state
-	const [baseMaze, setBaseMaze] = useState<MazeState | null>(null);
-	const [turns, setTurns] = useState<TurnPlayedEvent[]>([]);
-	const [currentTurn, setCurrentTurn] = useState(-1);
-	const [isPlaying, setIsPlaying] = useState(false);
-	const [pendingResult, setPendingResult] = useState<MatchOverEvent | null>(
-		null,
-	);
-
 	const matchIdRef = useRef<number>(-1);
+	const displayState = useDisplayState();
 
-	// Ref so the auto-advance interval can read current length without re-creating
-	const turnsLenRef = useRef(0);
-	turnsLenRef.current = turns.length;
+	const viewerMode = useMatchStore((s) => s.viewerMode);
+	const playbackSpeed = useMatchStore((s) => s.playbackSpeed);
+	const cursor = useMatchStore((s) => s.cursor);
+	const pendingResult = useMatchStore((s) => s.pendingResult);
+	const player1Cmd = useMatchStore((s) => s.player1Cmd);
+	const player2Cmd = useMatchStore((s) => s.player2Cmd);
 
-	// Derive rendered state from baseMaze + turns[cursor]
-	const displayState = useMemo(() => {
-		if (!baseMaze) return null;
-		if (currentTurn < 0 || turns.length === 0) return baseMaze;
-		const t = turns[currentTurn];
-		if (!t) return baseMaze;
-		return {
-			...baseMaze,
-			turn: t.turn,
-			player1: t.player1,
-			player2: t.player2,
-			cheese: t.cheese,
-		};
-	}, [baseMaze, turns, currentTurn]);
+	const {
+		onMatchStarted,
+		onTurnPlayed,
+		onMatchOver,
+		onBotInfo,
+		onError,
+		onDisconnect,
+		advanceCursor,
+		applyPendingResult,
+	} = useMatchStore.getState();
 
-	// Auto-advance cursor at ~5fps when playing
-	useEffect(() => {
-		if (!isPlaying) return;
-		const id = setInterval(() => {
-			setCurrentTurn((prev) => {
-				const maxIdx = turnsLenRef.current - 1;
-				if (prev >= maxIdx) return prev;
-				return prev + 1;
-			});
-		}, 200);
-		return () => clearInterval(id);
-	}, [isPlaying]);
-
-	// Apply result once cursor reaches the last turn
-	useEffect(() => {
-		if (!pendingResult) return;
-		if (currentTurn >= 0 && currentTurn >= turns.length - 1) {
-			setResult(pendingResult);
-			setPendingResult(null);
-			setStatus("finished");
-			setIsPlaying(false);
-		}
-	}, [currentTurn, turns.length, pendingResult]);
-
-	// Event listeners — pure accumulation, no pacing
+	// Event listeners — wire Tauri events to store actions
 	useEffect(() => {
 		const unlisteners = [
 			events.matchStartedEvent.listen((e) => {
 				matchIdRef.current = e.payload.match_id;
-				setBaseMaze(e.payload.maze);
-				setTurns([]);
-				setCurrentTurn(-1);
-				setIsPlaying(true);
-				setStatus("running");
-				setResult(null);
-				setPendingResult(null);
-				setError(null);
-				setDisconnection(null);
+				onMatchStarted(e.payload.maze, e.payload.match_id);
 			}),
 			events.turnPlayedEvent.listen((e) => {
 				if (e.payload.match_id !== matchIdRef.current) return;
-				setTurns((prev) => [...prev, e.payload]);
+				onTurnPlayed(e.payload);
 			}),
 			events.matchOverEvent.listen((e) => {
 				if (e.payload.match_id !== matchIdRef.current) return;
-				setPendingResult(e.payload);
+				onMatchOver(e.payload);
 			}),
 			events.matchErrorEvent.listen((e) => {
 				if (e.payload.match_id !== matchIdRef.current) return;
-				setError(e.payload.message);
-				setStatus("idle");
+				onError(e.payload.message);
 			}),
 			events.botDisconnectedEvent.listen((e) => {
 				if (e.payload.match_id !== matchIdRef.current) return;
-				setDisconnection(e.payload);
+				onDisconnect(e.payload);
+			}),
+			events.botInfoEvent.listen((e) => {
+				if (e.payload.match_id !== matchIdRef.current) return;
+				onBotInfo(e.payload);
 			}),
 		];
 
@@ -116,63 +67,39 @@ export default function MatchView() {
 		};
 	}, []);
 
+	// Auto-advance cursor during playback
+	useEffect(() => {
+		if (viewerMode !== "playing") return;
+		const id = setInterval(() => {
+			advanceCursor();
+		}, playbackSpeed);
+		return () => clearInterval(id);
+	}, [viewerMode, playbackSpeed]);
+
+	// Apply pending result once cursor reaches mainline end
+	useEffect(() => {
+		if (!pendingResult) return;
+		// Read root directly — its reference is stable (mutated in place),
+		// so we always get the fully-built tree here.
+		const { root } = useMatchStore.getState();
+		if (!root) return;
+		if (cursor.length >= mainlineLength(root)) {
+			applyPendingResult();
+		}
+	}, [cursor, pendingResult]);
+
 	const handleStart = async () => {
 		if (!player1Cmd || !player2Cmd) return;
-		setError(null);
-		setResult(null);
-		setDisconnection(null);
+		useMatchStore.setState({ error: null, result: null, disconnection: null });
 		const res = await commands.startMatch(player1Cmd, player2Cmd);
 		if (res.status === "error") {
-			setError(res.error);
+			useMatchStore.getState().onError(res.error);
 		}
 	};
 
-	// Navigation callbacks
-	const onGoToStart = useCallback(() => {
-		setCurrentTurn(-1);
-		setIsPlaying(false);
-	}, []);
-
-	const onGoToEnd = useCallback(() => {
-		setCurrentTurn(turns.length - 1);
-		setIsPlaying(false);
-	}, [turns.length]);
-
-	const onStepForward = useCallback(() => {
-		setCurrentTurn((prev) => Math.min(prev + 1, turns.length - 1));
-		setIsPlaying(false);
-	}, [turns.length]);
-
-	const onStepBack = useCallback(() => {
-		setCurrentTurn((prev) => Math.max(prev - 1, -1));
-		setIsPlaying(false);
-	}, []);
-
-	const onTogglePlay = useCallback(() => {
-		setIsPlaying((prev) => !prev);
-	}, []);
-
 	return (
 		<Stack h="100vh" gap={0}>
-			<MatchToolbar
-				player1Cmd={player1Cmd}
-				player2Cmd={player2Cmd}
-				onPlayer1CmdChange={setPlayer1Cmd}
-				onPlayer2CmdChange={setPlayer2Cmd}
-				onStart={handleStart}
-				status={status}
-				result={result}
-				error={error}
-				disconnection={disconnection}
-				currentTurn={currentTurn}
-				totalTurns={turns.length}
-				isPlaying={isPlaying}
-				onGoToStart={onGoToStart}
-				onGoToEnd={onGoToEnd}
-				onStepForward={onStepForward}
-				onStepBack={onStepBack}
-				onTogglePlay={onTogglePlay}
-			/>
+			<MatchToolbar onStart={handleStart} />
 			<div style={{ flex: 1, overflow: "hidden" }}>
 				{displayState ? (
 					<MazeRenderer gameState={displayState} />

@@ -13,12 +13,25 @@ use pyrat_host::game_loop::{
 };
 use pyrat_host::session::messages::{SessionId, SessionMsg};
 use pyrat_host::stub::spawn_stub_bot;
-use pyrat_host::wire::{GameResult, Player, TimingMode};
+use pyrat_host::wire::{Direction as WireDirection, GameResult, Player, TimingMode};
 
 use tauri_specta::Event;
 
 use crate::commands::{Coord, PlayerState};
-use crate::events::{BotDisconnectedEvent, MatchOverEvent, MatchWinner, TurnPlayedEvent};
+use crate::events::{
+    BotDisconnectedEvent, BotInfoEvent, Direction as SpectaDirection, MatchOverEvent, MatchWinner,
+    TurnPlayedEvent,
+};
+
+fn wire_to_specta(d: WireDirection) -> SpectaDirection {
+    match d {
+        WireDirection::Up => SpectaDirection::Up,
+        WireDirection::Right => SpectaDirection::Right,
+        WireDirection::Down => SpectaDirection::Down,
+        WireDirection::Left => SpectaDirection::Left,
+        _ => SpectaDirection::Stay,
+    }
+}
 
 /// Sentinel command value that means "use the built-in random stub bot".
 const STUB_SENTINEL: &str = "__random__";
@@ -221,7 +234,11 @@ async fn forward_events(
 ) {
     while let Some(event) = event_rx.recv().await {
         match event {
-            MatchEvent::TurnPlayed { state, .. } => {
+            MatchEvent::TurnPlayed {
+                state,
+                p1_action,
+                p2_action,
+            } => {
                 let payload = TurnPlayedEvent {
                     match_id,
                     turn: state.turn,
@@ -240,6 +257,8 @@ async fn forward_events(
                         score: state.player2_score,
                     },
                     cheese: state.cheese.iter().map(|&(x, y)| Coord { x, y }).collect(),
+                    player1_action: wire_to_specta(p1_action),
+                    player2_action: wire_to_specta(p2_action),
                 };
                 let _ = payload.emit(&app);
             },
@@ -273,6 +292,25 @@ async fn forward_events(
                     player1_score: result.player1_score,
                     player2_score: result.player2_score,
                     turns_played: result.turns_played,
+                }
+                .emit(&app);
+            },
+            MatchEvent::BotInfo { player, turn, info } => {
+                let player_str = if player == Player::Player1 {
+                    "player1"
+                } else {
+                    "player2"
+                };
+                let _ = BotInfoEvent {
+                    match_id,
+                    player: player_str.into(),
+                    turn,
+                    target: info.target.map(|(x, y)| Coord { x, y }),
+                    depth: info.depth,
+                    nodes: info.nodes,
+                    score: info.score,
+                    path: info.path.iter().map(|&(x, y)| Coord { x, y }).collect(),
+                    message: info.message,
                 }
                 .emit(&app);
             },

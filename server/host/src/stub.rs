@@ -8,9 +8,9 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::debug;
 
-use crate::session::messages::{HostCommand, SessionMsg};
+use crate::session::messages::{HostCommand, OwnedInfo, SessionMsg};
 use crate::session::SessionId;
-use pyrat_wire::Direction;
+use pyrat_wire::{Direction, Player};
 
 /// The four movement directions (excludes Stay).
 const MOVES: [Direction; 4] = [
@@ -121,6 +121,32 @@ async fn run_stub(
             Some(HostCommand::TurnState(ts)) => {
                 let turn = ts.turn;
                 let dir = random_direction();
+
+                // Emit fake Info so the GUI pipeline has data to display.
+                let player_pos = if controlled_players.first() == Some(&Player::Player1) {
+                    ts.player1_position
+                } else {
+                    ts.player2_position
+                };
+                let target = ts.cheese.first().copied();
+                let path = match target {
+                    Some(t) => vec![player_pos, t],
+                    None => vec![player_pos],
+                };
+                let _ = game_tx
+                    .send(SessionMsg::Info {
+                        session_id,
+                        info: OwnedInfo {
+                            target,
+                            depth: 1,
+                            nodes: 1,
+                            score: 0.0,
+                            path,
+                            message: "stub".into(),
+                        },
+                    })
+                    .await;
+
                 for &player in &controlled_players {
                     if game_tx
                         .send(SessionMsg::Action {

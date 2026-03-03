@@ -28,12 +28,14 @@ async startMatch(player1Cmd: string, player2Cmd: string) : Promise<Result<null, 
 
 export const events = __makeEvents__<{
 botDisconnectedEvent: BotDisconnectedEvent,
+botInfoEvent: BotInfoEvent,
 matchErrorEvent: MatchErrorEvent,
 matchOverEvent: MatchOverEvent,
 matchStartedEvent: MatchStartedEvent,
 turnPlayedEvent: TurnPlayedEvent
 }>({
 botDisconnectedEvent: "bot-disconnected-event",
+botInfoEvent: "bot-info-event",
 matchErrorEvent: "match-error-event",
 matchOverEvent: "match-over-event",
 matchStartedEvent: "match-started-event",
@@ -50,7 +52,15 @@ turnPlayedEvent: "turn-played-event"
  * Emitted when a bot disconnects mid-game.
  */
 export type BotDisconnectedEvent = { match_id: number; player: string; reason: string }
+/**
+ * Bot debug/analysis info forwarded from the host event stream.
+ */
+export type BotInfoEvent = { match_id: number; player: string; turn: number; target: Coord | null; depth: number; nodes: number; score: number; path: Coord[]; message: string }
 export type Coord = { x: number; y: number }
+/**
+ * Movement direction — specta-friendly mirror of pyrat_wire::Direction.
+ */
+export type Direction = "Up" | "Right" | "Down" | "Left" | "Stay"
 /**
  * Emitted on setup failures, bot crashes, etc.
  */
@@ -70,7 +80,7 @@ export type PlayerState = { position: Coord; score: number }
 /**
  * Per-turn delta. Walls/mud never change, so we only send positions + cheese.
  */
-export type TurnPlayedEvent = { match_id: number; turn: number; player1: PlayerState; player2: PlayerState; cheese: Coord[] }
+export type TurnPlayedEvent = { match_id: number; turn: number; player1: PlayerState; player2: PlayerState; cheese: Coord[]; player1_action: Direction; player2_action: Direction }
 export type WallEntry = { from: Coord; to: Coord }
 
 /** tauri-specta globals **/

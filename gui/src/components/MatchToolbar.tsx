@@ -14,31 +14,15 @@ import {
 	IconPlayerPause,
 	IconPlayerPlay,
 } from "@tabler/icons-react";
-import type {
-	BotDisconnectedEvent,
-	MatchOverEvent,
-	MatchWinner,
-} from "../bindings/generated";
-import type { MatchStatus } from "./MatchView";
+import type { MatchWinner } from "../bindings/generated";
+import {
+	useMatchStore,
+	useCursorDepth,
+	useMainlineLength,
+} from "../stores/matchStore";
 
 type Props = {
-	player1Cmd: string | null;
-	player2Cmd: string | null;
-	onPlayer1CmdChange: (value: string | null) => void;
-	onPlayer2CmdChange: (value: string | null) => void;
 	onStart: () => void;
-	status: MatchStatus;
-	result: MatchOverEvent | null;
-	error: string | null;
-	disconnection: BotDisconnectedEvent | null;
-	currentTurn: number;
-	totalTurns: number;
-	isPlaying: boolean;
-	onGoToStart: () => void;
-	onGoToEnd: () => void;
-	onStepForward: () => void;
-	onStepBack: () => void;
-	onTogglePlay: () => void;
 };
 
 function winnerLabel(winner: MatchWinner): string {
@@ -65,26 +49,48 @@ function winnerColor(winner: MatchWinner): string {
 
 const BOT_OPTIONS = [{ value: "__random__", label: "Random Bot" }];
 
-export default function MatchToolbar({
-	player1Cmd,
-	player2Cmd,
-	onPlayer1CmdChange,
-	onPlayer2CmdChange,
-	onStart,
-	status,
-	result,
-	error,
-	disconnection,
-	currentTurn,
-	totalTurns,
-	isPlaying,
-	onGoToStart,
-	onGoToEnd,
-	onStepForward,
-	onStepBack,
-	onTogglePlay,
-}: Props) {
+const SPEED_OPTIONS = [
+	{ value: "800", label: "0.25x" },
+	{ value: "400", label: "0.5x" },
+	{ value: "200", label: "1x" },
+	{ value: "100", label: "2x" },
+	{ value: "40", label: "5x" },
+	{ value: "20", label: "10x" },
+];
+
+export default function MatchToolbar({ onStart }: Props) {
+	const player1Cmd = useMatchStore((s) => s.player1Cmd);
+	const player2Cmd = useMatchStore((s) => s.player2Cmd);
+	const viewerMode = useMatchStore((s) => s.viewerMode);
+	const playbackSpeed = useMatchStore((s) => s.playbackSpeed);
+	const result = useMatchStore((s) => s.result);
+	const error = useMatchStore((s) => s.error);
+	const disconnection = useMatchStore((s) => s.disconnection);
+
+	const {
+		setPlayer1Cmd,
+		setPlayer2Cmd,
+		goToStart,
+		goToEnd,
+		stepForward,
+		stepBack,
+		togglePlay,
+		setPlaybackSpeed,
+	} = useMatchStore.getState();
+
+	const cursorDepth = useCursorDepth();
+	const totalTurns = useMainlineLength();
+
 	const canStart = player1Cmd != null && player2Cmd != null;
+	const hasMatch = viewerMode !== "empty";
+
+	const handleStartClick = () => {
+		if (hasMatch) {
+			if (!window.confirm("Start a new match? Current match data will be lost."))
+				return;
+		}
+		onStart();
+	};
 
 	return (
 		<Group
@@ -101,9 +107,8 @@ export default function MatchToolbar({
 					placeholder="Player 1"
 					data={BOT_OPTIONS}
 					value={player1Cmd}
-					onChange={onPlayer1CmdChange}
+					onChange={setPlayer1Cmd}
 					style={{ width: 180 }}
-					disabled={status === "running"}
 					allowDeselect={false}
 				/>
 				<Select
@@ -111,40 +116,38 @@ export default function MatchToolbar({
 					placeholder="Player 2"
 					data={BOT_OPTIONS}
 					value={player2Cmd}
-					onChange={onPlayer2CmdChange}
+					onChange={setPlayer2Cmd}
 					style={{ width: 180 }}
-					disabled={status === "running"}
 					allowDeselect={false}
 				/>
 				<Button
 					size="xs"
-					onClick={onStart}
+					onClick={handleStartClick}
 					disabled={!canStart}
-					loading={status === "running"}
 				>
-					Start
+					{!hasMatch ? "Start" : "New Match"}
 				</Button>
 			</Group>
-			{status !== "idle" && (
+			{hasMatch && (
 				<Group gap={4}>
 					<ActionIcon
 						variant="subtle"
 						size="sm"
-						onClick={onGoToStart}
-						disabled={currentTurn <= -1}
+						onClick={goToStart}
+						disabled={cursorDepth === 0}
 					>
 						<IconChevronsLeft size={16} />
 					</ActionIcon>
 					<ActionIcon
 						variant="subtle"
 						size="sm"
-						onClick={onStepBack}
-						disabled={currentTurn <= -1}
+						onClick={stepBack}
+						disabled={cursorDepth === 0}
 					>
 						<IconChevronLeft size={16} />
 					</ActionIcon>
-					<ActionIcon variant="subtle" size="sm" onClick={onTogglePlay}>
-						{isPlaying ? (
+					<ActionIcon variant="subtle" size="sm" onClick={togglePlay}>
+						{viewerMode === "playing" ? (
 							<IconPlayerPause size={16} />
 						) : (
 							<IconPlayerPlay size={16} />
@@ -153,21 +156,29 @@ export default function MatchToolbar({
 					<ActionIcon
 						variant="subtle"
 						size="sm"
-						onClick={onStepForward}
-						disabled={currentTurn >= totalTurns - 1}
+						onClick={stepForward}
+						disabled={cursorDepth >= totalTurns}
 					>
 						<IconChevronRight size={16} />
 					</ActionIcon>
 					<ActionIcon
 						variant="subtle"
 						size="sm"
-						onClick={onGoToEnd}
-						disabled={currentTurn >= totalTurns - 1}
+						onClick={goToEnd}
+						disabled={cursorDepth >= totalTurns}
 					>
 						<IconChevronsRight size={16} />
 					</ActionIcon>
+					<Select
+						size="xs"
+						data={SPEED_OPTIONS}
+						value={String(playbackSpeed)}
+						onChange={(v) => v && setPlaybackSpeed(Number(v))}
+						allowDeselect={false}
+						style={{ width: 80 }}
+					/>
 					<Text size="xs" c="dimmed" ml={4}>
-						Turn {currentTurn + 1} / {totalTurns}
+						Turn {cursorDepth} / {totalTurns}
 					</Text>
 				</Group>
 			)}
