@@ -133,10 +133,8 @@ export default function MatchToolbar({
 	const handleConfirm = () => {
 		const action = pendingAction;
 		setPendingAction(null);
-		if (action === "reset") {
-			resetToPreview();
-		} else if (action === "reroll") {
-			resetToPreview();
+		resetToPreview();
+		if (action === "reroll") {
 			rerollPreview(matchConfig);
 		}
 	};

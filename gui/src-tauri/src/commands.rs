@@ -214,13 +214,13 @@ pub fn get_game_state(config: Option<MatchConfigParams>) -> Result<MazeState, St
     Ok(build_maze_state(&game))
 }
 
-#[tauri::command]
-#[specta::specta]
-pub async fn stop_match(state: tauri::State<'_, AppState>) -> Result<(), String> {
+/// Cancel any running match: signal cooperative cancellation, wait up to 5s,
+/// then abort the task if it hasn't stopped.
+async fn cancel_running_match(match_phase: &tokio::sync::Mutex<MatchPhase>) {
     use std::time::Duration;
 
     let old_handle = {
-        let mut phase = state.match_phase.lock().await;
+        let mut phase = match_phase.lock().await;
         match std::mem::replace(&mut *phase, MatchPhase::Idle) {
             MatchPhase::Running { cancel, handle, .. } => {
                 cancel.cancel();
@@ -230,8 +230,20 @@ pub async fn stop_match(state: tauri::State<'_, AppState>) -> Result<(), String>
         }
     };
     if let Some(handle) = old_handle {
-        let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
+        let abort = handle.abort_handle();
+        if tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .is_err()
+        {
+            abort.abort();
+        }
     }
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn stop_match(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    cancel_running_match(&state.match_phase).await;
     Ok(())
 }
 
@@ -246,26 +258,13 @@ pub async fn start_match(
     player2_working_dir: Option<String>,
     config: Option<MatchConfigParams>,
 ) -> Result<(), String> {
-    use std::time::Duration;
     use tauri_specta::Event;
     use tokio_util::sync::CancellationToken;
 
     let params = config.unwrap_or_default();
 
     // Cancel existing match and wait for cleanup before proceeding.
-    let old_handle = {
-        let mut phase = state.match_phase.lock().await;
-        match std::mem::replace(&mut *phase, MatchPhase::Idle) {
-            MatchPhase::Running { cancel, handle, .. } => {
-                cancel.cancel();
-                Some(handle)
-            },
-            MatchPhase::Idle => None,
-        }
-    };
-    if let Some(handle) = old_handle {
-        let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
-    }
+    cancel_running_match(&state.match_phase).await;
 
     let match_id = state.next_match_id.fetch_add(1, Ordering::Relaxed);
     let cancel = CancellationToken::new();

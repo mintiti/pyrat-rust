@@ -122,23 +122,28 @@ interface MatchState {
 	advanceCursor: () => void;
 }
 
+/** Fields that get wiped when returning to idle/preview state. */
+const IDLE_MATCH = {
+	matchId: null as number | null,
+	mazeConfig: null as MazeConfig | null,
+	root: null as GameNode | null,
+	cursor: [] as number[],
+	mainlineDepth: 0,
+	result: null as MatchOverEvent | null,
+	pendingResult: null as MatchOverEvent | null,
+	error: null as string | null,
+	disconnection: null as BotDisconnectedEvent | null,
+	viewerMode: "previewing" as ViewerMode,
+};
+
 export const useMatchStore = create<MatchState>((set, get) => ({
 	// ── Initial state ────────────────────────────────────────
-	matchId: null,
-	mazeConfig: null,
+	...IDLE_MATCH,
 	player1BotId: "__random__",
 	player2BotId: "__random__",
-	result: null,
-	pendingResult: null,
-	error: null,
-	disconnection: null,
-	root: null,
-	cursor: [],
-	mainlineDepth: 0,
 	previewMaze: null,
 	previewSeed: null,
 	previewError: null,
-	viewerMode: "previewing",
 	playbackSpeed: 200,
 
 	// ── Setters ──────────────────────────────────────────────
@@ -157,6 +162,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 			children: [],
 		};
 		set({
+			...IDLE_MATCH,
 			matchId,
 			mazeConfig: {
 				width: maze.width,
@@ -167,13 +173,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 				total_cheese: maze.total_cheese,
 			},
 			root,
-			cursor: [],
-			mainlineDepth: 0,
 			viewerMode: "live",
-			result: null,
-			pendingResult: null,
-			error: null,
-			disconnection: null,
 		});
 	},
 
@@ -223,18 +223,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	},
 
 	onError: (message) => {
-		set({
-			error: message,
-			matchId: null,
-			mazeConfig: null,
-			root: null,
-			cursor: [],
-			mainlineDepth: 0,
-			result: null,
-			pendingResult: null,
-			disconnection: null,
-			viewerMode: "previewing",
-		});
+		set({ ...IDLE_MATCH, error: message });
 	},
 
 	onDisconnect: (e) => {
@@ -243,19 +232,8 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 
 	// ── Actions ─────────────────────────────────────────────
 	resetToPreview: () => {
-		commands.stopMatch(); // fire-and-forget, cancel backend
-		set({
-			matchId: null,
-			mazeConfig: null,
-			root: null,
-			cursor: [],
-			mainlineDepth: 0,
-			result: null,
-			pendingResult: null,
-			error: null,
-			disconnection: null,
-			viewerMode: "previewing",
-		});
+		commands.stopMatch().catch(console.error);
+		set(IDLE_MATCH);
 	},
 
 	// ── Navigation ───────────────────────────────────────────
