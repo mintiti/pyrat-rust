@@ -21,6 +21,14 @@ async startMatch(player1Cmd: string, player2Cmd: string, player1WorkingDir: stri
     else return { status: "error", error: e  as any };
 }
 },
+async stopMatch() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stop_match") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
 async loadBotConfigs() : Promise<Result<BotConfigEntry[], string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("load_bot_configs") };

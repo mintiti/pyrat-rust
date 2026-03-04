@@ -9,7 +9,7 @@ mod match_runner;
 mod state;
 
 use bot_config::{load_bot_configs, save_bot_configs};
-use commands::{get_game_state, start_match};
+use commands::{get_game_state, start_match, stop_match};
 use events::{
     BotDisconnectedEvent, BotInfoEvent, MatchErrorEvent, MatchOverEvent, MatchStartedEvent,
     TurnPlayedEvent,
@@ -29,6 +29,7 @@ fn main() {
         .commands(collect_commands![
             get_game_state,
             start_match,
+            stop_match,
             load_bot_configs,
             save_bot_configs,
             load_match_config,

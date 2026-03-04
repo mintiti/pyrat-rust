@@ -216,6 +216,27 @@ pub fn get_game_state(config: Option<MatchConfigParams>) -> Result<MazeState, St
 
 #[tauri::command]
 #[specta::specta]
+pub async fn stop_match(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    use std::time::Duration;
+
+    let old_handle = {
+        let mut phase = state.match_phase.lock().await;
+        match std::mem::replace(&mut *phase, MatchPhase::Idle) {
+            MatchPhase::Running { cancel, handle, .. } => {
+                cancel.cancel();
+                Some(handle)
+            },
+            MatchPhase::Idle => None,
+        }
+    };
+    if let Some(handle) = old_handle {
+        let _ = tokio::time::timeout(Duration::from_secs(5), handle).await;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+#[specta::specta]
 pub async fn start_match(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,

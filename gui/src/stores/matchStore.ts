@@ -39,7 +39,7 @@ export interface GameNode {
 	children: GameNode[];
 }
 
-export type ViewerMode = "empty" | "playing" | "paused";
+export type ViewerMode = "previewing" | "live" | "reviewing";
 
 // ── Tree helpers ─────────────────────────────────────────────────
 
@@ -106,6 +106,9 @@ interface MatchState {
 	onError: (message: string) => void;
 	onDisconnect: (e: BotDisconnectedEvent) => void;
 
+	// Actions
+	resetToPreview: () => void;
+
 	// Navigation
 	goToStart: () => void;
 	goToEnd: () => void;
@@ -135,7 +138,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	previewMaze: null,
 	previewSeed: null,
 	previewError: null,
-	viewerMode: "empty",
+	viewerMode: "previewing",
 	playbackSpeed: 200,
 
 	// ── Setters ──────────────────────────────────────────────
@@ -166,14 +169,11 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 			root,
 			cursor: [],
 			mainlineDepth: 0,
-			viewerMode: "playing",
+			viewerMode: "live",
 			result: null,
 			pendingResult: null,
 			error: null,
 			disconnection: null,
-			previewMaze: null,
-			previewSeed: null,
-			previewError: null,
 		});
 	},
 
@@ -205,7 +205,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	onMatchOver: (e) => {
 		const { cursor, mainlineDepth } = get();
 		if (cursor.length >= mainlineDepth) {
-			set({ result: e, pendingResult: null, viewerMode: "paused" });
+			set({ result: e, pendingResult: null, viewerMode: "reviewing" });
 		} else {
 			set({ pendingResult: e });
 		}
@@ -223,21 +223,49 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	},
 
 	onError: (message) => {
-		set({ error: message, viewerMode: "empty" });
+		set({
+			error: message,
+			matchId: null,
+			mazeConfig: null,
+			root: null,
+			cursor: [],
+			mainlineDepth: 0,
+			result: null,
+			pendingResult: null,
+			disconnection: null,
+			viewerMode: "previewing",
+		});
 	},
 
 	onDisconnect: (e) => {
 		set({ disconnection: e });
 	},
 
+	// ── Actions ─────────────────────────────────────────────
+	resetToPreview: () => {
+		commands.stopMatch(); // fire-and-forget, cancel backend
+		set({
+			matchId: null,
+			mazeConfig: null,
+			root: null,
+			cursor: [],
+			mainlineDepth: 0,
+			result: null,
+			pendingResult: null,
+			error: null,
+			disconnection: null,
+			viewerMode: "previewing",
+		});
+	},
+
 	// ── Navigation ───────────────────────────────────────────
 	goToStart: () => {
-		set({ cursor: [], viewerMode: "paused" });
+		set({ cursor: [], viewerMode: "reviewing" });
 	},
 
 	goToEnd: () => {
 		const { mainlineDepth } = get();
-		set({ cursor: mainlinePath(mainlineDepth), viewerMode: "paused" });
+		set({ cursor: mainlinePath(mainlineDepth), viewerMode: "reviewing" });
 	},
 
 	stepForward: () => {
@@ -245,23 +273,23 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		if (!root) return;
 		const node = getNodeAtPath(root, cursor);
 		if (!node || node.children.length === 0) return;
-		set({ cursor: [...cursor, 0], viewerMode: "paused" });
+		set({ cursor: [...cursor, 0], viewerMode: "reviewing" });
 	},
 
 	stepBack: () => {
 		const { cursor } = get();
 		if (cursor.length === 0) return;
-		set({ cursor: cursor.slice(0, -1), viewerMode: "paused" });
+		set({ cursor: cursor.slice(0, -1), viewerMode: "reviewing" });
 	},
 
 	goToTurn: (n) => {
-		set({ cursor: mainlinePath(n), viewerMode: "paused" });
+		set({ cursor: mainlinePath(n), viewerMode: "reviewing" });
 	},
 
 	togglePlay: () => {
 		const { viewerMode } = get();
 		set({
-			viewerMode: viewerMode === "playing" ? "paused" : "playing",
+			viewerMode: viewerMode === "live" ? "reviewing" : "live",
 		});
 	},
 
@@ -279,7 +307,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 				set({
 					result: pendingResult,
 					pendingResult: null,
-					viewerMode: "paused",
+					viewerMode: "reviewing",
 				});
 			}
 			return;

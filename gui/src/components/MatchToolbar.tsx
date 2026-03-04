@@ -93,6 +93,7 @@ export default function MatchToolbar({
 		stepBack,
 		togglePlay,
 		setPlaybackSpeed,
+		resetToPreview,
 	} = useMatchStore.getState();
 
 	const cursorDepth = useCursorDepth();
@@ -106,16 +107,37 @@ export default function MatchToolbar({
 		[bots],
 	);
 
-	const [confirmOpen, setConfirmOpen] = useState(false);
+	const [pendingAction, setPendingAction] = useState<
+		"reset" | "reroll" | null
+	>(null);
 
 	const canStart = player1BotId != null && player2BotId != null;
-	const hasMatch = viewerMode !== "empty";
+	const hasMatch = viewerMode !== "previewing";
 
 	const handleStartClick = () => {
 		if (hasMatch) {
-			setConfirmOpen(true);
+			setPendingAction("reset");
 		} else {
 			onStart();
+		}
+	};
+
+	const handleDiceClick = () => {
+		if (hasMatch) {
+			setPendingAction("reroll");
+		} else {
+			rerollPreview(matchConfig);
+		}
+	};
+
+	const handleConfirm = () => {
+		const action = pendingAction;
+		setPendingAction(null);
+		if (action === "reset") {
+			resetToPreview();
+		} else if (action === "reroll") {
+			resetToPreview();
+			rerollPreview(matchConfig);
 		}
 	};
 
@@ -178,17 +200,15 @@ export default function MatchToolbar({
 								matchConfig.preset.slice(1)}
 					</Badge>
 				</Tooltip>
-				{!hasMatch && (
-					<ActionIcon
-						variant="subtle"
-						size="sm"
-						onClick={() => rerollPreview(matchConfig)}
-						disabled={matchConfig.seed != null}
-						title="Re-roll maze"
-					>
-						<IconDice size={16} />
-					</ActionIcon>
-				)}
+				<ActionIcon
+					variant="subtle"
+					size="sm"
+					onClick={handleDiceClick}
+					disabled={!hasMatch && matchConfig.seed != null}
+					title="Re-roll maze"
+				>
+					<IconDice size={16} />
+				</ActionIcon>
 			</Group>
 			{hasMatch && (
 				<Group gap={4}>
@@ -209,7 +229,7 @@ export default function MatchToolbar({
 						<IconChevronLeft size={16} />
 					</ActionIcon>
 					<ActionIcon variant="subtle" size="sm" onClick={togglePlay}>
-						{viewerMode === "playing" ? (
+						{viewerMode === "live" ? (
 							<IconPlayerPause size={16} />
 						) : (
 							<IconPlayerPlay size={16} />
@@ -264,12 +284,16 @@ export default function MatchToolbar({
 				)}
 			</Group>
 			<ConfirmModal
-				title="Start new match?"
+				title={
+					pendingAction === "reroll"
+						? "Re-roll maze?"
+						: "Return to preview?"
+				}
 				description="Current match data will be lost."
-				opened={confirmOpen}
-				onClose={() => setConfirmOpen(false)}
-				onConfirm={onStart}
-				confirmLabel="New Match"
+				opened={pendingAction != null}
+				onClose={() => setPendingAction(null)}
+				onConfirm={handleConfirm}
+				confirmLabel={pendingAction === "reroll" ? "Re-roll" : "Confirm"}
 			/>
 		</Group>
 	);

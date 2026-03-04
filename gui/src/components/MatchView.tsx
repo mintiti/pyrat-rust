@@ -78,18 +78,17 @@ export default function MatchView({ onNavigate }: Props) {
 
 	// Auto-advance cursor during playback
 	useEffect(() => {
-		if (viewerMode !== "playing") return;
+		if (viewerMode !== "live") return;
 		const id = setInterval(() => {
 			advanceCursor();
 		}, playbackSpeed);
 		return () => clearInterval(id);
 	}, [viewerMode, playbackSpeed]);
 
-	// Generate maze preview when idle
+	// Generate maze preview — runs on every config change so preview is always fresh
 	useEffect(() => {
-		if (viewerMode !== "empty") return;
 		generatePreview(matchConfig);
-	}, [viewerMode, matchConfig]);
+	}, [matchConfig]);
 
 	const resolveBotId = (botId: string) => {
 		if (botId === "__random__") return { cmd: "__random__", workingDir: null };
