@@ -15,6 +15,7 @@ import type {
 	TurnPlayedEvent,
 	WallEntry,
 } from "../bindings/generated";
+import { RANDOM_BOT_ID } from "./botConfigAtom";
 
 // ── Types ────────────────────────────────────────────────────────
 
@@ -139,8 +140,8 @@ const IDLE_MATCH = {
 export const useMatchStore = create<MatchState>((set, get) => ({
 	// ── Initial state ────────────────────────────────────────
 	...IDLE_MATCH,
-	player1BotId: "__random__",
-	player2BotId: "__random__",
+	player1BotId: RANDOM_BOT_ID,
+	player2BotId: RANDOM_BOT_ID,
 	previewMaze: null,
 	previewSeed: null,
 	previewError: null,

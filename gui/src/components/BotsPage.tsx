@@ -16,15 +16,16 @@ import {
 } from "@mantine/core";
 import { IconArrowLeft, IconPlus, IconRobot } from "@tabler/icons-react";
 import { useAtom, useAtomValue } from "jotai";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { View } from "../App";
 import {
+	type BotConfig,
 	asyncBotsAtom,
 	botsAtom,
-	type BotConfig,
 } from "../stores/botConfigAtom";
 
 type Props = {
-	onNavigate: (view: "match" | "bots") => void;
+	onNavigate: (view: View) => void;
 };
 
 export default function BotsPage({ onNavigate }: Props) {
@@ -32,7 +33,20 @@ export default function BotsPage({ onNavigate }: Props) {
 	const [, setBots] = useAtom(asyncBotsAtom);
 	const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
 
+	// Local draft for the selected bot — edits are cheap, only persisted on blur.
 	const selectedBot = bots.find((b) => b.id === selectedBotId) ?? null;
+	const [draft, setDraft] = useState<BotConfig | null>(null);
+
+	// Sync draft when selection changes — keyed on ID, not object ref
+	// biome-ignore lint/correctness/useExhaustiveDependencies: intentionally keyed on selectedBotId
+	useEffect(() => {
+		setDraft(selectedBot ? { ...selectedBot } : null);
+	}, [selectedBotId]);
+
+	const flushDraft = () => {
+		if (!draft) return;
+		setBots(bots.map((b) => (b.id === draft.id ? draft : b)));
+	};
 
 	const handleAdd = () => {
 		const newBot: BotConfig = {
@@ -43,10 +57,6 @@ export default function BotsPage({ onNavigate }: Props) {
 		};
 		setBots([...bots, newBot]);
 		setSelectedBotId(newBot.id);
-	};
-
-	const handleUpdate = (id: string, patch: Partial<BotConfig>) => {
-		setBots(bots.map((b) => (b.id === id ? { ...b, ...patch } : b)));
 	};
 
 	const handleDelete = (id: string) => {
@@ -147,46 +157,43 @@ export default function BotsPage({ onNavigate }: Props) {
 				</ScrollArea>
 
 				{/* Right panel: details or empty state */}
-				{selectedBot ? (
+				{draft ? (
 					<Paper withBorder p="md" h="100%">
 						<ScrollArea h="100%" offsetScrollbars>
 							<Stack>
 								<Divider variant="dashed" label="General Settings" />
 								<TextInput
 									label="Name"
-									value={selectedBot.name}
+									value={draft.name}
 									onChange={(e) =>
-										handleUpdate(selectedBot.id, {
-											name: e.currentTarget.value,
-										})
+										setDraft({ ...draft, name: e.currentTarget.value })
 									}
+									onBlur={flushDraft}
 								/>
 								<TextInput
 									label="Command"
 									description="Shell command to launch the bot"
-									value={selectedBot.command}
+									value={draft.command}
 									onChange={(e) =>
-										handleUpdate(selectedBot.id, {
-											command: e.currentTarget.value,
-										})
+										setDraft({ ...draft, command: e.currentTarget.value })
 									}
+									onBlur={flushDraft}
 								/>
 								<TextInput
 									label="Working Directory"
 									description="Optional. Defaults to current dir."
-									value={selectedBot.working_dir ?? ""}
+									value={draft.working_dir ?? ""}
 									onChange={(e) =>
-										handleUpdate(selectedBot.id, {
+										setDraft({
+											...draft,
 											working_dir: e.currentTarget.value || null,
 										})
 									}
+									onBlur={flushDraft}
 								/>
 
 								<Group justify="end">
-									<Button
-										color="red"
-										onClick={() => handleDelete(selectedBot.id)}
-									>
+									<Button color="red" onClick={() => handleDelete(draft.id)}>
 										Remove
 									</Button>
 								</Group>

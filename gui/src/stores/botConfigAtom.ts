@@ -5,6 +5,9 @@ import type { BotConfigEntry } from "../bindings/generated";
 
 export type BotConfig = BotConfigEntry;
 
+/** Sentinel ID for the built-in random stub bot. Must match STUB_SENTINEL in match_runner.rs. */
+export const RANDOM_BOT_ID = "__random__" as const;
+
 /** Internal atom holding the raw data (initially a promise, then plain values). */
 const baseBotsAtom = atom<BotConfig[] | Promise<BotConfig[]>>(
 	commands

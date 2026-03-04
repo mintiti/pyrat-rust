@@ -10,9 +10,11 @@ import {
 	TextInput,
 } from "@mantine/core";
 import { useAtom, useAtomValue } from "jotai";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { MatchConfigParams } from "../bindings/generated";
 import {
+	CLASSIC_MAZE,
+	OPEN_MAZE,
 	PRESET_VALUES,
 	type PresetName,
 	asyncMatchConfigAtom,
@@ -56,8 +58,16 @@ function detectSizePreset(d: MatchConfigParams): PresetName | null {
 
 /** Derive maze type from density values. */
 function detectMazeType(d: MatchConfigParams): "classic" | "open" | null {
-	if (d.wall_density === 0 && d.mud_density === 0) return "open";
-	if (d.wall_density === 0.7 && d.mud_density === 0.1 && d.mud_range === 3)
+	if (
+		d.wall_density === OPEN_MAZE.wall_density &&
+		d.mud_density === OPEN_MAZE.mud_density
+	)
+		return "open";
+	if (
+		d.wall_density === CLASSIC_MAZE.wall_density &&
+		d.mud_density === CLASSIC_MAZE.mud_density &&
+		d.mud_range === CLASSIC_MAZE.mud_range
+	)
 		return "classic";
 	return null;
 }
@@ -67,9 +77,11 @@ export default function MatchConfigDrawer({ opened, onClose }: Props) {
 	const [, setConfig] = useAtom(asyncMatchConfigAtom);
 	const [draft, setDraft] = useState<MatchConfigParams>(committed);
 
-	// Reset draft when drawer opens
+	// Reset draft only on open transitions (not when committed changes while open)
+	const wasOpen = useRef(false);
 	useEffect(() => {
-		if (opened) setDraft(committed);
+		if (opened && !wasOpen.current) setDraft(committed);
+		wasOpen.current = opened;
 	}, [opened, committed]);
 
 	const errors = validate(draft);
@@ -100,9 +112,9 @@ export default function MatchConfigDrawer({ opened, onClose }: Props) {
 				// Keep size, switch to open maze
 				update({
 					preset: "open",
-					wall_density: 0,
-					mud_density: 0,
-					mud_range: 2,
+					wall_density: OPEN_MAZE.wall_density,
+					mud_density: OPEN_MAZE.mud_density,
+					mud_range: OPEN_MAZE.mud_range,
 				});
 			} else {
 				update({
@@ -112,20 +124,16 @@ export default function MatchConfigDrawer({ opened, onClose }: Props) {
 			}
 		} else {
 			// Classic maze
+			const classicPatch = {
+				wall_density: CLASSIC_MAZE.wall_density,
+				mud_density: CLASSIC_MAZE.mud_density,
+				mud_range: CLASSIC_MAZE.mud_range,
+			};
 			const sizePreset = detectSizePreset(draft);
 			if (sizePreset) {
-				update({
-					preset: sizePreset,
-					wall_density: 0.7,
-					mud_density: 0.1,
-					mud_range: 3,
-				});
+				update({ preset: sizePreset, ...classicPatch });
 			} else {
-				update({
-					wall_density: 0.7,
-					mud_density: 0.1,
-					mud_range: 3,
-				});
+				update(classicPatch);
 			}
 		}
 	};
@@ -155,7 +163,7 @@ export default function MatchConfigDrawer({ opened, onClose }: Props) {
 	};
 
 	const handleClose = () => {
-		if (Object.keys(validate(draft)).length === 0) {
+		if (Object.keys(errors).length === 0) {
 			setConfig(draft);
 		}
 		onClose();

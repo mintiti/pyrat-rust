@@ -2,7 +2,7 @@ import { Center, Stack, Text } from "@mantine/core";
 import { useAtomValue } from "jotai";
 import { useEffect, useRef, useState } from "react";
 import { events, commands } from "../bindings";
-import { botsAtom } from "../stores/botConfigAtom";
+import { RANDOM_BOT_ID, botsAtom } from "../stores/botConfigAtom";
 import { matchConfigAtom } from "../stores/matchConfigAtom";
 import {
 	generatePreview,
@@ -13,8 +13,10 @@ import MatchConfigDrawer from "./MatchConfigDrawer";
 import MatchToolbar from "./MatchToolbar";
 import MazeRenderer from "./MazeRenderer";
 
+import type { View } from "../App";
+
 type Props = {
-	onNavigate: (view: "match" | "bots") => void;
+	onNavigate: (view: View) => void;
 };
 
 export default function MatchView({ onNavigate }: Props) {
@@ -41,6 +43,7 @@ export default function MatchView({ onNavigate }: Props) {
 	} = useMatchStore.getState();
 
 	// Event listeners — wire Tauri events to store actions
+	// biome-ignore lint/correctness/useExhaustiveDependencies: callbacks from getState() are stable refs
 	useEffect(() => {
 		const unlisteners = [
 			events.matchStartedEvent.listen((e) => {
@@ -77,6 +80,7 @@ export default function MatchView({ onNavigate }: Props) {
 	}, []);
 
 	// Auto-advance cursor during playback
+	// biome-ignore lint/correctness/useExhaustiveDependencies: advanceCursor is a stable ref from getState()
 	useEffect(() => {
 		if (viewerMode !== "live") return;
 		const id = setInterval(() => {
@@ -91,7 +95,8 @@ export default function MatchView({ onNavigate }: Props) {
 	}, [matchConfig]);
 
 	const resolveBotId = (botId: string) => {
-		if (botId === "__random__") return { cmd: "__random__", workingDir: null };
+		if (botId === RANDOM_BOT_ID)
+			return { cmd: RANDOM_BOT_ID, workingDir: null };
 		const bot = bots.find((b) => b.id === botId);
 		if (!bot) return null;
 		return { cmd: bot.command, workingDir: bot.working_dir };

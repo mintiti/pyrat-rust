@@ -21,7 +21,7 @@ import {
 import { useAtomValue } from "jotai";
 import { useMemo, useState } from "react";
 import type { MatchWinner } from "../bindings/generated";
-import { botsAtom } from "../stores/botConfigAtom";
+import { RANDOM_BOT_ID, botsAtom } from "../stores/botConfigAtom";
 import { matchConfigAtom } from "../stores/matchConfigAtom";
 import {
 	rerollPreview,
@@ -31,9 +31,11 @@ import {
 } from "../stores/matchStore";
 import ConfirmModal from "./common/ConfirmModal";
 
+import type { View } from "../App";
+
 type Props = {
 	onStart: () => void;
-	onNavigate: (view: "match" | "bots") => void;
+	onNavigate: (view: View) => void;
 	onOpenConfig: () => void;
 };
 
@@ -101,15 +103,15 @@ export default function MatchToolbar({
 
 	const botOptions = useMemo(
 		() => [
-			{ value: "__random__", label: "Random Bot" },
+			{ value: RANDOM_BOT_ID, label: "Random Bot" },
 			...bots.map((b) => ({ value: b.id, label: b.name })),
 		],
 		[bots],
 	);
 
-	const [pendingAction, setPendingAction] = useState<
-		"reset" | "reroll" | null
-	>(null);
+	const [pendingAction, setPendingAction] = useState<"reset" | "reroll" | null>(
+		null,
+	);
 
 	const canStart = player1BotId != null && player2BotId != null;
 	const hasMatch = viewerMode !== "previewing";
@@ -283,9 +285,7 @@ export default function MatchToolbar({
 			</Group>
 			<ConfirmModal
 				title={
-					pendingAction === "reroll"
-						? "Re-roll maze?"
-						: "Return to preview?"
+					pendingAction === "reroll" ? "Re-roll maze?" : "Return to preview?"
 				}
 				description="Current match data will be lost."
 				opened={pendingAction != null}

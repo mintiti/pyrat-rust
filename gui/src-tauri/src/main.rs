@@ -4,6 +4,7 @@
 mod bot_config;
 mod commands;
 mod events;
+mod json_store;
 mod match_config;
 mod match_runner;
 mod state;

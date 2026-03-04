@@ -1,31 +1,29 @@
 {
-  "$schema": "https://raw.githubusercontent.com/nicotsx/tauri-settings-schema/master/tauri-conf-v2.json",
-  "productName": "PyRat",
-  "version": "0.1.0",
-  "identifier": "com.pyrat.gui",
-  "build": {
-    "beforeDevCommand": "pnpm dev:vite",
-    "beforeBuildCommand": "pnpm build:vite",
-    "frontendDist": "../dist",
-    "devUrl": "http://localhost:1420"
-  },
-  "app": {
-    "windows": [
-      {
-        "title": "PyRat",
-        "width": 800,
-        "height": 600,
-        "visible": true
-      }
-    ],
-    "security": {
-      "csp": null
-    }
-  },
-  "bundle": {
-    "active": true,
-    "icon": [
-      "icons/icon.png"
-    ]
-  }
+	"$schema": "https://raw.githubusercontent.com/nicotsx/tauri-settings-schema/master/tauri-conf-v2.json",
+	"productName": "PyRat",
+	"version": "0.1.0",
+	"identifier": "com.pyrat.gui",
+	"build": {
+		"beforeDevCommand": "pnpm dev:vite",
+		"beforeBuildCommand": "pnpm build:vite",
+		"frontendDist": "../dist",
+		"devUrl": "http://localhost:1420"
+	},
+	"app": {
+		"windows": [
+			{
+				"title": "PyRat",
+				"width": 800,
+				"height": 600,
+				"visible": true
+			}
+		],
+		"security": {
+			"csp": null
+		}
+	},
+	"bundle": {
+		"active": true,
+		"icon": ["icons/icon.png"]
+	}
 }

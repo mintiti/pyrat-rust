@@ -19,7 +19,7 @@ export default function DevHarness() {
 
 		if (next === "tauri" && !tauriState) {
 			commands
-				.getGameState()
+				.getGameState(null)
 				.then((result) => {
 					if (result.status === "ok") {
 						setTauriState(result.data);

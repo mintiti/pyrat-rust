@@ -18,7 +18,7 @@ export type PresetName =
 
 type PresetValues = Omit<MatchConfigParams, "preset" | "seed">;
 
-const CLASSIC_MAZE = {
+export const CLASSIC_MAZE = {
 	wall_density: 0.7,
 	mud_density: 0.1,
 	mud_range: 3,
@@ -28,7 +28,7 @@ const CLASSIC_MAZE = {
 	player_start: "corners" as const,
 };
 
-const OPEN_MAZE = {
+export const OPEN_MAZE = {
 	wall_density: 0.0,
 	mud_density: 0.0,
 	mud_range: 2,

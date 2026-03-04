@@ -62,6 +62,26 @@ repos:
             types: [rust]
             pass_filenames: false
 
+  # GUI frontend checks
+  -   repo: local
+      hooks:
+        -   id: biome-gui
+            name: biome check gui
+            description: Lint and format GUI frontend code
+            entry: pnpm --dir gui exec biome check --write
+            language: system
+            pass_filenames: false
+            files: ^gui/src/
+            types_or: [ts, tsx, json]
+
+        -   id: tsc-gui
+            name: tsc gui
+            description: Type check GUI frontend code
+            entry: pnpm --dir gui exec tsc --noEmit
+            language: system
+            pass_filenames: false
+            files: ^gui/(src/|tsconfig\.json)
+
   # Tests
   -   repo: local
       hooks:

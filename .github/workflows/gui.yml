@@ -1,0 +1,24 @@
+name: GUI
+
+on:
+  workflow_call:
+
+jobs:
+  gui-checks:
+    name: GUI Frontend Checks
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+    - uses: pnpm/action-setup@v4
+      with:
+        version: 10
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22
+        cache: 'pnpm'
+        cache-dependency-path: gui/pnpm-lock.yaml
+    - run: pnpm --dir gui install --frozen-lockfile
+    - name: Biome check (lint + format)
+      run: pnpm --dir gui exec biome check src/
+    - name: TypeScript type check
+      run: pnpm --dir gui exec tsc --noEmit

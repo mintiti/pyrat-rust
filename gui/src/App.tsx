@@ -2,7 +2,7 @@ import { useState } from "react";
 import BotsPage from "./components/BotsPage";
 import MatchView from "./components/MatchView";
 
-type View = "match" | "bots";
+export type View = "match" | "bots";
 
 export default function App() {
 	const [view, setView] = useState<View>("match");
