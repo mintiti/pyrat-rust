@@ -1,0 +1,25 @@
+[package]
+name = "pyrat-gui"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+pyrat-rust = { path = "../../engine", default-features = false }
+pyrat-host = { path = "../../server/host" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+tauri-specta = { version = "2.0.0-rc.21", features = ["derive", "typescript"] }
+specta = { version = "2.0.0-rc.22", features = ["derive"] }
+specta-typescript = "0.0.9"
+tokio = { version = "1", features = ["sync", "net", "time", "fs"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lints]
+workspace = true

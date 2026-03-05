@@ -1,6 +1,6 @@
 # PyRat Monorepo Makefile
 
-.PHONY: all engine gui examples test bench clean help sync lint lint-engine lint-sdk-python test-engine test-sdk-python test-wire test-host test-headless generate-wire fmt check dev-setup
+.PHONY: all engine gui examples test bench clean help sync lint lint-engine lint-sdk-python test-engine test-sdk-python test-wire test-host test-headless generate-wire fmt fmt-gui check check-gui dev-setup
 
 # Default target
 all: sync engine
@@ -15,9 +15,11 @@ engine: sync
 	@echo "Building PyRat Engine..."
 	cd engine && uv run maturin develop --release
 
-# Future components (placeholders)
+# Build GUI frontend
 gui:
-	@echo "GUI component not yet implemented"
+	@echo "Building GUI frontend..."
+	pnpm --dir gui install
+	pnpm --dir gui build
 
 examples:
 	@echo "Examples not yet implemented"
@@ -29,6 +31,8 @@ dev-setup:
 	uv sync --all-extras
 	@echo "Installing pre-commit hooks..."
 	uv run pre-commit install && uv run pre-commit install --hook-type pre-push
+	@echo "Installing GUI dependencies..."
+	pnpm --dir gui install
 
 # Testing
 test: test-engine test-wire test-host test-headless test-sdk-python
@@ -61,18 +65,27 @@ bench:
 	cargo bench -p pyrat-rust --bench game_benchmarks
 
 # Code quality
-fmt:
+fmt: fmt-gui
 	@echo "Formatting code..."
 	cargo fmt --all
 	uv run ruff format engine/python sdk/python/pyrat_sdk
 
-check:
+fmt-gui:
+	@echo "Formatting GUI frontend..."
+	pnpm --dir gui exec biome check --write src/
+
+check: check-gui
 	@echo "Running checks..."
 	cargo fmt --all -- --check
 	cargo clippy -p pyrat-rust --all-targets --no-default-features -- -D warnings
 	cargo clippy --all-targets --all-features -- -D warnings -A non-local-definitions
 	uv run ruff check engine/python sdk/python/pyrat_sdk
 	uv run mypy engine/python/pyrat_engine sdk/python/pyrat_sdk --ignore-missing-imports
+
+check-gui:
+	@echo "Checking GUI frontend..."
+	pnpm --dir gui exec biome check src/
+	pnpm --dir gui exec tsc --noEmit
 
 # Linting targets
 lint: lint-engine lint-sdk-python
@@ -112,6 +125,7 @@ help:
 	@echo "  all              - Sync dependencies and build all components"
 	@echo "  sync             - Sync workspace dependencies with uv"
 	@echo "  engine           - Build the PyRat engine"
+	@echo "  gui              - Build the GUI frontend"
 	@echo "  dev-setup        - Set up development environment"
 	@echo ""
 	@echo "Testing:"
@@ -123,8 +137,10 @@ help:
 	@echo "  test-sdk-python  - Run SDK Python tests"
 	@echo ""
 	@echo "Code Quality:"
-	@echo "  fmt              - Format all code"
-	@echo "  check            - Run all code quality checks"
+	@echo "  fmt              - Format all code (including GUI)"
+	@echo "  fmt-gui          - Format GUI frontend code"
+	@echo "  check            - Run all code quality checks (including GUI)"
+	@echo "  check-gui        - Check GUI frontend (biome + tsc)"
 	@echo "  lint             - Lint all Python components"
 	@echo "  lint-engine      - Lint engine Python code"
 	@echo "  lint-sdk-python  - Lint SDK Python code"
