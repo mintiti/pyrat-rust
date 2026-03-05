@@ -74,7 +74,7 @@ impl Search {
             sim.player1_position()
         };
 
-        let mut my_moves = state.valid_moves(Some(my_pos));
+        let mut my_moves = state.effective_moves(Some(my_pos));
         my_moves.shuffle(&mut rand::rng());
 
         for my_dir in &my_moves {
@@ -83,7 +83,7 @@ impl Search {
             }
 
             // Opponent picks the move that maximizes THEIR score.
-            let opp_moves = state.valid_moves(Some(opp_pos));
+            let opp_moves = state.effective_moves(Some(opp_pos));
             let mut best_opp_score = f32::NEG_INFINITY;
             let mut our_score_vs_opp_best = f32::NEG_INFINITY;
 
@@ -146,7 +146,7 @@ impl Search {
             sim.player1_position()
         };
 
-        let my_moves = state.valid_moves(Some(my_pos));
+        let my_moves = state.effective_moves(Some(my_pos));
 
         let mut best_our = f32::NEG_INFINITY;
         let mut best_opp_at_our_best = 0.0_f32;
@@ -156,7 +156,7 @@ impl Search {
                 return None;
             }
 
-            let opp_moves = state.valid_moves(Some(opp_pos));
+            let opp_moves = state.effective_moves(Some(opp_pos));
             let mut best_opp_score = f32::NEG_INFINITY;
             let mut our_when_opp_best = f32::NEG_INFINITY;
 

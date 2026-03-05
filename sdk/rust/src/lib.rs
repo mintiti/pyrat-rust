@@ -10,7 +10,7 @@
 //! impl Options for MyBot {}
 //! impl Bot for MyBot {
 //!     fn think(&mut self, state: &GameState, _ctx: &Context) -> Direction {
-//!         state.valid_moves(None).first().copied().unwrap_or(Direction::Stay)
+//!         state.effective_moves(None).first().copied().unwrap_or(Direction::Stay)
 //!     }
 //! }
 //!

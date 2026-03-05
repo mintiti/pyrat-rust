@@ -55,7 +55,7 @@ class Search(Bot):
         my_pos = sim.player1_position if self._am_player1 else sim.player2_position
         opp_pos = sim.player2_position if self._am_player1 else sim.player1_position
 
-        my_moves = state.get_effective_moves(my_pos)
+        my_moves = state.effective_moves(my_pos)
         random.shuffle(my_moves)
 
         for my_dir in my_moves:
@@ -63,7 +63,7 @@ class Search(Bot):
                 return None
 
             # Opponent picks the move that maximizes THEIR score.
-            opp_moves = state.get_effective_moves(opp_pos)
+            opp_moves = state.effective_moves(opp_pos)
             best_opp_score = -float("inf")
             our_score_vs_opp_best = -float("inf")
 
@@ -106,7 +106,7 @@ class Search(Bot):
         my_pos = sim.player1_position if self._am_player1 else sim.player2_position
         opp_pos = sim.player2_position if self._am_player1 else sim.player1_position
 
-        my_moves = state.get_effective_moves(my_pos)
+        my_moves = state.effective_moves(my_pos)
 
         best_our = -float("inf")
         best_opp_at_our_best = 0.0
@@ -115,7 +115,7 @@ class Search(Bot):
             if ctx.should_stop():
                 return None
 
-            opp_moves = state.get_effective_moves(opp_pos)
+            opp_moves = state.effective_moves(opp_pos)
             best_opp_score = -float("inf")
             our_when_opp_best = -float("inf")
 

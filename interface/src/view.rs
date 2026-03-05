@@ -209,9 +209,9 @@ impl GameView {
         self.maze().has_edge(a, b)
     }
 
-    /// Directions from `pos` that don't hit a wall or boundary. See [`Maze::valid_moves`].
-    pub fn valid_moves(&self, pos: Coordinates) -> Vec<Direction> {
-        self.maze().valid_moves(pos)
+    /// Directions from `pos` that don't hit a wall or boundary. See [`Maze::effective_moves`].
+    pub fn effective_moves(&self, pos: Coordinates) -> Vec<Direction> {
+        self.maze().effective_moves(pos)
     }
 
     /// Cost of moving in a direction, or `None` if blocked. See [`Maze::move_cost`].
@@ -399,8 +399,8 @@ mod tests {
         let maze_n = maze.neighbors(c(0, 0));
         assert_eq!(view_n, maze_n);
 
-        let view_m = view.valid_moves(c(2, 2));
-        let maze_m = maze.valid_moves(c(2, 2));
+        let view_m = view.effective_moves(c(2, 2));
+        let maze_m = maze.effective_moves(c(2, 2));
         assert_eq!(view_m, maze_m);
 
         assert_eq!(

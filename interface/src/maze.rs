@@ -1,7 +1,7 @@
 //! Static maze topology — the graph structure that doesn't change during a game.
 //!
 //! [`Maze`] bundles the move table, mud map, and dimensions into a single borrow.
-//! All graph queries (neighbors, edge costs, valid moves) are methods on `Maze`.
+//! All graph queries (neighbors, edge costs, effective moves) are methods on `Maze`.
 
 use pyrat::{Coordinates, Direction, MoveTable, MudMap};
 
@@ -91,7 +91,7 @@ impl<'a> Maze<'a> {
     }
 
     /// Directions from `pos` that lead to a valid cell (not into walls or boundaries).
-    pub fn valid_moves(&self, pos: Coordinates) -> Vec<Direction> {
+    pub fn effective_moves(&self, pos: Coordinates) -> Vec<Direction> {
         self.move_table.valid_directions(pos).collect()
     }
 
@@ -262,32 +262,32 @@ mod tests {
     }
 
     // -------------------------------------------------------------------
-    // valid_moves
+    // effective_moves
     // -------------------------------------------------------------------
 
     #[test]
-    fn valid_moves_center() {
+    fn effective_moves_center() {
         let (mt, mud) = open_3x3();
         let maze = Maze::new(&mt, &mud, 3, 3);
-        let moves = maze.valid_moves(c(1, 1));
+        let moves = maze.effective_moves(c(1, 1));
         assert_eq!(moves.len(), 4);
     }
 
     #[test]
-    fn valid_moves_corner() {
+    fn effective_moves_corner() {
         let (mt, mud) = open_3x3();
         let maze = Maze::new(&mt, &mud, 3, 3);
-        let moves = maze.valid_moves(c(0, 0));
+        let moves = maze.effective_moves(c(0, 0));
         assert_eq!(moves.len(), 2);
         assert!(moves.contains(&Direction::Up));
         assert!(moves.contains(&Direction::Right));
     }
 
     #[test]
-    fn valid_moves_with_wall() {
+    fn effective_moves_with_wall() {
         let (mt, mud) = walled_3x3();
         let maze = Maze::new(&mt, &mud, 3, 3);
-        let moves = maze.valid_moves(c(0, 1));
+        let moves = maze.effective_moves(c(0, 1));
         assert_eq!(moves.len(), 2);
         assert!(!moves.contains(&Direction::Right));
     }

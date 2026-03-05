@@ -209,10 +209,10 @@ class TestBuildCheeseMatrix:
 
 
 class TestConvenienceMethods:
-    def test_get_effective_moves_open_maze(self):
+    def test_effective_moves_open_maze(self):
         """3x3 maze with no walls — center cell has all 4 directions."""
         state = GameState(_make_config(controlled_players=[0]))
-        moves = state.get_effective_moves(pos=(1, 1))
+        moves = state.effective_moves(pos=(1, 1))
         # Center of 3x3 with no walls → UP, RIGHT, DOWN, LEFT all valid.
         assert set(moves) == {
             Direction.UP,
@@ -221,11 +221,11 @@ class TestConvenienceMethods:
             Direction.LEFT,
         }
 
-    def test_get_effective_moves_with_wall(self):
+    def test_effective_moves_with_wall(self):
         """Add a wall and verify one direction is blocked."""
         # Wall between (1,1) and (1,2) blocks UP from (1,1)
         state = GameState(_make_config(walls=[((1, 1), (1, 2))]))
-        moves = state.get_effective_moves(pos=(1, 1))
+        moves = state.effective_moves(pos=(1, 1))
         assert Direction.UP not in moves
         # Other 3 directions should still be valid
         assert len(moves) == 3

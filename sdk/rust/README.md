@@ -105,7 +105,7 @@ Coordinates are `(x, y)` with `(0, 0)` at the bottom-left. `Up` increases `y`, `
 
 | Method | Returns | Description |
 |---|---|---|
-| `valid_moves(pos)` | `Vec<Direction>` | Non-wall directions from `pos` |
+| `effective_moves(pos)` | `Vec<Direction>` | Non-wall directions from `pos` |
 | `move_cost(dir, pos)` | `Option<u8>` | `None`=wall, `Some(1)`=free, `Some(n)`=mud turns |
 | `shortest_path(from, to)` | `Option<FullPathResult>` | Full path with cost in turns |
 | `nearest_cheese(pos)` | `Option<FullPathResult>` | Closest cheese (first of ties) |

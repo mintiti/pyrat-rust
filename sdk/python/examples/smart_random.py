@@ -10,9 +10,9 @@ class SmartRandom(Bot):
     author = "PyRat SDK"
 
     def think(self, state: GameState, ctx: Context) -> Direction:
-        # get_effective_moves() returns Direction values for non-wall moves
+        # effective_moves() returns Direction values for non-wall moves
         # from the current position (UP, RIGHT, DOWN, LEFT — never STAY).
-        moves = state.get_effective_moves()
+        moves = state.effective_moves()
         if moves:
             return random.choice(moves)
         return Direction.STAY

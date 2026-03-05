@@ -83,9 +83,9 @@ impl PyMaze {
     }
 
     /// Direction ints (0-3) that don't hit a wall from (x, y).
-    fn valid_moves(&self, x: u8, y: u8) -> Vec<u8> {
+    fn effective_moves(&self, x: u8, y: u8) -> Vec<u8> {
         self.view
-            .valid_moves(Coordinates::new(x, y))
+            .effective_moves(Coordinates::new(x, y))
             .into_iter()
             .map(|d| d as u8)
             .collect()
