@@ -6,6 +6,7 @@ Call ``Bot().run()`` from ``__main__`` to connect and play.
 
 from __future__ import annotations
 
+import enum
 import os
 import sys
 import time
@@ -17,6 +18,17 @@ from pyrat_sdk._wire.connection import Connection
 from pyrat_sdk._wire.protocol.HostMessage import HostMessage
 from pyrat_sdk.options import apply_set_option, collect_options, options_to_wire
 from pyrat_sdk.state import Direction, GameState, Player
+
+# ── GameResult ────────────────────────────────────────
+
+
+class GameResult(enum.IntEnum):
+    """Outcome of a match.  Values match the wire protocol."""
+
+    PLAYER1 = 0
+    PLAYER2 = 1
+    DRAW = 2
+
 
 # ── Context ────────────────────────────────────────────
 
@@ -81,6 +93,9 @@ class Bot:
     def preprocess(self, state: GameState, ctx: Context) -> None:
         """Optional — called once before the game starts."""
 
+    def on_game_over(self, result: GameResult, scores: tuple[float, float]) -> None:
+        """Optional — called when the game ends with the result and final scores."""
+
     def run(self) -> None:
         """Entry point.  Reads env vars, connects, plays, exits."""
         _run_bot(self, self.preprocess, self._handle_turn)
@@ -122,6 +137,9 @@ class HivemindBot:
 
     def preprocess(self, state: GameState, ctx: Context) -> None:
         pass
+
+    def on_game_over(self, result: GameResult, scores: tuple[float, float]) -> None:
+        """Optional — called when the game ends with the result and final scores."""
 
     def run(self) -> None:
         _run_bot(self, self.preprocess, self._handle_turn)
@@ -291,7 +309,17 @@ def _run_lifecycle(
             turn_fn(state, ctx, conn)
         elif msg_type == HostMessage.Ping:
             conn.send_frame(codec.encode_pong())
-        elif msg_type in (HostMessage.GameOver, HostMessage.Stop):
+        elif msg_type == HostMessage.GameOver:
+            try:
+                go = codec.extract_game_over(table)
+                bot.on_game_over(
+                    GameResult(go["result"]),
+                    (go["player1_score"], go["player2_score"]),
+                )
+            except Exception:
+                traceback.print_exc()
+            break
+        elif msg_type == HostMessage.Stop:
             break
         elif msg_type == HostMessage.Timeout:
             pass  # Host handled it; we just note it.

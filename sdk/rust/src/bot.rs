@@ -1,5 +1,7 @@
-//! Bot and Hivemind traits, Context for timing.
+//! Bot and Hivemind traits, Context for timing and info sending.
 
+use std::cell::RefCell;
+use std::io::Write;
 use std::time::Instant;
 
 use pyrat::Direction;
@@ -8,15 +10,47 @@ use pyrat_wire::{GameResult, Player};
 use crate::options::Options;
 use crate::state::GameState;
 
+/// Synchronous writer for Info frames during `think()`.
+///
+/// Wraps a cloned `std::net::TcpStream` and writes length-prefixed frames
+/// directly (bypassing the async writer, which is idle during `think()`).
+pub(crate) struct InfoSender {
+    stream: std::net::TcpStream,
+}
+
+impl InfoSender {
+    pub(crate) fn new(stream: std::net::TcpStream) -> Self {
+        Self { stream }
+    }
+
+    fn send(&mut self, frame: &[u8]) {
+        let len = (frame.len() as u32).to_be_bytes();
+        if let Err(e) = self
+            .stream
+            .write_all(&len)
+            .and_then(|()| self.stream.write_all(frame))
+        {
+            eprintln!("[sdk] send_info() failed: {e}");
+        }
+    }
+}
+
 /// Timing context passed to `think()` and `preprocess()`.
+///
+/// Uses `RefCell` for the `InfoSender` so `send_info()` works through `&self`
+/// (the `Bot::think()` trait receives `&Context`).
 pub struct Context {
     deadline: Instant,
+    info_sender: RefCell<Option<InfoSender>>,
 }
 
 impl Context {
     /// Create a context with a deadline.
-    pub(crate) fn new(deadline: Instant) -> Self {
-        Self { deadline }
+    pub(crate) fn new(deadline: Instant, info_sender: Option<InfoSender>) -> Self {
+        Self {
+            deadline,
+            info_sender: RefCell::new(info_sender),
+        }
     }
 
     /// Whether the deadline has passed.
@@ -29,6 +63,31 @@ impl Context {
         self.deadline
             .checked_duration_since(Instant::now())
             .map_or(0, |d| d.as_millis() as u64)
+    }
+
+    /// Reclaim the `InfoSender` so it can be reused across turns.
+    pub(crate) fn take_info_sender(&mut self) -> Option<InfoSender> {
+        self.info_sender.borrow_mut().take()
+    }
+
+    /// Send an Info message to the host (for GUI / debugging).
+    ///
+    /// Writes synchronously on a cloned TCP socket. Errors are logged to stderr.
+    pub fn send_info(
+        &self,
+        target: Option<(u8, u8)>,
+        depth: u16,
+        nodes: u32,
+        score: f32,
+        path: &[(u8, u8)],
+        message: &str,
+    ) {
+        if let Ok(mut guard) = self.info_sender.try_borrow_mut() {
+            if let Some(sender) = guard.as_mut() {
+                let frame = crate::wire::build_info(target, depth, nodes, score, path, message);
+                sender.send(&frame);
+            }
+        }
     }
 }
 

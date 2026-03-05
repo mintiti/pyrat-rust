@@ -32,11 +32,20 @@ impl Bot for Search {
             }
 
             let result = self.search_root(&mut sim, depth, state, ctx);
-            let Some((dir, _score)) = result else {
+            let Some((dir, score)) = result else {
                 break; // timed out mid-search — keep previous best
             };
 
             best_move = dir;
+
+            ctx.send_info(
+                None,
+                depth as u16,
+                self.nodes as u32,
+                score,
+                &[],
+                &format!("depth {depth}: {best_move:?} ({score:.1})"),
+            );
         }
 
         best_move

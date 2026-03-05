@@ -322,6 +322,46 @@ pub fn build_action(player: wire::Player, direction: pyrat::Direction) -> Vec<u8
     })
 }
 
+/// Build an Info bot packet (search telemetry for GUI / debugging).
+pub fn build_info(
+    target: Option<(u8, u8)>,
+    depth: u16,
+    nodes: u32,
+    score: f32,
+    path: &[(u8, u8)],
+    message: &str,
+) -> Vec<u8> {
+    build_bot_frame(BotMessage::Info, |fbb| {
+        let msg = if message.is_empty() {
+            None
+        } else {
+            Some(fbb.create_string(message))
+        };
+
+        let path_vec: Vec<Vec2> = path.iter().map(|&(x, y)| Vec2::new(x, y)).collect();
+        let path_off = if path_vec.is_empty() {
+            None
+        } else {
+            Some(fbb.create_vector(&path_vec))
+        };
+
+        let target_v = target.map(|(x, y)| Vec2::new(x, y));
+
+        wire::Info::create(
+            fbb,
+            &wire::InfoArgs {
+                target: target_v.as_ref(),
+                depth,
+                nodes,
+                score,
+                path: path_off,
+                message: msg,
+            },
+        )
+        .as_union_value()
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -587,6 +627,35 @@ mod tests {
         let bytes = build_preprocessing_done();
         let packet = flatbuffers::root::<wire::BotPacket>(&bytes).unwrap();
         assert_eq!(packet.message_type(), BotMessage::PreprocessingDone);
+    }
+
+    #[test]
+    fn build_info_roundtrip() {
+        let bytes = build_info(Some((10, 7)), 3, 42000, 2.5, &[(1, 2), (3, 4)], "depth 3");
+        let packet = flatbuffers::root::<wire::BotPacket>(&bytes).unwrap();
+        assert_eq!(packet.message_type(), BotMessage::Info);
+        let info = packet.message_as_info().unwrap();
+        let t = info.target().unwrap();
+        assert_eq!((t.x(), t.y()), (10, 7));
+        assert_eq!(info.depth(), 3);
+        assert_eq!(info.nodes(), 42000);
+        assert!((info.score() - 2.5).abs() < f32::EPSILON);
+        let path = info.path().unwrap();
+        assert_eq!(path.len(), 2);
+        assert_eq!((path.get(0).x(), path.get(0).y()), (1, 2));
+        assert_eq!((path.get(1).x(), path.get(1).y()), (3, 4));
+        assert_eq!(info.message(), Some("depth 3"));
+    }
+
+    #[test]
+    fn build_info_empty_optional_fields() {
+        let bytes = build_info(None, 0, 0, 0.0, &[], "");
+        let packet = flatbuffers::root::<wire::BotPacket>(&bytes).unwrap();
+        assert_eq!(packet.message_type(), BotMessage::Info);
+        let info = packet.message_as_info().unwrap();
+        assert!(info.target().is_none());
+        assert!(info.path().is_none());
+        assert!(info.message().is_none());
     }
 
     #[test]

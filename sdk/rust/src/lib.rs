@@ -61,31 +61,49 @@ use wire::{
 /// Reads `PYRAT_HOST_PORT` and `PYRAT_AGENT_ID` from the environment,
 /// connects to the host, and runs the full lifecycle.
 pub fn run(mut bot: impl Bot, name: &str, author: &str) {
+    let (stream, sync_clone) = connect();
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("failed to build tokio runtime");
-    rt.block_on(run_async(&mut bot::BotRunner(&mut bot), name, author));
+    rt.block_on(run_async(
+        &mut bot::BotRunner(&mut bot),
+        name,
+        author,
+        stream,
+        sync_clone,
+    ));
 }
 
 /// Run a hivemind bot controlling both players. Blocks until the game ends.
 pub fn run_hivemind(mut bot: impl Hivemind, name: &str, author: &str) {
+    let (stream, sync_clone) = connect();
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .expect("failed to build tokio runtime");
-    rt.block_on(run_async(&mut bot::HivemindRunner(&mut bot), name, author));
+    rt.block_on(run_async(
+        &mut bot::HivemindRunner(&mut bot),
+        name,
+        author,
+        stream,
+        sync_clone,
+    ));
 }
 
-async fn connect() -> TcpStream {
+/// Connect to the host, returning the tokio stream and a std clone for sync Info writes.
+fn connect() -> (TcpStream, std::net::TcpStream) {
     let port: u16 = std::env::var("PYRAT_HOST_PORT")
         .expect("PYRAT_HOST_PORT not set")
         .parse()
         .expect("PYRAT_HOST_PORT not a valid port");
 
-    TcpStream::connect(format!("127.0.0.1:{port}"))
-        .await
-        .expect("failed to connect to host")
+    let std_stream = std::net::TcpStream::connect(format!("127.0.0.1:{port}"))
+        .expect("failed to connect to host");
+    let sync_clone = std_stream.try_clone().expect("failed to clone TCP socket");
+    let tokio_stream =
+        TcpStream::from_std(std_stream).expect("failed to convert TCP socket to tokio");
+    (tokio_stream, sync_clone)
 }
 
 fn get_agent_id() -> String {
@@ -94,8 +112,13 @@ fn get_agent_id() -> String {
 
 // ── Bot lifecycle ────────────────────────────────────
 
-async fn run_async(bot: &mut impl bot::Runner, name: &str, author: &str) {
-    let stream = connect().await;
+async fn run_async(
+    bot: &mut impl bot::Runner,
+    name: &str,
+    author: &str,
+    stream: TcpStream,
+    sync_clone: std::net::TcpStream,
+) {
     let (read, write) = tokio::io::split(stream);
     let mut reader = FrameReader::with_default_max(read);
     let mut writer = FrameWriter::with_default_max(write);
@@ -106,7 +129,7 @@ async fn run_async(bot: &mut impl bot::Runner, name: &str, author: &str) {
     send_frame(&mut writer, &build_ready()).await;
 
     let mut state = setup_phase(bot, &mut reader).await;
-    turn_loop(bot, &mut state, &mut reader, &mut writer).await;
+    turn_loop(bot, &mut state, &mut reader, &mut writer, sync_clone).await;
 }
 
 // ── Setup phase ──────────────────────────────────────
@@ -168,17 +191,21 @@ async fn turn_loop<T: bot::Runner, R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     state: &mut state::GameState,
     reader: &mut FrameReader<R>,
     writer: &mut FrameWriter<W>,
+    sync_clone: std::net::TcpStream,
 ) {
+    let info_sender = bot::InfoSender::new(sync_clone);
+
     // Preprocessing
     {
         let deadline =
             Instant::now() + Duration::from_millis(state.preprocessing_timeout_ms().into());
-        let ctx = Context::new(deadline);
+        let ctx = Context::new(deadline, None);
         bot.runner_preprocess(state, &ctx);
         send_frame(writer, &build_preprocessing_done()).await;
     }
 
     // Play turns
+    let mut info_sender = Some(info_sender);
     loop {
         let frame = match reader.read_frame().await {
             Ok(f) => f,
@@ -196,7 +223,10 @@ async fn turn_loop<T: bot::Runner, R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                 let timeout_ms =
                     u64::from(state.move_timeout_ms()).saturating_sub(MOVE_SAFETY_MARGIN_MS);
                 let deadline = Instant::now() + Duration::from_millis(timeout_ms);
-                let ctx = Context::new(deadline);
+
+                // Take the InfoSender for this turn, put it back after think().
+                let sender = info_sender.take();
+                let mut ctx = Context::new(deadline, sender);
 
                 let actions = match catch_unwind(AssertUnwindSafe(|| bot.runner_think(state, &ctx)))
                 {
@@ -207,6 +237,8 @@ async fn turn_loop<T: bot::Runner, R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
                         T::runner_stay(state)
                     },
                 };
+
+                info_sender = ctx.take_info_sender();
 
                 for (player, direction) in actions {
                     send_frame(writer, &build_action(player, direction)).await;
