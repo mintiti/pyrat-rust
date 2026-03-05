@@ -1,103 +1,91 @@
-# PyRat Ecosystem
+<p align="center">
+  <img src="docs/images/logo.png" alt="PyRat" width="150">
+</p>
 
-A high-performance game engine and ecosystem for the PyRat maze game, where a Rat and a Python compete to collect cheese.
+<h1 align="center">PyRat</h1>
 
-## Repository Structure
+A competitive, turn-based two-player maze game where a Rat and a Python race to collect cheese. Built from IMT Atlantique's original versions<!-- TODO: link to original -->.
 
-This is a monorepo containing all PyRat ecosystem components:
+<p align="center">
+  <img src="docs/images/match.png" alt="A PyRat match in progress" width="600">
+</p>
 
-- **[engine/](engine/)** - High-performance Rust game engine with Python bindings
-- **[server/host/](server/host/)** - Match hosting library — setup, turn loop, event streaming
-- **[server/headless/](server/headless/)** - Headless match runner binary — launches bots, runs a match, outputs JSON
-- **[server/wire/](server/wire/)** - FlatBuffers schema and generated types, shared by host and SDKs
-- **[sdk/rust/](sdk/rust/)** - Rust bot SDK
-- **[sdk/python/](sdk/python/)** - Python bot SDK
+## What's in this repo?
 
-## Quick Start
+This isn't just the game — it's the whole ecosystem: game engine, bot SDKs, match runner, and a GUI to watch it all happen. Pick what you need.
 
-### Prerequisites
+**[Write a bot](sdk/)** — Build an AI that plays PyRat. Python or Rust, your choice.
 
-- Python 3.8+
-- Rust toolchain
-- [uv](https://docs.astral.sh/uv/) (Python package manager)
+```python
+from pyrat_sdk import Bot, Context, Direction, GameState
 
-### Workspace Setup (Recommended)
+class MyBot(Bot):
+    def think(self, state: GameState, ctx: Context) -> Direction:
+        result = state.nearest_cheese()
+        return result.directions[0] if result else Direction.STAY
+```
 
-This repository uses uv workspaces for seamless development across components:
+**[Train an AI](engine/)** — Use the engine for reinforcement learning (PettingZoo) or game tree search.
+
+```python
+from pyrat_engine import GameConfig
+from pyrat_engine.env import PyRatEnv
+
+env = PyRatEnv(GameConfig.classic(15, 15, 21))
+obs, info = env.reset(seed=42)
+obs, rewards, terms, truncs, infos = env.step(actions)
+```
+
+**[Use the engine as a library](engine/)** — Embed the game in your own tools. Rust crate or Python package.
+
+```rust
+use pyrat_engine::{GameConfig, Direction};
+
+let config = GameConfig::preset("large")?;
+let mut game = config.create(Some(42));
+let result = game.process_turn(Direction::Right, Direction::Left);
+```
+
+🚧 **Watch bots play** — Desktop GUI for running and watching matches. Coming soon.
+
+## Setup
+
+Prerequisites:
+- [Rust toolchain](https://rustup.rs/)
+- Python 3.10+
+- [uv](https://docs.astral.sh/uv/)
 
 ```bash
-# Clone the repository
-git clone https://github.com/yourusername/pyrat-rust.git
+git clone https://github.com/mintiti/pyrat-rust.git
 cd pyrat-rust
-
-# Sync all workspace dependencies with dev tools
 uv sync --all-extras
-
-# Build the Rust engine
-cd engine
-uv run maturin develop --release
 ```
 
-### Run a Game
+## See it run
 
 ```bash
-# Run a headless match between two Rust bots
-cargo run -p pyrat-headless -- "cargo run -p pyrat-sdk --example greedy" "cargo run -p pyrat-sdk --example random"
-
-# Run a match with Python bots
-cargo run -p pyrat-headless -- "uv run python sdk/python/examples/greedy.py" "uv run python sdk/python/examples/smart_random.py"
+cargo run -p pyrat-headless -- \
+  "cargo run -p pyrat-sdk --example greedy" \
+  "cargo run -p pyrat-sdk --example smart_random"
 ```
 
-### Run Tests
+## The game
 
-```bash
-# Test everything
-make test
+A Rat and a Python drop into opposite corners of a maze. Cheese is scattered across the board, and both players move at the same time — so you're not reacting to your opponent, you're trying to outsmart them.
 
-# Test specific components
-make test-engine      # Engine tests
-make test-host        # Host library tests
-make test-headless    # Headless runner tests
-make test-sdk-python  # SDK Python tests
-```
+Some passages are filled with mud, which costs extra turns to cross. Do you take the shortcut through the mud, or go the long way around? The maze is symmetric so neither player has a positional advantage, but the strategies can look completely different.
 
-### Development Commands
+First to grab more than half the cheese wins.
 
-```bash
-make help        # Show all available commands
-make dev-setup   # Set up development environment
-make fmt         # Format all code
-make check       # Run all checks
-```
+Full rules in the [engine README](engine/).
 
-## Components
+## Repository map
 
-### Engine
-High-performance Rust game engine with Python bindings. Use it to:
-- Build and train AI agents with reinforcement learning (PettingZoo/Gymnasium compatible)
-- Simulate games programmatically
-- Benchmark AI strategies
+| Path | What it is |
+|------|------------|
+| [`engine/`](engine/) | Game engine — Rust core, Python bindings, PettingZoo env |
+| [`sdk/`](sdk/) | Bot SDKs — currently [Python](sdk/python/) and [Rust](sdk/rust/), more languages to come |
+| [`server/`](server/) | Match infrastructure — hosting, headless runner, wire protocol |
+| `gui/` | 🚧 Desktop GUI — watch and manage matches (coming soon) |
 
-### Host
-Match hosting library. Manages bot connections, setup handshake, and the turn loop. Streams `MatchEvent`s through a channel for consumers (headless runner, GUI, tournament systems) to process.
-
-### Headless Runner
-CLI binary that launches bot subprocesses, runs a match via the host library, and optionally writes a JSON game record.
-
-### SDKs
-- **sdk/rust/** — Rust bot SDK. Example: `cargo run -p pyrat-sdk --example greedy`
-- **sdk/python/** — Python bot SDK. Example: `uv run python sdk/python/examples/greedy.py`
-
-## Development
-
-The monorepo uses:
-- **uv workspaces** for Python dependency management
-- **Cargo** for Rust code
-- **Pre-commit hooks** for code quality
-- **GitHub Actions** for CI/CD
-
-See individual component READMEs for specific development instructions.
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
+Run `make help` for the full command list.
