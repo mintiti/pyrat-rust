@@ -7,7 +7,7 @@ impl Options for SmartRandom {}
 
 impl Bot for SmartRandom {
     fn think(&mut self, state: &GameState, _ctx: &Context) -> Direction {
-        let moves = state.valid_moves(None);
+        let moves = state.effective_moves(None);
         *moves.choose(&mut rand::rng()).unwrap_or(&Direction::Stay)
     }
 }

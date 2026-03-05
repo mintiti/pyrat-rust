@@ -114,8 +114,8 @@ if matrix[x, y, 0] != -1:
 
 | Method | Returns | Description |
 |---|---|---|
-| `get_effective_moves(pos=None)` | `list[Direction]` | Non-wall directions from pos |
-| `get_move_cost(direction, pos=None)` | `int \| None` | None=wall, 1=free, N=mud turns |
+| `effective_moves(pos=None)` | `list[Direction]` | Non-wall directions from pos |
+| `move_cost(direction, pos=None)` | `int \| None` | None=wall, 1=free, N=mud turns |
 | `shortest_path(start, goal)` | `PathResult \| None` | Full path with cost in turns |
 | `nearest_cheese(pos=None)` | `NearestCheeseResult \| None` | Closest cheese with path and cost |
 | `distances_from(pos=None)` | `dict[(int,int), int]` | Cost to every reachable cell |

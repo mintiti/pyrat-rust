@@ -234,9 +234,7 @@ class GameState:
 
     # ── Layer 2 convenience ────────────────────────────
 
-    def get_effective_moves(
-        self, pos: tuple[int, int] | None = None
-    ) -> list[Direction]:
+    def effective_moves(self, pos: tuple[int, int] | None = None) -> list[Direction]:
         """Directions that don't hit a wall from *pos* (default: my position).
 
         Returns a list of Direction values (UP, RIGHT, DOWN, LEFT).
@@ -245,9 +243,9 @@ class GameState:
         if pos is None:
             pos = self.my_position
         x, y = pos
-        return [Direction(d) for d in self._maze.valid_moves(x, y)]
+        return [Direction(d) for d in self._maze.effective_moves(x, y)]
 
-    def get_move_cost(
+    def move_cost(
         self, direction: Direction | int, pos: tuple[int, int] | None = None
     ) -> int | None:
         """Cost of moving in *direction* from *pos*.
