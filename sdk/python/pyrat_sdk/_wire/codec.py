@@ -6,7 +6,12 @@ plain Python types.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import flatbuffers
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 from pyrat_sdk._wire.protocol import Action as ActionMod
 from pyrat_sdk._wire.protocol import BotPacket as BotPacketMod
@@ -259,7 +264,7 @@ def encode_info(
     depth: int = 0,
     nodes: int = 0,
     score: float = 0.0,
-    pv: list[int] | None = None,
+    pv: Sequence[int] | None = None,
     message: str = "",
 ) -> bytes:
     def build(b):

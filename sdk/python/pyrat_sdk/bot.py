@@ -49,7 +49,7 @@ class Context:
     def send_info(
         self,
         *,
-        player: int | None = None,
+        player: Player,
         multipv: int = 0,
         target: tuple[int, int] | None = None,
         depth: int = 0,
@@ -62,13 +62,13 @@ class Context:
         try:
             self._conn.send_frame(
                 codec.encode_info(
-                    player=int(player) if player is not None else 0,
+                    player=int(player),
                     multipv=multipv,
                     target=target,
                     depth=depth,
                     nodes=nodes,
                     score=score,
-                    pv=[int(d) for d in pv] if pv else None,
+                    pv=pv,
                     message=message,
                 )
             )
