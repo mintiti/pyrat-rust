@@ -8,7 +8,6 @@ from pyrat_sdk.options import Check, Combo, Spin, Str
 from pyrat_sdk.state import (
     Direction,
     GameState,
-    NearestCheeseResult,
     PathResult,
     Player,
 )
@@ -24,7 +23,6 @@ __all__ = [
     "GameState",
     "HivemindBot",
     "MoveUndo",
-    "NearestCheeseResult",
     "PathResult",
     "Player",
     "Spin",

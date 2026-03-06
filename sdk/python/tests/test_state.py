@@ -7,7 +7,6 @@ import numpy as np
 from pyrat_sdk.state import (
     Direction,
     GameState,
-    NearestCheeseResult,
     PathResult,
     Player,
     _build_cheese_matrix,
@@ -235,8 +234,13 @@ class TestConvenienceMethods:
         result = state.shortest_path((0, 0), (2, 2))
         assert result is not None
         assert isinstance(result, PathResult)
-        assert isinstance(result.directions, list)
-        assert all(isinstance(d, Direction) for d in result.directions)
+        assert result.target == (2, 2)
+        assert isinstance(result.path, list)
+        assert all(isinstance(d, Direction) for d in result.path)
+        assert isinstance(result.first_moves, list)
+        assert len(result.first_moves) >= 1
+        assert all(isinstance(d, Direction) for d in result.first_moves)
+        assert result.first_moves[0] == result.path[0]
         assert isinstance(result.cost, int)
         assert result.cost > 0
 
@@ -245,17 +249,20 @@ class TestConvenienceMethods:
         result = state.shortest_path((0, 0), (0, 0))
         # Same cell → empty path, cost 0
         assert result is not None
-        assert result.directions == []
+        assert result.target == (0, 0)
+        assert result.path == []
         assert result.cost == 0
 
     def test_nearest_cheese_returns_result(self):
         state = GameState(_make_config(cheese=[(1, 1)]))
         result = state.nearest_cheese(pos=(0, 0))
         assert result is not None
-        assert isinstance(result, NearestCheeseResult)
-        assert result.position == (1, 1)
-        assert isinstance(result.directions, list)
-        assert all(isinstance(d, Direction) for d in result.directions)
+        assert isinstance(result, PathResult)
+        assert result.target == (1, 1)
+        assert isinstance(result.path, list)
+        assert all(isinstance(d, Direction) for d in result.path)
+        assert isinstance(result.first_moves, list)
+        assert len(result.first_moves) >= 1
         assert result.cost > 0
 
     def test_nearest_cheese_no_cheese(self):

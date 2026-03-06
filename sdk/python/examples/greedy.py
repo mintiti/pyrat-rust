@@ -13,8 +13,26 @@ class Greedy(Bot):
         candidates = state.nearest_cheeses()
         if candidates:
             result = random.choice(candidates)
-            if result.directions:
-                return result.directions[0]
+            if result.path:
+                # Walk directions to build coordinate path
+                x, y = state.my_position
+                path = []
+                for d in result.path:
+                    if d == Direction.UP:
+                        y += 1
+                    elif d == Direction.DOWN:
+                        y -= 1
+                    elif d == Direction.RIGHT:
+                        x += 1
+                    elif d == Direction.LEFT:
+                        x -= 1
+                    path.append((x, y))
+                ctx.send_info(
+                    target=result.target,
+                    path=path,
+                    message=f"target {result.target}, {len(path)} steps",
+                )
+                return result.path[0]
         return Direction.STAY
 
 
