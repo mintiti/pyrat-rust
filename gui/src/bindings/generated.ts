@@ -96,7 +96,7 @@ export type BotDisconnectedEvent = { match_id: number; player: PlayerSide; reaso
 /**
  * Bot debug/analysis info forwarded from the host event stream.
  */
-export type BotInfoEvent = { match_id: number; player: PlayerSide; turn: number; target: Coord | null; depth: number; nodes: number; score: number; path: Coord[]; message: string }
+export type BotInfoEvent = { match_id: number; player: PlayerSide; turn: number; multipv: number; target: Coord | null; depth: number; nodes: number; score: number; pv: Direction[]; message: string }
 export type Coord = { x: number; y: number }
 /**
  * Movement direction — specta-friendly mirror of pyrat_wire::Direction.

@@ -25,7 +25,7 @@ mod state;
 mod wire;
 
 // Re-export public API
-pub use bot::{Bot, Context, Hivemind};
+pub use bot::{Bot, Context, Hivemind, InfoSender};
 pub use options::{Options, SdkOptionDef};
 pub use pyrat_wire::OptionType;
 pub use state::{GameSim, GameState};
@@ -61,7 +61,7 @@ use wire::{
 /// Reads `PYRAT_HOST_PORT` and `PYRAT_AGENT_ID` from the environment,
 /// connects to the host, and runs the full lifecycle.
 pub fn run(mut bot: impl Bot, name: &str, author: &str) {
-    let (stream, sync_clone) = connect();
+    let (std_stream, sync_clone) = connect();
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -70,14 +70,14 @@ pub fn run(mut bot: impl Bot, name: &str, author: &str) {
         &mut bot::BotRunner(&mut bot),
         name,
         author,
-        stream,
+        std_stream,
         sync_clone,
     ));
 }
 
 /// Run a hivemind bot controlling both players. Blocks until the game ends.
 pub fn run_hivemind(mut bot: impl Hivemind, name: &str, author: &str) {
-    let (stream, sync_clone) = connect();
+    let (std_stream, sync_clone) = connect();
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
@@ -86,13 +86,15 @@ pub fn run_hivemind(mut bot: impl Hivemind, name: &str, author: &str) {
         &mut bot::HivemindRunner(&mut bot),
         name,
         author,
-        stream,
+        std_stream,
         sync_clone,
     ));
 }
 
-/// Connect to the host, returning the tokio stream and a std clone for sync Info writes.
-fn connect() -> (TcpStream, std::net::TcpStream) {
+/// Connect to the host, returning the std stream and a clone for sync Info writes.
+///
+/// The std→tokio conversion happens inside `run_async` where the reactor is available.
+fn connect() -> (std::net::TcpStream, std::net::TcpStream) {
     let port: u16 = std::env::var("PYRAT_HOST_PORT")
         .expect("PYRAT_HOST_PORT not set")
         .parse()
@@ -101,9 +103,7 @@ fn connect() -> (TcpStream, std::net::TcpStream) {
     let std_stream = std::net::TcpStream::connect(format!("127.0.0.1:{port}"))
         .expect("failed to connect to host");
     let sync_clone = std_stream.try_clone().expect("failed to clone TCP socket");
-    let tokio_stream =
-        TcpStream::from_std(std_stream).expect("failed to convert TCP socket to tokio");
-    (tokio_stream, sync_clone)
+    (std_stream, sync_clone)
 }
 
 fn get_agent_id() -> String {
@@ -116,9 +116,13 @@ async fn run_async(
     bot: &mut impl bot::Runner,
     name: &str,
     author: &str,
-    stream: TcpStream,
+    std_stream: std::net::TcpStream,
     sync_clone: std::net::TcpStream,
 ) {
+    std_stream
+        .set_nonblocking(true)
+        .expect("failed to set non-blocking");
+    let stream = TcpStream::from_std(std_stream).expect("failed to convert TCP socket to tokio");
     let (read, write) = tokio::io::split(stream);
     let mut reader = FrameReader::with_default_max(read);
     let mut writer = FrameWriter::with_default_max(write);
@@ -226,7 +230,7 @@ async fn turn_loop<T: bot::Runner, R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
 
                 // Take the InfoSender for this turn, put it back after think().
                 let sender = info_sender.take();
-                let mut ctx = Context::new(deadline, sender);
+                let ctx = Context::new(deadline, sender);
 
                 let actions = match catch_unwind(AssertUnwindSafe(|| bot.runner_think(state, &ctx)))
                 {
