@@ -17,6 +17,14 @@ class Direction(IntEnum):
     LEFT = 3
     STAY = 4
 
+    def apply_to(self, pos: tuple[int, int]) -> tuple[int, int]:
+        """Return the neighbouring cell after moving in this direction."""
+        dx, dy = _DIR_DELTAS[self.value]
+        return (pos[0] + dx, pos[1] + dy)
+
+
+_DIR_DELTAS = {0: (0, 1), 1: (1, 0), 2: (0, -1), 3: (-1, 0), 4: (0, 0)}
+
 
 class Player(IntEnum):
     PLAYER1 = 0
