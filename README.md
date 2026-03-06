@@ -46,7 +46,7 @@ let mut game = config.create(Some(42));
 let result = game.process_turn(Direction::Right, Direction::Left);
 ```
 
-🚧 **Watch bots play** — Desktop GUI for running and watching matches. Coming soon.
+**[Watch bots play](gui/)** — Desktop app for running matches and watching them play out. Pick two bots, configure the maze, hit start. Built with [Tauri](https://tauri.app/) — requires [Node.js](https://nodejs.org/) and [pnpm](https://pnpm.io/) to build.
 
 ## Setup
 
@@ -86,6 +86,6 @@ Full rules in the [engine README](engine/).
 | [`engine/`](engine/) | Game engine — Rust core, Python bindings, PettingZoo env |
 | [`sdk/`](sdk/) | Bot SDKs — currently [Python](sdk/python/) and [Rust](sdk/rust/), more languages to come |
 | [`server/`](server/) | Match infrastructure — hosting, headless runner, wire protocol |
-| `gui/` | 🚧 Desktop GUI — watch and manage matches (coming soon) |
+| [`gui/`](gui/) | Desktop GUI — run and watch matches |
 
 Run `make help` for the full command list.
