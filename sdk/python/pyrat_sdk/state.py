@@ -17,6 +17,14 @@ class Direction(IntEnum):
     LEFT = 3
     STAY = 4
 
+    def apply_to(self, pos: tuple[int, int]) -> tuple[int, int]:
+        """Return the neighbouring cell after moving in this direction."""
+        dx, dy = _DIR_DELTAS[self.value]
+        return (pos[0] + dx, pos[1] + dy)
+
+
+_DIR_DELTAS = {0: (0, 1), 1: (1, 0), 2: (0, -1), 3: (-1, 0), 4: (0, 0)}
+
 
 class Player(IntEnum):
     PLAYER1 = 0
@@ -24,17 +32,14 @@ class Player(IntEnum):
 
 
 class PathResult(NamedTuple):
-    """Result of a shortest-path query."""
+    """Result of a pathfinding query.
 
-    directions: list[Direction]
-    cost: int
+    Matches Rust SDK's ``FullPathResult`` — same four fields.
+    """
 
-
-class NearestCheeseResult(NamedTuple):
-    """Result of a nearest-cheese query."""
-
-    position: tuple[int, int]
-    directions: list[Direction]
+    target: tuple[int, int]
+    path: list[Direction]
+    first_moves: list[Direction]
     cost: int
 
 
@@ -266,24 +271,27 @@ class GameState:
     ) -> PathResult | None:
         """Shortest path between two cells.
 
-        Returns a PathResult(directions, cost) where directions is the
-        full Direction sequence and cost is in turns (mud passages cost
-        more than 1). Returns None if unreachable.
+        Returns a ``PathResult(target, path, first_moves, cost)`` where
+        *path* is the full Direction sequence and *first_moves* lists
+        every direction that starts an optimal route (there may be ties).
+        Returns None if unreachable.
         """
         result = self._maze.shortest_path(start, goal)
         if result is None:
             return None
-        dirs, cost = result
-        return PathResult([Direction(d) for d in dirs], cost)
+        target, path, first_moves, cost = result
+        return PathResult(
+            target,
+            [Direction(d) for d in path],
+            [Direction(d) for d in first_moves],
+            cost,
+        )
 
-    def nearest_cheese(
-        self, pos: tuple[int, int] | None = None
-    ) -> NearestCheeseResult | None:
+    def nearest_cheese(self, pos: tuple[int, int] | None = None) -> PathResult | None:
         """Nearest cheese from *pos* (default: my position).
 
-        Returns a NearestCheeseResult(position, directions, cost) where
-        position is the cheese (x, y), directions is the full path, and
-        cost is in turns. Returns None if no cheese remains.
+        Returns a ``PathResult(target, path, first_moves, cost)``.
+        Returns None if no cheese remains.
 
         When multiple cheeses tie at the minimum distance, returns the first
         one in the cheese list. Use ``nearest_cheeses`` to get all tied results.
@@ -293,12 +301,15 @@ class GameState:
         result = self._maze.nearest_cheese(pos, self.cheese)
         if result is None:
             return None
-        target, dirs, cost = result
-        return NearestCheeseResult(target, [Direction(d) for d in dirs], cost)
+        target, path, first_moves, cost = result
+        return PathResult(
+            target,
+            [Direction(d) for d in path],
+            [Direction(d) for d in first_moves],
+            cost,
+        )
 
-    def nearest_cheeses(
-        self, pos: tuple[int, int] | None = None
-    ) -> list[NearestCheeseResult]:
+    def nearest_cheeses(self, pos: tuple[int, int] | None = None) -> list[PathResult]:
         """All cheeses tied at the minimum distance from *pos* (default: my position).
 
         Each result has the full path reconstructed. Returns an empty list
@@ -308,8 +319,13 @@ class GameState:
             pos = self.my_position
         results = self._maze.nearest_cheeses(pos, self.cheese)
         return [
-            NearestCheeseResult(target, [Direction(d) for d in dirs], cost)
-            for target, dirs, cost in results
+            PathResult(
+                target,
+                [Direction(d) for d in path],
+                [Direction(d) for d in first_moves],
+                cost,
+            )
+            for target, path, first_moves, cost in results
         ]
 
     def distances_from(

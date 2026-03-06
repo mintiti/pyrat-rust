@@ -13,6 +13,9 @@ type WallTuple = ((u8, u8), (u8, u8));
 /// Wire tuple for a mud passage: ((x1, y1), (x2, y2), cost).
 type MudTuple = ((u8, u8), (u8, u8), u8);
 
+/// Wire tuple for a path result: ((x, y), path, first_moves, cost).
+type PathTuple = ((u8, u8), Vec<u8>, Vec<u8>, u32);
+
 /// Rust-backed maze graph for the Python SDK.
 ///
 /// Constructed once from MatchConfig wire data. Provides graph queries,
@@ -131,39 +134,30 @@ impl PyMaze {
         PyArray3::from_owned_array(py, mat)
     }
 
-    /// Shortest path: returns (directions, cost) or None.
-    ///
-    /// `directions` is the full direction sequence (int list).
-    fn shortest_path(&self, start: (u8, u8), goal: (u8, u8)) -> Option<(Vec<u8>, u32)> {
+    /// Shortest path: returns ((x, y), path, first_moves, cost) or None.
+    fn shortest_path(&self, start: (u8, u8), goal: (u8, u8)) -> Option<PathTuple> {
         let from = Coordinates::new(start.0, start.1);
         let to = Coordinates::new(goal.0, goal.1);
-        let result = iface::shortest_path_full(from, to, &self.view.maze())?;
-        let dirs: Vec<u8> = result.path.iter().map(|d| *d as u8).collect();
-        Some((dirs, result.cost))
+        let full = iface::shortest_path_full(from, to, &self.view.maze())?;
+        let path: Vec<u8> = full.path.iter().map(|d| *d as u8).collect();
+        let first_moves: Vec<u8> = full.first_moves.iter().map(|d| *d as u8).collect();
+        Some(((full.target.x, full.target.y), path, first_moves, full.cost))
     }
 
-    /// Nearest cheese: returns ((x, y), directions, cost) or None.
+    /// Nearest cheese: returns ((x,y), path, first_moves, cost) or None.
     ///
     /// Finds the nearest cheese by Dijkstra, then reconstructs the full path to it.
     /// When multiple cheeses tie at the minimum distance, returns the first one in
     /// the cheese list — use `nearest_cheeses` to get all tied results.
-    fn nearest_cheese(
-        &self,
-        pos: (u8, u8),
-        cheese: Vec<(u8, u8)>,
-    ) -> Option<((u8, u8), Vec<u8>, u32)> {
+    fn nearest_cheese(&self, pos: (u8, u8), cheese: Vec<(u8, u8)>) -> Option<PathTuple> {
         self.nearest_cheeses(pos, cheese).into_iter().next()
     }
 
-    /// All cheeses tied at the minimum distance: list of ((x, y), directions, cost).
+    /// All cheeses tied at the minimum distance: list of ((x,y), path, first_moves, cost).
     ///
     /// Each entry has a full direction sequence from a single-pass Dijkstra.
     /// Returns an empty list if no cheese remains.
-    fn nearest_cheeses(
-        &self,
-        pos: (u8, u8),
-        cheese: Vec<(u8, u8)>,
-    ) -> Vec<((u8, u8), Vec<u8>, u32)> {
+    fn nearest_cheeses(&self, pos: (u8, u8), cheese: Vec<(u8, u8)>) -> Vec<PathTuple> {
         let from = Coordinates::new(pos.0, pos.1);
         let cheese_coords: Vec<Coordinates> = cheese
             .iter()
@@ -173,8 +167,9 @@ impl PyMaze {
         iface::nearest_cheeses_full(from, &cheese_coords, &self.view.maze())
             .into_iter()
             .map(|full| {
-                let dirs: Vec<u8> = full.path.iter().map(|d| *d as u8).collect();
-                ((full.target.x, full.target.y), dirs, full.cost)
+                let path: Vec<u8> = full.path.iter().map(|d| *d as u8).collect();
+                let first_moves: Vec<u8> = full.first_moves.iter().map(|d| *d as u8).collect();
+                ((full.target.x, full.target.y), path, first_moves, full.cost)
             })
             .collect()
     }

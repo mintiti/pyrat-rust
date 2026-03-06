@@ -29,8 +29,8 @@ class MyBot(Bot):
 
     def think(self, state: GameState, ctx: Context) -> Direction:
         result = state.nearest_cheese()
-        if result is not None and result.directions:
-            return result.directions[0]
+        if result is not None and result.path:
+            return result.path[0]
         return Direction.STAY
 
 
@@ -117,12 +117,16 @@ if matrix[x, y, 0] != -1:
 | `effective_moves(pos=None)` | `list[Direction]` | Non-wall directions from pos |
 | `move_cost(direction, pos=None)` | `int \| None` | None=wall, 1=free, N=mud turns |
 | `shortest_path(start, goal)` | `PathResult \| None` | Full path with cost in turns |
-| `nearest_cheese(pos=None)` | `NearestCheeseResult \| None` | Closest cheese with path and cost |
+| `nearest_cheese(pos=None)` | `PathResult \| None` | Closest cheese with path and cost |
+| `nearest_cheeses(pos=None)` | `list[PathResult]` | All cheeses tied at minimum distance |
 | `distances_from(pos=None)` | `dict[(int,int), int]` | Cost to every reachable cell |
 
-`PathResult` is a NamedTuple: `(directions: list[Direction], cost: int)`
+`PathResult` is a NamedTuple: `(target: (int, int), path: list[Direction], first_moves: list[Direction], cost: int)`
 
-`NearestCheeseResult` is a NamedTuple: `(position: (int, int), directions: list[Direction], cost: int)`
+- `target` — destination cell
+- `path` — full direction sequence from source to target
+- `first_moves` — every direction that starts an optimal route (there may be ties)
+- `cost` — number of turns (mud passages cost more than 1)
 
 ### Simulation (tree search)
 
