@@ -90,14 +90,13 @@ pub fn extract_bot_packet(buf: &[u8]) -> Result<(BotMessage, BotPayload), String
     } else if msg_type == BotMessage::Info {
         let info = packet.message_as_info().ok_or("missing Info body")?;
         BotPayload::Info(OwnedInfo {
+            player: info.player(),
+            multipv: info.multipv(),
             target: info.target().map(vec2_to_tuple),
             depth: info.depth(),
             nodes: info.nodes(),
             score: info.score(),
-            path: info
-                .path()
-                .map(|p| (0..p.len()).map(|i| vec2_to_tuple(p.get(i))).collect())
-                .unwrap_or_default(),
+            pv: info.pv().map(|p| p.iter().collect()).unwrap_or_default(),
             message: info.message().unwrap_or("").to_owned(),
         })
     } else if msg_type == BotMessage::RenderCommands {
@@ -596,6 +595,102 @@ mod tests {
         assert_eq!(packet.message_type(), HostMessage::Timeout);
         let t = packet.message_as_timeout().unwrap();
         assert_eq!(t.default_move(), Direction::Stay);
+    }
+
+    // ── Info extraction round-trip ────────────────────
+
+    #[allow(clippy::too_many_arguments)]
+    fn build_info(
+        player: Player,
+        multipv: u16,
+        target: Option<(u8, u8)>,
+        depth: u16,
+        nodes: u32,
+        score: f32,
+        pv: &[Direction],
+        message: &str,
+    ) -> Vec<u8> {
+        let mut fbb = FlatBufferBuilder::new();
+
+        let msg = if message.is_empty() {
+            None
+        } else {
+            Some(fbb.create_string(message))
+        };
+        let pv_off = if pv.is_empty() {
+            None
+        } else {
+            Some(fbb.create_vector(pv))
+        };
+        let target_v = target.map(|(x, y)| Vec2::new(x, y));
+
+        let info = wire::Info::create(
+            &mut fbb,
+            &wire::InfoArgs {
+                player,
+                multipv,
+                target: target_v.as_ref(),
+                depth,
+                nodes,
+                score,
+                pv: pv_off,
+                message: msg,
+            },
+        );
+        let packet = wire::BotPacket::create(
+            &mut fbb,
+            &wire::BotPacketArgs {
+                message_type: BotMessage::Info,
+                message: Some(info.as_union_value()),
+            },
+        );
+        fbb.finish(packet, None);
+        fbb.finished_data().to_vec()
+    }
+
+    #[test]
+    fn extract_info_all_fields() {
+        let buf = build_info(
+            Player::Player2,
+            3,
+            Some((10, 7)),
+            5,
+            42000,
+            2.5,
+            &[Direction::Up, Direction::Left],
+            "depth 5",
+        );
+        let (msg_type, payload) = extract_bot_packet(&buf).unwrap();
+        assert_eq!(msg_type, BotMessage::Info);
+        match payload {
+            BotPayload::Info(info) => {
+                assert_eq!(info.player, Player::Player2);
+                assert_eq!(info.multipv, 3);
+                assert_eq!(info.target, Some((10, 7)));
+                assert_eq!(info.depth, 5);
+                assert_eq!(info.nodes, 42000);
+                assert!((info.score - 2.5).abs() < f32::EPSILON);
+                assert_eq!(info.pv, vec![Direction::Up, Direction::Left]);
+                assert_eq!(info.message, "depth 5");
+            },
+            _ => panic!("expected Info"),
+        }
+    }
+
+    #[test]
+    fn extract_info_empty_optional_fields() {
+        let buf = build_info(Player::Player1, 0, None, 0, 0, 0.0, &[], "");
+        let (_, payload) = extract_bot_packet(&buf).unwrap();
+        match payload {
+            BotPayload::Info(info) => {
+                assert_eq!(info.player, Player::Player1);
+                assert_eq!(info.multipv, 0);
+                assert!(info.target.is_none());
+                assert!(info.pv.is_empty());
+                assert!(info.message.is_empty());
+            },
+            _ => panic!("expected Info"),
+        }
     }
 
     #[test]

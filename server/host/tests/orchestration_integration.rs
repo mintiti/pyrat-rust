@@ -301,11 +301,13 @@ async fn info_forwarded_as_event() {
         Info::create(
             fbb,
             &InfoArgs {
+                player: Player::Player1,
+                multipv: 1,
                 target: None,
                 depth: 5,
                 nodes: 100,
                 score: 0.5,
-                path: None,
+                pv: None,
                 message: Some(msg),
             },
         )

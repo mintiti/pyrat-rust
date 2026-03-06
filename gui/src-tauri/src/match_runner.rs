@@ -311,11 +311,12 @@ async fn forward_events(
                     match_id,
                     player: player_side(player),
                     turn,
+                    multipv: info.multipv,
                     target: info.target.map(Coord::from),
                     depth: info.depth,
                     nodes: info.nodes,
                     score: info.score,
-                    path: info.path.iter().copied().map(Coord::from).collect(),
+                    pv: info.pv.iter().map(|&d| wire_to_specta(d)).collect(),
                     message: info.message,
                 }
                 .emit(&app);

@@ -25,8 +25,22 @@ class Info(object):
         self._tab = flatbuffers.table.Table(buf, pos)
 
     # Info
-    def Target(self):
+    def Player(self):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(4))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Uint8Flags, o + self._tab.Pos)
+        return 0
+
+    # Info
+    def Multipv(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(6))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Uint16Flags, o + self._tab.Pos)
+        return 0
+
+    # Info
+    def Target(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(8))
         if o != 0:
             x = o + self._tab.Pos
             from pyrat_sdk._wire.protocol.Vec2 import Vec2
@@ -37,100 +51,115 @@ class Info(object):
 
     # Info
     def Depth(self):
-        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(6))
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(10))
         if o != 0:
             return self._tab.Get(flatbuffers.number_types.Uint16Flags, o + self._tab.Pos)
         return 0
 
     # Info
     def Nodes(self):
-        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(8))
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(12))
         if o != 0:
             return self._tab.Get(flatbuffers.number_types.Uint32Flags, o + self._tab.Pos)
         return 0
 
     # Info
     def Score(self):
-        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(10))
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(14))
         if o != 0:
             return self._tab.Get(flatbuffers.number_types.Float32Flags, o + self._tab.Pos)
         return 0.0
 
     # Info
-    def Path(self, j):
-        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(12))
+    def Pv(self, j):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(16))
         if o != 0:
-            x = self._tab.Vector(o)
-            x += flatbuffers.number_types.UOffsetTFlags.py_type(j) * 2
-            from pyrat_sdk._wire.protocol.Vec2 import Vec2
-            obj = Vec2()
-            obj.Init(self._tab.Bytes, x)
-            return obj
-        return None
+            a = self._tab.Vector(o)
+            return self._tab.Get(flatbuffers.number_types.Uint8Flags, a + flatbuffers.number_types.UOffsetTFlags.py_type(j * 1))
+        return 0
 
     # Info
-    def PathLength(self):
-        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(12))
+    def PvAsNumpy(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(16))
+        if o != 0:
+            return self._tab.GetVectorAsNumpy(flatbuffers.number_types.Uint8Flags, o)
+        return 0
+
+    # Info
+    def PvLength(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(16))
         if o != 0:
             return self._tab.VectorLen(o)
         return 0
 
     # Info
-    def PathIsNone(self):
-        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(12))
+    def PvIsNone(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(16))
         return o == 0
 
     # Info
     def Message(self):
-        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(14))
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(18))
         if o != 0:
             return self._tab.String(o + self._tab.Pos)
         return None
 
 def InfoStart(builder):
-    builder.StartObject(6)
+    builder.StartObject(8)
 
 def Start(builder):
     InfoStart(builder)
 
+def InfoAddPlayer(builder, player):
+    builder.PrependUint8Slot(0, player, 0)
+
+def AddPlayer(builder, player):
+    InfoAddPlayer(builder, player)
+
+def InfoAddMultipv(builder, multipv):
+    builder.PrependUint16Slot(1, multipv, 0)
+
+def AddMultipv(builder, multipv):
+    InfoAddMultipv(builder, multipv)
+
 def InfoAddTarget(builder, target):
-    builder.PrependStructSlot(0, flatbuffers.number_types.UOffsetTFlags.py_type(target), 0)
+    builder.PrependStructSlot(2, flatbuffers.number_types.UOffsetTFlags.py_type(target), 0)
 
 def AddTarget(builder, target):
     InfoAddTarget(builder, target)
 
 def InfoAddDepth(builder, depth):
-    builder.PrependUint16Slot(1, depth, 0)
+    builder.PrependUint16Slot(3, depth, 0)
 
 def AddDepth(builder, depth):
     InfoAddDepth(builder, depth)
 
 def InfoAddNodes(builder, nodes):
-    builder.PrependUint32Slot(2, nodes, 0)
+    builder.PrependUint32Slot(4, nodes, 0)
 
 def AddNodes(builder, nodes):
     InfoAddNodes(builder, nodes)
 
 def InfoAddScore(builder, score):
-    builder.PrependFloat32Slot(3, score, 0.0)
+    builder.PrependFloat32Slot(5, score, 0.0)
 
 def AddScore(builder, score):
     InfoAddScore(builder, score)
 
-def InfoAddPath(builder, path):
-    builder.PrependUOffsetTRelativeSlot(4, flatbuffers.number_types.UOffsetTFlags.py_type(path), 0)
+def InfoAddPv(builder, pv):
+    builder.PrependUOffsetTRelativeSlot(6, flatbuffers.number_types.UOffsetTFlags.py_type(pv), 0)
 
-def AddPath(builder, path):
-    InfoAddPath(builder, path)
+def AddPv(builder, pv):
+    InfoAddPv(builder, pv)
 
-def InfoStartPathVector(builder, numElems):
-    return builder.StartVector(2, numElems, 1)
+def InfoStartPvVector(builder, numElems):
+    return builder.StartVector(1, numElems, 1)
 
-def StartPathVector(builder, numElems):
-    return InfoStartPathVector(builder, numElems)
+def StartPvVector(builder, numElems):
+    return InfoStartPvVector(builder, numElems)
 
 def InfoAddMessage(builder, message):
-    builder.PrependUOffsetTRelativeSlot(5, flatbuffers.number_types.UOffsetTFlags.py_type(message), 0)
+    builder.PrependUOffsetTRelativeSlot(7, flatbuffers.number_types.UOffsetTFlags.py_type(message), 0)
 
 def AddMessage(builder, message):
     InfoAddMessage(builder, message)

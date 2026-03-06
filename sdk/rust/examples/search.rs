@@ -39,6 +39,8 @@ impl Bot for Search {
             best_move = dir;
 
             ctx.send_info(
+                state.my_player(),
+                1,
                 None,
                 depth as u16,
                 self.nodes as u32,

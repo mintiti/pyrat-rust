@@ -71,11 +71,12 @@ pub struct BotInfoEvent {
     pub match_id: u32,
     pub player: PlayerSide,
     pub turn: u16,
+    pub multipv: u16,
     pub target: Option<Coord>,
     pub depth: u16,
     pub nodes: u32,
     pub score: f32,
-    pub path: Vec<Coord>,
+    pub pv: Vec<Direction>,
     pub message: String,
 }
 

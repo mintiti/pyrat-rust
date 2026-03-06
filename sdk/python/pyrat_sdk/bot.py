@@ -49,22 +49,26 @@ class Context:
     def send_info(
         self,
         *,
+        player: int | None = None,
+        multipv: int = 0,
         target: tuple[int, int] | None = None,
         depth: int = 0,
         nodes: int = 0,
         score: float = 0.0,
-        path: list[tuple[int, int]] | None = None,
+        pv: list[Direction] | None = None,
         message: str = "",
     ) -> None:
         """Send an Info message to the host (for GUI / debugging)."""
         try:
             self._conn.send_frame(
                 codec.encode_info(
+                    player=int(player) if player is not None else 0,
+                    multipv=multipv,
                     target=target,
                     depth=depth,
                     nodes=nodes,
                     score=score,
-                    path=path,
+                    pv=[int(d) for d in pv] if pv else None,
                     message=message,
                 )
             )

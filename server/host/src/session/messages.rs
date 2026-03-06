@@ -24,11 +24,13 @@ pub struct OwnedOptionDef {
 /// Owned copy of a bot Info message.
 #[derive(Debug, Clone)]
 pub struct OwnedInfo {
+    pub player: Player,
+    pub multipv: u16,
     pub target: Option<(u8, u8)>,
     pub depth: u16,
     pub nodes: u32,
     pub score: f32,
-    pub path: Vec<(u8, u8)>,
+    pub pv: Vec<Direction>,
     pub message: String,
 }
 

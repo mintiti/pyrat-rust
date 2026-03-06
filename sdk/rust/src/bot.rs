@@ -73,18 +73,23 @@ impl Context {
     /// Send an Info message to the host (for GUI / debugging).
     ///
     /// Writes synchronously on a cloned TCP socket. Errors are logged to stderr.
+    #[allow(clippy::too_many_arguments)]
     pub fn send_info(
         &self,
+        player: Player,
+        multipv: u16,
         target: Option<(u8, u8)>,
         depth: u16,
         nodes: u32,
         score: f32,
-        path: &[(u8, u8)],
+        pv: &[Direction],
         message: &str,
     ) {
         if let Ok(mut guard) = self.info_sender.try_borrow_mut() {
             if let Some(sender) = guard.as_mut() {
-                let frame = crate::wire::build_info(target, depth, nodes, score, path, message);
+                let frame = crate::wire::build_info(
+                    player, multipv, target, depth, nodes, score, pv, message,
+                );
                 sender.send(&frame);
             }
         }
