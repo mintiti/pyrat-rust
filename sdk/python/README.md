@@ -1,17 +1,21 @@
 # PyRat Python SDK
 
-Python SDK for writing PyRat bots. Your bot connects to the host over FlatBuffers, receives game state each turn, and returns a direction.
+Python library for writing PyRat bots. For the conceptual overview (bot lifecycle, GameState facets, how matches work), see the [SDK README](../). This document is the full Python API reference.
 
 Requires **Python 3.10+**.
 
-## Quick start
+## Getting started
+
+The SDK includes a Rust extension (pathfinding, simulation) built with [maturin](https://www.maturin.rs/). From the repo root:
 
 ```bash
-# From the repo root
 uv sync --all-extras
 cd sdk/python && uv run maturin develop --release && cd ../..
+```
 
-# Run a match (the host sets PYRAT_HOST_PORT for you)
+Run a match between two example bots:
+
+```bash
 cargo run -p pyrat-headless -- \
   "uv run python sdk/python/examples/greedy.py" \
   "uv run python sdk/python/examples/smart_random.py"
@@ -29,49 +33,59 @@ class MyBot(Bot):
 
     def think(self, state: GameState, ctx: Context) -> Direction:
         result = state.nearest_cheese()
-        if result is not None and result.path:
-            return result.path[0]
-        return Direction.STAY
+        return result.directions[0] if result else Direction.STAY
 
 
 if __name__ == "__main__":
     MyBot().run()
 ```
 
-You can use `print()` for debugging — the SDK communicates over TCP, not stdin/stdout.
+`print()` works for debugging: the SDK talks to the host over TCP, not stdin/stdout.
 
-## The `Bot` contract
+## The bot contract
 
-1. Subclass `Bot`
-2. Override `think(state, ctx) -> Direction` (required)
-3. Optionally override `preprocess(state, ctx)` for one-time setup
-4. Call `.run()` from `__main__`
+Subclass `Bot`, implement `think()`, call `.run()`.
 
-`think()` is called every turn. Return a `Direction`. If it raises, the SDK catches it and defaults to `STAY`.
+```python
+class Bot:
+    name: str   # shown to host/GUI
+    author: str
 
-`preprocess()` runs once before the game starts, with a separate time budget. Use it to precompute distance tables or other data expensive to rebuild each turn.
+    def think(self, state: GameState, ctx: Context) -> Direction: ...
+    def preprocess(self, state: GameState, ctx: Context) -> None: ...
+    def on_game_over(self, result: GameResult, scores: tuple[float, float]) -> None: ...
+    def run(self) -> None: ...
+```
+
+**`think(state, ctx) → Direction`** is the only required method. Called every turn. If it raises, the SDK catches the exception, prints the traceback, and sends STAY.
+
+**`preprocess(state, ctx)`** runs once before the game starts, with a separate (longer) time budget. Use it to precompute distance tables, load models, or anything too expensive to redo each turn.
+
+**`on_game_over(result, scores)`** is called when the match ends. `result` is a `GameResult` (PLAYER1, PLAYER2, or DRAW). `scores` is `(player1_score, player2_score)`.
+
+**`run()`** connects to the host, runs the full lifecycle, and exits. The [SDK README](../) covers the lifecycle in detail.
 
 ## Coordinate system
 
-Coordinates are `(x, y)` with `(0, 0)` at the bottom-left. `UP` increases `y`, `RIGHT` increases `x`.
+Coordinates are `(x, y)` tuples with `(0, 0)` at the bottom-left corner. `UP` increases `y`, `RIGHT` increases `x`.
 
 ## `GameState` reference
 
-### Properties — perspective-aware (use these)
+### Properties: perspective-aware (use these)
 
 | Property | Type | Description |
 |---|---|---|
-| `my_position` | `(int, int)` | This bot's (x, y) position |
+| `my_position` | `(int, int)` | Your (x, y) position |
 | `opponent_position` | `(int, int)` | Opponent's (x, y) position |
-| `my_score` | `float` | This bot's score |
+| `my_score` | `float` | Your score |
 | `opponent_score` | `float` | Opponent's score |
 | `my_mud_turns` | `int` | Turns stuck in mud (0 = free) |
 | `opponent_mud_turns` | `int` | Opponent's mud turns |
-| `my_last_move` | `Direction` | This bot's last move |
+| `my_last_move` | `Direction` | Your last move |
 | `opponent_last_move` | `Direction` | Opponent's last move |
-| `my_player` | `Player` | Which player this bot is (PLAYER1/PLAYER2) |
+| `my_player` | `Player` | Which player you are (PLAYER1 or PLAYER2) |
 
-### Properties — raw (for HivemindBot)
+### Properties: raw (for HivemindBot)
 
 | Property | Type | Description |
 |---|---|---|
@@ -84,24 +98,26 @@ Coordinates are `(x, y)` with `(0, 0)` at the bottom-left. `UP` increases `y`, `
 | `player1_last_move` | `Direction` | Player 1's last move |
 | `player2_last_move` | `Direction` | Player 2's last move |
 
-### Properties — shared
+### Properties: shared
 
 | Property | Type | Description |
 |---|---|---|
-| `cheese` | `list[(int, int)]` | Current cheese positions |
-| `cheese_matrix` | `ndarray (w, h)` | uint8 matrix, 1 where cheese exists |
-| `movement_matrix` | `ndarray (w, h, 4)` | int8 encoding of moves per direction (see below) |
+| `cheese` | `list[(int, int)]` | Remaining cheese positions |
+| `cheese_matrix` | `ndarray (w, h)` | `uint8`, 1 where cheese exists |
+| `movement_matrix` | `ndarray (w, h, 4)` | `int8`, encodes moves per direction (see below) |
 | `turn` | `int` | Current turn number |
 | `width`, `height` | `int` | Maze dimensions |
 | `max_turns` | `int` | Turn limit |
+| `move_timeout_ms` | `int` | Milliseconds allowed per `think()` call |
+| `preprocessing_timeout_ms` | `int` | Milliseconds allowed for `preprocess()` |
 
 #### `movement_matrix` encoding
 
-The matrix is indexed `[x, y, direction]` where direction is 0=UP, 1=RIGHT, 2=DOWN, 3=LEFT.
+Indexed as `[x, y, direction]` where direction is 0=UP, 1=RIGHT, 2=DOWN, 3=LEFT.
 
-- `-1` — wall (can't move)
-- `0` — free passage (costs 1 turn)
-- `N > 0` — mud passage (costs N turns)
+- `-1` : wall (can't move)
+- `0` : free passage (1 turn to traverse)
+- `N > 0` : mud passage (N turns to traverse)
 
 ```python
 matrix = state.movement_matrix
@@ -114,42 +130,68 @@ if matrix[x, y, 0] != -1:
 
 | Method | Returns | Description |
 |---|---|---|
-| `effective_moves(pos=None)` | `list[Direction]` | Non-wall directions from pos |
-| `move_cost(direction, pos=None)` | `int \| None` | None=wall, 1=free, N=mud turns |
-| `shortest_path(start, goal)` | `PathResult \| None` | Full path with cost in turns |
-| `nearest_cheese(pos=None)` | `PathResult \| None` | Closest cheese with path and cost |
-| `nearest_cheeses(pos=None)` | `list[PathResult]` | All cheeses tied at minimum distance |
-| `distances_from(pos=None)` | `dict[(int,int), int]` | Cost to every reachable cell |
+| `effective_moves(pos=None)` | `list[Direction]` | Non-wall directions from pos (default: `my_position`) |
+| `move_cost(direction, pos=None)` | `int \| None` | `None`=wall, `1`=free, `N`=mud turns |
+| `shortest_path(start, goal)` | `PathResult \| None` | Dijkstra path with total cost |
+| `nearest_cheese(pos=None)` | `NearestCheeseResult \| None` | Closest cheese with path and cost |
+| `nearest_cheeses(pos=None)` | `list[NearestCheeseResult]` | All cheeses tied at minimum distance |
+| `distances_from(pos=None)` | `dict[(int,int), int]` | Cost in turns to every reachable cell |
+| `simulate()` | `GameSim` | Mutable game copy for tree search |
 
-`PathResult` is a NamedTuple: `(target: (int, int), path: list[Direction], first_moves: list[Direction], cost: int)`
+All pathfinding methods account for mud costs and are backed by Dijkstra in Rust. Methods that take `pos` default to `my_position`.
 
-- `target` — destination cell
-- `path` — full direction sequence from source to target
-- `first_moves` — every direction that starts an optimal route (there may be ties)
-- `cost` — number of turns (mud passages cost more than 1)
+**`PathResult`** is a NamedTuple: `(directions: list[Direction], cost: int)`
+
+**`NearestCheeseResult`** is a NamedTuple: `(position: (int, int), directions: list[Direction], cost: int)`
 
 ### Simulation (tree search)
 
-`state.simulate()` returns a `GameSim` — a mutable snapshot of the game backed by Rust. Use it for game-tree search (minimax, MCTS, etc.) via `make_move` / `unmake_move`.
+`state.simulate()` returns a `GameSim`, a mutable snapshot of the game backed by the Rust engine. Use `make_move` / `unmake_move` for game-tree search (minimax, MCTS, etc.) without cloning state.
 
 ```python
 sim = state.simulate()
 
-# Advance one turn: both players move simultaneously.
 undo = sim.make_move(int(Direction.RIGHT), int(Direction.LEFT))
 print(sim.player1_score, sim.is_game_over)
 
-# Revert to the previous state.
-sim.unmake_move(undo)
+sim.unmake_move(undo)  # back to where we were
 ```
 
-**`GameSim` properties:** `player1_position`, `player2_position`, `player1_score`, `player2_score`, `player1_mud_turns`, `player2_mud_turns`, `cheese_positions`, `turn`, `max_turns`, `is_game_over`
+Directions must be passed as `int` (use `int(Direction.RIGHT)`). Undo tokens must be applied in LIFO order (most recent first).
 
-**`MoveUndo`** is the undo token returned by `make_move`. Apply tokens in LIFO order (most recent first). Properties: `p1_pos`, `p2_pos`, `p1_score`, `p2_score`, `p1_mud`, `p2_mud`, `collected_cheese`, `turn`.
+`GameSim` supports `copy.copy()` and `copy.deepcopy()` for branching search trees.
+
+**`GameSim` properties:**
+
+| Property | Type | Description |
+|---|---|---|
+| `player1_position` | `(int, int)` | Player 1's current position |
+| `player2_position` | `(int, int)` | Player 2's current position |
+| `player1_score` | `float` | Player 1's score |
+| `player2_score` | `float` | Player 2's score |
+| `player1_mud_turns` | `int` | Player 1's remaining mud turns |
+| `player2_mud_turns` | `int` | Player 2's remaining mud turns |
+| `cheese_positions` | `list[(int, int)]` | Remaining cheese |
+| `turn` | `int` | Current turn |
+| `max_turns` | `int` | Turn limit |
+| `is_game_over` | `bool` | True if the game has ended |
+
+**`MoveUndo` properties** (read-only, returned by `make_move`):
+
+| Property | Type | Description |
+|---|---|---|
+| `p1_pos` | `(int, int)` | Player 1's position before the move |
+| `p2_pos` | `(int, int)` | Player 2's position before the move |
+| `p1_score` | `float` | Player 1's score before the move |
+| `p2_score` | `float` | Player 2's score before the move |
+| `p1_mud` | `int` | Player 1's mud turns before the move |
+| `p2_mud` | `int` | Player 2's mud turns before the move |
+| `collected_cheese` | `list[(int, int)]` | Cheese collected during this move |
+| `turn` | `int` | Turn number before the move |
 
 Both `GameSim` and `MoveUndo` are importable from `pyrat_sdk`.
 
-## Direction values
+## `Direction` values
 
 | Name | Value |
 |---|---|
@@ -159,47 +201,66 @@ Both `GameSim` and `MoveUndo` are importable from `pyrat_sdk`.
 | `LEFT` | 3 |
 | `STAY` | 4 |
 
+`Direction` is an `IntEnum`, so you can use it anywhere an `int` is expected.
+
 ## `Context`
 
-Passed to `think()` and `preprocess()`. Provides:
+Passed to `think()` and `preprocess()`.
 
-- `time_remaining_ms()` — milliseconds left in this phase
-- `should_stop()` — True when time is up (for iterative deepening)
-- `send_info(...)` — send debug data to the host/GUI
+- **`time_remaining_ms()`** returns milliseconds left before the deadline (0.0 when expired)
+- **`should_stop()`** returns `True` when the deadline has passed, useful for iterative deepening loops
 
-### `send_info()` parameters
+### `send_info()`
 
-All keyword-only, all optional:
+Send debug and visualization data to the host/GUI. All parameters are keyword-only and optional:
 
 | Parameter | Type | Description |
 |---|---|---|
 | `target` | `(int, int)` | Cell the bot is heading toward (shown in GUI) |
+| `path` | `list[(int, int)]` | Planned route (drawn on the maze) |
 | `depth` | `int` | Search depth reached |
 | `nodes` | `int` | Nodes evaluated |
 | `score` | `float` | Evaluation score |
-| `path` | `list[(int, int)]` | Planned path (shown in GUI) |
-| `message` | `str` | Free-form debug message |
+| `message` | `str` | Free-form debug text |
+
+```python
+ctx.send_info(
+    target=result.position,
+    path=[result.position],
+    depth=4,
+    message=f"heading to cheese at {result.position}",
+)
+```
 
 ## `HivemindBot`
 
-Controls both players. Override `think()` to return a dict:
+Controls both players. `think()` returns a dict mapping each player to a direction:
 
 ```python
-def think(self, state, ctx) -> dict[Player, Direction]:
-    return {
-        Player.PLAYER1: Direction.UP,
-        Player.PLAYER2: Direction.DOWN,
-    }
+from pyrat_sdk import HivemindBot, Direction, Player
+
+class MyHivemind(HivemindBot):
+    name = "My Hivemind"
+    author = "Me"
+
+    def think(self, state, ctx) -> dict[Player, Direction]:
+        return {
+            Player.PLAYER1: Direction.UP,
+            Player.PLAYER2: Direction.DOWN,
+        }
+
+if __name__ == "__main__":
+    MyHivemind().run()
 ```
 
-Uses the raw `player1_*`/`player2_*` properties on `GameState` for per-player data.
+Uses the raw `player1_*` / `player2_*` properties on `GameState` (no my/opponent mapping). Missing keys default to STAY.
 
 ## Options
 
-Declare tunable parameters as class attributes. The host can override them via `SetOption` before the game starts.
+Declare tunable parameters as class attributes. The host or GUI can override them before a match starts.
 
 ```python
-from pyrat_sdk import Bot, Direction, Spin, Check, Combo, Str
+from pyrat_sdk import Bot, Spin, Check, Combo, Str
 
 class MyBot(Bot):
     name = "Greedy+"
@@ -213,9 +274,9 @@ class MyBot(Bot):
             ...
 ```
 
-| Type | Description | Example |
+| Type | Constructor | Resolves to |
 |---|---|---|
-| `Spin(default, min, max)` | Integer in a range | `Spin(default=3, min=1, max=10)` |
-| `Check(default)` | Boolean | `Check(default=True)` |
-| `Combo(default, choices)` | String from fixed set | `Combo(default="greedy", choices=[...])` |
-| `Str(default)` | Free-form string | `Str(default="")` |
+| `Spin` | `Spin(default, min, max)` | `int` |
+| `Check` | `Check(default)` | `bool` |
+| `Combo` | `Combo(default, choices)` | `str` |
+| `Str` | `Str(default)` | `str` |
