@@ -69,6 +69,7 @@ pub struct BotDisconnectedEvent {
 #[derive(Serialize, Deserialize, Debug, Clone, Type, Event)]
 pub struct BotInfoEvent {
     pub match_id: u32,
+    pub sender: PlayerSide,
     pub player: PlayerSide,
     pub turn: u16,
     pub multipv: u16,
