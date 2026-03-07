@@ -29,6 +29,30 @@ export interface MazeConfig {
 	total_cheese: number;
 }
 
+/** Info lines from one bot about one player, with batch tracking. */
+export interface InfoBucket {
+	batch: number;
+	lines: Record<number, BotInfoEvent & { batch: number }>; // keyed by multipv
+}
+
+/** All bot info for a game position. Keyed by "sender:subject". */
+export type BotInfoMap = Record<string, InfoBucket>;
+
+/** Accumulate a BotInfoEvent into the map. Mutates in place (designed for immer). */
+export function accumulateBotInfo(botInfo: BotInfoMap, e: BotInfoEvent): void {
+	const key = `${e.sender}:${e.player}`;
+	let bucket = botInfo[key];
+	if (!bucket) {
+		bucket = { batch: 0, lines: {} };
+		botInfo[key] = bucket;
+	}
+	// multipv=1 at new depth → new batch
+	if (e.multipv === 1) {
+		bucket.batch++;
+	}
+	bucket.lines[e.multipv] = { ...e, batch: bucket.batch };
+}
+
 /** One position in the game tree. */
 export interface GameNode {
 	turn: number;
@@ -36,7 +60,7 @@ export interface GameNode {
 	player2: PlayerState;
 	cheese: Coord[];
 	actions: { player1: Direction; player2: Direction } | null;
-	botInfo: { Player1: BotInfoEvent[]; Player2: BotInfoEvent[] };
+	botInfo: BotInfoMap;
 	children: GameNode[];
 }
 
@@ -159,7 +183,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 			player2: maze.player2,
 			cheese: maze.cheese,
 			actions: null,
-			botInfo: { Player1: [], Player2: [] },
+			botInfo: {},
 			children: [],
 		};
 		set({
@@ -192,7 +216,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 						player1: e.player1_action,
 						player2: e.player2_action,
 					},
-					botInfo: { Player1: [], Player2: [] },
+					botInfo: {},
 					children: [],
 				};
 
@@ -218,7 +242,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 				if (!state.root) return;
 				const node = getNodeAtPath(state.root, mainlinePath(e.turn));
 				if (!node) return;
-				node.botInfo[e.player].push(e);
+				accumulateBotInfo(node.botInfo, e);
 			}),
 		);
 	},

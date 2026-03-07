@@ -10,4 +10,8 @@ export default defineConfig({
 	build: {
 		outDir: "dist",
 	},
+	test: {
+		include: ["src/**/*.test.ts"],
+		setupFiles: ["src/test-setup.ts"],
+	},
 });

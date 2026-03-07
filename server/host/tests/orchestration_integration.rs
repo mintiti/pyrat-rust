@@ -340,7 +340,7 @@ async fn info_forwarded_as_event() {
     let info_event = events
         .iter()
         .find_map(|e| match e {
-            MatchEvent::BotInfo { player, info, .. } => Some((*player, info)),
+            MatchEvent::BotInfo { sender, info, .. } => Some((*sender, info)),
             _ => None,
         })
         .expect("expected at least one BotInfo event");
