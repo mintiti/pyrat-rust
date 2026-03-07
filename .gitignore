@@ -288,6 +288,9 @@ rust-project.json
 # Local working notes
 .mt/
 
+# direnv
+.envrc
+
 # macOS
 .DS_Store
 
