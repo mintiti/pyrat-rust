@@ -212,21 +212,23 @@ Passed to `think()` and `preprocess()`.
 
 ### `send_info()`
 
-Send debug and visualization data to the host/GUI. All parameters are keyword-only and optional:
+Send debug and visualization data to the host/GUI. `player` is required; all other parameters are keyword-only with defaults:
 
-| Parameter | Type | Description |
-|---|---|---|
-| `target` | `(int, int)` | Cell the bot is heading toward (shown in GUI) |
-| `path` | `list[(int, int)]` | Planned route (drawn on the maze) |
-| `depth` | `int` | Search depth reached |
-| `nodes` | `int` | Nodes evaluated |
-| `score` | `float` | Evaluation score |
-| `message` | `str` | Free-form debug text |
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `player` | `Player` | — | Which player this info is about |
+| `multipv` | `int` | `0` | Principal variation index (0 for single line) |
+| `target` | `(int, int) \| None` | `None` | Cell the bot is heading toward |
+| `depth` | `int` | `0` | Search depth reached |
+| `nodes` | `int` | `0` | Nodes evaluated |
+| `score` | `float` | `0.0` | Evaluation score |
+| `pv` | `list[Direction] \| None` | `None` | Principal variation (sequence of moves) |
+| `message` | `str` | `""` | Free-form debug text |
 
 ```python
 ctx.send_info(
+    player=state.my_player,
     target=result.position,
-    path=[result.position],
     depth=4,
     message=f"heading to cheese at {result.position}",
 )

@@ -3711,12 +3711,14 @@ pub mod pyrat {
         }
 
         impl<'a> Info<'a> {
-            pub const VT_TARGET: ::flatbuffers::VOffsetT = 4;
-            pub const VT_DEPTH: ::flatbuffers::VOffsetT = 6;
-            pub const VT_NODES: ::flatbuffers::VOffsetT = 8;
-            pub const VT_SCORE: ::flatbuffers::VOffsetT = 10;
-            pub const VT_PATH: ::flatbuffers::VOffsetT = 12;
-            pub const VT_MESSAGE: ::flatbuffers::VOffsetT = 14;
+            pub const VT_PLAYER: ::flatbuffers::VOffsetT = 4;
+            pub const VT_MULTIPV: ::flatbuffers::VOffsetT = 6;
+            pub const VT_TARGET: ::flatbuffers::VOffsetT = 8;
+            pub const VT_DEPTH: ::flatbuffers::VOffsetT = 10;
+            pub const VT_NODES: ::flatbuffers::VOffsetT = 12;
+            pub const VT_SCORE: ::flatbuffers::VOffsetT = 14;
+            pub const VT_PV: ::flatbuffers::VOffsetT = 16;
+            pub const VT_MESSAGE: ::flatbuffers::VOffsetT = 18;
 
             #[inline]
             pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -3736,8 +3738,8 @@ pub mod pyrat {
                 if let Some(x) = args.message {
                     builder.add_message(x);
                 }
-                if let Some(x) = args.path {
-                    builder.add_path(x);
+                if let Some(x) = args.pv {
+                    builder.add_pv(x);
                 }
                 builder.add_score(args.score);
                 builder.add_nodes(args.nodes);
@@ -3745,9 +3747,29 @@ pub mod pyrat {
                     builder.add_target(x);
                 }
                 builder.add_depth(args.depth);
+                builder.add_multipv(args.multipv);
+                builder.add_player(args.player);
                 builder.finish()
             }
 
+            #[inline]
+            pub fn player(&self) -> Player {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<Player>(Info::VT_PLAYER, Some(Player::Player1))
+                        .unwrap()
+                }
+            }
+            #[inline]
+            pub fn multipv(&self) -> u16 {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe { self._tab.get::<u16>(Info::VT_MULTIPV, Some(0)).unwrap() }
+            }
             #[inline]
             pub fn target(&self) -> Option<&'a Vec2> {
                 // Safety:
@@ -3777,16 +3799,12 @@ pub mod pyrat {
                 unsafe { self._tab.get::<f32>(Info::VT_SCORE, Some(0.0)).unwrap() }
             }
             #[inline]
-            pub fn path(&self) -> Option<::flatbuffers::Vector<'a, Vec2>> {
+            pub fn pv(&self) -> Option<::flatbuffers::Vector<'a, Direction>> {
                 // Safety:
                 // Created from valid Table for this object
                 // which contains a valid value in this slot
                 unsafe {
-                    self._tab
-                        .get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, Vec2>>>(
-                            Info::VT_PATH,
-                            None,
-                        )
+                    self._tab.get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, Direction>>>(Info::VT_PV, None)
                 }
             }
             #[inline]
@@ -3808,41 +3826,39 @@ pub mod pyrat {
                 pos: usize,
             ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
                 v.visit_table(pos)?
-                    .visit_field::<Vec2>("target", Self::VT_TARGET, false)?
-                    .visit_field::<u16>("depth", Self::VT_DEPTH, false)?
-                    .visit_field::<u32>("nodes", Self::VT_NODES, false)?
-                    .visit_field::<f32>("score", Self::VT_SCORE, false)?
-                    .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, Vec2>>>(
-                        "path",
-                        Self::VT_PATH,
-                        false,
-                    )?
-                    .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
-                        "message",
-                        Self::VT_MESSAGE,
-                        false,
-                    )?
-                    .finish();
+     .visit_field::<Player>("player", Self::VT_PLAYER, false)?
+     .visit_field::<u16>("multipv", Self::VT_MULTIPV, false)?
+     .visit_field::<Vec2>("target", Self::VT_TARGET, false)?
+     .visit_field::<u16>("depth", Self::VT_DEPTH, false)?
+     .visit_field::<u32>("nodes", Self::VT_NODES, false)?
+     .visit_field::<f32>("score", Self::VT_SCORE, false)?
+     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, Direction>>>("pv", Self::VT_PV, false)?
+     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("message", Self::VT_MESSAGE, false)?
+     .finish();
                 Ok(())
             }
         }
         pub struct InfoArgs<'a> {
+            pub player: Player,
+            pub multipv: u16,
             pub target: Option<&'a Vec2>,
             pub depth: u16,
             pub nodes: u32,
             pub score: f32,
-            pub path: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, Vec2>>>,
+            pub pv: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, Direction>>>,
             pub message: Option<::flatbuffers::WIPOffset<&'a str>>,
         }
         impl<'a> Default for InfoArgs<'a> {
             #[inline]
             fn default() -> Self {
                 InfoArgs {
+                    player: Player::Player1,
+                    multipv: 0,
                     target: None,
                     depth: 0,
                     nodes: 0,
                     score: 0.0,
-                    path: None,
+                    pv: None,
                     message: None,
                 }
             }
@@ -3853,6 +3869,15 @@ pub mod pyrat {
             start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
         }
         impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> InfoBuilder<'a, 'b, A> {
+            #[inline]
+            pub fn add_player(&mut self, player: Player) {
+                self.fbb_
+                    .push_slot::<Player>(Info::VT_PLAYER, player, Player::Player1);
+            }
+            #[inline]
+            pub fn add_multipv(&mut self, multipv: u16) {
+                self.fbb_.push_slot::<u16>(Info::VT_MULTIPV, multipv, 0);
+            }
             #[inline]
             pub fn add_target(&mut self, target: &Vec2) {
                 self.fbb_.push_slot_always::<&Vec2>(Info::VT_TARGET, target);
@@ -3870,12 +3895,12 @@ pub mod pyrat {
                 self.fbb_.push_slot::<f32>(Info::VT_SCORE, score, 0.0);
             }
             #[inline]
-            pub fn add_path(
+            pub fn add_pv(
                 &mut self,
-                path: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b, Vec2>>,
+                pv: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b, Direction>>,
             ) {
                 self.fbb_
-                    .push_slot_always::<::flatbuffers::WIPOffset<_>>(Info::VT_PATH, path);
+                    .push_slot_always::<::flatbuffers::WIPOffset<_>>(Info::VT_PV, pv);
             }
             #[inline]
             pub fn add_message(&mut self, message: ::flatbuffers::WIPOffset<&'b str>) {
@@ -3902,11 +3927,13 @@ pub mod pyrat {
         impl ::core::fmt::Debug for Info<'_> {
             fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                 let mut ds = f.debug_struct("Info");
+                ds.field("player", &self.player());
+                ds.field("multipv", &self.multipv());
                 ds.field("target", &self.target());
                 ds.field("depth", &self.depth());
                 ds.field("nodes", &self.nodes());
                 ds.field("score", &self.score());
-                ds.field("path", &self.path());
+                ds.field("pv", &self.pv());
                 ds.field("message", &self.message());
                 ds.finish()
             }

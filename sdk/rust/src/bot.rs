@@ -1,7 +1,7 @@
 //! Bot and Hivemind traits, Context for timing and info sending.
 
-use std::cell::RefCell;
 use std::io::Write;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use pyrat::Direction;
@@ -12,36 +12,99 @@ use crate::state::GameState;
 
 /// Synchronous writer for Info frames during `think()`.
 ///
-/// Wraps a cloned `std::net::TcpStream` and writes length-prefixed frames
-/// directly (bypassing the async writer, which is idle during `think()`).
-pub(crate) struct InfoSender {
-    stream: std::net::TcpStream,
+/// Wraps a `TcpStream` behind `Arc<Mutex<…>>` so it is `Send + Sync` and
+/// cheaply cloneable. Multi-threaded bots (e.g. MCTS) can clone the sender
+/// and move it into worker threads.
+#[derive(Clone)]
+pub struct InfoSender {
+    stream: Arc<Mutex<std::net::TcpStream>>,
 }
 
 impl InfoSender {
     pub(crate) fn new(stream: std::net::TcpStream) -> Self {
-        Self { stream }
+        Self {
+            stream: Arc::new(Mutex::new(stream)),
+        }
     }
 
-    fn send(&mut self, frame: &[u8]) {
+    /// Send a pre-built Info frame. Locks the stream internally.
+    pub fn send(&self, frame: &[u8]) {
+        let Ok(mut stream) = self.stream.lock() else {
+            eprintln!("[sdk] send_info() failed: mutex poisoned");
+            return;
+        };
         let len = (frame.len() as u32).to_be_bytes();
-        if let Err(e) = self
-            .stream
+        if let Err(e) = stream
             .write_all(&len)
-            .and_then(|()| self.stream.write_all(frame))
+            .and_then(|()| stream.write_all(frame))
         {
             eprintln!("[sdk] send_info() failed: {e}");
+        }
+    }
+
+    /// Build and send an Info message from [`InfoParams`].
+    pub fn send_info(&self, params: &InfoParams) {
+        let frame = crate::wire::build_info(
+            params.player,
+            params.multipv,
+            params.target,
+            params.depth,
+            params.nodes,
+            params.score,
+            params.pv,
+            params.message,
+        );
+        self.send(&frame);
+    }
+}
+
+/// Parameters for sending an Info message to the host.
+///
+/// Use [`InfoParams::for_player`] to create with defaults, then override
+/// fields with struct update syntax:
+///
+/// ```ignore
+/// ctx.send_info(&InfoParams {
+///     depth: 5,
+///     score: 3.0,
+///     ..InfoParams::for_player(player)
+/// });
+/// ```
+pub struct InfoParams<'a> {
+    pub player: Player,
+    pub multipv: u16,
+    pub target: Option<(u8, u8)>,
+    pub depth: u16,
+    pub nodes: u32,
+    pub score: f32,
+    pub pv: &'a [Direction],
+    pub message: &'a str,
+}
+
+impl InfoParams<'_> {
+    pub fn for_player(player: Player) -> Self {
+        Self {
+            player,
+            multipv: 0,
+            target: None,
+            depth: 0,
+            nodes: 0,
+            score: 0.0,
+            pv: &[],
+            message: "",
         }
     }
 }
 
 /// Timing context passed to `think()` and `preprocess()`.
 ///
-/// Uses `RefCell` for the `InfoSender` so `send_info()` works through `&self`
-/// (the `Bot::think()` trait receives `&Context`).
+/// Thread-safe: `Context` is `Sync`, so `&Context` can be shared across threads
+/// (e.g. rayon scoped threads, crossbeam scopes). Multi-threaded bots can also
+/// call [`info_sender()`](Self::info_sender) to get a cloneable handle for
+/// `std::thread::spawn`.
 pub struct Context {
     deadline: Instant,
-    info_sender: RefCell<Option<InfoSender>>,
+    info_sender: Mutex<Option<InfoSender>>,
 }
 
 impl Context {
@@ -49,7 +112,7 @@ impl Context {
     pub(crate) fn new(deadline: Instant, info_sender: Option<InfoSender>) -> Self {
         Self {
             deadline,
-            info_sender: RefCell::new(info_sender),
+            info_sender: Mutex::new(info_sender),
         }
     }
 
@@ -65,28 +128,25 @@ impl Context {
             .map_or(0, |d| d.as_millis() as u64)
     }
 
+    /// Clone the inner [`InfoSender`], if available.
+    ///
+    /// Use this to get an owned sender you can move into `std::thread::spawn`.
+    /// Returns `None` when no sender is available (e.g. during preprocess).
+    pub fn info_sender(&self) -> Option<InfoSender> {
+        self.info_sender.lock().unwrap().clone()
+    }
+
     /// Reclaim the `InfoSender` so it can be reused across turns.
-    pub(crate) fn take_info_sender(&mut self) -> Option<InfoSender> {
-        self.info_sender.borrow_mut().take()
+    pub(crate) fn take_info_sender(&self) -> Option<InfoSender> {
+        self.info_sender.lock().unwrap().take()
     }
 
     /// Send an Info message to the host (for GUI / debugging).
     ///
     /// Writes synchronously on a cloned TCP socket. Errors are logged to stderr.
-    pub fn send_info(
-        &self,
-        target: Option<(u8, u8)>,
-        depth: u16,
-        nodes: u32,
-        score: f32,
-        path: &[(u8, u8)],
-        message: &str,
-    ) {
-        if let Ok(mut guard) = self.info_sender.try_borrow_mut() {
-            if let Some(sender) = guard.as_mut() {
-                let frame = crate::wire::build_info(target, depth, nodes, score, path, message);
-                sender.send(&frame);
-            }
+    pub fn send_info(&self, params: &InfoParams) {
+        if let Some(sender) = self.info_sender.lock().unwrap().as_ref() {
+            sender.send_info(params);
         }
     }
 }

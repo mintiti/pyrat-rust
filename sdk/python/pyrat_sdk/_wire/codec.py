@@ -6,7 +6,12 @@ plain Python types.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import flatbuffers
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 from pyrat_sdk._wire.protocol import Action as ActionMod
 from pyrat_sdk._wire.protocol import BotPacket as BotPacketMod
@@ -253,32 +258,36 @@ def encode_pong() -> bytes:
 
 def encode_info(
     *,
+    player: int = 0,
+    multipv: int = 0,
     target: tuple[int, int] | None = None,
     depth: int = 0,
     nodes: int = 0,
     score: float = 0.0,
-    path: list[tuple[int, int]] | None = None,
+    pv: Sequence[int] | None = None,
     message: str = "",
 ) -> bytes:
     def build(b):
         # Pre-create strings and vectors before starting the table.
         msg_off = b.CreateString(message) if message else None
 
-        path_off = None
-        if path:
-            InfoMod.InfoStartPathVector(b, len(path))
-            for x, y in reversed(path):
-                CreateVec2(b, x, y)
-            path_off = b.EndVector()
+        pv_off = None
+        if pv:
+            InfoMod.InfoStartPvVector(b, len(pv))
+            for d in reversed(pv):
+                b.PrependUint8(d)
+            pv_off = b.EndVector()
 
         InfoMod.Start(b)
+        InfoMod.AddPlayer(b, player)
+        InfoMod.AddMultipv(b, multipv)
         if target is not None:
             InfoMod.AddTarget(b, CreateVec2(b, target[0], target[1]))
         InfoMod.AddDepth(b, depth)
         InfoMod.AddNodes(b, nodes)
         InfoMod.AddScore(b, score)
-        if path_off is not None:
-            InfoMod.AddPath(b, path_off)
+        if pv_off is not None:
+            InfoMod.AddPv(b, pv_off)
         if msg_off is not None:
             InfoMod.AddMessage(b, msg_off)
         return InfoMod.End(b)

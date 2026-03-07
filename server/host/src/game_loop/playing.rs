@@ -541,11 +541,13 @@ mod tests {
             .send(SessionMsg::Info {
                 session_id: SessionId(1),
                 info: crate::session::messages::OwnedInfo {
+                    player: Player::Player1,
+                    multipv: 1,
                     target: None,
                     depth: 5,
                     nodes: 100,
                     score: 0.5,
-                    path: vec![],
+                    pv: vec![],
                     message: "thinking".into(),
                 },
             })

@@ -323,12 +323,15 @@ pub fn build_action(player: wire::Player, direction: pyrat::Direction) -> Vec<u8
 }
 
 /// Build an Info bot packet (search telemetry for GUI / debugging).
+#[allow(clippy::too_many_arguments)]
 pub fn build_info(
+    player: wire::Player,
+    multipv: u16,
     target: Option<(u8, u8)>,
     depth: u16,
     nodes: u32,
     score: f32,
-    path: &[(u8, u8)],
+    pv: &[pyrat::Direction],
     message: &str,
 ) -> Vec<u8> {
     build_bot_frame(BotMessage::Info, |fbb| {
@@ -338,11 +341,11 @@ pub fn build_info(
             Some(fbb.create_string(message))
         };
 
-        let path_vec: Vec<Vec2> = path.iter().map(|&(x, y)| Vec2::new(x, y)).collect();
-        let path_off = if path_vec.is_empty() {
+        let pv_vec: Vec<wire::Direction> = pv.iter().map(|&d| engine_to_wire_dir(d)).collect();
+        let pv_off = if pv_vec.is_empty() {
             None
         } else {
-            Some(fbb.create_vector(&path_vec))
+            Some(fbb.create_vector(&pv_vec))
         };
 
         let target_v = target.map(|(x, y)| Vec2::new(x, y));
@@ -350,11 +353,13 @@ pub fn build_info(
         wire::Info::create(
             fbb,
             &wire::InfoArgs {
+                player,
+                multipv,
                 target: target_v.as_ref(),
                 depth,
                 nodes,
                 score,
-                path: path_off,
+                pv: pv_off,
                 message: msg,
             },
         )
@@ -631,30 +636,43 @@ mod tests {
 
     #[test]
     fn build_info_roundtrip() {
-        let bytes = build_info(Some((10, 7)), 3, 42000, 2.5, &[(1, 2), (3, 4)], "depth 3");
+        let bytes = build_info(
+            Player::Player2,
+            3,
+            Some((10, 7)),
+            5,
+            42000,
+            2.5,
+            &[pyrat::Direction::Up, pyrat::Direction::Left],
+            "depth 5",
+        );
         let packet = flatbuffers::root::<wire::BotPacket>(&bytes).unwrap();
         assert_eq!(packet.message_type(), BotMessage::Info);
         let info = packet.message_as_info().unwrap();
+        assert_eq!(info.player(), Player::Player2);
+        assert_eq!(info.multipv(), 3);
         let t = info.target().unwrap();
         assert_eq!((t.x(), t.y()), (10, 7));
-        assert_eq!(info.depth(), 3);
+        assert_eq!(info.depth(), 5);
         assert_eq!(info.nodes(), 42000);
         assert!((info.score() - 2.5).abs() < f32::EPSILON);
-        let path = info.path().unwrap();
-        assert_eq!(path.len(), 2);
-        assert_eq!((path.get(0).x(), path.get(0).y()), (1, 2));
-        assert_eq!((path.get(1).x(), path.get(1).y()), (3, 4));
-        assert_eq!(info.message(), Some("depth 3"));
+        let pv = info.pv().unwrap();
+        assert_eq!(pv.len(), 2);
+        assert_eq!(pv.get(0), WireDir::Up);
+        assert_eq!(pv.get(1), WireDir::Left);
+        assert_eq!(info.message(), Some("depth 5"));
     }
 
     #[test]
     fn build_info_empty_optional_fields() {
-        let bytes = build_info(None, 0, 0, 0.0, &[], "");
+        let bytes = build_info(Player::Player1, 0, None, 0, 0, 0.0, &[], "");
         let packet = flatbuffers::root::<wire::BotPacket>(&bytes).unwrap();
         assert_eq!(packet.message_type(), BotMessage::Info);
         let info = packet.message_as_info().unwrap();
+        assert_eq!(info.player(), Player::Player1);
+        assert_eq!(info.multipv(), 0);
         assert!(info.target().is_none());
-        assert!(info.path().is_none());
+        assert!(info.pv().is_none());
         assert!(info.message().is_none());
     }
 

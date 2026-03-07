@@ -230,11 +230,13 @@ class TestEncodeAction:
 class TestEncodeInfo:
     def test_all_fields(self):
         buf = codec.encode_info(
+            player=1,
+            multipv=2,
             target=(5, 3),
             depth=10,
             nodes=1000,
             score=42.5,
-            path=[(1, 2), (3, 4)],
+            pv=[0, 3],  # UP, LEFT
             message="hello",
         )
         packet = BotPacket.GetRootAs(buf)
@@ -243,26 +245,32 @@ class TestEncodeInfo:
         info = Info()
         info.Init(packet.Message().Bytes, packet.Message().Pos)
 
+        assert info.Player() == 1
+        assert info.Multipv() == 2
         assert info.Target().X() == 5
         assert info.Target().Y() == 3
         assert info.Depth() == 10
         assert info.Nodes() == 1000
         assert info.Score() == 42.5
-        assert info.PathLength() == 2
+        assert info.PvLength() == 2
+        assert info.Pv(0) == 0  # UP
+        assert info.Pv(1) == 3  # LEFT
         msg = info.Message()
         assert (msg.decode("utf-8") if isinstance(msg, bytes) else msg) == "hello"
 
     def test_minimal(self):
-        """Only default values — no target, path, or message."""
+        """Only default values — no target, pv, or message."""
         buf = codec.encode_info()
         packet = BotPacket.GetRootAs(buf)
         info = Info()
         info.Init(packet.Message().Bytes, packet.Message().Pos)
 
+        assert info.Player() == 0
+        assert info.Multipv() == 0
         assert info.Target() is None
         assert info.Depth() == 0
         assert info.Nodes() == 0
-        assert info.PathIsNone()
+        assert info.PvIsNone()
 
     def test_with_target_only(self):
         buf = codec.encode_info(target=(7, 2))
@@ -272,4 +280,4 @@ class TestEncodeInfo:
 
         assert info.Target().X() == 7
         assert info.Target().Y() == 2
-        assert info.PathIsNone()
+        assert info.PvIsNone()

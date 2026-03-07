@@ -4,7 +4,7 @@
 //! Both players independently maximize their own score — the opponent doesn't
 //! try to hurt us, they try to help themselves.
 
-use pyrat_sdk::{Bot, Context, DeriveOptions, Direction, GameSim, GameState, Player};
+use pyrat_sdk::{Bot, Context, DeriveOptions, Direction, GameSim, GameState, InfoParams, Player};
 use rand::prelude::SliceRandom;
 
 #[derive(DeriveOptions)]
@@ -38,14 +38,14 @@ impl Bot for Search {
 
             best_move = dir;
 
-            ctx.send_info(
-                None,
-                depth as u16,
-                self.nodes as u32,
+            ctx.send_info(&InfoParams {
+                multipv: 1,
+                depth: depth as u16,
+                nodes: self.nodes as u32,
                 score,
-                &[],
-                &format!("depth {depth}: {best_move:?} ({score:.1})"),
-            );
+                message: &format!("depth {depth}: {best_move:?} ({score:.1})"),
+                ..InfoParams::for_player(state.my_player())
+            });
         }
 
         best_move

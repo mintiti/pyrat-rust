@@ -150,11 +150,13 @@ table Action {
 table Pong {}
 
 table Info {
+  player: Player;
+  multipv: uint16;
   target: Vec2;
   depth: uint16;
   nodes: uint32;
   score: float32;
-  path: [Vec2];
+  pv: [Direction];
   message: string;
 }
 

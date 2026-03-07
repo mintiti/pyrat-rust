@@ -37,6 +37,8 @@ class Search(Bot):
             best_score = score
 
             ctx.send_info(
+                player=state.my_player,
+                multipv=1,
                 depth=depth,
                 nodes=self._nodes,
                 score=best_score,

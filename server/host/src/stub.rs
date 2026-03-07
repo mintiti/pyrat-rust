@@ -123,25 +123,22 @@ async fn run_stub(
                 let dir = random_direction();
 
                 // Emit fake Info so the GUI pipeline has data to display.
-                let player_pos = if controlled_players.first() == Some(&Player::Player1) {
-                    ts.player1_position
-                } else {
-                    ts.player2_position
-                };
+                let player = controlled_players
+                    .first()
+                    .copied()
+                    .unwrap_or(Player::Player1);
                 let target = ts.cheese.first().copied();
-                let path = match target {
-                    Some(t) => vec![player_pos, t],
-                    None => vec![player_pos],
-                };
                 let _ = game_tx
                     .send(SessionMsg::Info {
                         session_id,
                         info: OwnedInfo {
+                            player,
+                            multipv: 1,
                             target,
                             depth: 1,
                             nodes: 1,
                             score: 0.0,
-                            path,
+                            pv: vec![dir],
                             message: "stub".into(),
                         },
                     })

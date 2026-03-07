@@ -14,16 +14,12 @@ class Greedy(Bot):
         if candidates:
             result = random.choice(candidates)
             if result.path:
-                # Walk directions to build coordinate path
-                pos = state.my_position
-                path = []
-                for d in result.path:
-                    pos = d.apply_to(pos)
-                    path.append(pos)
                 ctx.send_info(
+                    player=state.my_player,
+                    multipv=1,
                     target=result.target,
-                    path=path,
-                    message=f"target {result.target}, {len(path)} steps",
+                    pv=result.path,
+                    message=f"target {result.target}, {len(result.path)} steps",
                 )
                 return result.path[0]
         return Direction.STAY
