@@ -25,7 +25,7 @@ mod state;
 mod wire;
 
 // Re-export public API
-pub use bot::{Bot, Context, Hivemind, InfoSender};
+pub use bot::{Bot, Context, Hivemind, InfoParams, InfoSender};
 pub use options::{Options, SdkOptionDef};
 pub use pyrat_wire::OptionType;
 pub use state::{GameSim, GameState};

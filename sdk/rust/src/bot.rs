@@ -41,6 +41,59 @@ impl InfoSender {
             eprintln!("[sdk] send_info() failed: {e}");
         }
     }
+
+    /// Build and send an Info message from [`InfoParams`].
+    pub fn send_info(&self, params: &InfoParams) {
+        let frame = crate::wire::build_info(
+            params.player,
+            params.multipv,
+            params.target,
+            params.depth,
+            params.nodes,
+            params.score,
+            params.pv,
+            params.message,
+        );
+        self.send(&frame);
+    }
+}
+
+/// Parameters for sending an Info message to the host.
+///
+/// Use [`InfoParams::for_player`] to create with defaults, then override
+/// fields with struct update syntax:
+///
+/// ```ignore
+/// ctx.send_info(&InfoParams {
+///     depth: 5,
+///     score: 3.0,
+///     ..InfoParams::for_player(player)
+/// });
+/// ```
+pub struct InfoParams<'a> {
+    pub player: Player,
+    pub multipv: u16,
+    pub target: Option<(u8, u8)>,
+    pub depth: u16,
+    pub nodes: u32,
+    pub score: f32,
+    pub pv: &'a [Direction],
+    pub message: &'a str,
+}
+
+impl InfoParams<'_> {
+    pub fn for_player(player: Player) -> Self {
+        Self {
+            player,
+            multipv: 0,
+            target: None,
+            depth: 0,
+            nodes: 0,
+            score: 0.0,
+            pv: &[],
+            message: "",
+        }
+    }
 }
 
 /// Timing context passed to `think()` and `preprocess()`.
@@ -91,22 +144,9 @@ impl Context {
     /// Send an Info message to the host (for GUI / debugging).
     ///
     /// Writes synchronously on a cloned TCP socket. Errors are logged to stderr.
-    #[allow(clippy::too_many_arguments)]
-    pub fn send_info(
-        &self,
-        player: Player,
-        multipv: u16,
-        target: Option<(u8, u8)>,
-        depth: u16,
-        nodes: u32,
-        score: f32,
-        pv: &[Direction],
-        message: &str,
-    ) {
+    pub fn send_info(&self, params: &InfoParams) {
         if let Some(sender) = self.info_sender.lock().unwrap().as_ref() {
-            let frame =
-                crate::wire::build_info(player, multipv, target, depth, nodes, score, pv, message);
-            sender.send(&frame);
+            sender.send_info(params);
         }
     }
 }
