@@ -173,29 +173,50 @@ Passed to `think()` and `preprocess()`.
 
 ### `send_info()`
 
-Send debug and visualization data to the host/GUI during `think()`:
+Send debug and visualization data to the host/GUI during `think()`. Takes an `InfoParams` struct:
 
-| Parameter | Type | Description |
+```rust
+use pyrat_sdk::InfoParams;
+
+ctx.send_info(&InfoParams {
+    depth: 5,
+    score: 3.0,
+    message: "best: Right",
+    ..InfoParams::for_player(state.my_player())
+});
+```
+
+| Field | Type | Description |
 |---|---|---|
+| `player` | `Player` | Which player this info is about |
+| `multipv` | `u16` | Principal variation index (0 for single line) |
 | `target` | `Option<(u8, u8)>` | Cell the bot is heading toward |
 | `depth` | `u16` | Search depth reached |
 | `nodes` | `u32` | Nodes evaluated |
 | `score` | `f32` | Evaluation score |
-| `path` | `&[(u8, u8)]` | Planned route |
+| `pv` | `&[Direction]` | Principal variation (sequence of moves) |
 | `message` | `&str` | Free-form debug text |
 
+`InfoParams::for_player(player)` sets `player` and zeroes everything else — use struct update syntax to override what you need.
+
+### `info_sender()`
+
+For multi-threaded bots, clone the sender and move it into worker threads:
+
 ```rust
-ctx.send_info(
-    None,                // target
-    depth as u16,        // depth
-    self.nodes as u32,   // nodes
-    score,               // score
-    &[],                 // path
-    &format!("depth {depth}: {best_move:?} ({score:.1})"),
-);
+if let Some(sender) = ctx.info_sender() {
+    let player = state.my_player();
+    std::thread::spawn(move || {
+        sender.send_info(&InfoParams {
+            depth: 10,
+            nodes: 50_000,
+            ..InfoParams::for_player(player)
+        });
+    });
+}
 ```
 
-Note: `target` and `path` use `(u8, u8)` tuples, not `Coordinates`.
+`InfoSender` is `Clone + Send + Sync`. Returns `None` during preprocessing.
 
 ## Hivemind
 
