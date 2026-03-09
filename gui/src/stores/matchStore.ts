@@ -11,6 +11,7 @@ import type {
 	MatchOverEvent,
 	MazeState,
 	MudEntry,
+	PlayerSide,
 	PlayerState,
 	TurnPlayedEvent,
 	WallEntry,
@@ -143,6 +144,8 @@ interface MatchState {
 	// Viewer
 	viewerMode: ViewerMode;
 	playbackSpeed: number; // ms between frames
+	showPlayer1Arrows: boolean;
+	showPlayer2Arrows: boolean;
 
 	// Setters for bot selectors
 	setPlayer1BotId: (cmd: string | null) => void;
@@ -158,6 +161,8 @@ interface MatchState {
 
 	// Actions
 	resetToPreview: () => void;
+
+	toggleArrows: (sender: PlayerSide) => void;
 
 	// Navigation
 	goToStart: () => void;
@@ -195,6 +200,8 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	previewSeed: null,
 	previewError: null,
 	playbackSpeed: 200,
+	showPlayer1Arrows: true,
+	showPlayer2Arrows: true,
 
 	// ── Setters ──────────────────────────────────────────────
 	setPlayer1BotId: (cmd) => set({ player1BotId: cmd }),
@@ -284,6 +291,12 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	resetToPreview: () => {
 		commands.stopMatch().catch(console.error);
 		set(IDLE_MATCH);
+	},
+
+	toggleArrows: (sender) => {
+		const key =
+			sender === "Player1" ? "showPlayer1Arrows" : "showPlayer2Arrows";
+		set((s) => ({ [key]: !s[key] }));
 	},
 
 	// ── Navigation ───────────────────────────────────────────

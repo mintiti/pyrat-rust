@@ -238,6 +238,83 @@ describe("buildPvOverlay", () => {
 		expect(result.arrows).toHaveLength(0);
 	});
 
+	it("renders full-length path by default (no truncation)", () => {
+		const botInfo: BotInfoMap = {};
+		accumulateBotInfo(
+			botInfo,
+			info({
+				sender: "Player1",
+				subject: "Player1",
+				multipv: 1,
+				pv: ["Right", "Right", "Right", "Right"],
+				score: 5,
+			}),
+		);
+
+		const result = buildPvOverlay(
+			botInfo,
+			p1Pos,
+			p2Pos,
+			noWalls,
+			5,
+			5,
+			fakeLayout,
+		);
+
+		// All 4 steps should produce 4 segments (not truncated at 5)
+		expect(result.arrows).toHaveLength(1);
+		expect(result.arrows[0].segments).toHaveLength(4);
+	});
+
+	it("offsets arrows by sender so overlapping paths separate", () => {
+		const botInfo: BotInfoMap = {};
+		// Both senders analyze Player1 with same PV
+		accumulateBotInfo(
+			botInfo,
+			info({
+				sender: "Player1",
+				subject: "Player1",
+				multipv: 1,
+				pv: ["Right"],
+				score: 3,
+			}),
+		);
+		accumulateBotInfo(
+			botInfo,
+			info({
+				sender: "Player2",
+				subject: "Player1",
+				multipv: 1,
+				pv: ["Right"],
+				score: 4,
+			}),
+		);
+
+		const result = buildPvOverlay(
+			botInfo,
+			p1Pos,
+			p2Pos,
+			noWalls,
+			5,
+			5,
+			fakeLayout,
+		);
+
+		expect(result.arrows).toHaveLength(2);
+		const p1Arrow = result.arrows.find((a) => a.sender === "Player1");
+		const p2Arrow = result.arrows.find((a) => a.sender === "Player2");
+		expect(p1Arrow).toBeDefined();
+		expect(p2Arrow).toBeDefined();
+		if (!p1Arrow || !p2Arrow) return;
+
+		// Same path but different pixel positions due to sender offset
+		const expectedSeparation = 2 * fakeLayout.cellSize * 0.06;
+		const dx = p2Arrow.segments[0].fromX - p1Arrow.segments[0].fromX;
+		const dy = p2Arrow.segments[0].fromY - p1Arrow.segments[0].fromY;
+		const separation = Math.sqrt(dx * dx + dy * dy);
+		expect(separation).toBeCloseTo(expectedSeparation * Math.SQRT2, 5);
+	});
+
 	it("marks alternatives as not best with pale color", () => {
 		const botInfo: BotInfoMap = {};
 		accumulateBotInfo(

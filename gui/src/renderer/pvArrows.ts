@@ -61,6 +61,13 @@ const SENDER_PALETTE: Record<PlayerSide, ColorPair> = {
 	},
 };
 
+// ── Per-sender pixel offset (disambiguates overlapping arrows) ───
+
+const SENDER_OFFSET: Record<PlayerSide, { dx: number; dy: number }> = {
+	Player1: { dx: -1, dy: -1 },
+	Player2: { dx: 1, dy: 1 },
+};
+
 // ── Direction → delta ────────────────────────────────────────────
 
 const DIRECTION_DELTA: Record<Direction, { dx: number; dy: number }> = {
@@ -143,7 +150,7 @@ export function buildPvOverlay(
 	layout: LayoutMetrics,
 	options?: PvOverlayOptions,
 ): PvOverlayData {
-	const maxSegments = options?.maxSegments ?? 5;
+	const maxSegments = options?.maxSegments ?? Number.POSITIVE_INFINITY;
 	const maxLines = options?.maxLines ?? 3;
 
 	const ws = buildWallSet(walls);
@@ -161,6 +168,10 @@ export function buildPvOverlay(
 		const palette = SENDER_PALETTE[sender];
 		const bestScore = lines[0].score; // multipv=1 is first after sort
 		const startPos = posFor(subject);
+		const senderOff = SENDER_OFFSET[sender];
+		const offPx = layout.cellSize * 0.06;
+		const ox = senderOff.dx * offPx;
+		const oy = senderOff.dy * offPx;
 
 		for (const line of lines.slice(0, maxLines)) {
 			const path = reconstructPath(
@@ -180,10 +191,10 @@ export function buildPvOverlay(
 				const from = gameToCellCenter(path[i], layout);
 				const to = gameToCellCenter(path[i + 1], layout);
 				segments.push({
-					fromX: from.x,
-					fromY: from.y,
-					toX: to.x,
-					toY: to.y,
+					fromX: from.x + ox,
+					fromY: from.y + oy,
+					toX: to.x + ox,
+					toY: to.y + oy,
 				});
 			}
 
@@ -206,8 +217,8 @@ export function buildPvOverlay(
 		if (bestLine.multipv === 1 && bestLine.target) {
 			const center = gameToCellCenter(bestLine.target, layout);
 			targets.push({
-				cx: center.x,
-				cy: center.y,
+				cx: center.x + ox,
+				cy: center.y + oy,
 				radius: layout.cellSize * 0.35,
 				color: palette.saturated,
 			});

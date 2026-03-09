@@ -16,6 +16,7 @@ import {
 	IconDice,
 	IconPlayerPause,
 	IconPlayerPlay,
+	IconRoute,
 	IconSettings,
 } from "@tabler/icons-react";
 import { useAtomValue } from "jotai";
@@ -85,6 +86,8 @@ export default function MatchToolbar({
 	const error = useMatchStore((s) => s.error);
 	const previewSeed = useMatchStore((s) => s.previewSeed);
 	const disconnection = useMatchStore((s) => s.disconnection);
+	const showP1Arrows = useMatchStore((s) => s.showPlayer1Arrows);
+	const showP2Arrows = useMatchStore((s) => s.showPlayer2Arrows);
 
 	const {
 		setPlayer1BotId,
@@ -96,6 +99,7 @@ export default function MatchToolbar({
 		togglePlay,
 		setPlaybackSpeed,
 		resetToPreview,
+		toggleArrows,
 	} = useMatchStore.getState();
 
 	const cursorDepth = useCursorDepth();
@@ -262,6 +266,24 @@ export default function MatchToolbar({
 					<Text size="xs" c="dimmed" ml={4}>
 						Turn {cursorDepth} / {totalTurns}
 					</Text>
+					<ActionIcon
+						variant={showP1Arrows ? "filled" : "subtle"}
+						color="blue"
+						size="sm"
+						onClick={() => toggleArrows("Player1")}
+						title="Toggle Rat PV arrows"
+					>
+						<IconRoute size={14} />
+					</ActionIcon>
+					<ActionIcon
+						variant={showP2Arrows ? "filled" : "subtle"}
+						color="green"
+						size="sm"
+						onClick={() => toggleArrows("Player2")}
+						title="Toggle Python PV arrows"
+					>
+						<IconRoute size={14} />
+					</ActionIcon>
 				</Group>
 			)}
 			<Group gap="sm">

@@ -11,7 +11,8 @@ import {
 import { computeLayout } from "../renderer/layout";
 import { buildPvOverlay } from "../renderer/pvArrows";
 import { generateTileMap } from "../renderer/tileMap";
-import { useCurrentBotInfo } from "../stores/matchStore";
+import type { BotInfoMap } from "../stores/matchStore";
+import { useCurrentBotInfo, useMatchStore } from "../stores/matchStore";
 import MazeCanvas from "./MazeCanvas";
 import PvOverlay from "./PvOverlay";
 
@@ -23,7 +24,22 @@ type Props = {
 export default function MazeRenderer({ gameState, showCellIndices }: Props) {
 	const [assets, setAssets] = useState<AssetMap | null>(null);
 	const { ref, width, height } = useElementSize();
-	const botInfo = useCurrentBotInfo();
+	const rawBotInfo = useCurrentBotInfo();
+	const showP1Arrows = useMatchStore((s) => s.showPlayer1Arrows);
+	const showP2Arrows = useMatchStore((s) => s.showPlayer2Arrows);
+
+	const botInfo = useMemo(() => {
+		if (!rawBotInfo) return null;
+		if (showP1Arrows && showP2Arrows) return rawBotInfo;
+		const filtered: BotInfoMap = {};
+		for (const [key, bucket] of Object.entries(rawBotInfo)) {
+			const sender = key.split(":")[0];
+			if (sender === "Player1" && !showP1Arrows) continue;
+			if (sender === "Player2" && !showP2Arrows) continue;
+			filtered[key] = bucket;
+		}
+		return Object.keys(filtered).length > 0 ? filtered : null;
+	}, [rawBotInfo, showP1Arrows, showP2Arrows]);
 
 	useEffect(() => {
 		loadAssets().then(setAssets);
