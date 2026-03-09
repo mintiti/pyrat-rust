@@ -51,3 +51,12 @@ export function gameToCanvas(
 		y: layout.mazeY + (layout.mazeH - 1 - coord.y) * layout.cellSize,
 	};
 }
+
+/** Convert a game coordinate to the center of its cell in canvas pixels. */
+export function gameToCellCenter(
+	coord: Coord,
+	layout: LayoutMetrics,
+): { x: number; y: number } {
+	const tl = gameToCanvas(coord, layout);
+	return { x: tl.x + layout.cellSize / 2, y: tl.y + layout.cellSize / 2 };
+}

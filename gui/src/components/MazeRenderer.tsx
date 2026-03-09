@@ -9,8 +9,11 @@ import {
 	computeStaticGeometry,
 } from "../renderer/instructions";
 import { computeLayout } from "../renderer/layout";
+import { buildPvOverlay } from "../renderer/pvArrows";
 import { generateTileMap } from "../renderer/tileMap";
+import { useCurrentBotInfo } from "../stores/matchStore";
 import MazeCanvas from "./MazeCanvas";
+import PvOverlay from "./PvOverlay";
 
 type Props = {
 	gameState: MazeState;
@@ -20,6 +23,7 @@ type Props = {
 export default function MazeRenderer({ gameState, showCellIndices }: Props) {
 	const [assets, setAssets] = useState<AssetMap | null>(null);
 	const { ref, width, height } = useElementSize();
+	const botInfo = useCurrentBotInfo();
 
 	useEffect(() => {
 		loadAssets().then(setAssets);
@@ -53,6 +57,19 @@ export default function MazeRenderer({ gameState, showCellIndices }: Props) {
 		);
 	}, [gameState, layout, assets, tileMap, staticGeo, showCellIndices]);
 
+	const pvOverlayData = useMemo(() => {
+		if (!botInfo || !layout) return null;
+		return buildPvOverlay(
+			botInfo,
+			gameState.player1.position,
+			gameState.player2.position,
+			gameState.walls,
+			gameState.width,
+			gameState.height,
+			layout,
+		);
+	}, [botInfo, layout, gameState]);
+
 	return (
 		<div ref={ref} style={{ width: "100%", height: "100%", minHeight: 200 }}>
 			{!assets || !instructions || !layout ? (
@@ -60,11 +77,20 @@ export default function MazeRenderer({ gameState, showCellIndices }: Props) {
 					<Loader />
 				</Center>
 			) : (
-				<MazeCanvas
-					instructions={instructions}
-					width={layout.canvasWidth}
-					height={layout.canvasHeight}
-				/>
+				<div style={{ position: "relative" }}>
+					<MazeCanvas
+						instructions={instructions}
+						width={layout.canvasWidth}
+						height={layout.canvasHeight}
+					/>
+					{pvOverlayData && (
+						<PvOverlay
+							overlay={pvOverlayData}
+							width={layout.canvasWidth}
+							height={layout.canvasHeight}
+						/>
+					)}
+				</div>
 			)}
 		</div>
 	);
