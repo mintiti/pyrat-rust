@@ -310,7 +310,7 @@ async fn forward_events(
                 let _ = BotInfoEvent {
                     match_id,
                     sender: player_side(sender),
-                    player: player_side(info.player),
+                    subject: player_side(info.player),
                     turn,
                     multipv: info.multipv,
                     target: info.target.map(Coord::from),

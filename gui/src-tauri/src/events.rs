@@ -70,7 +70,7 @@ pub struct BotDisconnectedEvent {
 pub struct BotInfoEvent {
     pub match_id: u32,
     pub sender: PlayerSide,
-    pub player: PlayerSide,
+    pub subject: PlayerSide,
     pub turn: u16,
     pub multipv: u16,
     pub target: Option<Coord>,

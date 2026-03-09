@@ -29,10 +29,18 @@ export interface MazeConfig {
 	total_cheese: number;
 }
 
-/** Info lines from one bot about one player, with batch tracking. */
+/**
+ * Info lines from one bot about one player, with subcycle tracking.
+ *
+ * Vocabulary (borrowed from nibbler's iterative-deepening model):
+ * - **cycle** = turn boundary. Each GameNode starts with `botInfo: {}`,
+ *   so the tree structure provides cycle isolation implicitly.
+ * - **subcycle** = increments on each multipv=1 within a turn.
+ *   One subcycle is one pass through PV ranks at a given search depth.
+ */
 export interface InfoBucket {
-	batch: number;
-	lines: Record<number, BotInfoEvent & { batch: number }>; // keyed by multipv
+	subcycle: number;
+	lines: Record<number, BotInfoEvent & { subcycle: number }>; // keyed by multipv
 }
 
 /** All bot info for a game position. Keyed by "sender:subject". */
@@ -40,17 +48,34 @@ export type BotInfoMap = Record<string, InfoBucket>;
 
 /** Accumulate a BotInfoEvent into the map. Mutates in place (designed for immer). */
 export function accumulateBotInfo(botInfo: BotInfoMap, e: BotInfoEvent): void {
-	const key = `${e.sender}:${e.player}`;
+	const key = `${e.sender}:${e.subject}`;
 	let bucket = botInfo[key];
 	if (!bucket) {
-		bucket = { batch: 0, lines: {} };
+		bucket = { subcycle: 0, lines: {} };
 		botInfo[key] = bucket;
 	}
-	// multipv=1 at new depth → new batch
+	// multipv=1 starts a new subcycle (one pass through PV ranks)
 	if (e.multipv === 1) {
-		bucket.batch++;
+		bucket.subcycle++;
 	}
-	bucket.lines[e.multipv] = { ...e, batch: bucket.batch };
+	bucket.lines[e.multipv] = { ...e, subcycle: bucket.subcycle };
+}
+
+/** True if this line belongs to an older subcycle than the bucket's current one. */
+export function isStale(
+	bucket: InfoBucket,
+	line: { subcycle: number },
+): boolean {
+	return line.subcycle < bucket.subcycle;
+}
+
+/** All lines from the current subcycle, sorted by multipv rank. */
+export function currentLines(
+	bucket: InfoBucket,
+): (BotInfoEvent & { subcycle: number })[] {
+	return Object.values(bucket.lines)
+		.filter((l) => l.subcycle === bucket.subcycle)
+		.sort((a, b) => a.multipv - b.multipv);
 }
 
 /** One position in the game tree. */

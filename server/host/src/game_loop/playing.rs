@@ -309,11 +309,13 @@ async fn collect_actions(
                     }
                     SessionMsg::Info { session_id, info } => {
                         if let Some(players) = session_players.get(&session_id) {
-                            emit(event_tx, MatchEvent::BotInfo {
-                                sender: players[0],
-                                turn: current_turn,
-                                info,
-                            });
+                            if let Some(&sender) = players.first() {
+                                emit(event_tx, MatchEvent::BotInfo {
+                                    sender,
+                                    turn: current_turn,
+                                    info,
+                                });
+                            }
                         }
                     }
                     _ => {
