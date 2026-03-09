@@ -306,10 +306,11 @@ async fn forward_events(
                 }
                 .emit(&app);
             },
-            MatchEvent::BotInfo { player, turn, info } => {
+            MatchEvent::BotInfo { sender, turn, info } => {
                 let _ = BotInfoEvent {
                     match_id,
-                    player: player_side(player),
+                    sender: player_side(sender),
+                    subject: player_side(info.player),
                     turn,
                     multipv: info.multipv,
                     target: info.target.map(Coord::from),

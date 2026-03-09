@@ -29,6 +29,55 @@ export interface MazeConfig {
 	total_cheese: number;
 }
 
+/**
+ * Info lines from one bot about one player, with subcycle tracking.
+ *
+ * Vocabulary (borrowed from nibbler's iterative-deepening model):
+ * - **cycle** = turn boundary. Each GameNode starts with `botInfo: {}`,
+ *   so the tree structure provides cycle isolation implicitly.
+ * - **subcycle** = increments on each multipv=1 within a turn.
+ *   One subcycle is one pass through PV ranks at a given search depth.
+ */
+export interface InfoBucket {
+	subcycle: number;
+	lines: Record<number, BotInfoEvent & { subcycle: number }>; // keyed by multipv
+}
+
+/** All bot info for a game position. Keyed by "sender:subject". */
+export type BotInfoMap = Record<string, InfoBucket>;
+
+/** Accumulate a BotInfoEvent into the map. Mutates in place (designed for immer). */
+export function accumulateBotInfo(botInfo: BotInfoMap, e: BotInfoEvent): void {
+	const key = `${e.sender}:${e.subject}`;
+	let bucket = botInfo[key];
+	if (!bucket) {
+		bucket = { subcycle: 0, lines: {} };
+		botInfo[key] = bucket;
+	}
+	// multipv=1 starts a new subcycle (one pass through PV ranks)
+	if (e.multipv === 1) {
+		bucket.subcycle++;
+	}
+	bucket.lines[e.multipv] = { ...e, subcycle: bucket.subcycle };
+}
+
+/** True if this line belongs to an older subcycle than the bucket's current one. */
+export function isStale(
+	bucket: InfoBucket,
+	line: { subcycle: number },
+): boolean {
+	return line.subcycle < bucket.subcycle;
+}
+
+/** All lines from the current subcycle, sorted by multipv rank. */
+export function currentLines(
+	bucket: InfoBucket,
+): (BotInfoEvent & { subcycle: number })[] {
+	return Object.values(bucket.lines)
+		.filter((l) => l.subcycle === bucket.subcycle)
+		.sort((a, b) => a.multipv - b.multipv);
+}
+
 /** One position in the game tree. */
 export interface GameNode {
 	turn: number;
@@ -36,7 +85,7 @@ export interface GameNode {
 	player2: PlayerState;
 	cheese: Coord[];
 	actions: { player1: Direction; player2: Direction } | null;
-	botInfo: { Player1: BotInfoEvent[]; Player2: BotInfoEvent[] };
+	botInfo: BotInfoMap;
 	children: GameNode[];
 }
 
@@ -159,7 +208,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 			player2: maze.player2,
 			cheese: maze.cheese,
 			actions: null,
-			botInfo: { Player1: [], Player2: [] },
+			botInfo: {},
 			children: [],
 		};
 		set({
@@ -192,7 +241,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 						player1: e.player1_action,
 						player2: e.player2_action,
 					},
-					botInfo: { Player1: [], Player2: [] },
+					botInfo: {},
 					children: [],
 				};
 
@@ -218,7 +267,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 				if (!state.root) return;
 				const node = getNodeAtPath(state.root, mainlinePath(e.turn));
 				if (!node) return;
-				node.botInfo[e.player].push(e);
+				accumulateBotInfo(node.botInfo, e);
 			}),
 		);
 	},

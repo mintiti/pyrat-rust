@@ -37,7 +37,7 @@ pub enum MatchEvent {
     },
     /// A bot sent debug/analysis info.
     BotInfo {
-        player: Player,
+        sender: Player,
         turn: u16,
         info: OwnedInfo,
     },

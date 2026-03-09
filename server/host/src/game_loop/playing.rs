@@ -309,14 +309,11 @@ async fn collect_actions(
                     }
                     SessionMsg::Info { session_id, info } => {
                         if let Some(players) = session_players.get(&session_id) {
-                            // Hivemind sessions control multiple players — emit one
-                            // BotInfo per controlled player so consumers see info
-                            // attributed to each.
-                            for &p in players {
+                            if let Some(&sender) = players.first() {
                                 emit(event_tx, MatchEvent::BotInfo {
-                                    player: p,
+                                    sender,
                                     turn: current_turn,
-                                    info: info.clone(),
+                                    info,
                                 });
                             }
                         }
@@ -596,12 +593,12 @@ mod tests {
             matches!(
                 event,
                 MatchEvent::BotInfo {
-                    player: Player::Player1,
+                    sender: Player::Player1,
                     turn: 1,
                     ..
                 }
             ),
-            "expected BotInfo for Player1, got {event:?}"
+            "expected BotInfo from Player1, got {event:?}"
         );
     }
 
