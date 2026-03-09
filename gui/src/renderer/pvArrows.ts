@@ -1,12 +1,11 @@
 import type {
-	BotInfoEvent,
 	Coord,
 	Direction,
 	PlayerSide,
 	WallEntry,
 } from "../bindings/generated";
 import type { BotInfoMap } from "../stores/matchStore";
-import { currentLines } from "../stores/matchStore";
+import { currentLines, parseBotInfoKey } from "../stores/matchStore";
 import { gameToCellCenter } from "./layout";
 import type { LayoutMetrics } from "./layout";
 
@@ -44,6 +43,7 @@ export type PvOverlayData = {
 export type PvOverlayOptions = {
 	maxSegments?: number;
 	maxLines?: number;
+	visibleSenders?: Set<PlayerSide>;
 };
 
 // ── Palette ──────────────────────────────────────────────────────
@@ -144,7 +144,7 @@ export function buildPvOverlay(
 	botInfo: BotInfoMap,
 	player1Pos: Coord,
 	player2Pos: Coord,
-	walls: WallEntry[],
+	wallSet: Set<string>,
 	mazeW: number,
 	mazeH: number,
 	layout: LayoutMetrics,
@@ -152,8 +152,8 @@ export function buildPvOverlay(
 ): PvOverlayData {
 	const maxSegments = options?.maxSegments ?? Number.POSITIVE_INFINITY;
 	const maxLines = options?.maxLines ?? 3;
+	const visibleSenders = options?.visibleSenders;
 
-	const ws = buildWallSet(walls);
 	const arrows: PvArrow[] = [];
 	const targets: TargetMarker[] = [];
 
@@ -161,10 +161,13 @@ export function buildPvOverlay(
 		subject === "Player1" ? player1Pos : player2Pos;
 
 	for (const [key, bucket] of Object.entries(botInfo)) {
+		const { sender, subject } = parseBotInfoKey(key);
+
+		if (visibleSenders && !visibleSenders.has(sender)) continue;
+
 		const lines = currentLines(bucket);
 		if (lines.length === 0) continue;
 
-		const [sender, subject] = key.split(":") as [PlayerSide, PlayerSide];
 		const palette = SENDER_PALETTE[sender];
 		const bestScore = lines[0].score; // multipv=1 is first after sort
 		const startPos = posFor(subject);
@@ -177,7 +180,7 @@ export function buildPvOverlay(
 			const path = reconstructPath(
 				startPos,
 				line.pv,
-				ws,
+				wallSet,
 				mazeW,
 				mazeH,
 				maxSegments,
@@ -224,6 +227,9 @@ export function buildPvOverlay(
 			});
 		}
 	}
+
+	// Pre-sort: alternatives first, best lines last (drawn on top)
+	arrows.sort((a, b) => b.multipv - a.multipv);
 
 	return { arrows, targets };
 }

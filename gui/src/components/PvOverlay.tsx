@@ -70,10 +70,7 @@ export default function PvOverlay({ overlay, width, height }: Props) {
 			ctx.stroke();
 		}
 
-		// Sort: alternatives first, best lines last (on top)
-		const sorted = [...overlay.arrows].sort((a, b) => b.multipv - a.multipv);
-
-		for (const arrow of sorted) {
+		for (const arrow of overlay.arrows) {
 			ctx.strokeStyle = arrow.color;
 			ctx.lineWidth = arrow.thickness;
 			ctx.lineCap = "round";

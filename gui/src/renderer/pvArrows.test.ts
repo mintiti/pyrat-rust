@@ -133,7 +133,7 @@ describe("reconstructPath", () => {
 describe("buildPvOverlay", () => {
 	const p1Pos: Coord = { x: 0, y: 0 };
 	const p2Pos: Coord = { x: 4, y: 4 };
-	const noWalls: WallEntry[] = [];
+	const noWalls = new Set<string>();
 
 	it("returns empty for null/empty botInfo", () => {
 		const result = buildPvOverlay({}, p1Pos, p2Pos, noWalls, 5, 5, fakeLayout);

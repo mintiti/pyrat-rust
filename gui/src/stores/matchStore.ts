@@ -47,6 +47,15 @@ export interface InfoBucket {
 /** All bot info for a game position. Keyed by "sender:subject". */
 export type BotInfoMap = Record<string, InfoBucket>;
 
+/** Parse a BotInfoMap key back into its sender and subject. */
+export function parseBotInfoKey(key: string): {
+	sender: PlayerSide;
+	subject: PlayerSide;
+} {
+	const [sender, subject] = key.split(":") as [PlayerSide, PlayerSide];
+	return { sender, subject };
+}
+
 /** Accumulate a BotInfoEvent into the map. Mutates in place (designed for immer). */
 export function accumulateBotInfo(botInfo: BotInfoMap, e: BotInfoEvent): void {
 	const key = `${e.sender}:${e.subject}`;
