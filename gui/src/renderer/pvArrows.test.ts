@@ -3,12 +3,18 @@ import type {
 	BotInfoEvent,
 	Coord,
 	Direction,
+	PlayerSide,
 	WallEntry,
 } from "../bindings/generated";
-import type { BotInfoMap } from "../stores/matchStore";
-import { accumulateBotInfo } from "../stores/matchStore";
+import type { BotInfoMap } from "../stores/botInfo";
+import { accumulateBotInfo } from "../stores/botInfo";
 import type { LayoutMetrics } from "./layout";
-import { buildPvOverlay, buildWallSet, reconstructPath } from "./pvArrows";
+import {
+	SENDER_OFFSET_FRACTION,
+	buildPvOverlay,
+	buildWallSet,
+	reconstructPath,
+} from "./pvArrows";
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -167,7 +173,7 @@ describe("buildPvOverlay", () => {
 
 		expect(result.arrows).toHaveLength(1);
 		expect(result.arrows[0].isBest).toBe(true);
-		expect(result.arrows[0].segments).toHaveLength(2);
+		expect(result.arrows[0].points).toHaveLength(3);
 		expect(result.targets).toHaveLength(1);
 	});
 
@@ -261,9 +267,9 @@ describe("buildPvOverlay", () => {
 			fakeLayout,
 		);
 
-		// All 4 steps should produce 4 segments (not truncated at 5)
+		// All 4 steps produce 5 points (start + 4 moves)
 		expect(result.arrows).toHaveLength(1);
-		expect(result.arrows[0].segments).toHaveLength(4);
+		expect(result.arrows[0].points).toHaveLength(5);
 	});
 
 	it("offsets arrows by sender so overlapping paths separate", () => {
@@ -308,9 +314,9 @@ describe("buildPvOverlay", () => {
 		if (!p1Arrow || !p2Arrow) return;
 
 		// Same path but different pixel positions due to sender offset
-		const expectedSeparation = 2 * fakeLayout.cellSize * 0.06;
-		const dx = p2Arrow.segments[0].fromX - p1Arrow.segments[0].fromX;
-		const dy = p2Arrow.segments[0].fromY - p1Arrow.segments[0].fromY;
+		const expectedSeparation = 2 * fakeLayout.cellSize * SENDER_OFFSET_FRACTION;
+		const dx = p2Arrow.points[0].x - p1Arrow.points[0].x;
+		const dy = p2Arrow.points[0].y - p1Arrow.points[0].y;
 		const separation = Math.sqrt(dx * dx + dy * dy);
 		expect(separation).toBeCloseTo(expectedSeparation * Math.SQRT2, 5);
 	});
@@ -349,9 +355,80 @@ describe("buildPvOverlay", () => {
 		);
 
 		expect(result.arrows).toHaveLength(2);
+		// Sorted: alternatives first (higher multipv), best last (drawn on top)
+		expect(result.arrows[0].isBest).toBe(false);
 		const best = result.arrows.find((a) => a.isBest);
 		const alt = result.arrows.find((a) => !a.isBest);
 		expect(best?.color).toContain("0.85");
 		expect(alt?.color).toContain("0.35");
+	});
+
+	it("filters arrows by visibleSenders", () => {
+		const botInfo: BotInfoMap = {};
+		accumulateBotInfo(
+			botInfo,
+			info({
+				sender: "Player1",
+				subject: "Player1",
+				multipv: 1,
+				pv: ["Right"],
+				score: 3,
+			}),
+		);
+		accumulateBotInfo(
+			botInfo,
+			info({
+				sender: "Player2",
+				subject: "Player2",
+				multipv: 1,
+				pv: ["Left"],
+				score: 4,
+			}),
+		);
+
+		const visible = new Set<PlayerSide>(["Player2"]);
+		const result = buildPvOverlay(
+			botInfo,
+			p1Pos,
+			p2Pos,
+			noWalls,
+			5,
+			5,
+			fakeLayout,
+			{ visibleSenders: visible },
+		);
+
+		expect(result.arrows).toHaveLength(1);
+		expect(result.arrows[0].sender).toBe("Player2");
+	});
+
+	it("respects maxLines option", () => {
+		const botInfo: BotInfoMap = {};
+		// 4 multi-PV lines from one sender
+		for (let mpv = 1; mpv <= 4; mpv++) {
+			accumulateBotInfo(
+				botInfo,
+				info({
+					sender: "Player1",
+					subject: "Player1",
+					multipv: mpv,
+					pv: ["Right"],
+					score: 10 - mpv,
+				}),
+			);
+		}
+
+		const result = buildPvOverlay(
+			botInfo,
+			p1Pos,
+			p2Pos,
+			noWalls,
+			5,
+			5,
+			fakeLayout,
+			{ maxLines: 2 },
+		);
+
+		expect(result.arrows).toHaveLength(2);
 	});
 });

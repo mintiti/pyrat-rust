@@ -1,5 +1,9 @@
 import { useEffect, useRef } from "react";
-import type { PvOverlayData } from "../renderer/pvArrows";
+import {
+	ARROWHEAD_SIZE_FACTOR,
+	type PvOverlayData,
+	TARGET_STROKE_WIDTH,
+} from "../renderer/pvArrows";
 
 type Props = {
 	overlay: PvOverlayData;
@@ -66,29 +70,31 @@ export default function PvOverlay({ overlay, width, height }: Props) {
 			ctx.beginPath();
 			ctx.arc(t.cx, t.cy, t.radius, 0, Math.PI * 2);
 			ctx.strokeStyle = t.color;
-			ctx.lineWidth = 3;
+			ctx.lineWidth = TARGET_STROKE_WIDTH;
 			ctx.stroke();
 		}
 
 		for (const arrow of overlay.arrows) {
+			const { points } = arrow;
 			ctx.strokeStyle = arrow.color;
 			ctx.lineWidth = arrow.thickness;
 			ctx.lineCap = "round";
 			ctx.lineJoin = "round";
 
 			ctx.beginPath();
-			ctx.moveTo(arrow.segments[0].fromX, arrow.segments[0].fromY);
-			for (const seg of arrow.segments) {
-				ctx.lineTo(seg.toX, seg.toY);
+			ctx.moveTo(points[0].x, points[0].y);
+			for (let i = 1; i < points.length; i++) {
+				ctx.lineTo(points[i].x, points[i].y);
 			}
 			ctx.stroke();
 
-			// Arrowhead at the end of the last segment
-			const last = arrow.segments[arrow.segments.length - 1];
-			const angle = Math.atan2(last.toY - last.fromY, last.toX - last.fromX);
-			const headSize = arrow.thickness * 2.5;
+			// Arrowhead at the tip
+			const tip = points[points.length - 1];
+			const prev = points[points.length - 2];
+			const angle = Math.atan2(tip.y - prev.y, tip.x - prev.x);
+			const headSize = arrow.thickness * ARROWHEAD_SIZE_FACTOR;
 			ctx.fillStyle = arrow.color;
-			drawArrowhead(ctx, last.toX, last.toY, angle, headSize);
+			drawArrowhead(ctx, tip.x, tip.y, angle, headSize);
 		}
 	}, [overlay, width, height]);
 

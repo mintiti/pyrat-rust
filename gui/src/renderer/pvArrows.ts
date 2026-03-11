@@ -4,25 +4,33 @@ import type {
 	PlayerSide,
 	WallEntry,
 } from "../bindings/generated";
-import type { BotInfoMap } from "../stores/matchStore";
-import { currentLines, parseBotInfoKey } from "../stores/matchStore";
+import type { BotInfoMap } from "../stores/botInfo";
+import { currentLines, parseBotInfoKey } from "../stores/botInfo";
 import { gameToCellCenter } from "./layout";
 import type { LayoutMetrics } from "./layout";
 
-// ── Types ────────────────────────────────────────────────────────
+// ── Visual tuning constants ──────────────────────────────────────
 
-export type ArrowSegment = {
-	fromX: number;
-	fromY: number;
-	toX: number;
-	toY: number;
-};
+export const SENDER_OFFSET_FRACTION = 0.06;
+export const TARGET_RADIUS_FRACTION = 0.35;
+export const TARGET_STROKE_WIDTH = 3;
+export const ARROWHEAD_SIZE_FACTOR = 2.5;
+
+type ThicknessTier = { maxGap: number; minPx: number; fraction: number };
+
+const THICKNESS_TIERS: ThicknessTier[] = [
+	{ maxGap: 2.5, minPx: 4, fraction: 0.12 },
+	{ maxGap: 5.0, minPx: 3, fraction: 0.08 },
+	{ maxGap: Number.POSITIVE_INFINITY, minPx: 2, fraction: 0.05 },
+];
+
+// ── Types ────────────────────────────────────────────────────────
 
 export type PvArrow = {
 	sender: PlayerSide;
 	subject: PlayerSide;
 	multipv: number;
-	segments: ArrowSegment[];
+	points: { x: number; y: number }[];
 	color: string;
 	thickness: number;
 	isBest: boolean;
@@ -133,9 +141,13 @@ export function reconstructPath(
 // ── Thickness tiers ─────────────────────────────────────────────
 
 function arrowThickness(scoreGap: number, cellSize: number): number {
-	if (scoreGap < 2.5) return Math.max(4, cellSize * 0.12);
-	if (scoreGap < 5.0) return Math.max(3, cellSize * 0.08);
-	return Math.max(2, cellSize * 0.05);
+	for (const tier of THICKNESS_TIERS) {
+		if (scoreGap < tier.maxGap) {
+			return Math.max(tier.minPx, cellSize * tier.fraction);
+		}
+	}
+	const last = THICKNESS_TIERS[THICKNESS_TIERS.length - 1];
+	return Math.max(last.minPx, cellSize * last.fraction);
 }
 
 // ── Main builder ────────────────────────────────────────────────
@@ -172,7 +184,7 @@ export function buildPvOverlay(
 		const bestScore = lines[0].score; // multipv=1 is first after sort
 		const startPos = posFor(subject);
 		const senderOff = SENDER_OFFSET[sender];
-		const offPx = layout.cellSize * 0.06;
+		const offPx = layout.cellSize * SENDER_OFFSET_FRACTION;
 		const ox = senderOff.dx * offPx;
 		const oy = senderOff.dy * offPx;
 
@@ -186,20 +198,13 @@ export function buildPvOverlay(
 				maxSegments,
 			);
 
-			// Need at least 2 points for a segment
+			// Need at least 2 points for a drawable arrow
 			if (path.length < 2) continue;
 
-			const segments: ArrowSegment[] = [];
-			for (let i = 0; i < path.length - 1; i++) {
-				const from = gameToCellCenter(path[i], layout);
-				const to = gameToCellCenter(path[i + 1], layout);
-				segments.push({
-					fromX: from.x + ox,
-					fromY: from.y + oy,
-					toX: to.x + ox,
-					toY: to.y + oy,
-				});
-			}
+			const points = path.map((coord) => {
+				const c = gameToCellCenter(coord, layout);
+				return { x: c.x + ox, y: c.y + oy };
+			});
 
 			const isBest = line.multipv === 1;
 			const scoreGap = Math.abs(line.score - bestScore);
@@ -208,7 +213,7 @@ export function buildPvOverlay(
 				sender,
 				subject,
 				multipv: line.multipv,
-				segments,
+				points,
 				color: isBest ? palette.saturated : palette.pale,
 				thickness: arrowThickness(scoreGap, layout.cellSize),
 				isBest,
@@ -222,7 +227,7 @@ export function buildPvOverlay(
 			targets.push({
 				cx: center.x + ox,
 				cy: center.y + oy,
-				radius: layout.cellSize * 0.35,
+				radius: layout.cellSize * TARGET_RADIUS_FRACTION,
 				color: palette.saturated,
 			});
 		}
