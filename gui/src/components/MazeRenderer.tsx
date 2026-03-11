@@ -1,7 +1,7 @@
 import { Center, Loader } from "@mantine/core";
 import { useElementSize } from "@mantine/hooks";
 import { useEffect, useMemo, useState } from "react";
-import type { MazeState } from "../bindings/generated";
+import type { MazeState, PlayerSide } from "../bindings/generated";
 import type { AssetMap } from "../renderer/assets";
 import { loadAssets } from "../renderer/assets";
 import {
@@ -9,8 +9,11 @@ import {
 	computeStaticGeometry,
 } from "../renderer/instructions";
 import { computeLayout } from "../renderer/layout";
+import { buildPvOverlay, buildWallSet } from "../renderer/pvArrows";
 import { generateTileMap } from "../renderer/tileMap";
+import { useCurrentBotInfo, useMatchStore } from "../stores/matchStore";
 import MazeCanvas from "./MazeCanvas";
+import PvOverlay from "./PvOverlay";
 
 type Props = {
 	gameState: MazeState;
@@ -20,6 +23,9 @@ type Props = {
 export default function MazeRenderer({ gameState, showCellIndices }: Props) {
 	const [assets, setAssets] = useState<AssetMap | null>(null);
 	const { ref, width, height } = useElementSize();
+	const botInfo = useCurrentBotInfo();
+	const showP1Arrows = useMatchStore((s) => s.showPlayer1Arrows);
+	const showP2Arrows = useMatchStore((s) => s.showPlayer2Arrows);
 
 	useEffect(() => {
 		loadAssets().then(setAssets);
@@ -53,6 +59,34 @@ export default function MazeRenderer({ gameState, showCellIndices }: Props) {
 		);
 	}, [gameState, layout, assets, tileMap, staticGeo, showCellIndices]);
 
+	const wallSet = useMemo(
+		() => buildWallSet(gameState.walls),
+		[gameState.walls],
+	);
+
+	const visibleSenders = useMemo(() => {
+		if (showP1Arrows && showP2Arrows) return undefined;
+		const set = new Set<PlayerSide>();
+		if (showP1Arrows) set.add("Player1");
+		if (showP2Arrows) set.add("Player2");
+		return set;
+	}, [showP1Arrows, showP2Arrows]);
+
+	const pvOverlayData = useMemo(() => {
+		if (!botInfo || !layout) return null;
+		if (visibleSenders?.size === 0) return null;
+		return buildPvOverlay(
+			botInfo,
+			gameState.player1.position,
+			gameState.player2.position,
+			wallSet,
+			gameState.width,
+			gameState.height,
+			layout,
+			{ visibleSenders },
+		);
+	}, [botInfo, layout, gameState, wallSet, visibleSenders]);
+
 	return (
 		<div ref={ref} style={{ width: "100%", height: "100%", minHeight: 200 }}>
 			{!assets || !instructions || !layout ? (
@@ -60,11 +94,20 @@ export default function MazeRenderer({ gameState, showCellIndices }: Props) {
 					<Loader />
 				</Center>
 			) : (
-				<MazeCanvas
-					instructions={instructions}
-					width={layout.canvasWidth}
-					height={layout.canvasHeight}
-				/>
+				<div style={{ position: "relative" }}>
+					<MazeCanvas
+						instructions={instructions}
+						width={layout.canvasWidth}
+						height={layout.canvasHeight}
+					/>
+					{pvOverlayData && (
+						<PvOverlay
+							overlay={pvOverlayData}
+							width={layout.canvasWidth}
+							height={layout.canvasHeight}
+						/>
+					)}
+				</div>
 			)}
 		</div>
 	);

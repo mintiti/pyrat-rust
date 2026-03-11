@@ -5,7 +5,7 @@ import {
 	accumulateBotInfo,
 	currentLines,
 	isStale,
-} from "./matchStore";
+} from "./botInfo";
 
 // ── Helpers ──────────────────────────────────────────────────────
 
