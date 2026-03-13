@@ -47,20 +47,18 @@ type Props = {
 
 export default function Sidebar({ active, onNavigate }: Props) {
 	return (
-		<>
-			<AppShell.Section grow>
-				<Stack justify="center" gap={0}>
-					{links.map((link) => (
-						<NavbarLink
-							key={link.page}
-							icon={link.icon}
-							label={link.label}
-							active={active === link.page}
-							onClick={() => onNavigate(link.page)}
-						/>
-					))}
-				</Stack>
-			</AppShell.Section>
-		</>
+		<AppShell.Section grow>
+			<Stack justify="center" gap={0}>
+				{links.map((link) => (
+					<NavbarLink
+						key={link.page}
+						icon={link.icon}
+						label={link.label}
+						active={active === link.page}
+						onClick={() => onNavigate(link.page)}
+					/>
+				))}
+			</Stack>
+		</AppShell.Section>
 	);
 }
