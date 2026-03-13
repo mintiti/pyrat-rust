@@ -1,14 +1,23 @@
+import { AppShell } from "@mantine/core";
 import { useState } from "react";
 import BotsPage from "./components/BotsPage";
 import MatchView from "./components/MatchView";
-
-export type View = "match" | "bots";
+import Sidebar, { type Page } from "./components/Sidebar";
 
 export default function App() {
-	const [view, setView] = useState<View>("match");
+	const [page, setPage] = useState<Page>("game");
 
-	if (view === "bots") {
-		return <BotsPage onNavigate={setView} />;
-	}
-	return <MatchView onNavigate={setView} />;
+	return (
+		<AppShell
+			navbar={{ width: "3rem", breakpoint: 0 }}
+			styles={{ main: { height: "100vh" } }}
+		>
+			<AppShell.Navbar>
+				<Sidebar active={page} onNavigate={setPage} />
+			</AppShell.Navbar>
+			<AppShell.Main>
+				{page === "bots" ? <BotsPage /> : <MatchView />}
+			</AppShell.Main>
+		</AppShell>
+	);
 }

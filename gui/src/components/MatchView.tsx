@@ -6,26 +6,23 @@ import { RANDOM_BOT_ID, botsAtom } from "../stores/botConfigAtom";
 import { matchConfigAtom } from "../stores/matchConfigAtom";
 import {
 	generatePreview,
+	useCurrentBotInfo,
 	useDisplayState,
 	useMatchStore,
 } from "../stores/matchStore";
 import MatchConfigDrawer from "./MatchConfigDrawer";
 import MatchToolbar from "./MatchToolbar";
 import MazeRenderer from "./MazeRenderer";
+import ThinkingPanel from "./ThinkingPanel";
 
-import type { View } from "../App";
-
-type Props = {
-	onNavigate: (view: View) => void;
-};
-
-export default function MatchView({ onNavigate }: Props) {
+export default function MatchView() {
 	const matchIdRef = useRef<number>(-1);
 	const displayState = useDisplayState();
 	const bots = useAtomValue(botsAtom);
 	const matchConfig = useAtomValue(matchConfigAtom);
 	const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
 
+	const botInfo = useCurrentBotInfo();
 	const viewerMode = useMatchStore((s) => s.viewerMode);
 	const playbackSpeed = useMatchStore((s) => s.playbackSpeed);
 	const previewError = useMatchStore((s) => s.previewError);
@@ -129,31 +126,35 @@ export default function MatchView({ onNavigate }: Props) {
 	};
 
 	return (
-		<Stack h="100vh" gap={0}>
+		<Stack h="100%" gap={0}>
 			<MatchToolbar
 				onStart={handleStart}
-				onNavigate={onNavigate}
 				onOpenConfig={() => setConfigDrawerOpen(true)}
 			/>
 			<MatchConfigDrawer
 				opened={configDrawerOpen}
 				onClose={() => setConfigDrawerOpen(false)}
 			/>
-			<div style={{ flex: 1, overflow: "hidden" }}>
-				{displayState ? (
-					<MazeRenderer gameState={displayState} />
-				) : previewError ? (
-					<Center h="100%">
-						<Text c="red" size="sm">
-							{previewError}
-						</Text>
-					</Center>
-				) : (
-					<Center h="100%">
-						<Text c="dimmed" size="sm">
-							Generating preview…
-						</Text>
-					</Center>
+			<div style={{ flex: 1, overflow: "hidden", display: "flex" }}>
+				<div style={{ flex: 1, minWidth: 0 }}>
+					{displayState ? (
+						<MazeRenderer gameState={displayState} />
+					) : previewError ? (
+						<Center h="100%">
+							<Text c="red" size="sm">
+								{previewError}
+							</Text>
+						</Center>
+					) : (
+						<Center h="100%">
+							<Text c="dimmed" size="sm">
+								Generating preview…
+							</Text>
+						</Center>
+					)}
+				</div>
+				{botInfo && Object.keys(botInfo).length > 0 && (
+					<ThinkingPanel botInfo={botInfo} />
 				)}
 			</div>
 		</Stack>

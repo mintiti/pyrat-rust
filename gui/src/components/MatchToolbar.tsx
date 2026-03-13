@@ -17,7 +17,6 @@ import {
 	IconPlayerPause,
 	IconPlayerPlay,
 	IconRoute,
-	IconSettings,
 } from "@tabler/icons-react";
 import { useAtomValue } from "jotai";
 import { useMemo, useState } from "react";
@@ -32,11 +31,8 @@ import {
 } from "../stores/matchStore";
 import ConfirmModal from "./common/ConfirmModal";
 
-import type { View } from "../App";
-
 type Props = {
 	onStart: () => void;
-	onNavigate: (view: View) => void;
 	onOpenConfig: () => void;
 };
 
@@ -71,11 +67,7 @@ const SPEED_OPTIONS = [
 	{ value: "20", label: "10x" },
 ];
 
-export default function MatchToolbar({
-	onStart,
-	onNavigate,
-	onOpenConfig,
-}: Props) {
+export default function MatchToolbar({ onStart, onOpenConfig }: Props) {
 	const bots = useAtomValue(botsAtom);
 	const matchConfig = useAtomValue(matchConfigAtom);
 	const player1BotId = useMatchStore((s) => s.player1BotId);
@@ -176,14 +168,6 @@ export default function MatchToolbar({
 				<Button size="xs" onClick={handleStartClick} disabled={!canStart}>
 					{!hasMatch ? "Start" : "New Match"}
 				</Button>
-				<ActionIcon
-					variant="subtle"
-					size="sm"
-					onClick={() => onNavigate("bots")}
-					title="Bot settings"
-				>
-					<IconSettings size={16} />
-				</ActionIcon>
 				<ActionIcon
 					variant="subtle"
 					size="sm"
