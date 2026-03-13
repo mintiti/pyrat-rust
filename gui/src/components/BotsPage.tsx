@@ -1,5 +1,4 @@
 import {
-	ActionIcon,
 	Box,
 	Button,
 	Center,
@@ -14,21 +13,16 @@ import {
 	ThemeIcon,
 	Title,
 } from "@mantine/core";
-import { IconArrowLeft, IconPlus, IconRobot } from "@tabler/icons-react";
+import { IconPlus, IconRobot } from "@tabler/icons-react";
 import { useAtom, useAtomValue } from "jotai";
 import { useEffect, useState } from "react";
-import type { View } from "../App";
 import {
 	type BotConfig,
 	asyncBotsAtom,
 	botsAtom,
 } from "../stores/botConfigAtom";
 
-type Props = {
-	onNavigate: (view: View) => void;
-};
-
-export default function BotsPage({ onNavigate }: Props) {
+export default function BotsPage() {
 	const bots = useAtomValue(botsAtom);
 	const [, setBots] = useAtom(asyncBotsAtom);
 	const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
@@ -65,18 +59,13 @@ export default function BotsPage({ onNavigate }: Props) {
 	};
 
 	return (
-		<Stack h="100vh" px="lg" pb="lg">
+		<Stack h="100%" px="lg" pb="lg">
 			<Group
 				justify="space-between"
 				py="sm"
 				style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
 			>
-				<Group gap="sm">
-					<ActionIcon variant="subtle" onClick={() => onNavigate("match")}>
-						<IconArrowLeft size={18} />
-					</ActionIcon>
-					<Title order={3}>Bot Management</Title>
-				</Group>
+				<Title order={3}>Bot Management</Title>
 			</Group>
 
 			<Group grow flex={1} style={{ overflow: "hidden" }} align="start">
