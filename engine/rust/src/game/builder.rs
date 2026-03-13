@@ -481,7 +481,7 @@ impl GameConfig {
     /// | Size     | Board  | Cheese | Turns | Maze type |
     /// |----------|--------|--------|-------|-----------|
     /// | `tiny`   | 11×9   | 13     | 150   | classic   |
-    /// | `small`  | 15×11  | 21     | 200   | classic   |
+    /// | `small`  | 15×13  | 21     | 200   | classic   |
     /// | `medium` | 21×15  | 41     | 300   | classic   |
     /// | `large`  | 31×21  | 85     | 400   | classic   |
     /// | `huge`   | 41×31  | 165    | 500   | classic   |
@@ -493,7 +493,7 @@ impl GameConfig {
     pub fn preset(name: &str) -> Result<Self, String> {
         let (width, height, cheese, max_turns, symmetric, maze_params) = match name {
             "tiny" => (11, 9, 13, 150, true, MazeParams::classic()),
-            "small" => (15, 11, 21, 200, true, MazeParams::classic()),
+            "small" => (15, 13, 21, 200, true, MazeParams::classic()),
             "medium" => (21, 15, 41, 300, true, MazeParams::classic()),
             "large" => (31, 21, 85, 400, true, MazeParams::classic()),
             "huge" => (41, 31, 165, 500, true, MazeParams::classic()),

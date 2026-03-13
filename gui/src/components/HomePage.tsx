@@ -28,7 +28,7 @@ export default function HomePage({ onNavigate }: Props) {
 							Set up a match between two bots and watch them play
 						</Text>
 					</Stack>
-					<Button variant="light" fullWidth onClick={() => onNavigate("match")}>
+					<Button variant="light" fullWidth onClick={() => onNavigate("setup")}>
 						Start
 					</Button>
 				</Stack>

@@ -1,30 +1,16 @@
+import { ActionIcon, Badge, Button, Group, Select, Text } from "@mantine/core";
 import {
-	ActionIcon,
-	Badge,
-	Button,
-	Group,
-	Select,
-	Text,
-	Tooltip,
-} from "@mantine/core";
-import {
-	IconAdjustments,
 	IconChevronLeft,
 	IconChevronRight,
 	IconChevronsLeft,
 	IconChevronsRight,
-	IconDice,
 	IconPlayerPause,
 	IconPlayerPlay,
 	IconRoute,
 } from "@tabler/icons-react";
-import { useAtomValue } from "jotai";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import type { MatchWinner } from "../bindings/generated";
-import { RANDOM_BOT_ID, botsAtom } from "../stores/botConfigAtom";
-import { matchConfigAtom } from "../stores/matchConfigAtom";
 import {
-	rerollPreview,
 	useCursorDepth,
 	useMainlineLength,
 	useMatchStore,
@@ -32,8 +18,7 @@ import {
 import ConfirmModal from "./common/ConfirmModal";
 
 type Props = {
-	onStart: () => void;
-	onOpenConfig: () => void;
+	onNewMatch: () => void;
 };
 
 function winnerLabel(winner: MatchWinner): string {
@@ -67,23 +52,16 @@ const SPEED_OPTIONS = [
 	{ value: "20", label: "10x" },
 ];
 
-export default function MatchToolbar({ onStart, onOpenConfig }: Props) {
-	const bots = useAtomValue(botsAtom);
-	const matchConfig = useAtomValue(matchConfigAtom);
-	const player1BotId = useMatchStore((s) => s.player1BotId);
-	const player2BotId = useMatchStore((s) => s.player2BotId);
+export default function MatchToolbar({ onNewMatch }: Props) {
 	const viewerMode = useMatchStore((s) => s.viewerMode);
 	const playbackSpeed = useMatchStore((s) => s.playbackSpeed);
 	const result = useMatchStore((s) => s.result);
 	const error = useMatchStore((s) => s.error);
-	const previewSeed = useMatchStore((s) => s.previewSeed);
 	const disconnection = useMatchStore((s) => s.disconnection);
 	const showP1Arrows = useMatchStore((s) => s.showPlayer1Arrows);
 	const showP2Arrows = useMatchStore((s) => s.showPlayer2Arrows);
 
 	const {
-		setPlayer1BotId,
-		setPlayer2BotId,
 		goToStart,
 		goToEnd,
 		stepForward,
@@ -97,44 +75,22 @@ export default function MatchToolbar({ onStart, onOpenConfig }: Props) {
 	const cursorDepth = useCursorDepth();
 	const totalTurns = useMainlineLength();
 
-	const botOptions = useMemo(
-		() => [
-			{ value: RANDOM_BOT_ID, label: "Random Bot" },
-			...bots.map((b) => ({ value: b.id, label: b.name })),
-		],
-		[bots],
-	);
+	const [confirmOpen, setConfirmOpen] = useState(false);
 
-	const [pendingAction, setPendingAction] = useState<"reset" | "reroll" | null>(
-		null,
-	);
-
-	const canStart = player1BotId != null && player2BotId != null;
 	const hasMatch = viewerMode !== "previewing";
 
-	const handleStartClick = () => {
+	const handleNewMatchClick = () => {
 		if (hasMatch) {
-			setPendingAction("reset");
+			setConfirmOpen(true);
 		} else {
-			onStart();
-		}
-	};
-
-	const handleDiceClick = () => {
-		if (hasMatch) {
-			setPendingAction("reroll");
-		} else {
-			rerollPreview(matchConfig);
+			onNewMatch();
 		}
 	};
 
 	const handleConfirm = () => {
-		const action = pendingAction;
-		setPendingAction(null);
+		setConfirmOpen(false);
 		resetToPreview();
-		if (action === "reroll") {
-			rerollPreview(matchConfig);
-		}
+		onNewMatch();
 	};
 
 	return (
@@ -147,56 +103,9 @@ export default function MatchToolbar({ onStart, onOpenConfig }: Props) {
 			}}
 		>
 			<Group gap="sm">
-				<Select
-					size="xs"
-					placeholder="Player 1"
-					data={botOptions}
-					value={player1BotId}
-					onChange={setPlayer1BotId}
-					style={{ width: 180 }}
-					allowDeselect={false}
-				/>
-				<Select
-					size="xs"
-					placeholder="Player 2"
-					data={botOptions}
-					value={player2BotId}
-					onChange={setPlayer2BotId}
-					style={{ width: 180 }}
-					allowDeselect={false}
-				/>
-				<Button size="xs" onClick={handleStartClick} disabled={!canStart}>
-					{!hasMatch ? "Start" : "New Match"}
+				<Button size="xs" variant="light" onClick={handleNewMatchClick}>
+					New Match
 				</Button>
-				<ActionIcon
-					variant="subtle"
-					size="sm"
-					onClick={onOpenConfig}
-					title="Match configuration"
-				>
-					<IconAdjustments size={16} />
-				</ActionIcon>
-				<Tooltip
-					label={previewSeed != null ? `Seed: ${previewSeed}` : "No preview"}
-					position="bottom"
-					withArrow
-				>
-					<Badge variant="light" size="sm" color="gray">
-						{matchConfig.preset === "custom"
-							? `${matchConfig.width}×${matchConfig.height}`
-							: matchConfig.preset.charAt(0).toUpperCase() +
-								matchConfig.preset.slice(1)}
-					</Badge>
-				</Tooltip>
-				<ActionIcon
-					variant="subtle"
-					size="sm"
-					onClick={handleDiceClick}
-					disabled={!hasMatch && matchConfig.seed != null}
-					title="Re-roll maze"
-				>
-					<IconDice size={16} />
-				</ActionIcon>
 			</Group>
 			{hasMatch && (
 				<Group gap={4}>
@@ -290,14 +199,12 @@ export default function MatchToolbar({ onStart, onOpenConfig }: Props) {
 				)}
 			</Group>
 			<ConfirmModal
-				title={
-					pendingAction === "reroll" ? "Re-roll maze?" : "Return to preview?"
-				}
+				title="Return to setup?"
 				description="Current match data will be lost."
-				opened={pendingAction != null}
-				onClose={() => setPendingAction(null)}
+				opened={confirmOpen}
+				onClose={() => setConfirmOpen(false)}
 				onConfirm={handleConfirm}
-				confirmLabel={pendingAction === "reroll" ? "Re-roll" : "Confirm"}
+				confirmLabel="Confirm"
 			/>
 		</Group>
 	);

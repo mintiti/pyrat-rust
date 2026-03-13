@@ -3,9 +3,10 @@ import { useState } from "react";
 import BotsPage from "./components/BotsPage";
 import HomePage from "./components/HomePage";
 import MatchView from "./components/MatchView";
+import SetupView from "./components/SetupView";
 import Sidebar, { type Page } from "./components/Sidebar";
 
-export type GameView = "home" | "match";
+export type GameView = "home" | "setup" | "match";
 
 export default function App() {
 	const [page, setPage] = useState<Page>("game");
@@ -21,8 +22,10 @@ export default function App() {
 		content = <BotsPage />;
 	} else if (gameView === "home") {
 		content = <HomePage onNavigate={setGameView} />;
+	} else if (gameView === "setup") {
+		content = <SetupView onStartMatch={() => setGameView("match")} />;
 	} else {
-		content = <MatchView />;
+		content = <MatchView onNewMatch={() => setGameView("setup")} />;
 	}
 
 	return (

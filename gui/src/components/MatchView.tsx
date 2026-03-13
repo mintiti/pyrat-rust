@@ -1,26 +1,28 @@
 import { Center, Stack, Text } from "@mantine/core";
 import { useAtomValue } from "jotai";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { events, commands } from "../bindings";
 import { RANDOM_BOT_ID, botsAtom } from "../stores/botConfigAtom";
 import { matchConfigAtom } from "../stores/matchConfigAtom";
 import {
-	generatePreview,
 	useCurrentBotInfo,
 	useDisplayState,
 	useMatchStore,
 } from "../stores/matchStore";
-import MatchConfigDrawer from "./MatchConfigDrawer";
 import MatchToolbar from "./MatchToolbar";
 import MazeRenderer from "./MazeRenderer";
 import ThinkingPanel from "./ThinkingPanel";
 
-export default function MatchView() {
+type Props = {
+	onNewMatch: () => void;
+};
+
+export default function MatchView({ onNewMatch }: Props) {
 	const matchIdRef = useRef<number>(-1);
+	const hasAutoStarted = useRef(false);
 	const displayState = useDisplayState();
 	const bots = useAtomValue(botsAtom);
 	const matchConfig = useAtomValue(matchConfigAtom);
-	const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
 
 	const botInfo = useCurrentBotInfo();
 	const viewerMode = useMatchStore((s) => s.viewerMode);
@@ -86,11 +88,6 @@ export default function MatchView() {
 		return () => clearInterval(id);
 	}, [viewerMode, playbackSpeed]);
 
-	// Generate maze preview — runs on every config change so preview is always fresh
-	useEffect(() => {
-		generatePreview(matchConfig);
-	}, [matchConfig]);
-
 	const resolveBotId = (botId: string) => {
 		if (botId === RANDOM_BOT_ID)
 			return { cmd: RANDOM_BOT_ID, workingDir: null };
@@ -125,16 +122,19 @@ export default function MatchView() {
 		}
 	};
 
+	// Auto-start on mount — if we're in preview mode and both bots are selected
+	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional one-shot on mount
+	useEffect(() => {
+		if (hasAutoStarted.current) return;
+		if (viewerMode === "previewing" && player1BotId && player2BotId) {
+			hasAutoStarted.current = true;
+			handleStart();
+		}
+	}, [viewerMode, player1BotId, player2BotId]);
+
 	return (
 		<Stack h="100%" gap={0}>
-			<MatchToolbar
-				onStart={handleStart}
-				onOpenConfig={() => setConfigDrawerOpen(true)}
-			/>
-			<MatchConfigDrawer
-				opened={configDrawerOpen}
-				onClose={() => setConfigDrawerOpen(false)}
-			/>
+			<MatchToolbar onNewMatch={onNewMatch} />
 			<div style={{ flex: 1, overflow: "hidden", display: "flex" }}>
 				<div style={{ flex: 1, minWidth: 0 }}>
 					{displayState ? (
@@ -148,7 +148,7 @@ export default function MatchView() {
 					) : (
 						<Center h="100%">
 							<Text c="dimmed" size="sm">
-								Generating preview…
+								Generating preview...
 							</Text>
 						</Center>
 					)}
