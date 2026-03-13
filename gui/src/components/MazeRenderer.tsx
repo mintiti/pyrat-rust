@@ -18,9 +18,14 @@ import PvOverlay from "./PvOverlay";
 type Props = {
 	gameState: MazeState;
 	showCellIndices?: boolean;
+	hideScoreStrip?: boolean;
 };
 
-export default function MazeRenderer({ gameState, showCellIndices }: Props) {
+export default function MazeRenderer({
+	gameState,
+	showCellIndices,
+	hideScoreStrip,
+}: Props) {
 	const [assets, setAssets] = useState<AssetMap | null>(null);
 	const { ref, width, height } = useElementSize();
 	const botInfo = useCurrentBotInfo();
@@ -55,9 +60,17 @@ export default function MazeRenderer({ gameState, showCellIndices }: Props) {
 			assets,
 			tileMap,
 			staticGeo,
-			{ showCellIndices },
+			{ showCellIndices, hideScoreStrip },
 		);
-	}, [gameState, layout, assets, tileMap, staticGeo, showCellIndices]);
+	}, [
+		gameState,
+		layout,
+		assets,
+		tileMap,
+		staticGeo,
+		showCellIndices,
+		hideScoreStrip,
+	]);
 
 	const wallSet = useMemo(
 		() => buildWallSet(gameState.walls),

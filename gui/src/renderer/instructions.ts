@@ -38,6 +38,7 @@ export type DrawInstructions = {
 
 export type DrawOptions = {
 	showCellIndices?: boolean;
+	hideScoreStrip?: boolean;
 };
 
 /** Pre-computed static geometry — walls and corners don't change per turn. */
@@ -220,7 +221,7 @@ export function buildDrawInstructions(
 	const marginTop = layout.mazeY;
 	const totalCheese = state.total_cheese;
 
-	if (totalCheese > 0 && marginTop > 4) {
+	if (!options.hideScoreStrip && totalCheese > 0 && marginTop > 4) {
 		// Icon size adapts to available space
 		const iconSize = Math.min(
 			Math.floor(marginTop * 0.6),

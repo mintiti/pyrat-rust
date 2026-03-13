@@ -223,7 +223,7 @@ export default function SetupView({ onStartMatch }: Props) {
 				{/* Left: maze preview */}
 				<div style={{ flex: 1, minWidth: 0 }}>
 					{displayState ? (
-						<MazeRenderer gameState={displayState} />
+						<MazeRenderer gameState={displayState} hideScoreStrip />
 					) : previewError ? (
 						<Center h="100%">
 							<Text c="red" size="sm">
