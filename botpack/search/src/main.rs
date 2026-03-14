@@ -5,7 +5,7 @@
 //! try to hurt us, they try to help themselves.
 
 use pyrat_sdk::{Bot, Context, DeriveOptions, Direction, GameSim, GameState, InfoParams, Player};
-use rand::prelude::SliceRandom;
+use rand::prelude::IndexedRandom;
 
 #[derive(DeriveOptions)]
 struct Search {
@@ -76,6 +76,7 @@ impl Search {
 
         let mut my_moves = state.effective_moves(Some(my_pos));
         my_moves.shuffle(&mut rand::rng());
+        let opp_moves = state.effective_moves(Some(opp_pos));
 
         for my_dir in &my_moves {
             if ctx.should_stop() {
@@ -83,7 +84,6 @@ impl Search {
             }
 
             // Opponent picks the move that maximizes THEIR score.
-            let opp_moves = state.effective_moves(Some(opp_pos));
             let mut best_opp_score = f32::NEG_INFINITY;
             let mut our_score_vs_opp_best = f32::NEG_INFINITY;
 
@@ -147,6 +147,7 @@ impl Search {
         };
 
         let my_moves = state.effective_moves(Some(my_pos));
+        let opp_moves = state.effective_moves(Some(opp_pos));
 
         let mut best_our = f32::NEG_INFINITY;
         let mut best_opp_at_our_best = 0.0_f32;
@@ -155,8 +156,6 @@ impl Search {
             if ctx.should_stop() {
                 return None;
             }
-
-            let opp_moves = state.effective_moves(Some(opp_pos));
             let mut best_opp_score = f32::NEG_INFINITY;
             let mut our_when_opp_best = f32::NEG_INFINITY;
 
