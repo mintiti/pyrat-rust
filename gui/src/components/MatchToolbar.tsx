@@ -6,7 +6,6 @@ import {
 	IconChevronsRight,
 	IconPlayerPause,
 	IconPlayerPlay,
-	IconRoute,
 } from "@tabler/icons-react";
 import { useState } from "react";
 import type { MatchWinner } from "../bindings/generated";
@@ -53,13 +52,12 @@ const SPEED_OPTIONS = [
 ];
 
 export default function MatchToolbar({ onNewMatch }: Props) {
-	const viewerMode = useMatchStore((s) => s.viewerMode);
+	const matchPhase = useMatchStore((s) => s.matchPhase);
+	const following = useMatchStore((s) => s.following);
 	const playbackSpeed = useMatchStore((s) => s.playbackSpeed);
 	const result = useMatchStore((s) => s.result);
 	const error = useMatchStore((s) => s.error);
 	const disconnection = useMatchStore((s) => s.disconnection);
-	const showP1Arrows = useMatchStore((s) => s.showPlayer1Arrows);
-	const showP2Arrows = useMatchStore((s) => s.showPlayer2Arrows);
 
 	const {
 		goToStart,
@@ -69,7 +67,6 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 		togglePlay,
 		setPlaybackSpeed,
 		resetToPreview,
-		toggleArrows,
 	} = useMatchStore.getState();
 
 	const cursorDepth = useCursorDepth();
@@ -77,7 +74,7 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 
 	const [confirmOpen, setConfirmOpen] = useState(false);
 
-	const hasMatch = viewerMode !== "previewing";
+	const hasMatch = matchPhase !== "idle";
 
 	const handleNewMatchClick = () => {
 		if (hasMatch) {
@@ -104,7 +101,7 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 		>
 			<Group gap="sm">
 				<Button size="xs" variant="light" onClick={handleNewMatchClick}>
-					New Match
+					Back to Setup
 				</Button>
 			</Group>
 			{hasMatch && (
@@ -126,7 +123,7 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 						<IconChevronLeft size={16} />
 					</ActionIcon>
 					<ActionIcon variant="subtle" size="sm" onClick={togglePlay}>
-						{viewerMode === "live" ? (
+						{following ? (
 							<IconPlayerPause size={16} />
 						) : (
 							<IconPlayerPlay size={16} />
@@ -159,24 +156,6 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 					<Text size="xs" c="dimmed" ml={4}>
 						Turn {cursorDepth} / {totalTurns}
 					</Text>
-					<ActionIcon
-						variant={showP1Arrows ? "filled" : "subtle"}
-						color="blue"
-						size="sm"
-						onClick={() => toggleArrows("Player1")}
-						title="Toggle Rat PV arrows"
-					>
-						<IconRoute size={14} />
-					</ActionIcon>
-					<ActionIcon
-						variant={showP2Arrows ? "filled" : "subtle"}
-						color="green"
-						size="sm"
-						onClick={() => toggleArrows("Player2")}
-						title="Toggle Python PV arrows"
-					>
-						<IconRoute size={14} />
-					</ActionIcon>
 				</Group>
 			)}
 			<Group gap="sm">
@@ -193,9 +172,9 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 					</Badge>
 				)}
 				{error && (
-					<Text size="xs" c="red">
+					<Badge color="red" variant="filled" size="lg">
 						{error}
-					</Text>
+					</Badge>
 				)}
 			</Group>
 			<ConfirmModal

@@ -25,7 +25,8 @@ export default function MatchView({ onNewMatch }: Props) {
 	const matchConfig = useAtomValue(matchConfigAtom);
 
 	const botInfo = useCurrentBotInfo();
-	const viewerMode = useMatchStore((s) => s.viewerMode);
+	const matchPhase = useMatchStore((s) => s.matchPhase);
+	const following = useMatchStore((s) => s.following);
 	const playbackSpeed = useMatchStore((s) => s.playbackSpeed);
 	const previewError = useMatchStore((s) => s.previewError);
 	const player1BotId = useMatchStore((s) => s.player1BotId);
@@ -39,6 +40,11 @@ export default function MatchView({ onNewMatch }: Props) {
 		onError,
 		onDisconnect,
 		advanceCursor,
+		goToStart,
+		goToEnd,
+		stepForward,
+		stepBack,
+		togglePlay,
 	} = useMatchStore.getState();
 
 	// Event listeners — wire Tauri events to store actions
@@ -81,12 +87,49 @@ export default function MatchView({ onNewMatch }: Props) {
 	// Auto-advance cursor during playback
 	// biome-ignore lint/correctness/useExhaustiveDependencies: advanceCursor is a stable ref from getState()
 	useEffect(() => {
-		if (viewerMode !== "live") return;
+		if (!following) return;
 		const id = setInterval(() => {
 			advanceCursor();
 		}, playbackSpeed);
 		return () => clearInterval(id);
-	}, [viewerMode, playbackSpeed]);
+	}, [following, playbackSpeed]);
+
+	// Keyboard shortcuts
+	// biome-ignore lint/correctness/useExhaustiveDependencies: navigation actions are stable refs from getState()
+	useEffect(() => {
+		const handler = (e: KeyboardEvent) => {
+			const phase = useMatchStore.getState().matchPhase;
+			if (phase === "idle" || phase === "connecting") return;
+
+			const tag = (e.target as HTMLElement)?.tagName;
+			if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+			switch (e.key) {
+				case "ArrowLeft":
+					e.preventDefault();
+					stepBack();
+					break;
+				case "ArrowRight":
+					e.preventDefault();
+					stepForward();
+					break;
+				case "Home":
+					e.preventDefault();
+					goToStart();
+					break;
+				case "End":
+					e.preventDefault();
+					goToEnd();
+					break;
+				case " ":
+					e.preventDefault();
+					togglePlay();
+					break;
+			}
+		};
+		window.addEventListener("keydown", handler);
+		return () => window.removeEventListener("keydown", handler);
+	}, []);
 
 	const resolveBotId = (botId: string) => {
 		if (botId === RANDOM_BOT_ID)
@@ -110,6 +153,7 @@ export default function MatchView({ onNewMatch }: Props) {
 			...matchConfig,
 			seed: matchConfig.seed ?? previewSeed,
 		};
+		useMatchStore.setState({ matchPhase: "connecting" });
 		const res = await commands.startMatch(
 			p1.cmd,
 			p2.cmd,
@@ -122,22 +166,30 @@ export default function MatchView({ onNewMatch }: Props) {
 		}
 	};
 
-	// Auto-start on mount — if we're in preview mode and both bots are selected
+	// Auto-start on mount — if we're idle and both bots are selected
 	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional one-shot on mount
 	useEffect(() => {
 		if (hasAutoStarted.current) return;
-		if (viewerMode === "previewing" && player1BotId && player2BotId) {
+		if (matchPhase === "idle" && player1BotId && player2BotId) {
 			hasAutoStarted.current = true;
 			handleStart();
 		}
-	}, [viewerMode, player1BotId, player2BotId]);
+	}, [matchPhase, player1BotId, player2BotId]);
+
+	const hasMatch = matchPhase !== "idle";
 
 	return (
 		<Stack h="100%" gap={0}>
 			<MatchToolbar onNewMatch={onNewMatch} />
 			<div style={{ flex: 1, overflow: "hidden", display: "flex" }}>
 				<div style={{ flex: 1, minWidth: 0 }}>
-					{displayState ? (
+					{matchPhase === "connecting" ? (
+						<Center h="100%">
+							<Text c="dimmed" size="sm">
+								Connecting bots...
+							</Text>
+						</Center>
+					) : displayState ? (
 						<MazeRenderer gameState={displayState} />
 					) : previewError ? (
 						<Center h="100%">
@@ -153,9 +205,7 @@ export default function MatchView({ onNewMatch }: Props) {
 						</Center>
 					)}
 				</div>
-				{botInfo && Object.keys(botInfo).length > 0 && (
-					<ThinkingPanel botInfo={botInfo} />
-				)}
+				{hasMatch && <ThinkingPanel botInfo={botInfo ?? {}} />}
 			</div>
 		</Stack>
 	);

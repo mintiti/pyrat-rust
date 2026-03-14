@@ -1,7 +1,9 @@
-import { Accordion, Group, Stack, Text } from "@mantine/core";
+import { Accordion, ActionIcon, Group, Stack, Text } from "@mantine/core";
+import { IconRoute } from "@tabler/icons-react";
 import type { PlayerSide } from "../../bindings/generated";
 import type { InfoBucket } from "../../stores/botInfo";
 import { currentLines } from "../../stores/botInfo";
+import { useMatchStore } from "../../stores/matchStore";
 import AnalysisLine from "./AnalysisLine";
 
 type SubjectEntry = {
@@ -21,12 +23,12 @@ const SUBJECT_LABEL: Record<PlayerSide, string> = {
 	Player2: "Python",
 };
 
-export default function BotSection({
-	sender,
-	botName,
-	color,
-	subjects,
-}: Props) {
+export default function BotPanel({ sender, botName, color, subjects }: Props) {
+	const showArrows = useMatchStore((s) =>
+		sender === "Player1" ? s.showPlayer1Arrows : s.showPlayer2Arrows,
+	);
+	const toggleArrows = useMatchStore.getState().toggleArrows;
+
 	return (
 		<Accordion.Item value={sender}>
 			<Accordion.Control
@@ -41,6 +43,19 @@ export default function BotSection({
 					<Text size="xs" c="dimmed">
 						{subjects.map(({ subject }) => SUBJECT_LABEL[subject]).join(", ")}
 					</Text>
+					<ActionIcon
+						variant={showArrows ? "filled" : "subtle"}
+						color={color}
+						size="xs"
+						onClick={(e) => {
+							e.stopPropagation();
+							toggleArrows(sender);
+						}}
+						title={`Toggle ${SUBJECT_LABEL[sender]} PV arrows`}
+						ml="auto"
+					>
+						<IconRoute size={12} />
+					</ActionIcon>
 				</Group>
 			</Accordion.Control>
 			<Accordion.Panel>

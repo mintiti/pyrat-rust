@@ -42,7 +42,7 @@ export interface GameNode {
 	children: GameNode[];
 }
 
-export type ViewerMode = "previewing" | "live" | "reviewing";
+export type MatchPhase = "idle" | "connecting" | "playing" | "finished";
 
 // ── Tree helpers ─────────────────────────────────────────────────
 
@@ -79,7 +79,6 @@ interface MatchState {
 	player1BotId: string | null;
 	player2BotId: string | null;
 	result: MatchOverEvent | null;
-	pendingResult: MatchOverEvent | null;
 	error: string | null;
 	disconnection: BotDisconnectedEvent | null;
 
@@ -94,7 +93,8 @@ interface MatchState {
 	previewError: string | null;
 
 	// Viewer
-	viewerMode: ViewerMode;
+	matchPhase: MatchPhase;
+	following: boolean;
 	playbackSpeed: number; // ms between frames
 	showPlayer1Arrows: boolean;
 	showPlayer2Arrows: boolean;
@@ -137,10 +137,10 @@ const IDLE_MATCH = {
 	cursor: [] as number[],
 	mainlineDepth: 0,
 	result: null as MatchOverEvent | null,
-	pendingResult: null as MatchOverEvent | null,
 	error: null as string | null,
 	disconnection: null as BotDisconnectedEvent | null,
-	viewerMode: "previewing" as ViewerMode,
+	matchPhase: "idle" as MatchPhase,
+	following: true,
 };
 
 export const useMatchStore = create<MatchState>((set, get) => ({
@@ -182,7 +182,8 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 				total_cheese: maze.total_cheese,
 			},
 			root,
-			viewerMode: "live",
+			matchPhase: "playing",
+			following: true,
 		});
 	},
 
@@ -212,12 +213,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	},
 
 	onMatchOver: (e) => {
-		const { cursor, mainlineDepth } = get();
-		if (cursor.length >= mainlineDepth) {
-			set({ result: e, pendingResult: null, viewerMode: "reviewing" });
-		} else {
-			set({ pendingResult: e });
-		}
+		set({ result: e, matchPhase: "finished" });
 	},
 
 	onBotInfo: (e) => {
@@ -253,12 +249,12 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 
 	// ── Navigation ───────────────────────────────────────────
 	goToStart: () => {
-		set({ cursor: [], viewerMode: "reviewing" });
+		set({ cursor: [], following: false });
 	},
 
 	goToEnd: () => {
 		const { mainlineDepth } = get();
-		set({ cursor: mainlinePath(mainlineDepth), viewerMode: "reviewing" });
+		set({ cursor: mainlinePath(mainlineDepth), following: false });
 	},
 
 	stepForward: () => {
@@ -266,24 +262,31 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		if (!root) return;
 		const node = getNodeAtPath(root, cursor);
 		if (!node || node.children.length === 0) return;
-		set({ cursor: [...cursor, 0], viewerMode: "reviewing" });
+		set({ cursor: [...cursor, 0], following: false });
 	},
 
 	stepBack: () => {
 		const { cursor } = get();
 		if (cursor.length === 0) return;
-		set({ cursor: cursor.slice(0, -1), viewerMode: "reviewing" });
+		set({ cursor: cursor.slice(0, -1), following: false });
 	},
 
 	goToTurn: (n) => {
-		set({ cursor: mainlinePath(n), viewerMode: "reviewing" });
+		set({ cursor: mainlinePath(n), following: false });
 	},
 
 	togglePlay: () => {
-		const { viewerMode } = get();
-		set({
-			viewerMode: viewerMode === "live" ? "reviewing" : "live",
-		});
+		const { following, matchPhase, mainlineDepth } = get();
+		if (following) {
+			set({ following: false });
+		} else {
+			// Catch up to latest when resuming during a live match
+			const update: Partial<MatchState> = { following: true };
+			if (matchPhase === "playing") {
+				update.cursor = mainlinePath(mainlineDepth);
+			}
+			set(update);
+		}
 	},
 
 	setPlaybackSpeed: (ms) => {
@@ -291,17 +294,13 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	},
 
 	advanceCursor: () => {
-		const { root, cursor } = get();
+		const { root, cursor, matchPhase } = get();
 		if (!root) return;
 		const node = getNodeAtPath(root, cursor);
 		if (!node || node.children.length === 0) {
-			const { pendingResult } = get();
-			if (pendingResult) {
-				set({
-					result: pendingResult,
-					pendingResult: null,
-					viewerMode: "reviewing",
-				});
+			// At tree end: stop following if match is finished (replay done)
+			if (matchPhase === "finished") {
+				set({ following: false });
 			}
 			return;
 		}
