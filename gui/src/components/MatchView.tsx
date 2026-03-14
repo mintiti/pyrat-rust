@@ -147,13 +147,12 @@ export default function MatchView({ onNewMatch }: Props) {
 			useMatchStore.getState().onError("Selected bot no longer exists.");
 			return;
 		}
-		useMatchStore.setState({ error: null, result: null, disconnection: null });
+		useMatchStore.getState().beginConnecting();
 		const { previewSeed } = useMatchStore.getState();
 		const configWithSeed = {
 			...matchConfig,
 			seed: matchConfig.seed ?? previewSeed,
 		};
-		useMatchStore.setState({ matchPhase: "connecting" });
 		const res = await commands.startMatch(
 			p1.cmd,
 			p2.cmd,

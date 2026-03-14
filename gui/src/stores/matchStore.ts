@@ -112,6 +112,7 @@ interface MatchState {
 	onDisconnect: (e: BotDisconnectedEvent) => void;
 
 	// Actions
+	beginConnecting: () => void;
 	resetToPreview: () => void;
 
 	toggleArrows: (sender: PlayerSide) => void;
@@ -236,6 +237,15 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	},
 
 	// ── Actions ─────────────────────────────────────────────
+	beginConnecting: () => {
+		set({
+			error: null,
+			result: null,
+			disconnection: null,
+			matchPhase: "connecting",
+		});
+	},
+
 	resetToPreview: () => {
 		commands.stopMatch().catch(console.error);
 		set(IDLE_MATCH);
