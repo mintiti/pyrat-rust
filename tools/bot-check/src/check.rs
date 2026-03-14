@@ -15,7 +15,7 @@ use pyrat_host::session::SessionConfig;
 use pyrat_host::stub::spawn_stub_bot;
 use pyrat_host::wire::{Player, TimingMode};
 
-use crate::manifest::{BotManifest, ManifestError};
+use crate::manifest::BotManifest;
 
 // ── Report types ─────────────────────────────────────
 
@@ -108,11 +108,7 @@ pub async fn run_check(bot_dir: &Path) -> CheckReport {
     let manifest = match BotManifest::load(&bot_dir) {
         Ok(m) => m,
         Err(e) => {
-            phases.push(PhaseResult::fail(
-                "manifest",
-                manifest_error_detail(&e),
-                t.elapsed(),
-            ));
+            phases.push(PhaseResult::fail("manifest", e.to_string(), t.elapsed()));
             return finish_report("?", "?", phases);
         },
     };
@@ -128,7 +124,7 @@ pub async fn run_check(bot_dir: &Path) -> CheckReport {
     // ── Phase 2: Launch bot ──────────────────────
     let t = Instant::now();
 
-    let game = match GameConfig::classic(7, 5, 3).create(Some(42)) {
+    let mut game = match GameConfig::classic(7, 5, 3).create(Some(42)) {
         Ok(g) => g,
         Err(e) => {
             phases.push(PhaseResult::fail(
@@ -259,11 +255,6 @@ pub async fn run_check(bot_dir: &Path) -> CheckReport {
     // ── Phase 4: Play 1 turn ─────────────────────
     let t = Instant::now();
 
-    let mut game = match GameConfig::classic(7, 5, 3).create(Some(42)) {
-        Ok(g) => g,
-        Err(_) => unreachable!("game creation succeeded in phase 2"),
-    };
-
     let playing_config = PlayingConfig {
         move_timeout: Duration::from_secs(3),
     };
@@ -293,7 +284,7 @@ pub async fn run_check(bot_dir: &Path) -> CheckReport {
                         timed_out = true;
                     },
                     MatchEvent::TurnPlayed { p1_action, .. } => {
-                        action_name = Some(direction_name(*p1_action));
+                        action_name = Some(p1_action.variant_name().unwrap_or("?"));
                     },
                     _ => {},
                 }
@@ -369,25 +360,5 @@ fn finish_report(bot_name: &str, agent_id: &str, phases: Vec<PhaseResult>) -> Ch
         agent_id: agent_id.into(),
         passed,
         phases,
-    }
-}
-
-fn manifest_error_detail(e: &ManifestError) -> String {
-    match e {
-        ManifestError::NotFound(p) => format!("bot.toml not found at {}", p.display()),
-        ManifestError::Read(e) => format!("failed to read bot.toml: {e}"),
-        ManifestError::Parse(e) => format!("failed to parse bot.toml: {e}"),
-        ManifestError::Validation(msg) => format!("invalid bot.toml: {msg}"),
-    }
-}
-
-fn direction_name(d: pyrat_host::wire::Direction) -> &'static str {
-    match d.0 {
-        0 => "Up",
-        1 => "Right",
-        2 => "Down",
-        3 => "Left",
-        4 => "Stay",
-        _ => "?",
     }
 }
