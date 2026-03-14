@@ -9,6 +9,7 @@ import {
 	useDisplayState,
 	useMatchStore,
 } from "../stores/matchStore";
+import EventTimeline from "./EventTimeline";
 import MatchToolbar from "./MatchToolbar";
 import MazeRenderer from "./MazeRenderer";
 import ThinkingPanel from "./ThinkingPanel";
@@ -206,6 +207,7 @@ export default function MatchView({ onNewMatch }: Props) {
 				</div>
 				{hasMatch && <ThinkingPanel botInfo={botInfo ?? {}} />}
 			</div>
+			{hasMatch && <EventTimeline />}
 		</Stack>
 	);
 }

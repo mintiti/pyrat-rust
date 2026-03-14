@@ -142,6 +142,7 @@ pub struct MudEntry {
 pub struct PlayerState {
     pub position: Coord,
     pub score: f32,
+    pub mud_turns: u8,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
@@ -196,10 +197,12 @@ pub fn build_maze_state(game: &GameState) -> MazeState {
         player1: PlayerState {
             position: game.player1_position().into(),
             score: game.player1_score(),
+            mud_turns: game.player1_mud_turns(),
         },
         player2: PlayerState {
             position: game.player2_position().into(),
             score: game.player2_score(),
+            mud_turns: game.player2_mud_turns(),
         },
         total_cheese: game.total_cheese(),
     }

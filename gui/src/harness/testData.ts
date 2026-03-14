@@ -40,6 +40,6 @@ export const testMazeState: MazeState = {
 		{ x: 1, y: 0 },
 		{ x: 5, y: 3 },
 	],
-	player1: { position: { x: 0, y: 0 }, score: 2 },
-	player2: { position: { x: 6, y: 4 }, score: 1.5 },
+	player1: { position: { x: 0, y: 0 }, score: 2, mud_turns: 0 },
+	player2: { position: { x: 6, y: 4 }, score: 1.5, mud_turns: 0 },
 };

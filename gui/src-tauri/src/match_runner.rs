@@ -267,10 +267,12 @@ async fn forward_events(
                     player1: PlayerState {
                         position: state.player1_position.into(),
                         score: state.player1_score,
+                        mud_turns: state.player1_mud_turns,
                     },
                     player2: PlayerState {
                         position: state.player2_position.into(),
                         score: state.player2_score,
+                        mud_turns: state.player2_mud_turns,
                     },
                     cheese: state.cheese.iter().copied().map(Coord::from).collect(),
                     player1_action: wire_to_specta(p1_action),
