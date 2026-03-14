@@ -1,6 +1,6 @@
 # PyRat Monorepo Makefile
 
-.PHONY: all engine gui examples test bench clean help sync lint lint-engine lint-sdk-python test-engine test-sdk-python test-wire test-host test-headless generate-wire fmt fmt-gui check check-gui dev-setup
+.PHONY: all engine gui examples test bench clean help sync lint lint-engine lint-sdk-python test-engine test-sdk-python test-wire test-host test-headless generate-wire fmt fmt-gui check check-gui dev-setup test-botpack
 
 # Default target
 all: sync engine
@@ -57,6 +57,17 @@ test-headless:
 test-sdk-python:
 	@echo "Running SDK Python tests..."
 	cd sdk/python && uv run pytest tests -v
+
+test-botpack:
+	@echo "Smoke-testing botpack bots..."
+	@fail=0; \
+	for bot_dir in botpack/*/; do \
+		if [ -f "$$bot_dir/bot.toml" ]; then \
+			echo "  checking $$bot_dir"; \
+			cargo run -p pyrat-check --quiet -- "$$bot_dir" || fail=1; \
+		fi; \
+	done; \
+	exit $$fail
 
 # Benchmarking
 bench:
@@ -135,6 +146,7 @@ help:
 	@echo "  test-host        - Run host library tests"
 	@echo "  test-headless    - Run headless runner tests"
 	@echo "  test-sdk-python  - Run SDK Python tests"
+	@echo "  test-botpack     - Smoke test all botpack bots"
 	@echo ""
 	@echo "Code Quality:"
 	@echo "  fmt              - Format all code (including GUI)"
