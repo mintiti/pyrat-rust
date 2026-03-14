@@ -7,8 +7,9 @@ import {
 	IconPlayerPause,
 	IconPlayerPlay,
 } from "@tabler/icons-react";
+import { useAtomValue } from "jotai";
 import { useState } from "react";
-import type { MatchWinner } from "../bindings/generated";
+import { RANDOM_BOT_ID, botsAtom } from "../stores/botConfigAtom";
 import {
 	useCursorDepth,
 	useMainlineLength,
@@ -20,27 +21,13 @@ type Props = {
 	onNewMatch: () => void;
 };
 
-function winnerLabel(winner: MatchWinner): string {
-	switch (winner) {
-		case "Player1":
-			return "Rat wins!";
-		case "Player2":
-			return "Python wins!";
-		case "Draw":
-			return "Draw!";
-	}
-}
-
-function winnerColor(winner: MatchWinner): string {
-	switch (winner) {
-		case "Player1":
-			return "blue";
-		case "Player2":
-			return "green";
-		case "Draw":
-			return "gray";
-	}
-}
+const DISCONNECT_REASONS: Record<string, string> = {
+	PeerClosed: "process exited",
+	FrameError: "communication error",
+	ChannelClosed: "connection dropped",
+	HandshakeTimeout: "failed to connect",
+	DrainComplete: "disconnected after game",
+};
 
 const SPEED_OPTIONS = [
 	{ value: "800", label: "0.25x" },
@@ -55,9 +42,11 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 	const matchPhase = useMatchStore((s) => s.matchPhase);
 	const following = useMatchStore((s) => s.following);
 	const playbackSpeed = useMatchStore((s) => s.playbackSpeed);
-	const result = useMatchStore((s) => s.result);
 	const error = useMatchStore((s) => s.error);
 	const disconnection = useMatchStore((s) => s.disconnection);
+	const player1BotId = useMatchStore((s) => s.player1BotId);
+	const player2BotId = useMatchStore((s) => s.player2BotId);
+	const bots = useAtomValue(botsAtom);
 
 	const {
 		goToStart,
@@ -161,14 +150,23 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 			<Group gap="sm">
 				{disconnection && (
 					<Badge color="yellow" variant="filled" size="lg">
-						{disconnection.player === "Player1" ? "Rat" : "Python"}{" "}
-						disconnected: {disconnection.reason}
-					</Badge>
-				)}
-				{result && (
-					<Badge color={winnerColor(result.winner)} variant="filled" size="lg">
-						{winnerLabel(result.winner)} {result.player1_score.toFixed(1)} -{" "}
-						{result.player2_score.toFixed(1)} ({result.turns_played}t)
+						{(() => {
+							const botId =
+								disconnection.player === "Player1"
+									? player1BotId
+									: player2BotId;
+							const name =
+								!botId || botId === RANDOM_BOT_ID
+									? disconnection.player === "Player1"
+										? "Rat"
+										: "Python"
+									: (bots.find((b) => b.id === botId)?.name ??
+										(disconnection.player === "Player1" ? "Rat" : "Python"));
+							const reason =
+								DISCONNECT_REASONS[disconnection.reason] ??
+								disconnection.reason;
+							return `${name} disconnected: ${reason}`;
+						})()}
 					</Badge>
 				)}
 				{error && (

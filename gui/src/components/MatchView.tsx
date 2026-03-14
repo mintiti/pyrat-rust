@@ -11,6 +11,7 @@ import {
 } from "../stores/matchStore";
 import MatchToolbar from "./MatchToolbar";
 import MazeColumn from "./MazeColumn";
+import ResultBanner from "./ResultBanner";
 import ThinkingPanel from "./ThinkingPanel";
 
 type Props = {
@@ -180,6 +181,7 @@ export default function MatchView({ onNewMatch }: Props) {
 	return (
 		<Stack h="100%" gap={0}>
 			<MatchToolbar onNewMatch={onNewMatch} />
+			{matchPhase === "finished" && <ResultBanner />}
 			<div style={{ flex: 1, overflow: "hidden", display: "flex" }}>
 				<MazeColumn
 					connecting={matchPhase === "connecting"}
