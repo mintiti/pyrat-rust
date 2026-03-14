@@ -1,4 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import pythonIconUrl from "../assets/sprites/players/python/neutral.png";
+import ratIconUrl from "../assets/sprites/players/rat/neutral.png";
+import type { LayoutMetrics } from "../renderer/layout";
 import type { GameNode } from "../stores/matchStore";
 import { useMatchStore } from "../stores/matchStore";
 
@@ -25,13 +28,8 @@ function lerpRgb(
 	return `rgb(${r},${g},${b})`;
 }
 
-// Mantine dark-theme blue-8 ≈ #1971c2, green-8 ≈ #2f9e44
-const BLUE: [number, number, number] = [25, 113, 194];
-const GREEN: [number, number, number] = [47, 158, 68];
-const MUD: [number, number, number] = [139, 90, 43];
-
-// Background lane color (dark-7 area)
-const LANE_BG = "var(--mantine-color-dark-7)";
+const NEUTRAL: [number, number, number] = [130, 130, 145];
+const MUD: [number, number, number] = [160, 110, 55];
 
 // ── Data hook ────────────────────────────────────────────────────
 
@@ -48,7 +46,6 @@ function useTimelineData(): TurnEntry[] | null {
 		let prevP1Score = root.player1.score;
 		let prevP2Score = root.player2.score;
 
-		// Walk the mainline (children[0] chain)
 		while (node.children.length > 0) {
 			const child = node.children[0];
 			entries.push({
@@ -67,25 +64,34 @@ function useTimelineData(): TurnEntry[] | null {
 	}, [mainlineDepth]);
 }
 
-// ── Component ────────────────────────────────────────────────────
+// ── Constants ────────────────────────────────────────────────────
 
 const TOTAL_HEIGHT = 48;
-const LANE_HEIGHT = 20;
-const P1_Y = 3; // Top of rat lane
-const DIVIDER_Y = 24;
-const P2_Y = 25; // Top of python lane
-const MUD_SWELL = 6; // Max additional height for mud rects
+const P1_MID = 13;
+const P2_MID = 35;
+const BASE_THICKNESS = 5;
+const MUD_SWELL_MAX = 8;
 const TICK_INTERVAL = 50;
+const ICON_SIZE = 16;
+const ICON_GAP = 8;
 
-export default function EventTimeline() {
+// ── Component ────────────────────────────────────────────────────
+
+type Props = {
+	layout: LayoutMetrics | null;
+};
+
+export default function EventTimeline({ layout }: Props) {
 	const data = useTimelineData();
 	const cursorDepth = useMatchStore((s) => s.cursor.length);
-	const maxTurns = useMatchStore((s) => s.mazeConfig?.max_turns ?? 300);
 	const svgRef = useRef<SVGSVGElement>(null);
 	const [dragging, setDragging] = useState(false);
 
 	const goToTurn = useMatchStore.getState().goToTurn;
 	const totalTurns = data?.length ?? 0;
+
+	// ViewBox width adapts to played turns — bars always fill the strip
+	const viewW = Math.max(totalTurns + 1, 2);
 
 	const turnFromClientX = useCallback(
 		(clientX: number) => {
@@ -93,10 +99,10 @@ export default function EventTimeline() {
 			if (!svg) return 0;
 			const rect = svg.getBoundingClientRect();
 			const fraction = (clientX - rect.left) / rect.width;
-			const turn = Math.round(fraction * maxTurns);
+			const turn = Math.round(fraction * viewW);
 			return Math.max(0, Math.min(turn, totalTurns));
 		},
-		[maxTurns, totalTurns],
+		[viewW, totalTurns],
 	);
 
 	const handlePointerDown = useCallback(
@@ -121,7 +127,6 @@ export default function EventTimeline() {
 		setDragging(false);
 	}, []);
 
-	// Clean up dragging state if pointer leaves window
 	useEffect(() => {
 		if (!dragging) return;
 		const handleUp = () => setDragging(false);
@@ -129,61 +134,68 @@ export default function EventTimeline() {
 		return () => window.removeEventListener("pointerup", handleUp);
 	}, [dragging]);
 
-	if (!data) return null;
+	if (!data || !layout) return null;
 
-	// Compute mud color + swell for each entry
+	const mazePixelW = layout.cellSize * layout.mazeW;
+	const showIcons = layout.mazeX > ICON_SIZE + ICON_GAP;
+
+	// Build SVG elements
 	const rects: React.ReactNode[] = [];
 	const cheeseMarkers: React.ReactNode[] = [];
 	const ticks: React.ReactNode[] = [];
 
 	for (let i = 0; i < data.length; i++) {
 		const e = data[i];
-		const x = e.turn; // 1-indexed turn, but that's fine for positioning
+		const x = e.turn;
 
-		// Rat lane (P1) — grows upward on mud
+		// P1 lane — thin rect centered on P1_MID
 		const p1MudFraction = Math.min(e.p1MudTurns / 5, 1);
-		const p1Swell = Math.round(p1MudFraction * MUD_SWELL);
+		const p1Thickness =
+			BASE_THICKNESS + Math.round(p1MudFraction * MUD_SWELL_MAX);
 		const p1Color =
 			e.p1MudTurns > 0
-				? lerpRgb(BLUE, MUD, p1MudFraction)
-				: lerpRgb(BLUE, BLUE, 0);
+				? lerpRgb(NEUTRAL, MUD, p1MudFraction)
+				: lerpRgb(NEUTRAL, NEUTRAL, 0);
 		rects.push(
 			<rect
 				key={`p1-${i}`}
 				x={x}
-				y={P1_Y - p1Swell}
+				y={P1_MID - p1Thickness / 2}
 				width={1}
-				height={LANE_HEIGHT + p1Swell}
+				height={p1Thickness}
 				fill={p1Color}
 			/>,
 		);
 
-		// Python lane (P2) — grows downward on mud
+		// P2 lane — thin rect centered on P2_MID
 		const p2MudFraction = Math.min(e.p2MudTurns / 5, 1);
-		const p2Swell = Math.round(p2MudFraction * MUD_SWELL);
+		const p2Thickness =
+			BASE_THICKNESS + Math.round(p2MudFraction * MUD_SWELL_MAX);
 		const p2Color =
 			e.p2MudTurns > 0
-				? lerpRgb(GREEN, MUD, p2MudFraction)
-				: lerpRgb(GREEN, GREEN, 0);
+				? lerpRgb(NEUTRAL, MUD, p2MudFraction)
+				: lerpRgb(NEUTRAL, NEUTRAL, 0);
 		rects.push(
 			<rect
 				key={`p2-${i}`}
 				x={x}
-				y={P2_Y}
+				y={P2_MID - p2Thickness / 2}
 				width={1}
-				height={LANE_HEIGHT + p2Swell}
+				height={p2Thickness}
 				fill={p2Color}
 			/>,
 		);
 
-		// Cheese markers
+		// Cheese markers — rects not circles, since preserveAspectRatio="none" would stretch circles
+		const CHEESE_H = 10;
 		if (e.p1ScoreDelta > 0) {
 			cheeseMarkers.push(
-				<circle
+				<rect
 					key={`c1-${i}`}
-					cx={x + 0.5}
-					cy={P1_Y + LANE_HEIGHT / 2}
-					r={1.5}
+					x={x}
+					y={P1_MID - CHEESE_H / 2}
+					width={1}
+					height={CHEESE_H}
 					fill="#fcc419"
 					opacity={e.p1ScoreDelta >= 1 ? 1 : 0.6}
 				/>,
@@ -191,11 +203,12 @@ export default function EventTimeline() {
 		}
 		if (e.p2ScoreDelta > 0) {
 			cheeseMarkers.push(
-				<circle
+				<rect
 					key={`c2-${i}`}
-					cx={x + 0.5}
-					cy={P2_Y + LANE_HEIGHT / 2}
-					r={1.5}
+					x={x}
+					y={P2_MID - CHEESE_H / 2}
+					width={1}
+					height={CHEESE_H}
 					fill="#fcc419"
 					opacity={e.p2ScoreDelta >= 1 ? 1 : 0.6}
 				/>,
@@ -203,8 +216,8 @@ export default function EventTimeline() {
 		}
 	}
 
-	// Tick marks every TICK_INTERVAL turns
-	for (let t = TICK_INTERVAL; t <= maxTurns; t += TICK_INTERVAL) {
+	// Tick marks — only within played range
+	for (let t = TICK_INTERVAL; t <= totalTurns; t += TICK_INTERVAL) {
 		ticks.push(
 			<line
 				key={`tick-${t}`}
@@ -218,54 +231,80 @@ export default function EventTimeline() {
 		);
 	}
 
-	// Cursor line
 	const cursorX = cursorDepth + 0.5;
 
 	return (
 		<div
 			style={{
-				borderTop: "1px solid var(--mantine-color-dark-4)",
 				height: TOTAL_HEIGHT,
 				flexShrink: 0,
-				background: LANE_BG,
+				position: "relative",
+				background: "var(--mantine-color-dark-7)",
 			}}
 		>
+			{/* Player icons in the gutter */}
+			{showIcons && (
+				<>
+					<img
+						src={ratIconUrl}
+						alt=""
+						style={{
+							position: "absolute",
+							left: layout.mazeX - ICON_SIZE - ICON_GAP,
+							top: P1_MID - ICON_SIZE / 2,
+							width: ICON_SIZE,
+							height: ICON_SIZE,
+							imageRendering: "pixelated",
+						}}
+					/>
+					<img
+						src={pythonIconUrl}
+						alt=""
+						style={{
+							position: "absolute",
+							left: layout.mazeX - ICON_SIZE - ICON_GAP,
+							top: P2_MID - ICON_SIZE / 2,
+							width: ICON_SIZE,
+							height: ICON_SIZE,
+							imageRendering: "pixelated",
+						}}
+					/>
+				</>
+			)}
+
 			{/* biome-ignore lint/a11y/noSvgWithoutTitle: decorative timeline, not informational */}
 			<svg
 				ref={svgRef}
-				viewBox={`0 0 ${maxTurns} ${TOTAL_HEIGHT}`}
+				viewBox={`0 0 ${viewW} ${TOTAL_HEIGHT}`}
 				preserveAspectRatio="none"
-				width="100%"
-				height={TOTAL_HEIGHT}
-				style={{ display: "block", cursor: "pointer" }}
+				style={{
+					display: "block",
+					cursor: "pointer",
+					position: "absolute",
+					left: layout.mazeX,
+					width: mazePixelW,
+					height: TOTAL_HEIGHT,
+				}}
 				onPointerDown={handlePointerDown}
 				onPointerMove={handlePointerMove}
 				onPointerUp={handlePointerUp}
 			>
-				{/* Background lanes */}
-				<rect
-					x={0}
-					y={P1_Y}
-					width={maxTurns}
-					height={LANE_HEIGHT}
-					fill="var(--mantine-color-dark-8)"
-				/>
-				<rect
-					x={0}
-					y={P2_Y}
-					width={maxTurns}
-					height={LANE_HEIGHT}
-					fill="var(--mantine-color-dark-8)"
-				/>
-
-				{/* Divider */}
+				{/* Guide lines */}
 				<line
 					x1={0}
-					y1={DIVIDER_Y}
-					x2={maxTurns}
-					y2={DIVIDER_Y}
-					stroke="var(--mantine-color-dark-4)"
-					strokeWidth={0.5}
+					y1={P1_MID}
+					x2={viewW}
+					y2={P1_MID}
+					stroke="var(--mantine-color-dark-5)"
+					strokeWidth={0.3}
+				/>
+				<line
+					x1={0}
+					y1={P2_MID}
+					x2={viewW}
+					y2={P2_MID}
+					stroke="var(--mantine-color-dark-5)"
+					strokeWidth={0.3}
 				/>
 
 				{/* Tick marks */}
@@ -276,19 +315,6 @@ export default function EventTimeline() {
 
 				{/* Cheese markers */}
 				{cheeseMarkers}
-
-				{/* Progress edge — faint line at the end of played turns */}
-				{totalTurns > 0 && totalTurns < maxTurns && (
-					<line
-						x1={totalTurns + 1}
-						y1={0}
-						x2={totalTurns + 1}
-						y2={TOTAL_HEIGHT}
-						stroke="var(--mantine-color-dark-3)"
-						strokeWidth={0.5}
-						strokeDasharray="2 2"
-					/>
-				)}
 
 				{/* Cursor line */}
 				<line

@@ -1,4 +1,4 @@
-import { Center, Stack, Text } from "@mantine/core";
+import { Stack } from "@mantine/core";
 import { useAtomValue } from "jotai";
 import { useEffect, useRef } from "react";
 import { events, commands } from "../bindings";
@@ -9,9 +9,8 @@ import {
 	useDisplayState,
 	useMatchStore,
 } from "../stores/matchStore";
-import EventTimeline from "./EventTimeline";
 import MatchToolbar from "./MatchToolbar";
-import MazeRenderer from "./MazeRenderer";
+import MazeColumn from "./MazeColumn";
 import ThinkingPanel from "./ThinkingPanel";
 
 type Props = {
@@ -182,32 +181,14 @@ export default function MatchView({ onNewMatch }: Props) {
 		<Stack h="100%" gap={0}>
 			<MatchToolbar onNewMatch={onNewMatch} />
 			<div style={{ flex: 1, overflow: "hidden", display: "flex" }}>
-				<div style={{ flex: 1, minWidth: 0 }}>
-					{matchPhase === "connecting" ? (
-						<Center h="100%">
-							<Text c="dimmed" size="sm">
-								Connecting bots...
-							</Text>
-						</Center>
-					) : displayState ? (
-						<MazeRenderer gameState={displayState} />
-					) : previewError ? (
-						<Center h="100%">
-							<Text c="red" size="sm">
-								{previewError}
-							</Text>
-						</Center>
-					) : (
-						<Center h="100%">
-							<Text c="dimmed" size="sm">
-								Generating preview...
-							</Text>
-						</Center>
-					)}
-				</div>
+				<MazeColumn
+					connecting={matchPhase === "connecting"}
+					displayState={displayState}
+					previewError={previewError}
+					hasMatch={hasMatch}
+				/>
 				{hasMatch && <ThinkingPanel botInfo={botInfo ?? {}} />}
 			</div>
-			{hasMatch && <EventTimeline />}
 		</Stack>
 	);
 }

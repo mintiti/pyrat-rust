@@ -12,19 +12,34 @@ export type LayoutMetrics = {
 	canvasHeight: number;
 };
 
+const MIN_TOP_MARGIN = 28;
+
 export function computeLayout(
 	containerW: number,
 	containerH: number,
 	mazeW: number,
 	mazeH: number,
 ): LayoutMetrics {
-	const cellSize = Math.floor(
+	let cellSize = Math.floor(
 		Math.min(containerW / mazeW, containerH / mazeH) * 0.9,
 	);
-	const mazePixelW = cellSize * mazeW;
-	const mazePixelH = cellSize * mazeH;
-	const mazeX = Math.floor((containerW - mazePixelW) / 2);
-	const mazeY = Math.floor((containerH - mazePixelH) / 2);
+	let mazePixelW = cellSize * mazeW;
+	let mazePixelH = cellSize * mazeH;
+	let mazeX = Math.floor((containerW - mazePixelW) / 2);
+	let mazeY = Math.floor((containerH - mazePixelH) / 2);
+
+	// Ensure minimum top margin for the score strip
+	if (mazeY < MIN_TOP_MARGIN) {
+		const availableH = containerH - MIN_TOP_MARGIN;
+		cellSize = Math.floor(
+			Math.min(containerW / mazeW, availableH / mazeH) * 0.9,
+		);
+		mazePixelW = cellSize * mazeW;
+		mazePixelH = cellSize * mazeH;
+		mazeX = Math.floor((containerW - mazePixelW) / 2);
+		mazeY = Math.max(MIN_TOP_MARGIN, Math.floor((containerH - mazePixelH) / 2));
+	}
+
 	const wallThickness = Math.max(1, Math.floor(cellSize / 7));
 	const cornerSize = Math.max(1, Math.floor(wallThickness * 1.2));
 
