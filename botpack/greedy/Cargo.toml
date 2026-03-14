@@ -8,5 +8,4 @@ publish = false
 pyrat-sdk = { path = "../../sdk/rust" }
 rand = "0.10"
 
-[lints]
-workspace = true
+[workspace]

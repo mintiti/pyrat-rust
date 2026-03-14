@@ -5,7 +5,7 @@
 //! try to hurt us, they try to help themselves.
 
 use pyrat_sdk::{Bot, Context, DeriveOptions, Direction, GameSim, GameState, InfoParams, Player};
-use rand::prelude::IndexedRandom;
+use rand::prelude::SliceRandom;
 
 #[derive(DeriveOptions)]
 struct Search {
