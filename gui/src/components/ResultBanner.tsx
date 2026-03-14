@@ -3,7 +3,7 @@ import { useAtomValue } from "jotai";
 import pythonIconUrl from "../assets/sprites/players/python/neutral.png";
 import ratIconUrl from "../assets/sprites/players/rat/neutral.png";
 import type { MatchWinner } from "../bindings/generated";
-import { RANDOM_BOT_ID, botsAtom } from "../stores/botConfigAtom";
+import { botsAtom, resolveBotName } from "../stores/botConfigAtom";
 import { useMatchStore } from "../stores/matchStore";
 
 const ACCENT: Record<MatchWinner, string> = {
@@ -11,16 +11,6 @@ const ACCENT: Record<MatchWinner, string> = {
 	Player2: "green",
 	Draw: "gray",
 };
-
-function resolveBotName(
-	botId: string | null,
-	bots: { id: string; name: string }[],
-	fallback: string,
-): string {
-	if (!botId) return fallback;
-	if (botId === RANDOM_BOT_ID) return "Random";
-	return bots.find((b) => b.id === botId)?.name ?? fallback;
-}
 
 export default function ResultBanner() {
 	const result = useMatchStore((s) => s.result);

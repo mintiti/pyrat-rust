@@ -9,7 +9,7 @@ import {
 } from "@tabler/icons-react";
 import { useAtomValue } from "jotai";
 import { useState } from "react";
-import { RANDOM_BOT_ID, botsAtom } from "../stores/botConfigAtom";
+import { botsAtom, resolveBotName } from "../stores/botConfigAtom";
 import {
 	useCursorDepth,
 	useMainlineLength,
@@ -150,23 +150,13 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 			<Group gap="sm">
 				{disconnection && (
 					<Badge color="yellow" variant="filled" size="lg">
-						{(() => {
-							const botId =
-								disconnection.player === "Player1"
-									? player1BotId
-									: player2BotId;
-							const name =
-								!botId || botId === RANDOM_BOT_ID
-									? disconnection.player === "Player1"
-										? "Rat"
-										: "Python"
-									: (bots.find((b) => b.id === botId)?.name ??
-										(disconnection.player === "Player1" ? "Rat" : "Python"));
-							const reason =
-								DISCONNECT_REASONS[disconnection.reason] ??
-								disconnection.reason;
-							return `${name} disconnected: ${reason}`;
-						})()}
+						{resolveBotName(
+							disconnection.player === "Player1" ? player1BotId : player2BotId,
+							bots,
+							disconnection.player === "Player1" ? "Rat" : "Python",
+						)}{" "}
+						disconnected:{" "}
+						{DISCONNECT_REASONS[disconnection.reason] ?? disconnection.reason}
 					</Badge>
 				)}
 				{error && (

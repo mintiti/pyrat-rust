@@ -3,10 +3,8 @@ import { useElementSize } from "@mantine/hooks";
 import { useMemo } from "react";
 import type { MazeState } from "../bindings/generated";
 import { computeLayout } from "../renderer/layout";
-import EventTimeline from "./EventTimeline";
+import EventTimeline, { TIMELINE_HEIGHT } from "./EventTimeline";
 import MazeRenderer from "./MazeRenderer";
-
-const TIMELINE_HEIGHT = 48;
 
 type Props = {
 	connecting: boolean;

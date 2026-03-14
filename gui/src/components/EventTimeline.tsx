@@ -29,6 +29,7 @@ function lerpRgb(
 }
 
 const NEUTRAL: [number, number, number] = [130, 130, 145];
+const NEUTRAL_CSS = `rgb(${NEUTRAL.join(",")})`;
 const MUD: [number, number, number] = [160, 110, 55];
 
 // ── Data hook ────────────────────────────────────────────────────
@@ -66,7 +67,7 @@ function useTimelineData(): TurnEntry[] | null {
 
 // ── Constants ────────────────────────────────────────────────────
 
-const TOTAL_HEIGHT = 48;
+export const TIMELINE_HEIGHT = 48;
 const P1_MID = 13;
 const P2_MID = 35;
 const BASE_THICKNESS = 5;
@@ -74,6 +75,50 @@ const MUD_SWELL_MAX = 8;
 const TICK_INTERVAL = 50;
 const ICON_SIZE = 16;
 const ICON_GAP = 8;
+const CHEESE_H = 10;
+
+// ── Lane helper ──────────────────────────────────────────────────
+
+function buildLaneRect(
+	key: string,
+	x: number,
+	midY: number,
+	mudTurns: number,
+): React.ReactNode {
+	const mudFraction = Math.min(mudTurns / 5, 1);
+	const thickness = BASE_THICKNESS + Math.round(mudFraction * MUD_SWELL_MAX);
+	const color = mudTurns > 0 ? lerpRgb(NEUTRAL, MUD, mudFraction) : NEUTRAL_CSS;
+	return (
+		<rect
+			key={key}
+			x={x}
+			y={midY - thickness / 2}
+			width={1}
+			height={thickness}
+			fill={color}
+		/>
+	);
+}
+
+function buildCheeseMarker(
+	key: string,
+	x: number,
+	midY: number,
+	scoreDelta: number,
+): React.ReactNode | null {
+	if (scoreDelta <= 0) return null;
+	return (
+		<rect
+			key={key}
+			x={x}
+			y={midY - CHEESE_H / 2}
+			width={1}
+			height={CHEESE_H}
+			fill="#fcc419"
+			opacity={scoreDelta >= 1 ? 1 : 0.6}
+		/>
+	);
+}
 
 // ── Component ────────────────────────────────────────────────────
 
@@ -134,109 +179,54 @@ export default function EventTimeline({ layout }: Props) {
 		return () => window.removeEventListener("pointerup", handleUp);
 	}, [dragging]);
 
+	// Memoize SVG elements — only rebuild when data changes, not on cursor moves
+	const { rects, cheeseMarkers, ticks } = useMemo(() => {
+		if (!data) return { rects: [], cheeseMarkers: [], ticks: [] };
+
+		const r: React.ReactNode[] = [];
+		const c: React.ReactNode[] = [];
+
+		for (let i = 0; i < data.length; i++) {
+			const e = data[i];
+			const x = e.turn;
+
+			r.push(buildLaneRect(`p1-${i}`, x, P1_MID, e.p1MudTurns));
+			r.push(buildLaneRect(`p2-${i}`, x, P2_MID, e.p2MudTurns));
+
+			const c1 = buildCheeseMarker(`c1-${i}`, x, P1_MID, e.p1ScoreDelta);
+			const c2 = buildCheeseMarker(`c2-${i}`, x, P2_MID, e.p2ScoreDelta);
+			if (c1) c.push(c1);
+			if (c2) c.push(c2);
+		}
+
+		const t: React.ReactNode[] = [];
+		for (let tick = TICK_INTERVAL; tick <= data.length; tick += TICK_INTERVAL) {
+			t.push(
+				<line
+					key={`tick-${tick}`}
+					x1={tick}
+					y1={0}
+					x2={tick}
+					y2={3}
+					stroke="var(--mantine-color-dark-3)"
+					strokeWidth={0.5}
+				/>,
+			);
+		}
+
+		return { rects: r, cheeseMarkers: c, ticks: t };
+	}, [data]);
+
 	if (!data || !layout) return null;
 
 	const mazePixelW = layout.cellSize * layout.mazeW;
 	const showIcons = layout.mazeX > ICON_SIZE + ICON_GAP;
-
-	// Build SVG elements
-	const rects: React.ReactNode[] = [];
-	const cheeseMarkers: React.ReactNode[] = [];
-	const ticks: React.ReactNode[] = [];
-
-	for (let i = 0; i < data.length; i++) {
-		const e = data[i];
-		const x = e.turn;
-
-		// P1 lane — thin rect centered on P1_MID
-		const p1MudFraction = Math.min(e.p1MudTurns / 5, 1);
-		const p1Thickness =
-			BASE_THICKNESS + Math.round(p1MudFraction * MUD_SWELL_MAX);
-		const p1Color =
-			e.p1MudTurns > 0
-				? lerpRgb(NEUTRAL, MUD, p1MudFraction)
-				: lerpRgb(NEUTRAL, NEUTRAL, 0);
-		rects.push(
-			<rect
-				key={`p1-${i}`}
-				x={x}
-				y={P1_MID - p1Thickness / 2}
-				width={1}
-				height={p1Thickness}
-				fill={p1Color}
-			/>,
-		);
-
-		// P2 lane — thin rect centered on P2_MID
-		const p2MudFraction = Math.min(e.p2MudTurns / 5, 1);
-		const p2Thickness =
-			BASE_THICKNESS + Math.round(p2MudFraction * MUD_SWELL_MAX);
-		const p2Color =
-			e.p2MudTurns > 0
-				? lerpRgb(NEUTRAL, MUD, p2MudFraction)
-				: lerpRgb(NEUTRAL, NEUTRAL, 0);
-		rects.push(
-			<rect
-				key={`p2-${i}`}
-				x={x}
-				y={P2_MID - p2Thickness / 2}
-				width={1}
-				height={p2Thickness}
-				fill={p2Color}
-			/>,
-		);
-
-		// Cheese markers — rects not circles, since preserveAspectRatio="none" would stretch circles
-		const CHEESE_H = 10;
-		if (e.p1ScoreDelta > 0) {
-			cheeseMarkers.push(
-				<rect
-					key={`c1-${i}`}
-					x={x}
-					y={P1_MID - CHEESE_H / 2}
-					width={1}
-					height={CHEESE_H}
-					fill="#fcc419"
-					opacity={e.p1ScoreDelta >= 1 ? 1 : 0.6}
-				/>,
-			);
-		}
-		if (e.p2ScoreDelta > 0) {
-			cheeseMarkers.push(
-				<rect
-					key={`c2-${i}`}
-					x={x}
-					y={P2_MID - CHEESE_H / 2}
-					width={1}
-					height={CHEESE_H}
-					fill="#fcc419"
-					opacity={e.p2ScoreDelta >= 1 ? 1 : 0.6}
-				/>,
-			);
-		}
-	}
-
-	// Tick marks — only within played range
-	for (let t = TICK_INTERVAL; t <= totalTurns; t += TICK_INTERVAL) {
-		ticks.push(
-			<line
-				key={`tick-${t}`}
-				x1={t}
-				y1={0}
-				x2={t}
-				y2={3}
-				stroke="var(--mantine-color-dark-3)"
-				strokeWidth={0.5}
-			/>,
-		);
-	}
-
 	const cursorX = cursorDepth + 0.5;
 
 	return (
 		<div
 			style={{
-				height: TOTAL_HEIGHT,
+				height: TIMELINE_HEIGHT,
 				flexShrink: 0,
 				position: "relative",
 				background: "var(--mantine-color-dark-7)",
@@ -275,7 +265,7 @@ export default function EventTimeline({ layout }: Props) {
 			{/* biome-ignore lint/a11y/noSvgWithoutTitle: decorative timeline, not informational */}
 			<svg
 				ref={svgRef}
-				viewBox={`0 0 ${viewW} ${TOTAL_HEIGHT}`}
+				viewBox={`0 0 ${viewW} ${TIMELINE_HEIGHT}`}
 				preserveAspectRatio="none"
 				style={{
 					display: "block",
@@ -283,7 +273,7 @@ export default function EventTimeline({ layout }: Props) {
 					position: "absolute",
 					left: layout.mazeX,
 					width: mazePixelW,
-					height: TOTAL_HEIGHT,
+					height: TIMELINE_HEIGHT,
 				}}
 				onPointerDown={handlePointerDown}
 				onPointerMove={handlePointerMove}
@@ -321,7 +311,7 @@ export default function EventTimeline({ layout }: Props) {
 					x1={cursorX}
 					y1={0}
 					x2={cursorX}
-					y2={TOTAL_HEIGHT}
+					y2={TIMELINE_HEIGHT}
 					stroke="white"
 					strokeWidth={1}
 					opacity={0.8}
