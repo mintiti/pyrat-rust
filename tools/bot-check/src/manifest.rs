@@ -54,11 +54,13 @@ impl BotManifest {
     /// Load and validate a bot manifest from a directory.
     pub fn load(bot_dir: &Path) -> Result<Self, ManifestError> {
         let path = bot_dir.join("bot.toml");
-        if !path.exists() {
-            return Err(ManifestError::NotFound(path));
-        }
-
-        let contents = std::fs::read_to_string(&path).map_err(ManifestError::Read)?;
+        let contents = std::fs::read_to_string(&path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                ManifestError::NotFound(path.clone())
+            } else {
+                ManifestError::Read(e)
+            }
+        })?;
         let manifest: Self = toml::from_str(&contents).map_err(ManifestError::Parse)?;
         manifest.validate()?;
         Ok(manifest)
