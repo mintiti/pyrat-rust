@@ -1,5 +1,5 @@
 use pyrat_sdk::{Bot, Context, Direction, GameState, Options};
-use rand::seq::IndexedRandom;
+use rand::prelude::IndexedRandom;
 
 struct SmartRandom;
 
