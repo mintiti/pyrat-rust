@@ -40,12 +40,13 @@ const SPEED_OPTIONS = [
 
 export default function MatchToolbar({ onNewMatch }: Props) {
 	const matchPhase = useMatchStore((s) => s.matchPhase);
-	const following = useMatchStore((s) => s.following);
+	const autoplay = useMatchStore((s) => s.autoplay);
 	const playbackSpeed = useMatchStore((s) => s.playbackSpeed);
 	const error = useMatchStore((s) => s.error);
 	const disconnection = useMatchStore((s) => s.disconnection);
 	const player1BotId = useMatchStore((s) => s.player1BotId);
 	const player2BotId = useMatchStore((s) => s.player2BotId);
+	const mainlineDepth = useMatchStore((s) => s.mainlineDepth);
 	const bots = useAtomValue(botsAtom);
 
 	const {
@@ -54,6 +55,7 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 		stepForward,
 		stepBack,
 		togglePlay,
+		goLive,
 		setPlaybackSpeed,
 		resetToPreview,
 	} = useMatchStore.getState();
@@ -112,12 +114,23 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 						<IconChevronLeft size={16} />
 					</ActionIcon>
 					<ActionIcon variant="subtle" size="sm" onClick={togglePlay}>
-						{following ? (
+						{autoplay ? (
 							<IconPlayerPause size={16} />
 						) : (
 							<IconPlayerPlay size={16} />
 						)}
 					</ActionIcon>
+					{matchPhase === "playing" && cursorDepth < mainlineDepth && (
+						<Badge
+							size="sm"
+							color="red"
+							variant="filled"
+							style={{ cursor: "pointer" }}
+							onClick={goLive}
+						>
+							LIVE
+						</Badge>
+					)}
 					<ActionIcon
 						variant="subtle"
 						size="sm"

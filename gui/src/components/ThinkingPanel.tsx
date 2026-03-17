@@ -79,7 +79,7 @@ export default function ThinkingPanel({ botInfo }: Props) {
 			style={{
 				width: 320,
 				flexShrink: 0,
-				borderLeft: "1px solid var(--mantine-color-default-border)",
+				borderLeft: "1px solid var(--mantine-color-dark-4)",
 			}}
 			p="sm"
 		>

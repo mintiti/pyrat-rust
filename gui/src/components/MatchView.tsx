@@ -24,10 +24,12 @@ export default function MatchView({ onNewMatch }: Props) {
 	const displayState = useDisplayState();
 	const bots = useAtomValue(botsAtom);
 	const matchConfig = useAtomValue(matchConfigAtom);
+	const matchConfigRef = useRef(matchConfig);
+	matchConfigRef.current = matchConfig;
 
 	const botInfo = useCurrentBotInfo();
 	const matchPhase = useMatchStore((s) => s.matchPhase);
-	const following = useMatchStore((s) => s.following);
+	const autoplay = useMatchStore((s) => s.autoplay);
 	const playbackSpeed = useMatchStore((s) => s.playbackSpeed);
 	const previewError = useMatchStore((s) => s.previewError);
 	const player1BotId = useMatchStore((s) => s.player1BotId);
@@ -46,6 +48,7 @@ export default function MatchView({ onNewMatch }: Props) {
 		stepForward,
 		stepBack,
 		togglePlay,
+		goLive,
 	} = useMatchStore.getState();
 
 	// Event listeners — wire Tauri events to store actions
@@ -88,12 +91,12 @@ export default function MatchView({ onNewMatch }: Props) {
 	// Auto-advance cursor during playback
 	// biome-ignore lint/correctness/useExhaustiveDependencies: advanceCursor is a stable ref from getState()
 	useEffect(() => {
-		if (!following) return;
+		if (!autoplay) return;
 		const id = setInterval(() => {
 			advanceCursor();
 		}, playbackSpeed);
 		return () => clearInterval(id);
-	}, [following, playbackSpeed]);
+	}, [autoplay, playbackSpeed]);
 
 	// Keyboard shortcuts
 	// biome-ignore lint/correctness/useExhaustiveDependencies: navigation actions are stable refs from getState()
@@ -126,6 +129,12 @@ export default function MatchView({ onNewMatch }: Props) {
 					e.preventDefault();
 					togglePlay();
 					break;
+				case "l":
+					if (useMatchStore.getState().matchPhase === "playing") {
+						e.preventDefault();
+						goLive();
+					}
+					break;
 			}
 		};
 		window.addEventListener("keydown", handler);
@@ -150,9 +159,10 @@ export default function MatchView({ onNewMatch }: Props) {
 		}
 		useMatchStore.getState().beginConnecting();
 		const { previewSeed } = useMatchStore.getState();
+		const cfg = matchConfigRef.current;
 		const configWithSeed = {
-			...matchConfig,
-			seed: matchConfig.seed ?? previewSeed,
+			...cfg,
+			seed: cfg.seed ?? previewSeed,
 		};
 		const res = await commands.startMatch(
 			p1.cmd,

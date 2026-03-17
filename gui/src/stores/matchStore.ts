@@ -94,7 +94,7 @@ interface MatchState {
 
 	// Viewer
 	matchPhase: MatchPhase;
-	following: boolean;
+	autoplay: boolean;
 	playbackSpeed: number; // ms between frames
 	showPlayer1Arrows: boolean;
 	showPlayer2Arrows: boolean;
@@ -124,6 +124,7 @@ interface MatchState {
 	stepBack: () => void;
 	goToTurn: (n: number) => void;
 	togglePlay: () => void;
+	goLive: () => void;
 	setPlaybackSpeed: (ms: number) => void;
 
 	// Auto-advance (called by the interval timer)
@@ -141,7 +142,7 @@ const IDLE_MATCH = {
 	error: null as string | null,
 	disconnection: null as BotDisconnectedEvent | null,
 	matchPhase: "idle" as MatchPhase,
-	following: true,
+	autoplay: true,
 };
 
 export const useMatchStore = create<MatchState>((set, get) => ({
@@ -184,7 +185,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 			},
 			root,
 			matchPhase: "playing",
-			following: true,
+			autoplay: true,
 		});
 	},
 
@@ -259,12 +260,12 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 
 	// ── Navigation ───────────────────────────────────────────
 	goToStart: () => {
-		set({ cursor: [], following: false });
+		set({ cursor: [], autoplay: false });
 	},
 
 	goToEnd: () => {
 		const { mainlineDepth } = get();
-		set({ cursor: mainlinePath(mainlineDepth), following: false });
+		set({ cursor: mainlinePath(mainlineDepth), autoplay: false });
 	},
 
 	stepForward: () => {
@@ -272,31 +273,26 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		if (!root) return;
 		const node = getNodeAtPath(root, cursor);
 		if (!node || node.children.length === 0) return;
-		set({ cursor: [...cursor, 0], following: false });
+		set({ cursor: [...cursor, 0], autoplay: false });
 	},
 
 	stepBack: () => {
 		const { cursor } = get();
 		if (cursor.length === 0) return;
-		set({ cursor: cursor.slice(0, -1), following: false });
+		set({ cursor: cursor.slice(0, -1), autoplay: false });
 	},
 
 	goToTurn: (n) => {
-		set({ cursor: mainlinePath(n), following: false });
+		set({ cursor: mainlinePath(n), autoplay: false });
 	},
 
 	togglePlay: () => {
-		const { following, matchPhase, mainlineDepth } = get();
-		if (following) {
-			set({ following: false });
-		} else {
-			// Catch up to latest when resuming during a live match
-			const update: Partial<MatchState> = { following: true };
-			if (matchPhase === "playing") {
-				update.cursor = mainlinePath(mainlineDepth);
-			}
-			set(update);
-		}
+		set((s) => ({ autoplay: !s.autoplay }));
+	},
+
+	goLive: () => {
+		const { mainlineDepth } = get();
+		set({ cursor: mainlinePath(mainlineDepth), autoplay: true });
 	},
 
 	setPlaybackSpeed: (ms) => {
@@ -308,9 +304,9 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		if (!root) return;
 		const node = getNodeAtPath(root, cursor);
 		if (!node || node.children.length === 0) {
-			// At tree end: stop following if match is finished (replay done)
+			// At tree end: stop autoplay if match is finished (replay done)
 			if (matchPhase === "finished") {
-				set({ following: false });
+				set({ autoplay: false });
 			}
 			return;
 		}
