@@ -32,7 +32,7 @@ impl Bot for Search {
             }
 
             let result = self.search_root(&mut sim, depth, state, ctx);
-            let Some((dir, score)) = result else {
+            let Some((dir, score, pv)) = result else {
                 break; // timed out mid-search — keep previous best
             };
 
@@ -43,6 +43,7 @@ impl Bot for Search {
                 depth: depth as u16,
                 nodes: self.nodes as u32,
                 score,
+                pv: &pv,
                 message: &format!("depth {depth}: {best_move:?} ({score:.1})"),
                 ..InfoParams::for_player(state.my_player())
             });
@@ -59,9 +60,10 @@ impl Search {
         depth: i32,
         state: &GameState,
         ctx: &Context,
-    ) -> Option<(Direction, f32)> {
+    ) -> Option<(Direction, f32, Vec<Direction>)> {
         let mut best_move = Direction::Stay;
         let mut best_score = f32::NEG_INFINITY;
+        let mut best_child_pv = Vec::new();
 
         let my_pos = if self.am_player1 {
             sim.player1_position()
@@ -86,21 +88,24 @@ impl Search {
             // Opponent picks the move that maximizes THEIR score.
             let mut best_opp_score = f32::NEG_INFINITY;
             let mut our_score_vs_opp_best = f32::NEG_INFINITY;
+            let mut pv_vs_opp_best = Vec::new();
 
             for opp_dir in &opp_moves {
                 let (p1_dir, p2_dir) = self.assign_moves(*my_dir, *opp_dir);
                 let undo = sim.make_move(p1_dir, p2_dir);
                 self.nodes += 1;
 
-                let (our, opp) = if depth <= 1 || sim.is_game_over() {
-                    self.evaluate(sim)
+                let (our, opp, child_pv) = if depth <= 1 || sim.is_game_over() {
+                    let (our, opp) = self.evaluate(sim);
+                    (our, opp, Vec::new())
                 } else {
-                    let pair = self.search(sim, depth - 1, state, ctx);
-                    if pair.is_none() {
-                        sim.unmake_move(undo);
-                        return None;
+                    match self.search(sim, depth - 1, state, ctx) {
+                        Some(result) => result,
+                        None => {
+                            sim.unmake_move(undo);
+                            return None;
+                        },
                     }
-                    pair.unwrap()
                 };
 
                 sim.unmake_move(undo);
@@ -108,16 +113,20 @@ impl Search {
                 if opp > best_opp_score {
                     best_opp_score = opp;
                     our_score_vs_opp_best = our;
+                    pv_vs_opp_best = child_pv;
                 }
             }
 
             if our_score_vs_opp_best > best_score {
                 best_score = our_score_vs_opp_best;
                 best_move = *my_dir;
+                best_child_pv = pv_vs_opp_best;
             }
         }
 
-        Some((best_move, best_score))
+        let mut pv = vec![best_move];
+        pv.extend(best_child_pv);
+        Some((best_move, best_score, pv))
     }
 
     fn search(
@@ -126,9 +135,10 @@ impl Search {
         depth: i32,
         state: &GameState,
         ctx: &Context,
-    ) -> Option<(f32, f32)> {
+    ) -> Option<(f32, f32, Vec<Direction>)> {
         if depth == 0 || sim.is_game_over() {
-            return Some(self.evaluate(sim));
+            let (our, opp) = self.evaluate(sim);
+            return Some((our, opp, Vec::new()));
         }
 
         if ctx.should_stop() {
@@ -151,6 +161,7 @@ impl Search {
 
         let mut best_our = f32::NEG_INFINITY;
         let mut best_opp_at_our_best = 0.0_f32;
+        let mut best_pv = Vec::new();
 
         for my_dir in &my_moves {
             if ctx.should_stop() {
@@ -158,21 +169,24 @@ impl Search {
             }
             let mut best_opp_score = f32::NEG_INFINITY;
             let mut our_when_opp_best = f32::NEG_INFINITY;
+            let mut pv_when_opp_best = Vec::new();
 
             for opp_dir in &opp_moves {
                 let (p1_dir, p2_dir) = self.assign_moves(*my_dir, *opp_dir);
                 let undo = sim.make_move(p1_dir, p2_dir);
                 self.nodes += 1;
 
-                let (our, opp) = if depth <= 1 || sim.is_game_over() {
-                    self.evaluate(sim)
+                let (our, opp, child_pv) = if depth <= 1 || sim.is_game_over() {
+                    let (our, opp) = self.evaluate(sim);
+                    (our, opp, Vec::new())
                 } else {
-                    let pair = self.search(sim, depth - 1, state, ctx);
-                    if pair.is_none() {
-                        sim.unmake_move(undo);
-                        return None;
+                    match self.search(sim, depth - 1, state, ctx) {
+                        Some(result) => result,
+                        None => {
+                            sim.unmake_move(undo);
+                            return None;
+                        },
                     }
-                    pair.unwrap()
                 };
 
                 sim.unmake_move(undo);
@@ -180,16 +194,20 @@ impl Search {
                 if opp > best_opp_score {
                     best_opp_score = opp;
                     our_when_opp_best = our;
+                    pv_when_opp_best = child_pv;
                 }
             }
 
             if our_when_opp_best > best_our {
                 best_our = our_when_opp_best;
                 best_opp_at_our_best = best_opp_score;
+                let mut pv = vec![*my_dir];
+                pv.extend(pv_when_opp_best);
+                best_pv = pv;
             }
         }
 
-        Some((best_our, best_opp_at_our_best))
+        Some((best_our, best_opp_at_our_best, best_pv))
     }
 
     fn evaluate(&self, sim: &GameSim) -> (f32, f32) {

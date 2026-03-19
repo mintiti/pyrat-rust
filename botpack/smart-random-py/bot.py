@@ -2,7 +2,7 @@
 
 Baseline opponent. Won't win, but won't walk into walls either.
 
-SDK features: effective_moves.
+SDK features: effective_moves, send_info.
 """
 
 import random
@@ -17,7 +17,13 @@ class SmartRandom(Bot):
     def think(self, state: GameState, ctx: Context) -> Direction:
         moves = state.effective_moves()
         if moves:
-            return random.choice(moves)
+            chosen = random.choice(moves)
+            ctx.send_info(
+                player=state.my_player,
+                pv=[chosen],
+                message=chosen.name,
+            )
+            return chosen
         return Direction.STAY
 
 

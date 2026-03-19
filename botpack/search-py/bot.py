@@ -35,7 +35,7 @@ class Search(Bot):
             if result is None:
                 break  # timed out mid-search — keep previous best
 
-            move, score = result
+            move, score, pv = result
             best_move = move
             best_score = score
 
@@ -45,6 +45,7 @@ class Search(Bot):
                 depth=depth,
                 nodes=self._nodes,
                 score=best_score,
+                pv=pv,
                 message=f"depth {depth}: {best_move.name} ({best_score:.1f})",
             )
 
@@ -52,10 +53,11 @@ class Search(Bot):
 
     def _search_root(
         self, sim: GameSim, depth: int, state: GameState, ctx: Context
-    ) -> tuple[Direction, float] | None:
-        """Find the best move at the root. Returns (direction, our_score) or None on timeout."""
+    ) -> tuple[Direction, float, list[Direction]] | None:
+        """Find the best move at the root. Returns (direction, our_score, pv) or None on timeout."""
         best_move = Direction.STAY
         best_score = -float("inf")
+        best_child_pv: list[Direction] = []
 
         my_pos = sim.player1_position if self._am_player1 else sim.player2_position
         opp_pos = sim.player2_position if self._am_player1 else sim.player1_position
@@ -71,6 +73,7 @@ class Search(Bot):
             opp_moves = state.effective_moves(opp_pos)
             best_opp_score = -float("inf")
             our_score_vs_opp_best = -float("inf")
+            pv_vs_opp_best: list[Direction] = []
 
             for opp_dir in opp_moves:
                 p1_dir, p2_dir = self._assign_moves(my_dir, opp_dir)
@@ -79,31 +82,34 @@ class Search(Bot):
 
                 if depth <= 1 or sim.is_game_over:
                     our, opp = self._evaluate(sim)
+                    child_pv: list[Direction] = []
                 else:
-                    pair = self._search(sim, depth - 1, state, ctx)
-                    if pair is None:
+                    result = self._search(sim, depth - 1, state, ctx)
+                    if result is None:
                         sim.unmake_move(undo)
                         return None
-                    our, opp = pair
+                    our, opp, child_pv = result
 
                 sim.unmake_move(undo)
 
                 if opp > best_opp_score:
                     best_opp_score = opp
                     our_score_vs_opp_best = our
+                    pv_vs_opp_best = child_pv
 
             if our_score_vs_opp_best > best_score:
                 best_score = our_score_vs_opp_best
                 best_move = my_dir
+                best_child_pv = pv_vs_opp_best
 
-        return best_move, best_score
+        return best_move, best_score, [best_move, *best_child_pv]
 
     def _search(
         self, sim: GameSim, depth: int, state: GameState, ctx: Context
-    ) -> tuple[float, float] | None:
-        """Recursive search. Returns (our_score, opp_score) or None on timeout."""
+    ) -> tuple[float, float, list[Direction]] | None:
+        """Recursive search. Returns (our_score, opp_score, pv) or None on timeout."""
         if depth == 0 or sim.is_game_over:
-            return self._evaluate(sim)
+            return *self._evaluate(sim), []
 
         if ctx.should_stop():
             return None
@@ -115,6 +121,7 @@ class Search(Bot):
 
         best_our = -float("inf")
         best_opp_at_our_best = 0.0
+        best_pv: list[Direction] = []
 
         for my_dir in my_moves:
             if ctx.should_stop():
@@ -123,6 +130,7 @@ class Search(Bot):
             opp_moves = state.effective_moves(opp_pos)
             best_opp_score = -float("inf")
             our_when_opp_best = -float("inf")
+            pv_when_opp_best: list[Direction] = []
 
             for opp_dir in opp_moves:
                 p1_dir, p2_dir = self._assign_moves(my_dir, opp_dir)
@@ -131,24 +139,27 @@ class Search(Bot):
 
                 if depth <= 1 or sim.is_game_over:
                     our, opp = self._evaluate(sim)
+                    child_pv: list[Direction] = []
                 else:
-                    pair = self._search(sim, depth - 1, state, ctx)
-                    if pair is None:
+                    result = self._search(sim, depth - 1, state, ctx)
+                    if result is None:
                         sim.unmake_move(undo)
                         return None
-                    our, opp = pair
+                    our, opp, child_pv = result
 
                 sim.unmake_move(undo)
 
                 if opp > best_opp_score:
                     best_opp_score = opp
                     our_when_opp_best = our
+                    pv_when_opp_best = child_pv
 
             if our_when_opp_best > best_our:
                 best_our = our_when_opp_best
                 best_opp_at_our_best = best_opp_score
+                best_pv = [my_dir, *pv_when_opp_best]
 
-        return best_our, best_opp_at_our_best
+        return best_our, best_opp_at_our_best, best_pv
 
     def _evaluate(self, sim: GameSim) -> tuple[float, float]:
         """Return (our_score, opponent_score) from the simulation."""

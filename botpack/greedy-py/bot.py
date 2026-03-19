@@ -25,6 +25,7 @@ class Greedy(Bot):
                     player=state.my_player,
                     multipv=1,
                     target=result.target,
+                    score=state.my_score + 1.0,
                     pv=result.path,
                     message=f"target {result.target}, {len(result.path)} steps",
                 )
