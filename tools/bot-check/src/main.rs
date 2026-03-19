@@ -46,6 +46,7 @@ fn print_human(report: &CheckReport) {
         total_ms += phase.duration_ms;
         let (tag, detail) = match &phase.status {
             PhaseStatus::Pass { detail } => ("PASS", detail.as_str()),
+            PhaseStatus::Warn { detail } => ("WARN", detail.as_str()),
             PhaseStatus::Fail { detail } => ("FAIL", detail.as_str()),
             PhaseStatus::Skip { detail } => ("SKIP", detail.as_str()),
         };

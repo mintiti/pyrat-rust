@@ -39,13 +39,14 @@ pub struct PhaseResult {
 #[allow(dead_code)]
 pub enum PhaseStatus {
     Pass { detail: String },
+    Warn { detail: String },
     Fail { detail: String },
     Skip { detail: String },
 }
 
 impl PhaseStatus {
     fn is_pass(&self) -> bool {
-        matches!(self, Self::Pass { .. })
+        matches!(self, Self::Pass { .. } | Self::Warn { .. })
     }
 }
 
@@ -64,6 +65,16 @@ impl PhaseResult {
         Self {
             name,
             status: PhaseStatus::Fail {
+                detail: detail.into(),
+            },
+            duration_ms: elapsed.as_millis() as u64,
+        }
+    }
+
+    fn warn(name: &'static str, detail: impl Into<String>, elapsed: Duration) -> Self {
+        Self {
+            name,
+            status: PhaseStatus::Warn {
                 detail: detail.into(),
             },
             duration_ms: elapsed.as_millis() as u64,
@@ -183,7 +194,7 @@ pub async fn run_check(bot_dir: &Path) -> CheckReport {
     ));
 
     // Spawn stub bot as Player 2.
-    let stub_session_id = pyrat_host::session::SessionId(1000);
+    let stub_session_id = pyrat_host::session::SessionId::STUB;
     let _stub_handle = spawn_stub_bot(stub_session_id, "__stub__".into(), "Stub".into(), game_tx);
 
     let setup = MatchSetup {
@@ -207,6 +218,9 @@ pub async fn run_check(bot_dir: &Path) -> CheckReport {
 
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
 
+    // NOTE: The host silently drops connections with unrecognized agent_ids, so if
+    // the bot connects with a wrong ID the startup timeout fires with a generic message.
+    // Fixing this properly requires a MatchEvent::ConnectionRejected variant in pyrat-host.
     let setup_result = match run_setup(&setup, &mut game_rx, Some(&event_tx)).await {
         Ok(r) => r,
         Err(e) => {
@@ -290,17 +304,24 @@ pub async fn run_check(bot_dir: &Path) -> CheckReport {
                 }
             }
 
-            let detail = if timed_out {
-                "turn 1 completed, but bot timed out (host used STAY as default)".to_string()
+            if timed_out {
+                phases.push(PhaseResult::warn(
+                    "play",
+                    "turn 1 completed, but bot timed out (host used STAY as default)",
+                    t.elapsed(),
+                ));
             } else {
                 let action = action_name.unwrap_or("?");
                 let outcome_str = match outcome {
                     TurnOutcome::Continue => "",
                     TurnOutcome::GameOver(_) => " (game over)",
                 };
-                format!("turn 1 completed, action: {action}{outcome_str}")
-            };
-            phases.push(PhaseResult::pass("play", detail, t.elapsed()));
+                phases.push(PhaseResult::pass(
+                    "play",
+                    format!("turn 1 completed, action: {action}{outcome_str}"),
+                    t.elapsed(),
+                ));
+            }
         },
         Err(e) => {
             phases.push(PhaseResult::fail(
@@ -344,7 +365,12 @@ pub async fn run_check(bot_dir: &Path) -> CheckReport {
         }
     }
     // _bot_processes RAII guard kills the subprocess on drop.
-    phases.push(PhaseResult::pass("shutdown", "clean", t.elapsed()));
+    let shutdown_detail = if disconnected == session_count {
+        "clean"
+    } else {
+        "timed out waiting for disconnect"
+    };
+    phases.push(PhaseResult::pass("shutdown", shutdown_detail, t.elapsed()));
 
     finish_report(
         identified_name.as_deref().unwrap_or(&bot_name),

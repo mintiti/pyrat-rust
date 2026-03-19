@@ -1,5 +1,5 @@
 [settings]
-name = "Search"
+name = "Search.py"
 agent_id = "pyrat/search-py"
 run_command = "uv run python bot.py"
 

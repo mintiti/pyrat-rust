@@ -1,5 +1,5 @@
 [settings]
-name = "Smart Random"
+name = "Smart Random.py"
 agent_id = "pyrat/smart-random-py"
 run_command = "uv run python bot.py"
 

@@ -24,12 +24,12 @@ Listed from simplest to most complex.
 
 | Bot | Strategy | SDK features | Tags | Language |
 |-----|----------|--------------|------|----------|
-| [Smart Random](smart-random/) | Random valid direction each turn | `effective_moves` | baseline | Rust |
-| [Smart Random](smart-random-py/) | Random valid direction each turn | `effective_moves` | baseline | Python |
-| [Greedy](greedy/) | Nearest cheese, random tiebreaking | `nearest_cheeses`, `send_info` | greedy, shortest-path | Rust |
-| [Greedy](greedy-py/) | Nearest cheese, random tiebreaking | `nearest_cheeses`, `send_info` | greedy, shortest-path | Python |
-| [Search](search/) | Iterative-deepening best-response tree search | `GameSim`, `effective_moves`, `should_stop`, `send_info`, `DeriveOptions` | tree-search, iterative-deepening | Rust |
-| [Search](search-py/) | Iterative-deepening best-response tree search | `GameSim`, `effective_moves`, `should_stop`, `send_info`, `Spin` | tree-search, iterative-deepening | Python |
+| [Smart Random.rs](smart-random/) | Random valid direction each turn | `effective_moves` | baseline | Rust |
+| [Smart Random.py](smart-random-py/) | Random valid direction each turn | `effective_moves` | baseline | Python |
+| [Greedy.rs](greedy/) | Nearest cheese, random tiebreaking | `nearest_cheeses`, `send_info` | greedy, shortest-path | Rust |
+| [Greedy.py](greedy-py/) | Nearest cheese, random tiebreaking | `nearest_cheeses`, `send_info` | greedy, shortest-path | Python |
+| [Search.rs](search/) | Iterative-deepening best-response tree search | `GameSim`, `effective_moves`, `should_stop`, `send_info` | tree-search, iterative-deepening | Rust |
+| [Search.py](search-py/) | Iterative-deepening best-response tree search | `GameSim`, `effective_moves`, `should_stop`, `send_info` | tree-search, iterative-deepening | Python |
 
 Looking for a specific SDK feature? The source code is the documentation: each bot's comments explain the strategy reasoning and SDK usage.
 
@@ -51,6 +51,8 @@ tags = ["greedy", "shortest-path"]
 ```
 
 `settings` tells the runner how to launch the bot. `details` is metadata for discovery and the bot listing above.
+
+`run_command` is passed to `sh -c`, so it runs as a shell command. Only run bots you trust.
 
 ## Contributing a bot
 

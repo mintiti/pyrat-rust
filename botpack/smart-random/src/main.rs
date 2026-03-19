@@ -25,5 +25,5 @@ impl Bot for SmartRandom {
 }
 
 fn main() {
-    pyrat_sdk::run(SmartRandom, "Smart Random", "PyRat");
+    pyrat_sdk::run(SmartRandom, "Smart Random.rs", "mintiti");
 }

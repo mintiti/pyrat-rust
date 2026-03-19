@@ -1,5 +1,5 @@
 [settings]
-name = "Greedy"
+name = "Greedy.rs"
 agent_id = "pyrat/greedy"
 run_command = "cargo run --release"
 

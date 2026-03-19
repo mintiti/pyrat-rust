@@ -1,5 +1,5 @@
 [settings]
-name = "Greedy"
+name = "Greedy.py"
 agent_id = "pyrat/greedy-py"
 run_command = "uv run python bot.py"
 

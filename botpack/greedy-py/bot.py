@@ -12,8 +12,8 @@ from pyrat_sdk import Bot, Context, Direction, GameState
 
 
 class Greedy(Bot):
-    name = "Greedy"
-    author = "PyRat SDK"
+    name = "Greedy.py"
+    author = "mintiti"
 
     def think(self, state: GameState, ctx: Context) -> Direction:
         candidates = state.nearest_cheeses()

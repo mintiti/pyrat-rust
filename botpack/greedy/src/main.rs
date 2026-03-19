@@ -41,5 +41,5 @@ impl Bot for Greedy {
 }
 
 fn main() {
-    pyrat_sdk::run(Greedy, "Greedy", "PyRat");
+    pyrat_sdk::run(Greedy, "Greedy.rs", "mintiti");
 }
