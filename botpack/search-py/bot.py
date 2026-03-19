@@ -47,7 +47,7 @@ class Search(Bot):
     def think(self, state: GameState, ctx: Context) -> Direction:
         self._am_player1 = state.my_player == Player.PLAYER1
         self._nodes = 0
-        sim = state.simulate()
+        sim = state.to_sim()
 
         best_move = Direction.STAY
         best_score = -float("inf")

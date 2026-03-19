@@ -26,7 +26,7 @@ impl Bot for Search {
     fn think(&mut self, state: &GameState, ctx: &Context) -> Direction {
         self.am_player1 = state.my_player() == Player::Player1;
         self.nodes = 0;
-        let mut sim = state.simulate();
+        let mut sim = state.to_sim();
 
         let mut best_move = Direction::Stay;
         let mut best_score = f32::NEG_INFINITY;
@@ -102,7 +102,7 @@ impl Search {
                 let undo = sim.make_move(p1_dir, p2_dir);
                 self.nodes += 1;
 
-                let (our, opp, child_pv) = if depth <= 1 || sim.is_game_over() {
+                let (our, opp, child_pv) = if depth <= 1 || sim.check_game_over() {
                     let (our, opp) = self.evaluate(sim);
                     (our, opp, Vec::new())
                 } else {
@@ -139,7 +139,7 @@ impl Search {
                     multipv: 1,
                     depth: depth as u16,
                     nodes: self.nodes as u32,
-                    score: best_score,
+                    score: Some(best_score),
                     pv: &pv,
                     message: &format!("depth {depth}: {best_move:?} ({best_score:.1})"),
                     ..InfoParams::for_player(state.my_player())
@@ -151,7 +151,7 @@ impl Search {
                     multipv: tied_pvs.len() as u16,
                     depth: depth as u16,
                     nodes: self.nodes as u32,
-                    score: best_score,
+                    score: Some(best_score),
                     pv: &pv,
                     message: &format!(
                         "depth {depth}: {:?} ({best_score:.1}) [pv {}]",
@@ -174,7 +174,7 @@ impl Search {
         ctx: &Context,
         pv_suffixes: &[&[Direction]],
     ) -> Option<(f32, f32, Vec<Direction>)> {
-        if depth == 0 || sim.is_game_over() {
+        if depth == 0 || sim.check_game_over() {
             let (our, opp) = self.evaluate(sim);
             return Some((our, opp, Vec::new()));
         }
@@ -225,7 +225,7 @@ impl Search {
                 let undo = sim.make_move(p1_dir, p2_dir);
                 self.nodes += 1;
 
-                let (our, opp, child_pv) = if depth <= 1 || sim.is_game_over() {
+                let (our, opp, child_pv) = if depth <= 1 || sim.check_game_over() {
                     let (our, opp) = self.evaluate(sim);
                     (our, opp, Vec::new())
                 } else {

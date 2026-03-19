@@ -23,7 +23,7 @@ impl Bot for Greedy {
                 ctx.send_info(&InfoParams {
                     multipv: 1,
                     target: Some(target),
-                    score: state.my_score() + 1.0,
+                    score: Some(state.my_score() + 1.0),
                     pv: &result.path,
                     message: &format!(
                         "target ({}, {}), {} steps",
