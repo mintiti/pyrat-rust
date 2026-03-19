@@ -82,6 +82,7 @@ pub struct GameOverData {
 }
 
 /// Parsed host message.
+#[derive(Debug)]
 #[allow(dead_code)] // Fields are extracted for completeness; not all are consumed.
 pub enum HostMsg {
     SetOption { name: String, value: String },

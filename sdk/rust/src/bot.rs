@@ -1,6 +1,7 @@
 //! Bot and Hivemind traits, Context for timing and info sending.
 
 use std::io::Write;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -105,24 +106,33 @@ impl InfoParams<'_> {
 pub struct Context {
     deadline: Instant,
     info_sender: Mutex<Option<InfoSender>>,
+    stopped: Arc<AtomicBool>,
 }
 
 impl Context {
-    /// Create a context with a deadline.
-    pub(crate) fn new(deadline: Instant, info_sender: Option<InfoSender>) -> Self {
+    /// Create a context with a deadline and optional server-stop flag.
+    pub(crate) fn new(
+        deadline: Instant,
+        info_sender: Option<InfoSender>,
+        stopped: Arc<AtomicBool>,
+    ) -> Self {
         Self {
             deadline,
             info_sender: Mutex::new(info_sender),
+            stopped,
         }
     }
 
-    /// Whether the deadline has passed.
+    /// Whether the bot should stop thinking (deadline passed **or** server sent Stop/Timeout).
     pub fn should_stop(&self) -> bool {
-        Instant::now() >= self.deadline
+        Instant::now() >= self.deadline || self.stopped.load(Ordering::Relaxed)
     }
 
-    /// Milliseconds remaining before the deadline. Returns 0 if past.
+    /// Milliseconds remaining before the deadline. Returns 0 if stopped by the server.
     pub fn time_remaining_ms(&self) -> u64 {
+        if self.stopped.load(Ordering::Relaxed) {
+            return 0;
+        }
         self.deadline
             .checked_duration_since(Instant::now())
             .map_or(0, |d| d.as_millis() as u64)
@@ -134,11 +144,6 @@ impl Context {
     /// Returns `None` when no sender is available (e.g. during preprocess).
     pub fn info_sender(&self) -> Option<InfoSender> {
         self.info_sender.lock().unwrap().clone()
-    }
-
-    /// Reclaim the `InfoSender` so it can be reused across turns.
-    pub(crate) fn take_info_sender(&self) -> Option<InfoSender> {
-        self.info_sender.lock().unwrap().take()
     }
 
     /// Send an Info message to the host (for GUI / debugging).
@@ -257,5 +262,39 @@ impl<H: Hivemind> Runner for HivemindRunner<'_, H> {
 
     fn runner_on_game_over(&mut self, result: GameResult, scores: (f32, f32)) {
         self.0.on_game_over(result, scores);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    fn flag(val: bool) -> Arc<AtomicBool> {
+        Arc::new(AtomicBool::new(val))
+    }
+
+    #[test]
+    fn should_stop_deadline_only() {
+        let ctx = Context::new(Instant::now() - Duration::from_secs(1), None, flag(false));
+        assert!(ctx.should_stop());
+    }
+
+    #[test]
+    fn should_stop_flag_only() {
+        let ctx = Context::new(Instant::now() + Duration::from_secs(10), None, flag(true));
+        assert!(ctx.should_stop());
+    }
+
+    #[test]
+    fn should_stop_neither() {
+        let ctx = Context::new(Instant::now() + Duration::from_secs(10), None, flag(false));
+        assert!(!ctx.should_stop());
+    }
+
+    #[test]
+    fn time_remaining_returns_zero_when_stopped() {
+        let ctx = Context::new(Instant::now() + Duration::from_secs(10), None, flag(true));
+        assert_eq!(ctx.time_remaining_ms(), 0);
     }
 }
