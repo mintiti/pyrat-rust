@@ -10,7 +10,7 @@ pyrat-engine-interface = { path = "../../interface" }
 pyrat = { package = "pyrat-rust", path = "../../engine", default-features = false }
 pyrat-sdk-derive = { path = "derive" }
 flatbuffers = "25.2.10"
-tokio = { version = "1", features = ["rt", "macros", "net", "io-util", "time"] }
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync", "macros", "net", "io-util", "time"] }
 
 [dev-dependencies]
 rand = "0.10"

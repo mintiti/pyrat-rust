@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import enum
 import os
+import queue
 import sys
+import threading
 import time
 import traceback
 from typing import Any
@@ -36,15 +38,25 @@ class GameResult(enum.IntEnum):
 class Context:
     """Passed to ``think()`` and ``preprocess()``.  Provides timing and info sending."""
 
-    def __init__(self, timeout_ms: int, conn: Connection) -> None:
+    def __init__(
+        self,
+        timeout_ms: int,
+        conn: Connection,
+        stop_event: threading.Event | None = None,
+    ) -> None:
         self._deadline = time.monotonic() + timeout_ms / 1000.0
         self._conn = conn
+        self._stop_event = stop_event
 
     def time_remaining_ms(self) -> float:
+        if self._stop_event is not None and self._stop_event.is_set():
+            return 0.0
         return max(0.0, (self._deadline - time.monotonic()) * 1000.0)
 
     def should_stop(self) -> bool:
-        return time.monotonic() >= self._deadline
+        return time.monotonic() >= self._deadline or (
+            self._stop_event is not None and self._stop_event.is_set()
+        )
 
     def send_info(
         self,
@@ -207,6 +219,42 @@ def _validate_direction(value: Any, source: str) -> Direction:
         return Direction.STAY
 
 
+def _reader_loop(
+    conn: Connection,
+    msg_queue: queue.Queue[tuple[int, object] | None],
+    stop_event: threading.Event,
+) -> None:
+    """Background reader — forwards host messages, sets stop flag on Stop/Timeout."""
+    while True:
+        try:
+            buf = conn.recv_frame()
+        except (ConnectionError, OSError):
+            break
+        except Exception as e:
+            print(f"[sdk] read error: {e}", file=sys.stderr)
+            break
+
+        try:
+            msg_type, table = codec.decode_host_packet(buf)
+        except Exception as e:
+            print(f"[sdk] parse error: {e}", file=sys.stderr)
+            continue
+
+        if msg_type == HostMessage.Ping:
+            try:
+                conn.send_frame(codec.encode_pong())
+            except Exception:
+                pass
+            continue
+
+        if msg_type in (HostMessage.Stop, HostMessage.Timeout):
+            stop_event.set()
+
+        msg_queue.put((msg_type, table))
+
+    msg_queue.put(None)
+
+
 def _run_bot(bot: Any, preprocess_fn: Any, turn_fn: Any) -> None:
     """Shared entry point for Bot and HivemindBot."""
     port = _parse_port()
@@ -285,8 +333,19 @@ def _run_lifecycle(
         )
     state = GameState(config)
 
+    # Start background reader thread before preprocessing so the stop flag
+    # works for long preprocess() calls too.
+    stop_event = threading.Event()
+    msg_queue: queue.Queue[tuple[int, object] | None] = queue.Queue()
+    reader_thread = threading.Thread(
+        target=_reader_loop,
+        args=(conn, msg_queue, stop_event),
+        daemon=True,
+    )
+    reader_thread.start()
+
     # 3. Preprocessing.
-    ctx = Context(config["preprocessing_timeout_ms"], conn)
+    ctx = Context(config["preprocessing_timeout_ms"], conn, stop_event)
     try:
         preprocess_fn(state, ctx)
     except Exception:
@@ -294,14 +353,13 @@ def _run_lifecycle(
         print("preprocess() crashed, but the game will continue.", file=sys.stderr)
     conn.send_frame(codec.encode_preprocessing_done())
 
-    # 4. Turn loop.
+    # 4. Turn loop — reads from queue instead of socket.
     while True:
-        try:
-            msg_type, table = codec.decode_host_packet(conn.recv_frame())
-        except ConnectionError:
-            raise
-        except Exception as e:
-            raise ConnectionError(f"Failed to decode host message: {e}") from e
+        item = msg_queue.get()
+        if item is None:
+            break
+
+        msg_type, table = item
 
         if msg_type == HostMessage.TurnState:
             try:
@@ -309,10 +367,9 @@ def _run_lifecycle(
             except Exception as e:
                 raise ConnectionError(f"Failed to decode TurnState: {e}") from e
             state.update(ts)
-            ctx = Context(config["move_timeout_ms"], conn)
+            stop_event.clear()
+            ctx = Context(config["move_timeout_ms"], conn, stop_event)
             turn_fn(state, ctx, conn)
-        elif msg_type == HostMessage.Ping:
-            conn.send_frame(codec.encode_pong())
         elif msg_type == HostMessage.GameOver:
             try:
                 go = codec.extract_game_over(table)
@@ -326,4 +383,4 @@ def _run_lifecycle(
         elif msg_type == HostMessage.Stop:
             break
         elif msg_type == HostMessage.Timeout:
-            pass  # Host handled it; we just note it.
+            pass  # Flag already set by reader thread.
