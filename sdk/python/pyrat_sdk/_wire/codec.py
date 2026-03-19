@@ -263,7 +263,7 @@ def encode_info(
     target: tuple[int, int] | None = None,
     depth: int = 0,
     nodes: int = 0,
-    score: float = 0.0,
+    score: float | None = None,
     pv: Sequence[int] | None = None,
     message: str = "",
 ) -> bytes:
@@ -285,7 +285,8 @@ def encode_info(
             InfoMod.AddTarget(b, CreateVec2(b, target[0], target[1]))
         InfoMod.AddDepth(b, depth)
         InfoMod.AddNodes(b, nodes)
-        InfoMod.AddScore(b, score)
+        if score is not None:
+            InfoMod.AddScore(b, score)
         if pv_off is not None:
             InfoMod.AddPv(b, pv_off)
         if msg_off is not None:

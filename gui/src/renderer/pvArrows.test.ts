@@ -28,7 +28,7 @@ function info(
 		target: null,
 		depth: 1,
 		nodes: 0,
-		score: 0,
+		score: null,
 		pv: [],
 		message: "",
 		...overrides,

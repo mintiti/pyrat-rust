@@ -18,6 +18,7 @@ import { IconCopy, IconDice, IconPlayerPlay } from "@tabler/icons-react";
 import { useAtom, useAtomValue } from "jotai";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MatchConfigParams } from "../bindings/generated";
+import { SLOT_PALETTE } from "../lib/botPalette";
 import { RANDOM_BOT_ID, botsAtom } from "../stores/botConfigAtom";
 import {
 	CLASSIC_MAZE,
@@ -180,7 +181,7 @@ export default function SetupView({ onStartMatch }: Props) {
 				}}
 			>
 				<Group gap="sm">
-					<Text size="sm" fw={600} c="blue">
+					<Text size="sm" fw={600} c={SLOT_PALETTE.Player1.mantine}>
 						Rat
 					</Text>
 					<Select
@@ -195,7 +196,7 @@ export default function SetupView({ onStartMatch }: Props) {
 					<Text size="sm" c="dimmed">
 						vs
 					</Text>
-					<Text size="sm" fw={600} c="green">
+					<Text size="sm" fw={600} c={SLOT_PALETTE.Player2.mantine}>
 						Python
 					</Text>
 					<Select

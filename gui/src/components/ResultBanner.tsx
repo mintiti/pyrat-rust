@@ -3,12 +3,13 @@ import { useAtomValue } from "jotai";
 import pythonIconUrl from "../assets/sprites/players/python/neutral.png";
 import ratIconUrl from "../assets/sprites/players/rat/neutral.png";
 import type { MatchWinner } from "../bindings/generated";
+import { SLOT_PALETTE } from "../lib/botPalette";
 import { botsAtom, resolveBotName } from "../stores/botConfigAtom";
 import { useMatchStore } from "../stores/matchStore";
 
 const ACCENT: Record<MatchWinner, string> = {
-	Player1: "blue",
-	Player2: "green",
+	Player1: SLOT_PALETTE.Player1.mantine,
+	Player2: SLOT_PALETTE.Player2.mantine,
 	Draw: "gray",
 };
 

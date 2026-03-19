@@ -68,7 +68,7 @@ class Info(object):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(14))
         if o != 0:
             return self._tab.Get(flatbuffers.number_types.Float32Flags, o + self._tab.Pos)
-        return 0.0
+        return None
 
     # Info
     def Pv(self, j):
@@ -141,7 +141,7 @@ def AddNodes(builder, nodes):
     InfoAddNodes(builder, nodes)
 
 def InfoAddScore(builder, score):
-    builder.PrependFloat32Slot(5, score, 0.0)
+    builder.PrependFloat32Slot(5, score, None)
 
 def AddScore(builder, score):
     InfoAddScore(builder, score)

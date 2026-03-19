@@ -3741,7 +3741,9 @@ pub mod pyrat {
                 if let Some(x) = args.pv {
                     builder.add_pv(x);
                 }
-                builder.add_score(args.score);
+                if let Some(x) = args.score {
+                    builder.add_score(x);
+                }
                 builder.add_nodes(args.nodes);
                 if let Some(x) = args.target {
                     builder.add_target(x);
@@ -3792,11 +3794,11 @@ pub mod pyrat {
                 unsafe { self._tab.get::<u32>(Info::VT_NODES, Some(0)).unwrap() }
             }
             #[inline]
-            pub fn score(&self) -> f32 {
+            pub fn score(&self) -> Option<f32> {
                 // Safety:
                 // Created from valid Table for this object
                 // which contains a valid value in this slot
-                unsafe { self._tab.get::<f32>(Info::VT_SCORE, Some(0.0)).unwrap() }
+                unsafe { self._tab.get::<f32>(Info::VT_SCORE, None) }
             }
             #[inline]
             pub fn pv(&self) -> Option<::flatbuffers::Vector<'a, Direction>> {
@@ -3844,7 +3846,7 @@ pub mod pyrat {
             pub target: Option<&'a Vec2>,
             pub depth: u16,
             pub nodes: u32,
-            pub score: f32,
+            pub score: Option<f32>,
             pub pv: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, Direction>>>,
             pub message: Option<::flatbuffers::WIPOffset<&'a str>>,
         }
@@ -3857,7 +3859,7 @@ pub mod pyrat {
                     target: None,
                     depth: 0,
                     nodes: 0,
-                    score: 0.0,
+                    score: None,
                     pv: None,
                     message: None,
                 }
@@ -3892,7 +3894,7 @@ pub mod pyrat {
             }
             #[inline]
             pub fn add_score(&mut self, score: f32) {
-                self.fbb_.push_slot::<f32>(Info::VT_SCORE, score, 0.0);
+                self.fbb_.push_slot_always::<f32>(Info::VT_SCORE, score);
             }
             #[inline]
             pub fn add_pv(
