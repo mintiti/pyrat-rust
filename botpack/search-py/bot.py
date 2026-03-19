@@ -23,6 +23,11 @@ def order_moves(
     moves: list[Direction], pv_suffixes: list[list[Direction]]
 ) -> list[Direction]:
     """Order moves: PV-preferred first (shuffled), then rest (shuffled)."""
+    if not pv_suffixes:
+        shuffled = list(moves)
+        random.shuffle(shuffled)
+        return shuffled
+
     pv_firsts: set[Direction] = set()
     for suffix in pv_suffixes:
         if suffix:
@@ -85,7 +90,9 @@ class Search(Bot):
             if ctx.should_stop():
                 break
 
-            child_suffixes = [pv[1:] for pv in pvs if pv and pv[0] == my_dir]
+            child_suffixes = (
+                [pv[1:] for pv in pvs if pv and pv[0] == my_dir] if pvs else []
+            )
 
             best_opp_score = -float("inf")
             our_score_vs_opp_best = -float("inf")
@@ -176,7 +183,11 @@ class Search(Bot):
             if ctx.should_stop():
                 return None
 
-            child_suffixes = [s[1:] for s in pv_suffixes if s and s[0] == my_dir]
+            child_suffixes = (
+                [s[1:] for s in pv_suffixes if s and s[0] == my_dir]
+                if pv_suffixes
+                else []
+            )
 
             best_opp_score = -float("inf")
             our_when_opp_best = -float("inf")

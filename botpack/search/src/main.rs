@@ -83,11 +83,14 @@ impl Search {
                 break;
             }
 
-            let child_suffixes: Vec<&[Direction]> = pvs
-                .iter()
-                .filter(|pv| pv.first() == Some(my_dir))
-                .map(|pv| &pv[1..])
-                .collect();
+            let child_suffixes: Vec<&[Direction]> = if pvs.is_empty() {
+                Vec::new()
+            } else {
+                pvs.iter()
+                    .filter(|pv| pv.first() == Some(my_dir))
+                    .map(|pv| &pv[1..])
+                    .collect()
+            };
 
             let mut best_opp_score = f32::NEG_INFINITY;
             let mut our_score_vs_opp_best = f32::NEG_INFINITY;
@@ -203,11 +206,15 @@ impl Search {
                 return None;
             }
 
-            let child_suffixes: Vec<&[Direction]> = pv_suffixes
-                .iter()
-                .filter(|s| s.first() == Some(my_dir))
-                .map(|s| &s[1..])
-                .collect();
+            let child_suffixes: Vec<&[Direction]> = if pv_suffixes.is_empty() {
+                Vec::new()
+            } else {
+                pv_suffixes
+                    .iter()
+                    .filter(|s| s.first() == Some(my_dir))
+                    .map(|s| &s[1..])
+                    .collect()
+            };
 
             let mut best_opp_score = f32::NEG_INFINITY;
             let mut our_when_opp_best = f32::NEG_INFINITY;
@@ -270,6 +277,12 @@ impl Search {
 }
 
 fn order_moves<S: AsRef<[Direction]>>(moves: &[Direction], pv_suffixes: &[S]) -> Vec<Direction> {
+    if pv_suffixes.is_empty() {
+        let mut shuffled = moves.to_vec();
+        shuffled.shuffle(&mut rand::rng());
+        return shuffled;
+    }
+
     let mut pv_firsts: Vec<Direction> = Vec::new();
     for suffix in pv_suffixes {
         if let Some(&first) = suffix.as_ref().first() {
