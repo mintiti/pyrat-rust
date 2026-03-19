@@ -130,7 +130,7 @@ All `pos` parameters are `Option<Coordinates>`. Pass `None` to default to `my_po
 let mut sim = state.to_sim();
 
 let undo = sim.make_move(Direction::Right, Direction::Left);
-println!("{} {}", sim.player1_score(), sim.is_game_over());
+println!("{} {}", sim.player1_score(), sim.check_game_over());
 
 sim.unmake_move(undo);  // back to previous state
 ```
@@ -148,9 +148,9 @@ sim.unmake_move(undo);  // back to previous state
 | `player1_mud_turns()` | `u8` |
 | `player2_mud_turns()` | `u8` |
 | `cheese_positions()` | `Vec<Coordinates>` |
-| `turn()` | `u16` |
-| `max_turns()` | `u16` |
-| `is_game_over()` | `bool` |
+| `turn` | `u16` |
+| `max_turns` | `u16` |
+| `check_game_over()` | `bool` |
 
 `MoveUndo` is the undo token returned by `make_move`. Apply in LIFO order (most recent first).
 
