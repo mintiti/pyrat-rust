@@ -153,13 +153,13 @@ cd engine && uv run maturin develop --release
 ```bash
 # Run a headless match between two Rust bots
 cargo run -p pyrat-headless -- \
-    "cargo run -p pyrat-sdk --example greedy" \
-    "cargo run -p pyrat-sdk --example random"
+    "cd botpack/greedy && cargo run --release" \
+    "cd botpack/smart-random && cargo run --release"
 
 # Run a match with Python bots
 cargo run -p pyrat-headless -- \
-    "uv run python sdk/python/examples/greedy.py" \
-    "uv run python sdk/python/examples/smart_random.py"
+    "cd botpack/greedy-py && uv run python bot.py" \
+    "cd botpack/smart-random-py && uv run python bot.py"
 ```
 
 ### CI Debugging
@@ -280,8 +280,8 @@ Command: `cargo run -p pyrat-headless -- bot1_cmd bot2_cmd`
 
 **Rust SDK (`sdk/rust/`):**
 Bot SDK for writing Rust bots. Provides trait-based bot interface with FlatBuffers wire protocol.
-- Examples: `cargo run -p pyrat-sdk --example greedy`
+- Example bots: `botpack/` (e.g. `cd botpack/greedy && cargo run --release`)
 
 **Python SDK (`sdk/python/`):**
 Bot SDK for writing Python bots. Uses PyO3/maturin for engine bindings.
-- Examples: `uv run python sdk/python/examples/greedy.py`
+- Example bots: `botpack/` (e.g. `cd botpack/greedy-py && uv run python bot.py`)

@@ -1,0 +1,10 @@
+[settings]
+name = "Greedy.py"
+agent_id = "pyrat/greedy-py"
+run_command = "uv run python bot.py"
+
+[details]
+description = "Picks the nearest cheese, simple and effective"
+developer = "mintiti"
+language = "Python"
+tags = ["greedy", "shortest-path"]

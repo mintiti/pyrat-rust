@@ -2925,6 +2925,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "pyrat-check"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "pyrat-host",
+ "pyrat-rust",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml 0.8.2",
+]
+
+[[package]]
 name = "pyrat-engine-interface"
 version = "0.1.0"
 dependencies = [
@@ -3010,7 +3023,6 @@ dependencies = [
  "pyrat-rust",
  "pyrat-sdk-derive",
  "pyrat-wire",
- "rand 0.10.0",
  "tokio",
 ]
 

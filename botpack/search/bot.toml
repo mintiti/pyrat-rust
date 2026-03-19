@@ -1,0 +1,10 @@
+[settings]
+name = "Search.rs"
+agent_id = "pyrat/search"
+run_command = "cargo run --release"
+
+[details]
+description = "Naive tree search with iterative deepening, both players think ahead to grab the most cheese"
+developer = "mintiti"
+language = "Rust"
+tags = ["search", "tree-search", "iterative-deepening"]

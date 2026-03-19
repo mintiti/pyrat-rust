@@ -13,12 +13,12 @@ uv sync --all-extras
 cd sdk/python && uv run maturin develop --release && cd ../..
 ```
 
-Run a match between two example bots:
+Run a match between two botpack bots:
 
 ```bash
 cargo run -p pyrat-headless -- \
-  "uv run python sdk/python/examples/greedy.py" \
-  "uv run python sdk/python/examples/smart_random.py"
+  "cd botpack/greedy-py && uv run python bot.py" \
+  "cd botpack/smart-random-py && uv run python bot.py"
 ```
 
 ### Minimal bot

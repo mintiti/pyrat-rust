@@ -1,0 +1,11 @@
+[package]
+name = "bot-smart-random"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+pyrat-sdk = { path = "../../sdk/rust" }
+rand = "0.10"
+
+[workspace]

@@ -1,0 +1,10 @@
+[settings]
+name = "Smart Random.rs"
+agent_id = "pyrat/smart-random"
+run_command = "cargo run --release"
+
+[details]
+description = "Picks a random non-wall direction each turn"
+developer = "mintiti"
+language = "Rust"
+tags = ["random", "baseline"]

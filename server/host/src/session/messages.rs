@@ -8,6 +8,11 @@ use pyrat_wire::{Direction, GameResult, OptionType, Player, TimingMode};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SessionId(pub u64);
 
+impl SessionId {
+    /// Placeholder ID for non-game sessions (stubs, test harnesses, etc.).
+    pub const STUB: Self = Self(u64::MAX);
+}
+
 // ── Owned types extracted from FlatBuffers ──────────
 
 /// Owned copy of a bot-declared option (from Identify).

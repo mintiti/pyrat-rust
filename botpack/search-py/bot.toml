@@ -1,0 +1,10 @@
+[settings]
+name = "Search.py"
+agent_id = "pyrat/search-py"
+run_command = "uv run python bot.py"
+
+[details]
+description = "Naive tree search with iterative deepening, both players think ahead to grab the most cheese"
+developer = "mintiti"
+language = "Python"
+tags = ["search", "tree-search", "iterative-deepening"]

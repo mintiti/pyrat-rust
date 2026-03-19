@@ -4,7 +4,9 @@
 
 <h1 align="center">PyRat</h1>
 
-A competitive, turn-based two-player maze game where a Rat and a Python race to collect cheese. Built from IMT Atlantique's original versions<!-- TODO: link to original -->.
+Welcome to pyrat-rust! This is my reimplementation of PyRat, a two-player maze game originally created for courses at IMT Atlantique ([v1 by Vincent Gripon](https://github.com/vgripon/PyRat), [v2 by Bastien Pasdeloup](https://github.com/BastienPasdeloup/PyRat)).
+
+I started this for fun, and I hope you enjoy it too.
 
 <p align="center">
   <img src="docs/images/match.png" alt="A PyRat match in progress" width="600">
@@ -12,9 +14,14 @@ A competitive, turn-based two-player maze game where a Rat and a Python race to 
 
 ## What's in this repo?
 
-This isn't just the game — it's the whole ecosystem: game engine, bot SDKs, match runner, and a GUI to watch it all happen. Pick what you need.
+A few things, actually:
 
-**[Write a bot](sdk/)** — Build an AI that plays PyRat. Python or Rust, your choice.
+- A 🔥 _blazingly fast_ 🔥 game engine, rewritten in Rust. Handles the rules, the maze, the scoring.
+- Bot development kits (SDKs) for Python and Rust: libraries that handle the server connection so you can focus on writing your bot's logic.
+- A game server that runs matches between bots.
+- A desktop GUI to watch it all play out.
+
+I tried to make writing a bot as simple as I could. Here's a complete one in Python:
 
 ```python
 from pyrat_sdk import Bot, Context, Direction, GameState
@@ -25,7 +32,9 @@ class MyBot(Bot):
         return result.directions[0] if result else Direction.STAY
 ```
 
-**[Train an AI](engine/)** — Use the engine for reinforcement learning (PettingZoo) or game tree search.
+[More on writing bots →](sdk/)
+
+You can also use the engine directly for reinforcement learning or game tree search:
 
 ```python
 from pyrat_engine import GameConfig
@@ -36,7 +45,7 @@ obs, info = env.reset(seed=42)
 obs, rewards, terms, truncs, infos = env.step(actions)
 ```
 
-**[Use the engine as a library](engine/)** — Embed the game in your own tools. Rust crate or Python package.
+Or embed it as a Rust library:
 
 ```rust
 use pyrat_engine::{GameConfig, Direction};
@@ -46,11 +55,14 @@ let mut game = config.create(Some(42));
 let result = game.process_turn(Direction::Right, Direction::Left);
 ```
 
-**[Watch bots play](gui/)** — Desktop app for running matches and watching them play out. Pick two bots, configure the maze, hit start. Built with [Tauri](https://tauri.app/) — requires [Node.js](https://nodejs.org/) and [pnpm](https://pnpm.io/) to build.
+[More on the engine →](engine/)
+
+There's also a [desktop GUI](gui/) for running and watching matches. Pick two bots, configure the maze, hit start. Built with [Tauri](https://tauri.app/), requires [Node.js](https://nodejs.org/) and [pnpm](https://pnpm.io/).
 
 ## Setup
 
 Prerequisites:
+
 - [Rust toolchain](https://rustup.rs/)
 - Python 3.10+
 - [uv](https://docs.astral.sh/uv/)
@@ -65,15 +77,13 @@ uv sync --all-extras
 
 ```bash
 cargo run -p pyrat-headless -- \
-  "cargo run -p pyrat-sdk --example greedy" \
-  "cargo run -p pyrat-sdk --example smart_random"
+  "cd botpack/greedy && cargo run --release" \
+  "cd botpack/smart-random && cargo run --release"
 ```
 
 ## The game
 
-A Rat and a Python drop into opposite corners of a maze. Cheese is scattered across the board, and both players move at the same time — so you're not reacting to your opponent, you're trying to outsmart them.
-
-Some passages are filled with mud, which costs extra turns to cross. Do you take the shortcut through the mud, or go the long way around? The maze is symmetric so neither player has a positional advantage, but the strategies can look completely different.
+A Rat and a Python drop into opposite corners of a maze. Cheese is scattered across the board, and both players move at the same time. Try to get more cheeses than your opponent!
 
 First to grab more than half the cheese wins.
 
@@ -81,11 +91,11 @@ Full rules in the [engine README](engine/).
 
 ## Repository map
 
-| Path | What it is |
-|------|------------|
-| [`engine/`](engine/) | Game engine — Rust core, Python bindings, PettingZoo env |
-| [`sdk/`](sdk/) | Bot SDKs — currently [Python](sdk/python/) and [Rust](sdk/rust/), more languages to come |
-| [`server/`](server/) | Match infrastructure — hosting, headless runner, wire protocol |
-| [`gui/`](gui/) | Desktop GUI — run and watch matches |
+| Path                 | What it is                                                                                   |
+| -------------------- | -------------------------------------------------------------------------------------------- |
+| [`engine/`](engine/) | Game engine. Rust core, Python bindings, PettingZoo env                                      |
+| [`sdk/`](sdk/)       | Bot development kits for [Python](sdk/python/) and [Rust](sdk/rust/), more languages to come |
+| [`server/`](server/) | Match infrastructure: hosting, headless runner, wire protocol                                |
+| [`gui/`](gui/)       | Desktop GUI for running and watching matches                                                 |
 
 Run `make help` for the full command list.

@@ -11,12 +11,12 @@ Add the dependency (path-based within the monorepo):
 pyrat-sdk = { path = "../sdk/rust" }
 ```
 
-Run a match between two example bots:
+Run a match between two botpack bots:
 
 ```bash
 cargo run -p pyrat-headless -- \
-  "cargo run -p pyrat-sdk --example greedy" \
-  "cargo run -p pyrat-sdk --example smart_random"
+  "cd botpack/greedy && cargo run --release" \
+  "cd botpack/smart-random && cargo run --release"
 ```
 
 ### Minimal bot

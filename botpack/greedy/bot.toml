@@ -1,0 +1,10 @@
+[settings]
+name = "Greedy.rs"
+agent_id = "pyrat/greedy"
+run_command = "cargo run --release"
+
+[details]
+description = "Picks the nearest cheese, simple and effective"
+developer = "mintiti"
+language = "Rust"
+tags = ["greedy", "shortest-path"]
