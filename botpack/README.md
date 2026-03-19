@@ -1,10 +1,12 @@
 # Botpack
 
-A collection of bots to test against and learn from. Each one is a complete, working bot. Read the source to see how it's built, or just run it as an opponent.
+Bots to play against, learn from, or just see what's possible. From a random walker to a tree-searching opponent that thinks ahead, each one is a working bot you can run right now.
 
 ## Running a match
 
-Pick a bot and play yours against it:
+Rust bots need the [Rust toolchain](https://rustup.rs/). Python bots need [uv](https://docs.astral.sh/uv/).
+
+Pick a bot and play yours against it. From the repo root:
 
 ```bash
 cargo run -p pyrat-headless -- \
@@ -12,7 +14,7 @@ cargo run -p pyrat-headless -- \
   "cd botpack/greedy && cargo run --release"
 ```
 
-Replace `your_bot_command` with however you launch your bot. Each bot's run command is in its `bot.toml`.
+Replace `your_bot_command` with however you launch your bot. Each bot's `bot.toml` has its run command.
 
 The GUI will discover botpack bots automatically from their `bot.toml` metadata once bot management lands.
 
@@ -23,9 +25,11 @@ Listed from simplest to most complex.
 | Bot | Strategy | SDK features | Tags | Language |
 |-----|----------|--------------|------|----------|
 | [Smart Random](smart-random/) | Random valid direction each turn | `effective_moves` | baseline | Rust |
+| [Smart Random](smart-random-py/) | Random valid direction each turn | `effective_moves` | baseline | Python |
 | [Greedy](greedy/) | Nearest cheese, random tiebreaking | `nearest_cheeses`, `send_info` | greedy, shortest-path | Rust |
 | [Greedy](greedy-py/) | Nearest cheese, random tiebreaking | `nearest_cheeses`, `send_info` | greedy, shortest-path | Python |
 | [Search](search/) | Iterative-deepening best-response tree search | `GameSim`, `effective_moves`, `should_stop`, `send_info`, `DeriveOptions` | tree-search, iterative-deepening | Rust |
+| [Search](search-py/) | Iterative-deepening best-response tree search | `GameSim`, `effective_moves`, `should_stop`, `send_info`, `Spin` | tree-search, iterative-deepening | Python |
 
 Looking for a specific SDK feature? The source code is the documentation: each bot's comments explain the strategy reasoning and SDK usage.
 
@@ -50,4 +54,4 @@ tags = ["greedy", "shortest-path"]
 
 ## Contributing a bot
 
-Got a bot? Add a directory with your source and a `bot.toml`, open a PR.
+Got a bot you want people to play against? Add a directory with your source and a `bot.toml`, open a PR.
