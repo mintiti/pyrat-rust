@@ -1,4 +1,10 @@
-"""Greedy bot — always moves toward the nearest cheese."""
+"""Greedy bot: always moves toward the nearest cheese.
+
+Strategy: each turn, find all cheeses at minimum distance and pick one randomly.
+Simple and effective. A good first opponent and a baseline to beat.
+
+SDK features: nearest_cheeses (pathfinding), send_info (GUI visualization).
+"""
 
 import random
 
@@ -12,6 +18,7 @@ class Greedy(Bot):
     def think(self, state: GameState, ctx: Context) -> Direction:
         candidates = state.nearest_cheeses()
         if candidates:
+            # Pick randomly among tied cheeses so we don't always chase the same one.
             result = random.choice(candidates)
             if result.path:
                 ctx.send_info(
