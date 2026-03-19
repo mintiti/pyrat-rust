@@ -1,14 +1,24 @@
-//! Search bot: simultaneous-game tree search with iterative deepening and PV ordering.
+//! Naive search bot: simultaneous-game tree search with iterative deepening and PV ordering.
+//!
+//! A starting point for search, not a competitive engine.
 //!
 //! Both players independently maximize their own score. Since the game is constant-sum
 //! (cheese collected by one player is unavailable to the other), this is equivalent to
-//! minimax: maximizing our score and maximizing opponent's score produces the same
-//! equilibrium as maximizing ours while minimizing theirs.
+//! minimax. Maximizing our score and maximizing opponent's score produces the same
+//! result as maximizing ours while minimizing theirs.
 //!
 //! Iterative deepening with no depth cap. The search cooperates with `should_stop()` and
 //! deepens until time runs out. Tied PVs (principal variations) from the previous depth
 //! guide move ordering at every level of the tree: preferred moves are explored first,
 //! giving deeper searches better chances of finding strong lines early.
+//!
+//! What's here: iterative deepening, PV move ordering, effective_moves filtering.
+//!
+//! What's not:
+//! - No evaluation heuristic: only raw scores at leaf nodes, no positional awareness
+//! - No pruning: full tree explored at each depth
+//! - No transposition table: same positions re-evaluated when reached via different paths
+//! - No simultaneous-move equilibrium: sequential best-response, not Nash
 //!
 //! SDK features: GameSim, effective_moves, should_stop, send_info.
 

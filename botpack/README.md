@@ -28,8 +28,8 @@ Listed from simplest to most complex.
 | [Smart Random.py](smart-random-py/) | Random valid direction each turn | `effective_moves` | baseline | Python |
 | [Greedy.rs](greedy/) | Nearest cheese, random tiebreaking | `nearest_cheeses`, `send_info` | greedy, shortest-path | Rust |
 | [Greedy.py](greedy-py/) | Nearest cheese, random tiebreaking | `nearest_cheeses`, `send_info` | greedy, shortest-path | Python |
-| [Search.rs](search/) | Iterative-deepening best-response tree search | `GameSim`, `effective_moves`, `should_stop`, `send_info` | tree-search, iterative-deepening | Rust |
-| [Search.py](search-py/) | Iterative-deepening best-response tree search | `GameSim`, `effective_moves`, `should_stop`, `send_info` | tree-search, iterative-deepening | Python |
+| [Search.rs](search/) | Naive tree search with iterative deepening, both players think ahead to grab the most cheese | `GameSim`, `effective_moves`, `should_stop`, `send_info` | tree-search, iterative-deepening | Rust |
+| [Search.py](search-py/) | Naive tree search with iterative deepening, both players think ahead to grab the most cheese | `GameSim`, `effective_moves`, `should_stop`, `send_info` | tree-search, iterative-deepening | Python |
 
 Looking for a specific SDK feature? The source code is the documentation: each bot's comments explain the strategy reasoning and SDK usage.
 
