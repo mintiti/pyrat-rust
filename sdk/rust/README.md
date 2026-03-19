@@ -115,7 +115,7 @@ Coordinates are `Coordinates` objects with `.x` and `.y` fields. `(0, 0)` is at 
 | `nearest_cheese(pos)` | `Option<FullPathResult>` | Closest cheese (first of ties) |
 | `nearest_cheeses(pos)` | `Vec<FullPathResult>` | All cheeses tied at minimum distance |
 | `distances_from(pos)` | `HashMap<Coordinates, u32>` | Cost to every reachable cell |
-| `simulate()` | `GameSim` | Mutable snapshot for tree search |
+| `to_sim()` | `GameSim` | Mutable snapshot for tree search |
 | `view()` | `&GameView` | Read-only access to maze topology |
 
 All `pos` parameters are `Option<Coordinates>`. Pass `None` to default to `my_position()`.
@@ -124,10 +124,10 @@ All `pos` parameters are `Option<Coordinates>`. Pass `None` to default to `my_po
 
 ## Simulation (tree search)
 
-`state.simulate()` returns a `GameSim`, a mutable game snapshot backed by the Rust engine. Use `make_move` / `unmake_move` for game-tree search (minimax, MCTS, etc.) without cloning state.
+`state.to_sim()` returns a `GameSim`, a mutable game snapshot backed by the Rust engine. Use `make_move` / `unmake_move` for game-tree search (minimax, MCTS, etc.) without cloning state.
 
 ```rust
-let mut sim = state.simulate();
+let mut sim = state.to_sim();
 
 let undo = sim.make_move(Direction::Right, Direction::Left);
 println!("{} {}", sim.player1_score(), sim.is_game_over());

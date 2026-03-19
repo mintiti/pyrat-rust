@@ -136,7 +136,7 @@ if matrix[x, y, 0] != -1:
 | `nearest_cheese(pos=None)` | `NearestCheeseResult \| None` | Closest cheese with path and cost |
 | `nearest_cheeses(pos=None)` | `list[NearestCheeseResult]` | All cheeses tied at minimum distance |
 | `distances_from(pos=None)` | `dict[(int,int), int]` | Cost in turns to every reachable cell |
-| `simulate()` | `GameSim` | Mutable game copy for tree search |
+| `to_sim()` | `GameSim` | Mutable game copy for tree search |
 
 All pathfinding methods account for mud costs and are backed by Dijkstra in Rust. Methods that take `pos` default to `my_position`.
 
@@ -146,10 +146,10 @@ All pathfinding methods account for mud costs and are backed by Dijkstra in Rust
 
 ### Simulation (tree search)
 
-`state.simulate()` returns a `GameSim`, a mutable snapshot of the game backed by the Rust engine. Use `make_move` / `unmake_move` for game-tree search (minimax, MCTS, etc.) without cloning state.
+`state.to_sim()` returns a `GameSim`, a mutable snapshot of the game backed by the Rust engine. Use `make_move` / `unmake_move` for game-tree search (minimax, MCTS, etc.) without cloning state.
 
 ```python
-sim = state.simulate()
+sim = state.to_sim()
 
 undo = sim.make_move(int(Direction.RIGHT), int(Direction.LEFT))
 print(sim.player1_score, sim.is_game_over)

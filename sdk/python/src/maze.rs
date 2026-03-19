@@ -190,7 +190,7 @@ impl PyMaze {
     /// passed in from the current `GameState`.
     #[pyo3(signature = (p1_pos, p2_pos, p1_score, p2_score, p1_mud, p2_mud, cheese, turn))]
     #[allow(clippy::too_many_arguments)]
-    fn simulate(
+    fn to_sim(
         &self,
         p1_pos: (u8, u8),
         p2_pos: (u8, u8),

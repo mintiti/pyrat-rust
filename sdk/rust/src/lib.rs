@@ -28,7 +28,10 @@ mod wire;
 pub use bot::{Bot, Context, Hivemind, InfoParams, InfoSender};
 pub use options::{Options, SdkOptionDef};
 pub use pyrat_wire::OptionType;
-pub use state::{GameSim, GameState};
+pub use state::GameState;
+
+// Re-export engine GameState as GameSim for simulation/search use
+pub use pyrat::GameState as GameSim;
 
 // Re-export engine types bots need
 pub use pyrat::{Coordinates, Direction, MoveUndo};

@@ -111,10 +111,10 @@ This is what the greedy example bot does: find the nearest cheese and follow the
 
 ### Simulation: what happens if I go *there*?
 
-This is where it gets interesting. `simulate()` gives you a mutable copy of the whole game, backed by the Rust engine, and you can explore the game tree with `make_move` / `unmake_move` without cloning anything.
+This is where it gets interesting. `to_sim()` gives you a mutable copy of the whole game, backed by the Rust engine, and you can explore the game tree with `make_move` / `unmake_move` without cloning anything.
 
 ```python
-sim = state.simulate()
+sim = state.to_sim()
 
 undo = sim.make_move(Direction.RIGHT, Direction.LEFT)
 print(sim.player1_score, sim.is_game_over)

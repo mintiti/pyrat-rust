@@ -21,7 +21,7 @@ impl Bot for Search {
     fn think(&mut self, state: &GameState, ctx: &Context) -> Direction {
         self.am_player1 = state.my_player() == Player::Player1;
         self.nodes = 0;
-        let mut sim = state.simulate();
+        let mut sim = state.to_sim();
 
         let mut best_move = Direction::Stay;
 
@@ -92,7 +92,7 @@ impl Search {
                 let undo = sim.make_move(p1_dir, p2_dir);
                 self.nodes += 1;
 
-                let (our, opp) = if depth <= 1 || sim.is_game_over() {
+                let (our, opp) = if depth <= 1 || sim.check_game_over() {
                     self.evaluate(sim)
                 } else {
                     let pair = self.search(sim, depth - 1, state, ctx);
@@ -127,7 +127,7 @@ impl Search {
         state: &GameState,
         ctx: &Context,
     ) -> Option<(f32, f32)> {
-        if depth == 0 || sim.is_game_over() {
+        if depth == 0 || sim.check_game_over() {
             return Some(self.evaluate(sim));
         }
 
@@ -165,7 +165,7 @@ impl Search {
                 let undo = sim.make_move(p1_dir, p2_dir);
                 self.nodes += 1;
 
-                let (our, opp) = if depth <= 1 || sim.is_game_over() {
+                let (our, opp) = if depth <= 1 || sim.check_game_over() {
                     self.evaluate(sim)
                 } else {
                     let pair = self.search(sim, depth - 1, state, ctx);

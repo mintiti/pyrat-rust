@@ -95,7 +95,7 @@ impl PyMoveUndo {
 
 /// Mutable game snapshot for make_move / unmake_move tree search.
 ///
-/// Created via [`PyMaze::simulate`] — no Python-facing constructor.
+/// Created via [`PyMaze::to_sim`] — no Python-facing constructor.
 /// Uses objective player1/player2 naming (no my/opponent mapping).
 #[pyclass(name = "GameSim")]
 pub struct PyGameSim {
