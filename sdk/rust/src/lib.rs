@@ -340,3 +340,158 @@ fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
         "unknown panic".to_string()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pyrat_wire::{self as wire, HostMessage};
+    use std::io::Read as _;
+    use std::net::TcpListener;
+    use std::sync::atomic::Ordering;
+    use tokio::sync::mpsc;
+
+    use crate::wire::HostMsg;
+
+    fn build_host_packet<F>(msg_type: HostMessage, build_msg: F) -> Vec<u8>
+    where
+        F: FnOnce(
+            &mut flatbuffers::FlatBufferBuilder,
+        ) -> flatbuffers::WIPOffset<flatbuffers::UnionWIPOffset>,
+    {
+        let mut fbb = flatbuffers::FlatBufferBuilder::new();
+        let msg_offset = build_msg(&mut fbb);
+        let packet = wire::HostPacket::create(
+            &mut fbb,
+            &wire::HostPacketArgs {
+                message_type: msg_type,
+                message: Some(msg_offset),
+            },
+        );
+        fbb.finish(packet, None);
+        fbb.finished_data().to_vec()
+    }
+
+    fn dummy_info_sender() -> (bot::InfoSender, std::net::TcpStream) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = std::net::TcpStream::connect(addr).unwrap();
+        let (server, _) = listener.accept().unwrap();
+        server
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .unwrap();
+        (bot::InfoSender::new(client), server)
+    }
+
+    /// Write length-prefixed frames to a tokio duplex writer.
+    async fn write_frames(
+        mut writer: pyrat_wire::framing::FrameWriter<tokio::io::DuplexStream>,
+        frames: Vec<Vec<u8>>,
+    ) {
+        for frame in &frames {
+            writer.write_frame(frame).await.unwrap();
+        }
+        // drop writer → EOF → reader_task exits
+    }
+
+    #[tokio::test]
+    async fn reader_stop_sets_flag_and_forwards() {
+        let frame = build_host_packet(HostMessage::Stop, |fbb| {
+            wire::Stop::create(fbb, &wire::StopArgs {}).as_union_value()
+        });
+
+        let (client, server) = tokio::io::duplex(4096);
+        let reader = pyrat_wire::framing::FrameReader::with_default_max(client);
+        let fw = pyrat_wire::framing::FrameWriter::with_default_max(server);
+
+        let (info_sender, _tcp_server) = dummy_info_sender();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let (msg_tx, mut msg_rx) = mpsc::unbounded_channel();
+
+        tokio::spawn(write_frames(fw, vec![frame]));
+        reader_task(reader, msg_tx, stopped.clone(), info_sender).await;
+
+        assert!(stopped.load(Ordering::Relaxed));
+        match msg_rx.recv().await {
+            Some(HostMsg::Stop) => {},
+            other => panic!("expected Stop, got {other:#?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn reader_timeout_sets_flag_and_forwards() {
+        let frame = build_host_packet(HostMessage::Timeout, |fbb| {
+            wire::Timeout::create(
+                fbb,
+                &wire::TimeoutArgs {
+                    default_move: wire::Direction::Stay,
+                },
+            )
+            .as_union_value()
+        });
+
+        let (client, server) = tokio::io::duplex(4096);
+        let reader = pyrat_wire::framing::FrameReader::with_default_max(client);
+        let fw = pyrat_wire::framing::FrameWriter::with_default_max(server);
+
+        let (info_sender, _tcp_server) = dummy_info_sender();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let (msg_tx, mut msg_rx) = mpsc::unbounded_channel();
+
+        tokio::spawn(write_frames(fw, vec![frame]));
+        reader_task(reader, msg_tx, stopped.clone(), info_sender).await;
+
+        assert!(stopped.load(Ordering::Relaxed));
+        match msg_rx.recv().await {
+            Some(HostMsg::Timeout { .. }) => {},
+            other => panic!("expected Timeout, got {other:#?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn reader_clean_disconnect() {
+        let (client, server) = tokio::io::duplex(4096);
+        drop(server); // EOF on the read side
+        let reader = pyrat_wire::framing::FrameReader::with_default_max(client);
+
+        let (info_sender, _tcp_server) = dummy_info_sender();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let (msg_tx, mut msg_rx) = mpsc::unbounded_channel();
+
+        reader_task(reader, msg_tx, stopped.clone(), info_sender).await;
+
+        assert!(!stopped.load(Ordering::Relaxed));
+        assert!(msg_rx.recv().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn reader_ping_sends_pong_not_forwarded() {
+        let frame = build_host_packet(HostMessage::Ping, |fbb| {
+            wire::Ping::create(fbb, &wire::PingArgs {}).as_union_value()
+        });
+
+        let (client, server) = tokio::io::duplex(4096);
+        let reader = pyrat_wire::framing::FrameReader::with_default_max(client);
+        let fw = pyrat_wire::framing::FrameWriter::with_default_max(server);
+
+        let (info_sender, mut tcp_server) = dummy_info_sender();
+        let stopped = Arc::new(AtomicBool::new(false));
+        let (msg_tx, mut msg_rx) = mpsc::unbounded_channel();
+
+        tokio::spawn(write_frames(fw, vec![frame]));
+        reader_task(reader, msg_tx, stopped.clone(), info_sender).await;
+
+        // No messages forwarded — channel is closed, recv returns None.
+        assert!(msg_rx.recv().await.is_none());
+        assert!(!stopped.load(Ordering::Relaxed));
+
+        // Read the Pong from the TCP server side (length-prefixed).
+        let mut len_buf = [0u8; 4];
+        tcp_server.read_exact(&mut len_buf).unwrap();
+        let len = u32::from_be_bytes(len_buf) as usize;
+        let mut pong_buf = vec![0u8; len];
+        tcp_server.read_exact(&mut pong_buf).unwrap();
+
+        let packet = flatbuffers::root::<wire::BotPacket>(&pong_buf).unwrap();
+        assert_eq!(packet.message_type(), wire::BotMessage::Pong);
+    }
+}

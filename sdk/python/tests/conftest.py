@@ -10,6 +10,8 @@ from pyrat_sdk._wire.protocol import MatchConfig as MatchConfigMod
 from pyrat_sdk._wire.protocol import Ping as PingMod
 from pyrat_sdk._wire.protocol import SetOption as SetOptionMod
 from pyrat_sdk._wire.protocol import StartPreprocessing as StartPreprocessingMod
+from pyrat_sdk._wire.protocol import Stop as StopMod
+from pyrat_sdk._wire.protocol import Timeout as TimeoutMod
 from pyrat_sdk._wire.protocol import TurnState as TurnStateMod
 from pyrat_sdk._wire.protocol.Vec2 import CreateVec2
 
@@ -26,6 +28,8 @@ class MockConnection:
         self.sent.append(payload)
 
     def recv_frame(self) -> bytes:
+        if self._idx >= len(self._incoming):
+            raise ConnectionError("no more frames")
         frame = self._incoming[self._idx]
         self._idx += 1
         return frame
@@ -131,6 +135,17 @@ def build_turn_state(
 def build_ping(builder):
     PingMod.Start(builder)
     return PingMod.End(builder)
+
+
+def build_stop(builder):
+    StopMod.Start(builder)
+    return StopMod.End(builder)
+
+
+def build_timeout(builder, default_move: int = 4):
+    TimeoutMod.Start(builder)
+    TimeoutMod.AddDefaultMove(builder, default_move)
+    return TimeoutMod.End(builder)
 
 
 def make_lifecycle_frames(
