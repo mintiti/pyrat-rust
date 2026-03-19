@@ -1,0 +1,10 @@
+[settings]
+name = "Smart Random"
+agent_id = "pyrat/smart-random-py"
+run_command = "uv run python bot.py"
+
+[details]
+description = "Picks a random non-wall direction each turn"
+developer = "mintiti"
+language = "Python"
+tags = ["random", "baseline"]

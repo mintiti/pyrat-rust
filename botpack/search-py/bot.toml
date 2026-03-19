@@ -1,0 +1,10 @@
+[settings]
+name = "Search"
+agent_id = "pyrat/search-py"
+run_command = "uv run python bot.py"
+
+[details]
+description = "Iterative-deepening best-response tree search"
+developer = "mintiti"
+language = "Python"
+tags = ["search", "tree-search", "iterative-deepening"]
