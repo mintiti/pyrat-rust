@@ -12,6 +12,7 @@ use pyrat_engine_interface::GameView;
 use pyrat_wire::Player;
 
 use crate::wire::{MatchConfigData, TurnStateData};
+use crate::GameSim;
 
 /// SDK-facing game state. Built once from `MatchConfigData`, updated each turn.
 pub struct GameState {
@@ -262,7 +263,7 @@ impl GameState {
     }
 
     /// Clone the game into a mutable simulation state.
-    pub fn to_sim(&self) -> pyrat::GameState {
+    pub fn to_sim(&self) -> GameSim {
         let mut game = self.view.snapshot();
 
         // Patch dynamic state to match current turn
@@ -430,7 +431,7 @@ mod tests {
         assert_eq!(sim.player1_position(), Coordinates::new(1, 1));
         assert_eq!(sim.player2_position(), Coordinates::new(3, 3));
         assert!((sim.player1_score() - 1.0).abs() < f32::EPSILON);
-        assert_eq!(sim.turns(), 5);
+        assert_eq!(sim.turn, 5);
         assert_eq!(sim.cheese_positions().len(), 1);
     }
 
