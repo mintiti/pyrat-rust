@@ -4,6 +4,7 @@ import type {
 	PlayerSide,
 	WallEntry,
 } from "../bindings/generated";
+import { SLOT_PALETTE } from "../lib/botPalette";
 import type { BotInfoMap } from "../stores/botInfo";
 import { currentLines, parseBotInfoKey } from "../stores/botInfo";
 import { gameToCellCenter } from "./layout";
@@ -52,21 +53,6 @@ export type PvOverlayOptions = {
 	maxSegments?: number;
 	maxLines?: number;
 	visibleSenders?: Set<PlayerSide>;
-};
-
-// ── Palette ──────────────────────────────────────────────────────
-
-type ColorPair = { saturated: string; pale: string };
-
-const SENDER_PALETTE: Record<PlayerSide, ColorPair> = {
-	Player1: {
-		saturated: "rgba(66, 135, 245, 0.85)",
-		pale: "rgba(66, 135, 245, 0.35)",
-	},
-	Player2: {
-		saturated: "rgba(72, 199, 142, 0.85)",
-		pale: "rgba(72, 199, 142, 0.35)",
-	},
 };
 
 // ── Per-sender pixel offset (disambiguates overlapping arrows) ───
@@ -180,8 +166,8 @@ export function buildPvOverlay(
 		const lines = currentLines(bucket);
 		if (lines.length === 0) continue;
 
-		const palette = SENDER_PALETTE[sender];
-		const bestScore = lines[0].score; // multipv=1 is first after sort
+		const palette = SLOT_PALETTE[sender];
+		const bestScore = lines[0].score;
 		const startPos = posFor(subject);
 		const senderOff = SENDER_OFFSET[sender];
 		const offPx = layout.cellSize * SENDER_OFFSET_FRACTION;
@@ -207,7 +193,10 @@ export function buildPvOverlay(
 			});
 
 			const isBest = line.multipv === 1;
-			const scoreGap = Math.abs(line.score - bestScore);
+			const scoreGap =
+				line.score != null && bestScore != null
+					? Math.abs(line.score - bestScore)
+					: 0;
 
 			arrows.push({
 				sender,

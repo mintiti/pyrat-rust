@@ -306,7 +306,7 @@ async fn info_forwarded_as_event() {
                 target: None,
                 depth: 5,
                 nodes: 100,
-                score: 0.5,
+                score: Some(0.5),
                 pv: None,
                 message: Some(msg),
             },

@@ -42,7 +42,7 @@ impl Bot for Search {
                 multipv: 1,
                 depth: depth as u16,
                 nodes: self.nodes as u32,
-                score,
+                score: Some(score),
                 message: &format!("depth {depth}: {best_move:?} ({score:.1})"),
                 ..InfoParams::for_player(state.my_player())
             });

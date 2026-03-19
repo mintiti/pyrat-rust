@@ -76,7 +76,7 @@ pub struct BotInfoEvent {
     pub target: Option<Coord>,
     pub depth: u16,
     pub nodes: u32,
-    pub score: f32,
+    pub score: Option<f32>,
     pub pv: Vec<Direction>,
     pub message: String,
 }

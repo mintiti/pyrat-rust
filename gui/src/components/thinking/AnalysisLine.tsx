@@ -1,4 +1,4 @@
-import { Badge, Group, Stack, Text } from "@mantine/core";
+import { Group, Stack, Text } from "@mantine/core";
 import type { BotInfoEvent, Direction } from "../../bindings/generated";
 
 const DIR_ARROW: Record<Direction, string> = {
@@ -38,45 +38,53 @@ function formatNodes(n: number): string {
 type Props = {
 	line: BotInfoEvent & { subcycle: number };
 	color: string;
+	subjectIcon: string;
 };
 
-export default function AnalysisLine({ line, color }: Props) {
-	const hasScore = line.score !== 0;
+export default function AnalysisLine({ line, color, subjectIcon }: Props) {
 	const hasPv = line.pv.length > 0;
-	const hasTarget = line.target !== null;
 	const hasDepth = line.depth > 0;
 	const hasNodes = line.nodes > 0;
 	const hasMessage = line.message !== "";
-	const hasMeta = hasTarget || hasDepth || hasNodes || hasMessage;
+	const hasMeta = hasDepth || hasNodes || hasMessage;
 
-	if (!hasScore && !hasPv && !hasMeta) return null;
+	const showScore = line.score !== null;
+
+	if (!showScore && !hasPv && !hasMeta) return null;
 
 	return (
-		<Stack
-			gap={0}
-			py={4}
-			pl={8}
-			style={{
-				borderLeft: `2px solid var(--mantine-color-${color}-4)`,
-			}}
-		>
-			{/* Row 1: rank + score + arrows */}
+		<Stack gap={0} py={4} pl={8}>
+			{/* Row 1: subject icon + rank + score bubble + arrows */}
 			<Group gap={6} wrap="nowrap">
+				<img
+					src={subjectIcon}
+					alt=""
+					width={12}
+					height={12}
+					style={{ flexShrink: 0 }}
+				/>
 				{line.multipv > 1 && (
 					<Text size="xs" c="dimmed" fw={500} style={{ flexShrink: 0 }}>
 						{line.multipv}.
 					</Text>
 				)}
-				{hasScore && (
-					<Badge
-						size="sm"
-						variant="light"
-						color={line.score > 0 ? "teal" : "red"}
-						style={{ flexShrink: 0 }}
+				{showScore && (
+					<Text
+						size="xs"
+						fw={700}
+						ff="monospace"
+						style={{
+							flexShrink: 0,
+							width: "3.5rem",
+							textAlign: "center",
+							borderRadius: "var(--mantine-radius-sm)",
+							background: `var(--mantine-color-${color}-light)`,
+							color: `var(--mantine-color-${color}-light-color)`,
+							padding: "1px 4px",
+						}}
 					>
-						{line.score > 0 ? "+" : ""}
 						{line.score}
-					</Badge>
+					</Text>
 				)}
 				{hasPv && (
 					<Text
@@ -93,14 +101,9 @@ export default function AnalysisLine({ line, color }: Props) {
 				)}
 			</Group>
 
-			{/* Row 2: target, depth, nodes, message */}
+			{/* Row 2: depth, nodes, message */}
 			{hasMeta && (
 				<Group gap={8} wrap="nowrap" mt={2}>
-					{hasTarget && (
-						<Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
-							→ ({line.target?.x}, {line.target?.y})
-						</Text>
-					)}
 					{hasDepth && (
 						<Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
 							d{line.depth}

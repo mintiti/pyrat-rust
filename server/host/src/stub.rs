@@ -137,7 +137,7 @@ async fn run_stub(
                             target,
                             depth: 1,
                             nodes: 1,
-                            score: 0.0,
+                            score: Some(0.0),
                             pv: vec![dir],
                             message: "stub".into(),
                         },

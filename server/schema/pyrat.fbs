@@ -155,7 +155,7 @@ table Info {
   target: Vec2;
   depth: uint16;
   nodes: uint32;
-  score: float32;
+  score: float32 = null;
   pv: [Direction];
   message: string;
 }

@@ -330,7 +330,7 @@ pub fn build_info(
     target: Option<(u8, u8)>,
     depth: u16,
     nodes: u32,
-    score: f32,
+    score: Option<f32>,
     pv: &[pyrat::Direction],
     message: &str,
 ) -> Vec<u8> {
@@ -642,7 +642,7 @@ mod tests {
             Some((10, 7)),
             5,
             42000,
-            2.5,
+            Some(2.5),
             &[pyrat::Direction::Up, pyrat::Direction::Left],
             "depth 5",
         );
@@ -655,7 +655,7 @@ mod tests {
         assert_eq!((t.x(), t.y()), (10, 7));
         assert_eq!(info.depth(), 5);
         assert_eq!(info.nodes(), 42000);
-        assert!((info.score() - 2.5).abs() < f32::EPSILON);
+        assert!((info.score().unwrap() - 2.5).abs() < f32::EPSILON);
         let pv = info.pv().unwrap();
         assert_eq!(pv.len(), 2);
         assert_eq!(pv.get(0), WireDir::Up);
@@ -665,7 +665,7 @@ mod tests {
 
     #[test]
     fn build_info_empty_optional_fields() {
-        let bytes = build_info(Player::Player1, 0, None, 0, 0, 0.0, &[], "");
+        let bytes = build_info(Player::Player1, 0, None, 0, 0, None, &[], "");
         let packet = flatbuffers::root::<wire::BotPacket>(&bytes).unwrap();
         assert_eq!(packet.message_type(), BotMessage::Info);
         let info = packet.message_as_info().unwrap();

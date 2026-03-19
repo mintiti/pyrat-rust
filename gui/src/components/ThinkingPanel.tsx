@@ -2,6 +2,7 @@ import { Accordion, Center, ScrollArea, Stack, Text } from "@mantine/core";
 import { useAtomValue } from "jotai";
 import { useMemo } from "react";
 import type { PlayerSide } from "../bindings/generated";
+import { SLOT_PALETTE } from "../lib/botPalette";
 import { botsAtom, resolveBotName } from "../stores/botConfigAtom";
 import {
 	type BotInfoMap,
@@ -10,11 +11,6 @@ import {
 } from "../stores/botInfo";
 import { useMatchStore } from "../stores/matchStore";
 import BotPanel from "./thinking/BotPanel";
-
-const SENDER_COLOR: Record<PlayerSide, string> = {
-	Player1: "blue",
-	Player2: "green",
-};
 
 type SenderGroup = {
 	sender: PlayerSide;
@@ -53,7 +49,7 @@ function useSenderGroups(botInfo: BotInfoMap): SenderGroup[] {
 				bots,
 				sender,
 			),
-			color: SENDER_COLOR[sender],
+			color: SLOT_PALETTE[sender].mantine,
 			subjects: (grouped.get(sender) ?? []).sort((a, b) =>
 				a.subject.localeCompare(b.subject),
 			),

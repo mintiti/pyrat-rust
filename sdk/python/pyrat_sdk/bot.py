@@ -54,7 +54,7 @@ class Context:
         target: tuple[int, int] | None = None,
         depth: int = 0,
         nodes: int = 0,
-        score: float = 0.0,
+        score: float | None = None,
         pv: list[Direction] | None = None,
         message: str = "",
     ) -> None:

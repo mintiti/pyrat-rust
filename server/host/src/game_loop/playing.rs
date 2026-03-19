@@ -543,7 +543,7 @@ mod tests {
                     target: None,
                     depth: 5,
                     nodes: 100,
-                    score: 0.5,
+                    score: Some(0.5),
                     pv: vec![],
                     message: "thinking".into(),
                 },
