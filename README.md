@@ -77,8 +77,8 @@ uv sync --all-extras
 
 ```bash
 cargo run -p pyrat-headless -- \
-  "cargo run -p pyrat-sdk --example greedy" \
-  "cargo run -p pyrat-sdk --example smart_random"
+  "cd botpack/greedy && cargo run --release" \
+  "cd botpack/smart-random && cargo run --release"
 ```
 
 ## The game

@@ -3023,7 +3023,6 @@ dependencies = [
  "pyrat-rust",
  "pyrat-sdk-derive",
  "pyrat-wire",
- "rand 0.10.0",
  "tokio",
 ]
 

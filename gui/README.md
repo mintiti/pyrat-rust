@@ -37,9 +37,9 @@ Each bot is a shell command. Add it once in the bot management panel, then pick 
 
 | Name | Command |
 |------|---------|
-| Greedy (Rust) | `cargo run -p pyrat-sdk --example greedy` |
-| Greedy (Python) | `uv run python sdk/python/examples/greedy.py` |
-| Random (Rust) | `cargo run -p pyrat-sdk --example random` |
+| Greedy (Rust) | `cd botpack/greedy && cargo run --release` |
+| Greedy (Python) | `cd botpack/greedy-py && uv run python bot.py` |
+| Smart Random (Rust) | `cd botpack/smart-random && cargo run --release` |
 
 There's also a built-in random stub for quick testing, no command needed.
 
