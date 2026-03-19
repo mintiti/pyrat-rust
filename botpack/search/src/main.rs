@@ -1,21 +1,26 @@
-//! Search bot — best-response tree search with iterative deepening.
+//! Search bot: simultaneous-game tree search with iterative deepening and PV ordering.
 //!
-//! Uses GameSim (make_move / unmake_move) for efficient game-tree exploration.
-//! Both players independently maximize their own score — the opponent doesn't
-//! try to hurt us, they try to help themselves.
+//! Both players independently maximize their own score. Since the game is constant-sum
+//! (cheese collected by one player is unavailable to the other), this is equivalent to
+//! minimax: maximizing our score and maximizing opponent's score produces the same
+//! equilibrium as maximizing ours while minimizing theirs.
+//!
+//! Iterative deepening with no depth cap. The search cooperates with `should_stop()` and
+//! deepens until time runs out. Tied PVs (principal variations) from the previous depth
+//! guide move ordering at every level of the tree: preferred moves are explored first,
+//! giving deeper searches better chances of finding strong lines early.
+//!
+//! SDK features: GameSim, effective_moves, should_stop, send_info.
 
-use pyrat_sdk::{Bot, Context, DeriveOptions, Direction, GameSim, GameState, InfoParams, Player};
+use pyrat_sdk::{Bot, Context, Direction, GameSim, GameState, InfoParams, Options, Player};
 use rand::prelude::SliceRandom;
 
-#[derive(DeriveOptions)]
 struct Search {
-    #[spin(default = 6, min = 1, max = 12)]
-    max_depth: i32,
-
-    // Internal state — no option attributes, ignored by derive.
     am_player1: bool,
     nodes: u64,
 }
+
+impl Options for Search {}
 
 impl Bot for Search {
     fn think(&mut self, state: &GameState, ctx: &Context) -> Direction {
@@ -24,29 +29,22 @@ impl Bot for Search {
         let mut sim = state.simulate();
 
         let mut best_move = Direction::Stay;
+        let mut best_score = f32::NEG_INFINITY;
+        let mut pvs: Vec<Vec<Direction>> = Vec::new();
 
-        // IDDFS: only update best_move when a depth completes fully.
-        for depth in 1..=self.max_depth {
+        for depth in 1.. {
             if ctx.should_stop() {
                 break;
             }
 
-            let result = self.search_root(&mut sim, depth, state, ctx);
-            let Some((dir, score, pv)) = result else {
-                break; // timed out mid-search — keep previous best
-            };
+            let (dir, score, new_pvs) = self.search_root(&mut sim, depth, state, ctx, &pvs);
 
-            best_move = dir;
+            if score > best_score {
+                best_move = dir;
+                best_score = score;
+            }
 
-            ctx.send_info(&InfoParams {
-                multipv: 1,
-                depth: depth as u16,
-                nodes: self.nodes as u32,
-                score,
-                pv: &pv,
-                message: &format!("depth {depth}: {best_move:?} ({score:.1})"),
-                ..InfoParams::for_player(state.my_player())
-            });
+            pvs = new_pvs;
         }
 
         best_move
@@ -60,10 +58,11 @@ impl Search {
         depth: i32,
         state: &GameState,
         ctx: &Context,
-    ) -> Option<(Direction, f32, Vec<Direction>)> {
+        pvs: &[Vec<Direction>],
+    ) -> (Direction, f32, Vec<Vec<Direction>>) {
         let mut best_move = Direction::Stay;
         let mut best_score = f32::NEG_INFINITY;
-        let mut best_child_pv = Vec::new();
+        let mut tied_pvs: Vec<Vec<Direction>> = Vec::new();
 
         let my_pos = if self.am_player1 {
             sim.player1_position()
@@ -76,19 +75,24 @@ impl Search {
             sim.player1_position()
         };
 
-        let mut my_moves = state.effective_moves(Some(my_pos));
-        my_moves.shuffle(&mut rand::rng());
+        let my_moves = order_moves(&state.effective_moves(Some(my_pos)), pvs);
         let opp_moves = state.effective_moves(Some(opp_pos));
 
         for my_dir in &my_moves {
             if ctx.should_stop() {
-                return None;
+                break;
             }
 
-            // Opponent picks the move that maximizes THEIR score.
+            let child_suffixes: Vec<&[Direction]> = pvs
+                .iter()
+                .filter(|pv| pv.first() == Some(my_dir))
+                .map(|pv| &pv[1..])
+                .collect();
+
             let mut best_opp_score = f32::NEG_INFINITY;
             let mut our_score_vs_opp_best = f32::NEG_INFINITY;
             let mut pv_vs_opp_best = Vec::new();
+            let mut timed_out = false;
 
             for opp_dir in &opp_moves {
                 let (p1_dir, p2_dir) = self.assign_moves(*my_dir, *opp_dir);
@@ -99,11 +103,12 @@ impl Search {
                     let (our, opp) = self.evaluate(sim);
                     (our, opp, Vec::new())
                 } else {
-                    match self.search(sim, depth - 1, state, ctx) {
+                    match self.search(sim, depth - 1, state, ctx, &child_suffixes) {
                         Some(result) => result,
                         None => {
                             sim.unmake_move(undo);
-                            return None;
+                            timed_out = true;
+                            break;
                         },
                     }
                 };
@@ -117,16 +122,45 @@ impl Search {
                 }
             }
 
+            if timed_out {
+                break;
+            }
+
+            let mut pv = vec![*my_dir];
+            pv.extend(pv_vs_opp_best);
+
             if our_score_vs_opp_best > best_score {
                 best_score = our_score_vs_opp_best;
                 best_move = *my_dir;
-                best_child_pv = pv_vs_opp_best;
+                ctx.send_info(&InfoParams {
+                    multipv: 1,
+                    depth: depth as u16,
+                    nodes: self.nodes as u32,
+                    score: best_score,
+                    pv: &pv,
+                    message: &format!("depth {depth}: {best_move:?} ({best_score:.1})"),
+                    ..InfoParams::for_player(state.my_player())
+                });
+                tied_pvs = vec![pv];
+            } else if our_score_vs_opp_best == best_score {
+                tied_pvs.push(pv.clone());
+                ctx.send_info(&InfoParams {
+                    multipv: tied_pvs.len() as u16,
+                    depth: depth as u16,
+                    nodes: self.nodes as u32,
+                    score: best_score,
+                    pv: &pv,
+                    message: &format!(
+                        "depth {depth}: {:?} ({best_score:.1}) [pv {}]",
+                        pv[0],
+                        tied_pvs.len()
+                    ),
+                    ..InfoParams::for_player(state.my_player())
+                });
             }
         }
 
-        let mut pv = vec![best_move];
-        pv.extend(best_child_pv);
-        Some((best_move, best_score, pv))
+        (best_move, best_score, tied_pvs)
     }
 
     fn search(
@@ -135,6 +169,7 @@ impl Search {
         depth: i32,
         state: &GameState,
         ctx: &Context,
+        pv_suffixes: &[&[Direction]],
     ) -> Option<(f32, f32, Vec<Direction>)> {
         if depth == 0 || sim.is_game_over() {
             let (our, opp) = self.evaluate(sim);
@@ -156,7 +191,7 @@ impl Search {
             sim.player1_position()
         };
 
-        let my_moves = state.effective_moves(Some(my_pos));
+        let my_moves = order_moves(&state.effective_moves(Some(my_pos)), pv_suffixes);
         let opp_moves = state.effective_moves(Some(opp_pos));
 
         let mut best_our = f32::NEG_INFINITY;
@@ -167,6 +202,13 @@ impl Search {
             if ctx.should_stop() {
                 return None;
             }
+
+            let child_suffixes: Vec<&[Direction]> = pv_suffixes
+                .iter()
+                .filter(|s| s.first() == Some(my_dir))
+                .map(|s| &s[1..])
+                .collect();
+
             let mut best_opp_score = f32::NEG_INFINITY;
             let mut our_when_opp_best = f32::NEG_INFINITY;
             let mut pv_when_opp_best = Vec::new();
@@ -180,7 +222,7 @@ impl Search {
                     let (our, opp) = self.evaluate(sim);
                     (our, opp, Vec::new())
                 } else {
-                    match self.search(sim, depth - 1, state, ctx) {
+                    match self.search(sim, depth - 1, state, ctx, &child_suffixes) {
                         Some(result) => result,
                         None => {
                             sim.unmake_move(undo);
@@ -227,10 +269,37 @@ impl Search {
     }
 }
 
+fn order_moves<S: AsRef<[Direction]>>(moves: &[Direction], pv_suffixes: &[S]) -> Vec<Direction> {
+    let mut pv_firsts: Vec<Direction> = Vec::new();
+    for suffix in pv_suffixes {
+        if let Some(&first) = suffix.as_ref().first() {
+            if !pv_firsts.contains(&first) {
+                pv_firsts.push(first);
+            }
+        }
+    }
+
+    let mut preferred: Vec<Direction> = moves
+        .iter()
+        .copied()
+        .filter(|d| pv_firsts.contains(d))
+        .collect();
+    let mut rest: Vec<Direction> = moves
+        .iter()
+        .copied()
+        .filter(|d| !pv_firsts.contains(d))
+        .collect();
+
+    preferred.shuffle(&mut rand::rng());
+    rest.shuffle(&mut rand::rng());
+
+    preferred.extend(rest);
+    preferred
+}
+
 fn main() {
     pyrat_sdk::run(
         Search {
-            max_depth: 6,
             am_player1: false,
             nodes: 0,
         },

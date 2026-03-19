@@ -1,21 +1,43 @@
-"""Search bot: best-response tree search with iterative deepening.
+"""Search bot: simultaneous-game tree search with iterative deepening and PV ordering.
 
-Uses GameSim (make_move / unmake_move) for efficient game-tree exploration.
-Both players independently maximize their own score. The opponent doesn't
-try to hurt us, they try to help themselves.
+Both players independently maximize their own score. Since the game is constant-sum
+(cheese collected by one player is unavailable to the other), this is equivalent to
+minimax: maximizing our score and maximizing opponent's score produces the same
+equilibrium as maximizing ours while minimizing theirs.
 
-SDK features: GameSim, effective_moves, should_stop, send_info, Spin.
+Iterative deepening with no depth cap. The search cooperates with should_stop() and
+deepens until time runs out. Tied PVs (principal variations) from the previous depth
+guide move ordering at every level of the tree: preferred moves are explored first,
+giving deeper searches better chances of finding strong lines early.
+
+SDK features: GameSim, effective_moves, should_stop, send_info.
 """
 
+import itertools
 import random
 
-from pyrat_sdk import Bot, Context, Direction, GameSim, GameState, Player, Spin
+from pyrat_sdk import Bot, Context, Direction, GameSim, GameState, Player
+
+
+def order_moves(
+    moves: list[Direction], pv_suffixes: list[list[Direction]]
+) -> list[Direction]:
+    """Order moves: PV-preferred first (shuffled), then rest (shuffled)."""
+    pv_firsts: set[Direction] = set()
+    for suffix in pv_suffixes:
+        if suffix:
+            pv_firsts.add(suffix[0])
+
+    preferred = [d for d in moves if d in pv_firsts]
+    rest = [d for d in moves if d not in pv_firsts]
+    random.shuffle(preferred)
+    random.shuffle(rest)
+    return preferred + rest
 
 
 class Search(Bot):
     name = "Search"
     author = "PyRat SDK"
-    max_depth = Spin(default=6, min=1, max=12)
 
     def think(self, state: GameState, ctx: Context) -> Direction:
         self._am_player1 = state.my_player == Player.PLAYER1
@@ -24,56 +46,51 @@ class Search(Bot):
 
         best_move = Direction.STAY
         best_score = -float("inf")
+        pvs: list[list[Direction]] = []
 
-        # IDDFS: only commit to a new best_move when a depth completes fully.
-        # If we time out mid-depth, the partial results are unreliable.
-        for depth in range(1, self.max_depth + 1):
+        for depth in itertools.count(1):
             if ctx.should_stop():
                 break
 
-            result = self._search_root(sim, depth, state, ctx)
-            if result is None:
-                break  # timed out mid-search — keep previous best
+            move, score, new_pvs = self._search_root(sim, depth, state, ctx, pvs)
 
-            move, score, pv = result
-            best_move = move
-            best_score = score
+            if score > best_score:
+                best_move = move
+                best_score = score
 
-            ctx.send_info(
-                player=state.my_player,
-                multipv=1,
-                depth=depth,
-                nodes=self._nodes,
-                score=best_score,
-                pv=pv,
-                message=f"depth {depth}: {best_move.name} ({best_score:.1f})",
-            )
+            pvs = new_pvs
 
         return best_move
 
     def _search_root(
-        self, sim: GameSim, depth: int, state: GameState, ctx: Context
-    ) -> tuple[Direction, float, list[Direction]] | None:
-        """Find the best move at the root. Returns (direction, our_score, pv) or None on timeout."""
+        self,
+        sim: GameSim,
+        depth: int,
+        state: GameState,
+        ctx: Context,
+        pvs: list[list[Direction]],
+    ) -> tuple[Direction, float, list[list[Direction]]]:
+        """Find the best move at the root. Always returns a result (may be partial)."""
         best_move = Direction.STAY
         best_score = -float("inf")
-        best_child_pv: list[Direction] = []
+        tied_pvs: list[list[Direction]] = []
 
         my_pos = sim.player1_position if self._am_player1 else sim.player2_position
         opp_pos = sim.player2_position if self._am_player1 else sim.player1_position
 
-        my_moves = state.effective_moves(my_pos)
-        random.shuffle(my_moves)
+        my_moves = order_moves(state.effective_moves(my_pos), pvs)
+        opp_moves = state.effective_moves(opp_pos)
 
         for my_dir in my_moves:
             if ctx.should_stop():
-                return None
+                break
 
-            # Opponent picks the move that maximizes THEIR score.
-            opp_moves = state.effective_moves(opp_pos)
+            child_suffixes = [pv[1:] for pv in pvs if pv and pv[0] == my_dir]
+
             best_opp_score = -float("inf")
             our_score_vs_opp_best = -float("inf")
             pv_vs_opp_best: list[Direction] = []
+            timed_out = False
 
             for opp_dir in opp_moves:
                 p1_dir, p2_dir = self._assign_moves(my_dir, opp_dir)
@@ -84,10 +101,11 @@ class Search(Bot):
                     our, opp = self._evaluate(sim)
                     child_pv: list[Direction] = []
                 else:
-                    result = self._search(sim, depth - 1, state, ctx)
+                    result = self._search(sim, depth - 1, state, ctx, child_suffixes)
                     if result is None:
                         sim.unmake_move(undo)
-                        return None
+                        timed_out = True
+                        break
                     our, opp, child_pv = result
 
                 sim.unmake_move(undo)
@@ -97,15 +115,45 @@ class Search(Bot):
                     our_score_vs_opp_best = our
                     pv_vs_opp_best = child_pv
 
+            if timed_out:
+                break
+
+            pv = [my_dir, *pv_vs_opp_best]
+
             if our_score_vs_opp_best > best_score:
                 best_score = our_score_vs_opp_best
                 best_move = my_dir
-                best_child_pv = pv_vs_opp_best
+                ctx.send_info(
+                    player=state.my_player,
+                    multipv=1,
+                    depth=depth,
+                    nodes=self._nodes,
+                    score=best_score,
+                    pv=pv,
+                    message=f"depth {depth}: {best_move.name} ({best_score:.1f})",
+                )
+                tied_pvs = [pv]
+            elif our_score_vs_opp_best == best_score:
+                tied_pvs.append(pv)
+                ctx.send_info(
+                    player=state.my_player,
+                    multipv=len(tied_pvs),
+                    depth=depth,
+                    nodes=self._nodes,
+                    score=best_score,
+                    pv=pv,
+                    message=f"depth {depth}: {pv[0].name} ({best_score:.1f}) [pv {len(tied_pvs)}]",
+                )
 
-        return best_move, best_score, [best_move, *best_child_pv]
+        return best_move, best_score, tied_pvs
 
     def _search(
-        self, sim: GameSim, depth: int, state: GameState, ctx: Context
+        self,
+        sim: GameSim,
+        depth: int,
+        state: GameState,
+        ctx: Context,
+        pv_suffixes: list[list[Direction]],
     ) -> tuple[float, float, list[Direction]] | None:
         """Recursive search. Returns (our_score, opp_score, pv) or None on timeout."""
         if depth == 0 or sim.is_game_over:
@@ -117,7 +165,8 @@ class Search(Bot):
         my_pos = sim.player1_position if self._am_player1 else sim.player2_position
         opp_pos = sim.player2_position if self._am_player1 else sim.player1_position
 
-        my_moves = state.effective_moves(my_pos)
+        my_moves = order_moves(state.effective_moves(my_pos), pv_suffixes)
+        opp_moves = state.effective_moves(opp_pos)
 
         best_our = -float("inf")
         best_opp_at_our_best = 0.0
@@ -127,7 +176,8 @@ class Search(Bot):
             if ctx.should_stop():
                 return None
 
-            opp_moves = state.effective_moves(opp_pos)
+            child_suffixes = [s[1:] for s in pv_suffixes if s and s[0] == my_dir]
+
             best_opp_score = -float("inf")
             our_when_opp_best = -float("inf")
             pv_when_opp_best: list[Direction] = []
@@ -141,7 +191,7 @@ class Search(Bot):
                     our, opp = self._evaluate(sim)
                     child_pv: list[Direction] = []
                 else:
-                    result = self._search(sim, depth - 1, state, ctx)
+                    result = self._search(sim, depth - 1, state, ctx, child_suffixes)
                     if result is None:
                         sim.unmake_move(undo)
                         return None
