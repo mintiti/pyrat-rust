@@ -289,16 +289,16 @@ class TestConvenienceMethods:
 
 
 class TestSimulation:
-    def test_simulate_returns_game_sim(self):
+    def test_to_sim_returns_game_sim(self):
         from pyrat_sdk._engine import GameSim
 
         state = GameState(_make_config())
-        sim = state.simulate()
+        sim = state.to_sim()
         assert isinstance(sim, GameSim)
 
     def test_make_move_changes_state(self):
         state = GameState(_make_config())
-        sim = state.simulate()
+        sim = state.to_sim()
 
         pos_before = sim.player1_position
         # Move player1 RIGHT (1), player2 stays (4)
@@ -312,7 +312,7 @@ class TestSimulation:
 
     def test_round_trip_restores_scores(self):
         state = GameState(_make_config(cheese=[(1, 0)]))
-        sim = state.simulate()
+        sim = state.to_sim()
 
         score_before = sim.player1_score
         # Move player1 RIGHT toward cheese at (1,0)
@@ -324,7 +324,7 @@ class TestSimulation:
     def test_is_game_over_after_all_cheese_collected(self):
         # Single cheese at (1,0), player1 starts at (0,0)
         state = GameState(_make_config(cheese=[(1, 0)]))
-        sim = state.simulate()
+        sim = state.to_sim()
         assert not sim.is_game_over
 
         # Player1 moves RIGHT to collect the cheese
@@ -335,7 +335,7 @@ class TestSimulation:
         from pyrat_sdk._engine import MoveUndo
 
         state = GameState(_make_config())
-        sim = state.simulate()
+        sim = state.to_sim()
         undo = sim.make_move(4, 4)  # Both STAY
         assert isinstance(undo, MoveUndo)
         # MoveUndo captures pre-move state

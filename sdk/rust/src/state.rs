@@ -6,7 +6,7 @@
 
 use std::collections::HashMap;
 
-use pyrat::{Coordinates, Direction, MoveUndo};
+use pyrat::{Coordinates, Direction};
 use pyrat_engine_interface::pathfinding::FullPathResult;
 use pyrat_engine_interface::GameView;
 use pyrat_wire::Player;
@@ -262,7 +262,7 @@ impl GameState {
     }
 
     /// Clone the game into a mutable simulation state.
-    pub fn simulate(&self) -> GameSim {
+    pub fn to_sim(&self) -> pyrat::GameState {
         let mut game = self.view.snapshot();
 
         // Patch dynamic state to match current turn
@@ -284,70 +284,12 @@ impl GameState {
 
         game.turn = self.turn;
 
-        GameSim { game }
+        game
     }
 
     /// Read-only access to the underlying `GameView`.
     pub fn view(&self) -> &GameView {
         &self.view
-    }
-}
-
-/// Mutable game snapshot for make_move / unmake_move tree search.
-#[derive(Clone)]
-pub struct GameSim {
-    game: pyrat::GameState,
-}
-
-impl GameSim {
-    /// Advance one step and return an undo token.
-    pub fn make_move(&mut self, p1_dir: Direction, p2_dir: Direction) -> MoveUndo {
-        self.game.make_move(p1_dir, p2_dir)
-    }
-
-    /// Revert the most recent make_move. Must be called in LIFO order.
-    pub fn unmake_move(&mut self, undo: MoveUndo) {
-        self.game.unmake_move(undo);
-    }
-
-    pub fn player1_position(&self) -> Coordinates {
-        self.game.player1_position()
-    }
-
-    pub fn player2_position(&self) -> Coordinates {
-        self.game.player2_position()
-    }
-
-    pub fn player1_score(&self) -> f32 {
-        self.game.player1_score()
-    }
-
-    pub fn player2_score(&self) -> f32 {
-        self.game.player2_score()
-    }
-
-    pub fn player1_mud_turns(&self) -> u8 {
-        self.game.player1_mud_turns()
-    }
-
-    pub fn player2_mud_turns(&self) -> u8 {
-        self.game.player2_mud_turns()
-    }
-
-    pub fn cheese_positions(&self) -> Vec<Coordinates> {
-        self.game.cheese_positions()
-    }
-
-    pub fn turn(&self) -> u16 {
-        self.game.turns()
-    }
-
-    pub fn max_turns(&self) -> u16 {
-        self.game.max_turns()
-    }
-
-    pub fn is_game_over(&self) -> bool {
-        self.game.check_game_over()
     }
 }
 
@@ -467,9 +409,9 @@ mod tests {
     }
 
     #[test]
-    fn simulate_make_unmake() {
+    fn to_sim_make_unmake() {
         let state = GameState::from_config(&test_config()).unwrap();
-        let mut sim = state.simulate();
+        let mut sim = state.to_sim();
 
         let p1_before = sim.player1_position();
         let undo = sim.make_move(Direction::Right, Direction::Stay);
@@ -480,15 +422,15 @@ mod tests {
     }
 
     #[test]
-    fn simulate_reflects_current_state() {
+    fn to_sim_reflects_current_state() {
         let mut state = GameState::from_config(&test_config()).unwrap();
         state.update(test_turn_state());
 
-        let sim = state.simulate();
+        let sim = state.to_sim();
         assert_eq!(sim.player1_position(), Coordinates::new(1, 1));
         assert_eq!(sim.player2_position(), Coordinates::new(3, 3));
         assert!((sim.player1_score() - 1.0).abs() < f32::EPSILON);
-        assert_eq!(sim.turn(), 5);
+        assert_eq!(sim.turns(), 5);
         assert_eq!(sim.cheese_positions().len(), 1);
     }
 
