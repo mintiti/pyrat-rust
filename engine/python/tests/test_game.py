@@ -184,7 +184,7 @@ class TestPresets:
         """Test that presets have correct dimensions."""
         expected = {
             "tiny": (11, 9, 13, 150),
-            "small": (15, 11, 21, 200),
+            "small": (15, 13, 21, 200),
             "medium": (21, 15, 41, 300),
             "large": (31, 21, 85, 400),
             "huge": (41, 31, 165, 500),

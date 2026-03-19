@@ -1,15 +1,15 @@
-import { Accordion, ScrollArea, Stack } from "@mantine/core";
+import { Accordion, Center, ScrollArea, Stack, Text } from "@mantine/core";
 import { useAtomValue } from "jotai";
 import { useMemo } from "react";
 import type { PlayerSide } from "../bindings/generated";
-import { RANDOM_BOT_ID, botsAtom } from "../stores/botConfigAtom";
+import { botsAtom, resolveBotName } from "../stores/botConfigAtom";
 import {
 	type BotInfoMap,
 	type InfoBucket,
 	parseBotInfoKey,
 } from "../stores/botInfo";
 import { useMatchStore } from "../stores/matchStore";
-import BotSection from "./thinking/BotSection";
+import BotPanel from "./thinking/BotPanel";
 
 const SENDER_COLOR: Record<PlayerSide, string> = {
 	Player1: "blue",
@@ -44,18 +44,19 @@ function useSenderGroups(botInfo: BotInfoMap): SenderGroup[] {
 			list.push({ subject, bucket });
 		}
 
-		const resolveName = (side: PlayerSide): string => {
-			const botId = side === "Player1" ? player1BotId : player2BotId;
-			if (!botId || botId === RANDOM_BOT_ID) return "Random Bot";
-			const bot = bots.find((b) => b.id === botId);
-			return bot?.name ?? side;
-		};
-
-		return Array.from(grouped.entries()).map(([sender, subjects]) => ({
+		// Fixed order: Player1 always first, Player2 always second.
+		const SIDES: PlayerSide[] = ["Player1", "Player2"];
+		return SIDES.filter((side) => grouped.has(side)).map((sender) => ({
 			sender,
-			botName: resolveName(sender),
+			botName: resolveBotName(
+				sender === "Player1" ? player1BotId : player2BotId,
+				bots,
+				sender,
+			),
 			color: SENDER_COLOR[sender],
-			subjects: subjects.sort((a, b) => a.subject.localeCompare(b.subject)),
+			subjects: (grouped.get(sender) ?? []).sort((a, b) =>
+				a.subject.localeCompare(b.subject),
+			),
 		}));
 	}, [botInfo, bots, player1BotId, player2BotId]);
 }
@@ -66,40 +67,50 @@ type Props = {
 
 export default function ThinkingPanel({ botInfo }: Props) {
 	const groups = useSenderGroups(botInfo);
+	const matchPhase = useMatchStore((s) => s.matchPhase);
 
-	if (groups.length === 0) return null;
-
-	const defaultOpen = groups.map((g) => g.sender);
+	const emptyMessage =
+		matchPhase === "finished"
+			? "No analysis for this turn."
+			: "Waiting for bot analysis...";
 
 	return (
 		<ScrollArea
 			style={{
 				width: 320,
 				flexShrink: 0,
-				borderLeft: "1px solid var(--mantine-color-default-border)",
+				borderLeft: "1px solid var(--mantine-color-dark-4)",
 			}}
 			p="sm"
 		>
-			<Stack gap="sm">
-				<Accordion
-					multiple
-					defaultValue={defaultOpen}
-					variant="separated"
-					styles={{
-						item: { borderRadius: "var(--mantine-radius-sm)" },
-					}}
-				>
-					{groups.map((g) => (
-						<BotSection
-							key={g.sender}
-							sender={g.sender}
-							botName={g.botName}
-							color={g.color}
-							subjects={g.subjects}
-						/>
-					))}
-				</Accordion>
-			</Stack>
+			{groups.length === 0 ? (
+				<Center h="100%">
+					<Text size="sm" c="dimmed">
+						{emptyMessage}
+					</Text>
+				</Center>
+			) : (
+				<Stack gap="sm">
+					<Accordion
+						multiple
+						defaultValue={["Player1", "Player2"]}
+						variant="separated"
+						styles={{
+							item: { borderRadius: "var(--mantine-radius-sm)" },
+						}}
+					>
+						{groups.map((g) => (
+							<BotPanel
+								key={g.sender}
+								sender={g.sender}
+								botName={g.botName}
+								color={g.color}
+								subjects={g.subjects}
+							/>
+						))}
+					</Accordion>
+				</Stack>
+			)}
 		</ScrollArea>
 	);
 }

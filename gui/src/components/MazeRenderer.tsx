@@ -8,7 +8,7 @@ import {
 	buildDrawInstructions,
 	computeStaticGeometry,
 } from "../renderer/instructions";
-import { computeLayout } from "../renderer/layout";
+import { type LayoutMetrics, computeLayout } from "../renderer/layout";
 import { buildPvOverlay, buildWallSet } from "../renderer/pvArrows";
 import { generateTileMap } from "../renderer/tileMap";
 import { useCurrentBotInfo, useMatchStore } from "../stores/matchStore";
@@ -17,10 +17,17 @@ import PvOverlay from "./PvOverlay";
 
 type Props = {
 	gameState: MazeState;
+	layout?: LayoutMetrics | null;
 	showCellIndices?: boolean;
+	hideScoreStrip?: boolean;
 };
 
-export default function MazeRenderer({ gameState, showCellIndices }: Props) {
+export default function MazeRenderer({
+	gameState,
+	layout: externalLayout,
+	showCellIndices,
+	hideScoreStrip,
+}: Props) {
 	const [assets, setAssets] = useState<AssetMap | null>(null);
 	const { ref, width, height } = useElementSize();
 	const botInfo = useCurrentBotInfo();
@@ -31,10 +38,14 @@ export default function MazeRenderer({ gameState, showCellIndices }: Props) {
 		loadAssets().then(setAssets);
 	}, []);
 
-	const layout = useMemo(() => {
+	// Use external layout when provided (MazeColumn), otherwise compute internally
+	const internalLayout = useMemo(() => {
+		if (externalLayout !== undefined) return null;
 		if (width === 0 || height === 0) return null;
 		return computeLayout(width, height, gameState.width, gameState.height);
-	}, [width, height, gameState.width, gameState.height]);
+	}, [externalLayout, width, height, gameState.width, gameState.height]);
+
+	const layout = externalLayout !== undefined ? externalLayout : internalLayout;
 
 	const tileMap = useMemo(
 		() => generateTileMap(gameState.width, gameState.height, 42),
@@ -55,9 +66,17 @@ export default function MazeRenderer({ gameState, showCellIndices }: Props) {
 			assets,
 			tileMap,
 			staticGeo,
-			{ showCellIndices },
+			{ showCellIndices, hideScoreStrip },
 		);
-	}, [gameState, layout, assets, tileMap, staticGeo, showCellIndices]);
+	}, [
+		gameState,
+		layout,
+		assets,
+		tileMap,
+		staticGeo,
+		showCellIndices,
+		hideScoreStrip,
+	]);
 
 	const wallSet = useMemo(
 		() => buildWallSet(gameState.walls),
@@ -88,7 +107,10 @@ export default function MazeRenderer({ gameState, showCellIndices }: Props) {
 	}, [botInfo, layout, gameState, wallSet, visibleSenders]);
 
 	return (
-		<div ref={ref} style={{ width: "100%", height: "100%", minHeight: 200 }}>
+		<div
+			ref={externalLayout !== undefined ? undefined : ref}
+			style={{ width: "100%", height: "100%", minHeight: 200 }}
+		>
 			{!assets || !instructions || !layout ? (
 				<Center h="100%">
 					<Loader />

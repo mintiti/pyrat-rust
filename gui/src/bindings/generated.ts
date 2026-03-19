@@ -134,7 +134,7 @@ export type MudEntry = { from: Coord; to: Coord; cost: number }
  * Player identity — specta-friendly mirror of pyrat_wire::Player.
  */
 export type PlayerSide = "Player1" | "Player2"
-export type PlayerState = { position: Coord; score: number }
+export type PlayerState = { position: Coord; score: number; mud_turns: number }
 /**
  * Per-turn delta. Walls/mud never change, so we only send positions + cheese.
  */

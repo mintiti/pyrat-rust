@@ -38,6 +38,7 @@ export type DrawInstructions = {
 
 export type DrawOptions = {
 	showCellIndices?: boolean;
+	hideScoreStrip?: boolean;
 };
 
 /** Pre-computed static geometry — walls and corners don't change per turn. */
@@ -215,70 +216,56 @@ export function buildDrawInstructions(
 		dh: playerDim,
 	});
 
-	// 9. Score strip — cheese icons above the maze
+	// 9. Score strip — text counts above the maze
 	const mazePixelW = cellSize * width;
 	const marginTop = layout.mazeY;
 	const totalCheese = state.total_cheese;
 
-	if (totalCheese > 0 && marginTop > 4) {
-		// Icon size adapts to available space
-		const iconSize = Math.min(
-			Math.floor(marginTop * 0.6),
-			Math.floor(mazePixelW / 2 / (totalCheese + 2)),
-		);
-		const iconGap = Math.floor(iconSize * 0.1);
+	if (!options.hideScoreStrip && totalCheese > 0 && marginTop > 4) {
+		const iconSize = Math.floor(marginTop * 0.6);
 		const stripY = layout.mazeY - iconSize - Math.floor(iconSize * 0.3);
+		const fontSize = Math.max(10, Math.floor(marginTop * 0.4));
+		const textY = stripY + iconSize / 2 + fontSize / 3;
 
-		const drawStrip = (
-			playerSprite: HTMLImageElement,
-			score: number,
-			startX: number,
-			direction: 1 | -1,
-		) => {
-			// Player icon as label
-			sprites.push({
-				image: playerSprite,
-				dx: direction === 1 ? startX : startX - iconSize,
-				dy: stripY,
-				dw: iconSize,
-				dh: iconSize,
-			});
-
-			const eaten = Math.floor(score);
-			const hasHalf = score % 1 !== 0;
-			const missing = totalCheese - eaten - (hasHalf ? 1 : 0);
-
-			let cursor =
-				direction === 1
-					? startX + iconSize + iconGap
-					: startX - iconSize - iconGap;
-
-			const place = (img: HTMLImageElement) => {
-				sprites.push({
-					image: img,
-					dx: direction === 1 ? cursor : cursor - iconSize,
-					dy: stripY,
-					dw: iconSize,
-					dh: iconSize,
-				});
-				cursor += direction * (iconSize + iconGap);
-			};
-
-			for (let i = 0; i < eaten; i++) place(assets.cheeseEaten);
-			if (hasHalf) place(assets.cheeseHalf);
-			for (let i = 0; i < missing; i++) place(assets.cheeseMissing);
+		const formatScore = (score: number): string => {
+			const display = score % 1 !== 0 ? score.toFixed(1) : String(score);
+			return `${display} / ${totalCheese}`;
 		};
 
-		// Rat: left-aligned from maze left edge
-		drawStrip(assets.rat.neutral, state.player1.score, layout.mazeX, 1);
+		// Rat: left-aligned
+		sprites.push({
+			image: assets.rat.neutral,
+			dx: layout.mazeX,
+			dy: stripY,
+			dw: iconSize,
+			dh: iconSize,
+		});
+		texts.push({
+			text: formatScore(state.player1.score),
+			x: layout.mazeX + iconSize + 4,
+			y: textY,
+			fontSize,
+			color: "#ffffff",
+			align: "left",
+		});
 
-		// Python: right-aligned from maze right edge
-		drawStrip(
-			assets.python.neutral,
-			state.player2.score,
-			layout.mazeX + mazePixelW,
-			-1,
-		);
+		// Python: right-aligned
+		const rightEdge = layout.mazeX + mazePixelW;
+		sprites.push({
+			image: assets.python.neutral,
+			dx: rightEdge - iconSize,
+			dy: stripY,
+			dw: iconSize,
+			dh: iconSize,
+		});
+		texts.push({
+			text: formatScore(state.player2.score),
+			x: rightEdge - iconSize - 4,
+			y: textY,
+			fontSize,
+			color: "#ffffff",
+			align: "right",
+		});
 	}
 
 	return {

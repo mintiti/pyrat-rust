@@ -42,7 +42,7 @@ export interface GameNode {
 	children: GameNode[];
 }
 
-export type ViewerMode = "previewing" | "live" | "reviewing";
+export type MatchPhase = "idle" | "connecting" | "playing" | "finished";
 
 // ── Tree helpers ─────────────────────────────────────────────────
 
@@ -79,7 +79,6 @@ interface MatchState {
 	player1BotId: string | null;
 	player2BotId: string | null;
 	result: MatchOverEvent | null;
-	pendingResult: MatchOverEvent | null;
 	error: string | null;
 	disconnection: BotDisconnectedEvent | null;
 
@@ -94,7 +93,8 @@ interface MatchState {
 	previewError: string | null;
 
 	// Viewer
-	viewerMode: ViewerMode;
+	matchPhase: MatchPhase;
+	autoplay: boolean;
 	playbackSpeed: number; // ms between frames
 	showPlayer1Arrows: boolean;
 	showPlayer2Arrows: boolean;
@@ -112,6 +112,7 @@ interface MatchState {
 	onDisconnect: (e: BotDisconnectedEvent) => void;
 
 	// Actions
+	beginConnecting: () => void;
 	resetToPreview: () => void;
 
 	toggleArrows: (sender: PlayerSide) => void;
@@ -123,6 +124,7 @@ interface MatchState {
 	stepBack: () => void;
 	goToTurn: (n: number) => void;
 	togglePlay: () => void;
+	goLive: () => void;
 	setPlaybackSpeed: (ms: number) => void;
 
 	// Auto-advance (called by the interval timer)
@@ -137,10 +139,10 @@ const IDLE_MATCH = {
 	cursor: [] as number[],
 	mainlineDepth: 0,
 	result: null as MatchOverEvent | null,
-	pendingResult: null as MatchOverEvent | null,
 	error: null as string | null,
 	disconnection: null as BotDisconnectedEvent | null,
-	viewerMode: "previewing" as ViewerMode,
+	matchPhase: "idle" as MatchPhase,
+	autoplay: true,
 };
 
 export const useMatchStore = create<MatchState>((set, get) => ({
@@ -182,7 +184,8 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 				total_cheese: maze.total_cheese,
 			},
 			root,
-			viewerMode: "live",
+			matchPhase: "playing",
+			autoplay: true,
 		});
 	},
 
@@ -212,12 +215,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	},
 
 	onMatchOver: (e) => {
-		const { cursor, mainlineDepth } = get();
-		if (cursor.length >= mainlineDepth) {
-			set({ result: e, pendingResult: null, viewerMode: "reviewing" });
-		} else {
-			set({ pendingResult: e });
-		}
+		set({ result: e, matchPhase: "finished" });
 	},
 
 	onBotInfo: (e) => {
@@ -240,6 +238,15 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	},
 
 	// ── Actions ─────────────────────────────────────────────
+	beginConnecting: () => {
+		set({
+			error: null,
+			result: null,
+			disconnection: null,
+			matchPhase: "connecting",
+		});
+	},
+
 	resetToPreview: () => {
 		commands.stopMatch().catch(console.error);
 		set(IDLE_MATCH);
@@ -253,12 +260,12 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 
 	// ── Navigation ───────────────────────────────────────────
 	goToStart: () => {
-		set({ cursor: [], viewerMode: "reviewing" });
+		set({ cursor: [], autoplay: false });
 	},
 
 	goToEnd: () => {
 		const { mainlineDepth } = get();
-		set({ cursor: mainlinePath(mainlineDepth), viewerMode: "reviewing" });
+		set({ cursor: mainlinePath(mainlineDepth), autoplay: false });
 	},
 
 	stepForward: () => {
@@ -266,24 +273,26 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		if (!root) return;
 		const node = getNodeAtPath(root, cursor);
 		if (!node || node.children.length === 0) return;
-		set({ cursor: [...cursor, 0], viewerMode: "reviewing" });
+		set({ cursor: [...cursor, 0], autoplay: false });
 	},
 
 	stepBack: () => {
 		const { cursor } = get();
 		if (cursor.length === 0) return;
-		set({ cursor: cursor.slice(0, -1), viewerMode: "reviewing" });
+		set({ cursor: cursor.slice(0, -1), autoplay: false });
 	},
 
 	goToTurn: (n) => {
-		set({ cursor: mainlinePath(n), viewerMode: "reviewing" });
+		set({ cursor: mainlinePath(n), autoplay: false });
 	},
 
 	togglePlay: () => {
-		const { viewerMode } = get();
-		set({
-			viewerMode: viewerMode === "live" ? "reviewing" : "live",
-		});
+		set((s) => ({ autoplay: !s.autoplay }));
+	},
+
+	goLive: () => {
+		const { mainlineDepth } = get();
+		set({ cursor: mainlinePath(mainlineDepth), autoplay: true });
 	},
 
 	setPlaybackSpeed: (ms) => {
@@ -291,17 +300,13 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	},
 
 	advanceCursor: () => {
-		const { root, cursor } = get();
+		const { root, cursor, matchPhase } = get();
 		if (!root) return;
 		const node = getNodeAtPath(root, cursor);
 		if (!node || node.children.length === 0) {
-			const { pendingResult } = get();
-			if (pendingResult) {
-				set({
-					result: pendingResult,
-					pendingResult: null,
-					viewerMode: "reviewing",
-				});
+			// At tree end: stop autoplay if match is finished (replay done)
+			if (matchPhase === "finished") {
+				set({ autoplay: false });
 			}
 			return;
 		}

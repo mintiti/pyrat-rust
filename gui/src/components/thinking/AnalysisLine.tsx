@@ -98,7 +98,7 @@ export default function AnalysisLine({ line, color }: Props) {
 				<Group gap={8} wrap="nowrap" mt={2}>
 					{hasTarget && (
 						<Text size="xs" c="dimmed" style={{ flexShrink: 0 }}>
-							({line.target?.x}, {line.target?.y})
+							→ ({line.target?.x}, {line.target?.y})
 						</Text>
 					)}
 					{hasDepth && (

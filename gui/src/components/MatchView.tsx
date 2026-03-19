@@ -1,29 +1,35 @@
-import { Center, Stack, Text } from "@mantine/core";
+import { Stack } from "@mantine/core";
 import { useAtomValue } from "jotai";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { events, commands } from "../bindings";
 import { RANDOM_BOT_ID, botsAtom } from "../stores/botConfigAtom";
 import { matchConfigAtom } from "../stores/matchConfigAtom";
 import {
-	generatePreview,
 	useCurrentBotInfo,
 	useDisplayState,
 	useMatchStore,
 } from "../stores/matchStore";
-import MatchConfigDrawer from "./MatchConfigDrawer";
 import MatchToolbar from "./MatchToolbar";
-import MazeRenderer from "./MazeRenderer";
+import MazeColumn from "./MazeColumn";
+import ResultBanner from "./ResultBanner";
 import ThinkingPanel from "./ThinkingPanel";
 
-export default function MatchView() {
+type Props = {
+	onNewMatch: () => void;
+};
+
+export default function MatchView({ onNewMatch }: Props) {
 	const matchIdRef = useRef<number>(-1);
+	const hasAutoStarted = useRef(false);
 	const displayState = useDisplayState();
 	const bots = useAtomValue(botsAtom);
 	const matchConfig = useAtomValue(matchConfigAtom);
-	const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
+	const matchConfigRef = useRef(matchConfig);
+	matchConfigRef.current = matchConfig;
 
 	const botInfo = useCurrentBotInfo();
-	const viewerMode = useMatchStore((s) => s.viewerMode);
+	const matchPhase = useMatchStore((s) => s.matchPhase);
+	const autoplay = useMatchStore((s) => s.autoplay);
 	const playbackSpeed = useMatchStore((s) => s.playbackSpeed);
 	const previewError = useMatchStore((s) => s.previewError);
 	const player1BotId = useMatchStore((s) => s.player1BotId);
@@ -37,6 +43,12 @@ export default function MatchView() {
 		onError,
 		onDisconnect,
 		advanceCursor,
+		goToStart,
+		goToEnd,
+		stepForward,
+		stepBack,
+		togglePlay,
+		goLive,
 	} = useMatchStore.getState();
 
 	// Event listeners — wire Tauri events to store actions
@@ -79,17 +91,55 @@ export default function MatchView() {
 	// Auto-advance cursor during playback
 	// biome-ignore lint/correctness/useExhaustiveDependencies: advanceCursor is a stable ref from getState()
 	useEffect(() => {
-		if (viewerMode !== "live") return;
+		if (!autoplay) return;
 		const id = setInterval(() => {
 			advanceCursor();
 		}, playbackSpeed);
 		return () => clearInterval(id);
-	}, [viewerMode, playbackSpeed]);
+	}, [autoplay, playbackSpeed]);
 
-	// Generate maze preview — runs on every config change so preview is always fresh
+	// Keyboard shortcuts
+	// biome-ignore lint/correctness/useExhaustiveDependencies: navigation actions are stable refs from getState()
 	useEffect(() => {
-		generatePreview(matchConfig);
-	}, [matchConfig]);
+		const handler = (e: KeyboardEvent) => {
+			const phase = useMatchStore.getState().matchPhase;
+			if (phase === "idle" || phase === "connecting") return;
+
+			const tag = (e.target as HTMLElement)?.tagName;
+			if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+
+			switch (e.key) {
+				case "ArrowLeft":
+					e.preventDefault();
+					stepBack();
+					break;
+				case "ArrowRight":
+					e.preventDefault();
+					stepForward();
+					break;
+				case "Home":
+					e.preventDefault();
+					goToStart();
+					break;
+				case "End":
+					e.preventDefault();
+					goToEnd();
+					break;
+				case " ":
+					e.preventDefault();
+					togglePlay();
+					break;
+				case "l":
+					if (useMatchStore.getState().matchPhase === "playing") {
+						e.preventDefault();
+						goLive();
+					}
+					break;
+			}
+		};
+		window.addEventListener("keydown", handler);
+		return () => window.removeEventListener("keydown", handler);
+	}, []);
 
 	const resolveBotId = (botId: string) => {
 		if (botId === RANDOM_BOT_ID)
@@ -107,11 +157,12 @@ export default function MatchView() {
 			useMatchStore.getState().onError("Selected bot no longer exists.");
 			return;
 		}
-		useMatchStore.setState({ error: null, result: null, disconnection: null });
+		useMatchStore.getState().beginConnecting();
 		const { previewSeed } = useMatchStore.getState();
+		const cfg = matchConfigRef.current;
 		const configWithSeed = {
-			...matchConfig,
-			seed: matchConfig.seed ?? previewSeed,
+			...cfg,
+			seed: cfg.seed ?? previewSeed,
 		};
 		const res = await commands.startMatch(
 			p1.cmd,
@@ -125,37 +176,30 @@ export default function MatchView() {
 		}
 	};
 
+	// Auto-start on mount — if we're idle and both bots are selected
+	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional one-shot on mount
+	useEffect(() => {
+		if (hasAutoStarted.current) return;
+		if (matchPhase === "idle" && player1BotId && player2BotId) {
+			hasAutoStarted.current = true;
+			handleStart();
+		}
+	}, [matchPhase, player1BotId, player2BotId]);
+
+	const hasMatch = matchPhase !== "idle";
+
 	return (
 		<Stack h="100%" gap={0}>
-			<MatchToolbar
-				onStart={handleStart}
-				onOpenConfig={() => setConfigDrawerOpen(true)}
-			/>
-			<MatchConfigDrawer
-				opened={configDrawerOpen}
-				onClose={() => setConfigDrawerOpen(false)}
-			/>
+			<MatchToolbar onNewMatch={onNewMatch} />
+			{matchPhase === "finished" && <ResultBanner />}
 			<div style={{ flex: 1, overflow: "hidden", display: "flex" }}>
-				<div style={{ flex: 1, minWidth: 0 }}>
-					{displayState ? (
-						<MazeRenderer gameState={displayState} />
-					) : previewError ? (
-						<Center h="100%">
-							<Text c="red" size="sm">
-								{previewError}
-							</Text>
-						</Center>
-					) : (
-						<Center h="100%">
-							<Text c="dimmed" size="sm">
-								Generating preview…
-							</Text>
-						</Center>
-					)}
-				</div>
-				{botInfo && Object.keys(botInfo).length > 0 && (
-					<ThinkingPanel botInfo={botInfo} />
-				)}
+				<MazeColumn
+					connecting={matchPhase === "connecting"}
+					displayState={displayState}
+					previewError={previewError}
+					hasMatch={hasMatch}
+				/>
+				{hasMatch && <ThinkingPanel botInfo={botInfo ?? {}} />}
 			</div>
 		</Stack>
 	);

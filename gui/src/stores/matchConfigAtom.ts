@@ -51,7 +51,7 @@ export const PRESET_VALUES: Record<
 	},
 	small: {
 		width: 15,
-		height: 11,
+		height: 13,
 		max_turns: 200,
 		cheese_count: 21,
 		...CLASSIC_MAZE,
@@ -87,17 +87,53 @@ export const PRESET_VALUES: Record<
 };
 
 export const DEFAULT_MATCH_CONFIG: MatchConfigParams = {
-	preset: "medium",
+	preset: "custom",
 	...PRESET_VALUES.medium,
 	seed: null,
 };
+
+// ---------------------------------------------------------------------------
+// Preset detection — pure functions for matching current values to presets
+// ---------------------------------------------------------------------------
+
+/** Derive which size preset matches, or null if custom. */
+export function detectSizePreset(d: MatchConfigParams): PresetName | null {
+	for (const [name, vals] of Object.entries(PRESET_VALUES)) {
+		if (name === "open") continue;
+		if (
+			d.width === vals.width &&
+			d.height === vals.height &&
+			d.max_turns === vals.max_turns &&
+			d.cheese_count === vals.cheese_count
+		)
+			return name as PresetName;
+	}
+	return null;
+}
+
+/** Derive maze type from density values. */
+export function detectMazeType(
+	d: MatchConfigParams,
+): "classic" | "open" | null {
+	if (
+		d.wall_density === OPEN_MAZE.wall_density &&
+		d.mud_density === OPEN_MAZE.mud_density
+	)
+		return "open";
+	if (
+		d.wall_density === CLASSIC_MAZE.wall_density &&
+		d.mud_density === CLASSIC_MAZE.mud_density &&
+		d.mud_range === CLASSIC_MAZE.mud_range
+	)
+		return "classic";
+	return null;
+}
 
 // ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
 
 export function validate(c: MatchConfigParams): Record<string, string> {
-	if (c.preset !== "custom") return {};
 	const errors: Record<string, string> = {};
 	if (c.width < 2) errors.width = "Min 2";
 	if (c.height < 2) errors.height = "Min 2";

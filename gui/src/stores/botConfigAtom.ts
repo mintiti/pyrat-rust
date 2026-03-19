@@ -32,3 +32,14 @@ export const asyncBotsAtom = atom(
  * then tracks the latest value. Components read this, write asyncBotsAtom.
  */
 export const botsAtom = unwrap(asyncBotsAtom, (prev) => prev ?? []);
+
+/** Resolve a bot ID to a display name. */
+export function resolveBotName(
+	botId: string | null,
+	bots: { id: string; name: string }[],
+	fallback: string,
+): string {
+	if (!botId) return fallback;
+	if (botId === RANDOM_BOT_ID) return "Random";
+	return bots.find((b) => b.id === botId)?.name ?? fallback;
+}
