@@ -4,10 +4,11 @@ use pyrat::game::builder::{GameBuilder, GameConfig, MazeParams};
 use pyrat::game::game_logic::GameState;
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use tokio::sync::{mpsc, oneshot};
 
-use crate::events::{MatchErrorEvent, MatchStartedEvent};
-use crate::match_runner::{run_match, PlayerSetup};
-use crate::state::{AppState, MatchPhase};
+use crate::events::{Direction as SpectaDirection, MatchErrorEvent, MatchStartedEvent};
+use crate::match_runner::{run_match, specta_to_wire, wire_to_specta, PlayerSetup};
+use crate::state::{AnalysisCmd, AnalysisResp, AnalysisTx, AppState, MatchPhase};
 
 // ---------------------------------------------------------------------------
 // MatchConfigParams — flat DTO for the frontend
@@ -252,6 +253,7 @@ pub async fn stop_match(state: tauri::State<'_, AppState>) -> Result<(), String>
 
 #[tauri::command]
 #[specta::specta]
+#[allow(clippy::too_many_arguments)]
 pub async fn start_match(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
@@ -260,11 +262,13 @@ pub async fn start_match(
     player1_working_dir: Option<String>,
     player2_working_dir: Option<String>,
     config: Option<MatchConfigParams>,
+    step_mode: Option<bool>,
 ) -> Result<(), String> {
     use tauri_specta::Event;
     use tokio_util::sync::CancellationToken;
 
     let params = config.unwrap_or_default();
+    let step = step_mode.unwrap_or(false);
 
     // Cancel existing match and wait for cleanup before proceeding.
     cancel_running_match(&state.match_phase).await;
@@ -283,6 +287,14 @@ pub async fn start_match(
     }
     .emit(&app)
     .map_err(|e| e.to_string())?;
+
+    // Create analysis channel if step mode
+    let (cmd_tx_for_phase, cmd_rx) = if step {
+        let (tx, rx) = mpsc::channel(4);
+        (Some(tx), Some(rx))
+    } else {
+        (None, None)
+    };
 
     let app_handle = app.clone();
     let match_phase = state.match_phase.clone();
@@ -304,12 +316,11 @@ pub async fn start_match(
             ],
             cancel,
             match_id,
+            cmd_rx,
         )
         .await;
 
         if let Err(e) = &result {
-            // Don't emit error for expected cancellation — the new match's
-            // MatchStartedEvent already reset the frontend.
             if !cancel_check.is_cancelled() {
                 let _ = MatchErrorEvent {
                     match_id,
@@ -331,17 +342,109 @@ pub async fn start_match(
         }
     });
 
-    // Set Running AFTER spawn so we have the JoinHandle.
-    // Brief race window: if another start_match arrives here, it sees Idle and
-    // skips cancellation. Harmless — both tasks check match_id before cleanup.
     {
         let mut phase = state.match_phase.lock().await;
         *phase = MatchPhase::Running {
             match_id,
             cancel: cancel_for_phase,
             handle,
+            cmd_tx: cmd_tx_for_phase,
         };
     }
 
     Ok(())
+}
+
+// ── Analysis commands ───────────────────────────────
+
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct StopAnalysisResult {
+    pub player1_action: SpectaDirection,
+    pub player2_action: SpectaDirection,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct AdvanceAnalysisResult {
+    pub player1_action: SpectaDirection,
+    pub player2_action: SpectaDirection,
+    pub game_over: bool,
+}
+
+/// Get a clone of the analysis channel sender, if the match is in step mode.
+async fn get_cmd_tx(match_phase: &tokio::sync::Mutex<MatchPhase>) -> Result<AnalysisTx, String> {
+    let phase = match_phase.lock().await;
+    match &*phase {
+        MatchPhase::Running {
+            cmd_tx: Some(tx), ..
+        } => Ok(tx.clone()),
+        MatchPhase::Running { cmd_tx: None, .. } => Err("match is not in step mode".into()),
+        MatchPhase::Idle => Err("no match running".into()),
+    }
+}
+
+/// Send an analysis command and await the response.
+async fn send_analysis_cmd(tx: &AnalysisTx, cmd: AnalysisCmd) -> Result<AnalysisResp, String> {
+    let (reply_tx, reply_rx) = oneshot::channel();
+    tx.send((cmd, reply_tx))
+        .await
+        .map_err(|_| "analysis loop exited".to_string())?;
+    reply_rx
+        .await
+        .map_err(|_| "analysis loop dropped reply".to_string())
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn start_analysis_turn(
+    state: tauri::State<'_, AppState>,
+    duration_ms: u64,
+) -> Result<(), String> {
+    let tx = get_cmd_tx(&state.match_phase).await?;
+    let resp = send_analysis_cmd(&tx, AnalysisCmd::StartTurn { duration_ms }).await?;
+    match resp {
+        AnalysisResp::TurnStarted => Ok(()),
+        AnalysisResp::Error(e) => Err(e),
+        _ => Err("unexpected response".into()),
+    }
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn stop_analysis(
+    state: tauri::State<'_, AppState>,
+) -> Result<StopAnalysisResult, String> {
+    let tx = get_cmd_tx(&state.match_phase).await?;
+    let resp = send_analysis_cmd(&tx, AnalysisCmd::StopCollect).await?;
+    match resp {
+        AnalysisResp::Actions { p1, p2 } => Ok(StopAnalysisResult {
+            player1_action: wire_to_specta(p1),
+            player2_action: wire_to_specta(p2),
+        }),
+        AnalysisResp::Error(e) => Err(e),
+        _ => Err("unexpected response".into()),
+    }
+}
+
+#[tauri::command]
+#[specta::specta]
+pub async fn advance_analysis(
+    state: tauri::State<'_, AppState>,
+    player1_action: Option<SpectaDirection>,
+    player2_action: Option<SpectaDirection>,
+) -> Result<AdvanceAnalysisResult, String> {
+    let tx = get_cmd_tx(&state.match_phase).await?;
+    let actions = match (player1_action, player2_action) {
+        (Some(a1), Some(a2)) => Some([specta_to_wire(a1), specta_to_wire(a2)]),
+        _ => None,
+    };
+    let resp = send_analysis_cmd(&tx, AnalysisCmd::Advance { actions }).await?;
+    match resp {
+        AnalysisResp::Advanced { p1, p2, game_over } => Ok(AdvanceAnalysisResult {
+            player1_action: wire_to_specta(p1),
+            player2_action: wire_to_specta(p2),
+            game_over,
+        }),
+        AnalysisResp::Error(e) => Err(e),
+        _ => Err("unexpected response".into()),
+    }
 }

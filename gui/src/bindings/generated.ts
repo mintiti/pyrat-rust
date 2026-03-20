@@ -13,9 +13,9 @@ async getGameState(config: MatchConfigParams | null) : Promise<Result<MazeState,
     else return { status: "error", error: e  as any };
 }
 },
-async startMatch(player1Cmd: string, player2Cmd: string, player1WorkingDir: string | null, player2WorkingDir: string | null, config: MatchConfigParams | null) : Promise<Result<null, string>> {
+async startMatch(player1Cmd: string, player2Cmd: string, player1WorkingDir: string | null, player2WorkingDir: string | null, config: MatchConfigParams | null, stepMode: boolean | null) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("start_match", { player1Cmd, player2Cmd, player1WorkingDir, player2WorkingDir, config }) };
+    return { status: "ok", data: await TAURI_INVOKE("start_match", { player1Cmd, player2Cmd, player1WorkingDir, player2WorkingDir, config, stepMode }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -24,6 +24,30 @@ async startMatch(player1Cmd: string, player2Cmd: string, player1WorkingDir: stri
 async stopMatch() : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("stop_match") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async startAnalysisTurn(durationMs: number) : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("start_analysis_turn", { durationMs }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async stopAnalysis() : Promise<Result<StopAnalysisResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stop_analysis") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async advanceAnalysis(player1Action: Direction | null, player2Action: Direction | null) : Promise<Result<AdvanceAnalysisResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("advance_analysis", { player1Action, player2Action }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -88,6 +112,7 @@ turnPlayedEvent: "turn-played-event"
 
 /** user-defined types **/
 
+export type AdvanceAnalysisResult = { player1_action: Direction; player2_action: Direction; game_over: boolean }
 export type BotConfigEntry = { id: string; name: string; command: string; working_dir: string | null }
 /**
  * Emitted when a bot disconnects mid-game.
@@ -135,6 +160,7 @@ export type MudEntry = { from: Coord; to: Coord; cost: number }
  */
 export type PlayerSide = "Player1" | "Player2"
 export type PlayerState = { position: Coord; score: number; mud_turns: number }
+export type StopAnalysisResult = { player1_action: Direction; player2_action: Direction }
 /**
  * Per-turn delta. Walls/mud never change, so we only send positions + cheese.
  */

@@ -53,6 +53,32 @@ impl PlayingState {
             last_p2: WireDirection::Stay,
         }
     }
+
+    /// Build the turn state for the current game position.
+    pub fn build_turn_state(&self, game: &GameState) -> OwnedTurnState {
+        build_turn_state(game, self.last_p1, self.last_p2)
+    }
+
+    /// Record the actions taken this turn (updates last moves for next turn state).
+    pub fn record_actions(&mut self, p1: WireDirection, p2: WireDirection) {
+        self.last_p1 = p1;
+        self.last_p2 = p2;
+    }
+
+    /// Map of session ID to controlled players.
+    pub fn session_players(&self) -> &HashMap<SessionId, Vec<Player>> {
+        &self.session_players
+    }
+
+    /// Set of disconnected session IDs.
+    pub fn disconnected(&self) -> &HashSet<SessionId> {
+        &self.disconnected
+    }
+
+    /// Mutable access to disconnected set.
+    pub fn disconnected_mut(&mut self) -> &mut HashSet<SessionId> {
+        &mut self.disconnected
+    }
 }
 
 /// Outcome of a single turn.
@@ -76,11 +102,11 @@ pub enum PlayingError {
 /// Convert a wire Direction (u8 newtype) to an engine Direction enum.
 ///
 /// Same discriminant values: Up=0, Right=1, Down=2, Left=3, Stay=4.
-fn wire_to_engine(d: WireDirection) -> EngineDirection {
+pub fn wire_to_engine(d: WireDirection) -> EngineDirection {
     EngineDirection::try_from(d.0).unwrap_or(EngineDirection::Stay)
 }
 
-fn engine_to_wire(d: EngineDirection) -> WireDirection {
+pub fn engine_to_wire(d: EngineDirection) -> WireDirection {
     WireDirection(d as u8)
 }
 
@@ -383,7 +409,7 @@ fn both_filled(p1: Option<WireDirection>, p2: Option<WireDirection>) -> bool {
     p1.is_some() && p2.is_some()
 }
 
-fn determine_result(game: &GameState) -> MatchResult {
+pub fn determine_result(game: &GameState) -> MatchResult {
     let p1 = game.player1.score;
     let p2 = game.player2.score;
     let result = if p1 > p2 {

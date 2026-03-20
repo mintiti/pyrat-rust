@@ -170,6 +170,7 @@ export default function MatchView({ onNewMatch }: Props) {
 			p1.workingDir,
 			p2.workingDir,
 			configWithSeed,
+			null,
 		);
 		if (res.status === "error") {
 			useMatchStore.getState().onError(res.error);
