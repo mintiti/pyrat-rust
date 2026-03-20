@@ -156,7 +156,6 @@ const IDLE_MATCH = {
 	result: null as MatchOverEvent | null,
 	error: null as string | null,
 	disconnection: null as BotDisconnectedEvent | null,
-	mode: "auto" as MatchMode,
 	matchPhase: "idle" as MatchPhase,
 	autoplay: true,
 };
@@ -164,6 +163,7 @@ const IDLE_MATCH = {
 export const useMatchStore = create<MatchState>((set, get) => ({
 	// ── Initial state ────────────────────────────────────────
 	...IDLE_MATCH,
+	mode: "auto" as MatchMode,
 	player1BotId: RANDOM_BOT_ID,
 	player2BotId: RANDOM_BOT_ID,
 	previewMaze: null,
@@ -180,7 +180,6 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 
 	// ── Event handlers ───────────────────────────────────────
 	onMatchStarted: (maze, matchId) => {
-		const { mode } = get();
 		const root: GameNode = {
 			turn: maze.turn,
 			player1: maze.player1,
@@ -190,9 +189,9 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 			botInfo: {},
 			children: [],
 		};
+		const { mode } = get();
 		set({
 			...IDLE_MATCH,
-			mode,
 			matchId,
 			mazeConfig: {
 				width: maze.width,
@@ -240,7 +239,10 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 							c.player2.position.y === e.player2.position.y &&
 							c.player2.score === e.player2.score &&
 							c.player2.mud_turns === e.player2.mud_turns &&
-							c.cheese.length === e.cheese.length,
+							c.cheese.length === e.cheese.length &&
+							c.cheese.every(
+								(ch, i) => ch.x === e.cheese[i].x && ch.y === e.cheese[i].y,
+							),
 					);
 					if (existingIdx >= 0) {
 						state.cursor = [...state.cursor, existingIdx];
@@ -312,13 +314,15 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		const { mode, matchPhase } = get();
 		if (mode !== "step" || matchPhase !== "playing") return;
 		const res = await commands.startAnalysisTurn(0);
-		if (res.status === "error") console.error("startAnalysis:", res.error);
+		if (res.status === "error") get().onError(res.error);
 	},
 
 	stopAnalysis: async () => {
+		const { mode, matchPhase } = get();
+		if (mode !== "step" || matchPhase !== "playing") return null;
 		const res = await commands.stopAnalysisTurn();
 		if (res.status === "error") {
-			console.error("stopAnalysis:", res.error);
+			get().onError(res.error);
 			return null;
 		}
 		return {
@@ -335,13 +339,11 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		if (!node || node.children.length > 0) return;
 		const res = await commands.advanceAnalysis(actions ?? null);
 		if (res.status === "error") {
-			console.error("advanceTurn:", res.error);
+			get().onError(res.error);
 			return;
 		}
 		// Tree mutation + cursor advance happens in onTurnPlayed
-		if (res.data.game_over) {
-			// Match will end via onMatchOver event
-		}
+		// game_over: match will end via onMatchOver event
 	},
 
 	// ── Navigation ───────────────────────────────────────────
