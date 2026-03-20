@@ -11,7 +11,7 @@ use pyrat_host::wire::Direction as WireDirection;
 
 pub enum AnalysisCmd {
     StartTurn { duration_ms: u64 },
-    StopCollect,
+    StopTurn,
     Advance { actions: Option<[WireDirection; 2]> },
 }
 

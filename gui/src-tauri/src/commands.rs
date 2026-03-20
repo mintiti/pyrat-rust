@@ -10,6 +10,13 @@ use crate::events::{Direction as SpectaDirection, MatchErrorEvent, MatchStartedE
 use crate::match_runner::{run_match, specta_to_wire, wire_to_specta, PlayerSetup};
 use crate::state::{AnalysisCmd, AnalysisResp, AnalysisTx, AppState, MatchPhase};
 
+/// Pair of player actions for `advance_analysis`. Both must be provided together.
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct AnalysisActions {
+    pub player1: SpectaDirection,
+    pub player2: SpectaDirection,
+}
+
 // ---------------------------------------------------------------------------
 // MatchConfigParams — flat DTO for the frontend
 // ---------------------------------------------------------------------------
@@ -358,7 +365,7 @@ pub async fn start_match(
 // ── Analysis commands ───────────────────────────────
 
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
-pub struct StopAnalysisResult {
+pub struct StopAnalysisTurnResult {
     pub player1_action: SpectaDirection,
     pub player2_action: SpectaDirection,
 }
@@ -410,13 +417,13 @@ pub async fn start_analysis_turn(
 
 #[tauri::command]
 #[specta::specta]
-pub async fn stop_analysis(
+pub async fn stop_analysis_turn(
     state: tauri::State<'_, AppState>,
-) -> Result<StopAnalysisResult, String> {
+) -> Result<StopAnalysisTurnResult, String> {
     let tx = get_cmd_tx(&state.match_phase).await?;
-    let resp = send_analysis_cmd(&tx, AnalysisCmd::StopCollect).await?;
+    let resp = send_analysis_cmd(&tx, AnalysisCmd::StopTurn).await?;
     match resp {
-        AnalysisResp::Actions { p1, p2 } => Ok(StopAnalysisResult {
+        AnalysisResp::Actions { p1, p2 } => Ok(StopAnalysisTurnResult {
             player1_action: wire_to_specta(p1),
             player2_action: wire_to_specta(p2),
         }),
@@ -429,14 +436,10 @@ pub async fn stop_analysis(
 #[specta::specta]
 pub async fn advance_analysis(
     state: tauri::State<'_, AppState>,
-    player1_action: Option<SpectaDirection>,
-    player2_action: Option<SpectaDirection>,
+    actions: Option<AnalysisActions>,
 ) -> Result<AdvanceAnalysisResult, String> {
     let tx = get_cmd_tx(&state.match_phase).await?;
-    let actions = match (player1_action, player2_action) {
-        (Some(a1), Some(a2)) => Some([specta_to_wire(a1), specta_to_wire(a2)]),
-        _ => None,
-    };
+    let actions = actions.map(|a| [specta_to_wire(a.player1), specta_to_wire(a.player2)]);
     let resp = send_analysis_cmd(&tx, AnalysisCmd::Advance { actions }).await?;
     match resp {
         AnalysisResp::Advanced { p1, p2, game_over } => Ok(AdvanceAnalysisResult {

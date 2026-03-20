@@ -237,6 +237,7 @@ use pyrat_host::game_loop::SessionHandle;
 enum AnalysisPhase {
     Idle,
     Collecting {
+        turn: u16,
         p1_action: Option<WireDirection>,
         p2_action: Option<WireDirection>,
         deadline: Option<tokio::time::Instant>,
@@ -276,13 +277,13 @@ async fn run_analysis_inner(
                     AnalysisCmd::StartTurn { duration_ms } => {
                         // If collecting, stop + drain first
                         if collecting {
-                            send_stop(sessions, &playing).await;
+                            send_stop(sessions, &mut playing).await;
                             drain_rx(game_rx);
                         }
 
                         // Build and send turn state to all connected sessions
                         let turn_state = playing.build_turn_state(game);
-                        send_turn_state(sessions, &playing, &turn_state).await;
+                        send_turn_state(sessions, &mut playing, &turn_state).await;
 
                         let dl = if duration_ms > 0 {
                             Some(tokio::time::Instant::now() + Duration::from_millis(duration_ms))
@@ -291,6 +292,7 @@ async fn run_analysis_inner(
                         };
 
                         phase = AnalysisPhase::Collecting {
+                            turn: game.turn,
                             p1_action: None,
                             p2_action: None,
                             deadline: dl,
@@ -298,7 +300,7 @@ async fn run_analysis_inner(
                         let _ = reply.send(AnalysisResp::TurnStarted);
                     }
 
-                    AnalysisCmd::StopCollect => {
+                    AnalysisCmd::StopTurn => {
                         let (p1, p2) = finish_collecting(
                             sessions, &mut playing, game_rx, &mut phase, event_tx,
                         ).await;
@@ -336,7 +338,7 @@ async fn run_analysis_inner(
 
                         if result.game_over {
                             let match_result = determine_result(game);
-                            send_game_over(sessions, &playing, &match_result).await;
+                            send_game_over(sessions, &mut playing, &match_result).await;
                             emit_event(event_tx, MatchEvent::MatchOver {
                                 result: match_result,
                             });
@@ -347,8 +349,9 @@ async fn run_analysis_inner(
                         }
 
                         // Auto-start new analysis turn (no deadline)
-                        send_turn_state(sessions, &playing, &turn_state).await;
+                        send_turn_state(sessions, &mut playing, &turn_state).await;
                         phase = AnalysisPhase::Collecting {
+                            turn: game.turn,
                             p1_action: None,
                             p2_action: None,
                             deadline: None,
@@ -362,12 +365,12 @@ async fn run_analysis_inner(
 
             msg = game_rx.recv(), if collecting => {
                 let Some(msg) = msg else { break; };
-                handle_bot_msg(msg, game.turn, &mut phase, &mut playing, event_tx);
+                handle_bot_msg(msg, &mut phase, &mut playing, event_tx);
             }
 
             _ = tokio::time::sleep_until(deadline), if collecting && has_deadline => {
                 // Deadline hit: send Stop to all sessions, remove deadline
-                send_stop(sessions, &playing).await;
+                send_stop(sessions, &mut playing).await;
                 if let AnalysisPhase::Collecting { deadline: ref mut dl, .. } = phase {
                     *dl = None;
                 }
@@ -380,10 +383,12 @@ async fn run_analysis_inner(
 }
 
 /// Send HostCommand::Stop to all connected sessions.
-async fn send_stop(sessions: &[SessionHandle], playing: &PlayingState) {
+async fn send_stop(sessions: &[SessionHandle], playing: &mut PlayingState) {
     for s in sessions {
-        if !playing.disconnected().contains(&s.session_id) {
-            let _ = s.cmd_tx.send(HostCommand::Stop).await;
+        if !playing.disconnected().contains(&s.session_id)
+            && s.cmd_tx.send(HostCommand::Stop).await.is_err()
+        {
+            playing.disconnected_mut().insert(s.session_id);
         }
     }
 }
@@ -391,15 +396,17 @@ async fn send_stop(sessions: &[SessionHandle], playing: &PlayingState) {
 /// Send a TurnState to all connected sessions.
 async fn send_turn_state(
     sessions: &[SessionHandle],
-    playing: &PlayingState,
+    playing: &mut PlayingState,
     turn_state: &pyrat_host::game_loop::OwnedTurnState,
 ) {
     for s in sessions {
-        if !playing.disconnected().contains(&s.session_id) {
-            let _ = s
-                .cmd_tx
+        if !playing.disconnected().contains(&s.session_id)
+            && s.cmd_tx
                 .send(HostCommand::TurnState(Box::new(turn_state.clone())))
-                .await;
+                .await
+                .is_err()
+        {
+            playing.disconnected_mut().insert(s.session_id);
         }
     }
 }
@@ -407,19 +414,21 @@ async fn send_turn_state(
 /// Send GameOver to all connected sessions.
 async fn send_game_over(
     sessions: &[SessionHandle],
-    playing: &PlayingState,
+    playing: &mut PlayingState,
     result: &pyrat_host::game_loop::MatchResult,
 ) {
     for s in sessions {
-        if !playing.disconnected().contains(&s.session_id) {
-            let _ = s
-                .cmd_tx
+        if !playing.disconnected().contains(&s.session_id)
+            && s.cmd_tx
                 .send(HostCommand::GameOver {
                     result: result.result,
                     player1_score: result.player1_score,
                     player2_score: result.player2_score,
                 })
-                .await;
+                .await
+                .is_err()
+        {
+            playing.disconnected_mut().insert(s.session_id);
         }
     }
 }
@@ -437,13 +446,14 @@ async fn finish_collecting(
     phase: &mut AnalysisPhase,
     event_tx: &mpsc::UnboundedSender<MatchEvent>,
 ) -> (WireDirection, WireDirection) {
-    // Extract current action slots
-    let (mut p1, mut p2) = match phase {
+    // Extract current action slots and turn
+    let (current_turn, mut p1, mut p2) = match phase {
         AnalysisPhase::Collecting {
+            turn,
             p1_action,
             p2_action,
             ..
-        } => (*p1_action, *p2_action),
+        } => (*turn, *p1_action, *p2_action),
         AnalysisPhase::Idle => {
             return (WireDirection::Stay, WireDirection::Stay);
         },
@@ -484,7 +494,7 @@ async fn finish_collecting(
                             if let Some(&sender) = players.first() {
                                 emit_event(event_tx, MatchEvent::BotInfo {
                                     sender,
-                                    turn: 0, // turn context lost during drain
+                                    turn: current_turn,
                                     info,
                                 });
                             }
@@ -519,17 +529,17 @@ async fn finish_collecting(
 /// Handle a bot message during the Collecting phase.
 fn handle_bot_msg(
     msg: SessionMsg,
-    current_turn: u16,
     phase: &mut AnalysisPhase,
     playing: &mut PlayingState,
     event_tx: &mpsc::UnboundedSender<MatchEvent>,
 ) {
-    let (p1_action, p2_action) = match phase {
+    let (current_turn, p1_action, p2_action) = match phase {
         AnalysisPhase::Collecting {
+            turn,
             p1_action,
             p2_action,
             ..
-        } => (p1_action, p2_action),
+        } => (*turn, p1_action, p2_action),
         _ => return,
     };
 
