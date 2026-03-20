@@ -6,12 +6,15 @@ import {
 	IconChevronsRight,
 	IconPlayerPause,
 	IconPlayerPlay,
+	IconPlayerTrackNext,
 } from "@tabler/icons-react";
 import { useAtomValue } from "jotai";
 import { useState } from "react";
 import { botsAtom, resolveBotName } from "../stores/botConfigAtom";
 import {
+	getNodeAtPath,
 	useCursorDepth,
+	useIsAtTip,
 	useMainlineLength,
 	useMatchStore,
 } from "../stores/matchStore";
@@ -59,10 +62,24 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 		goLive,
 		setPlaybackSpeed,
 		resetToPreview,
+		advanceTurn,
 	} = useMatchStore.getState();
 
 	const cursorDepth = useCursorDepth();
 	const totalTurns = useMainlineLength();
+	const isAtTip = useIsAtTip();
+
+	const handleStepForward = () => {
+		const s = useMatchStore.getState();
+		if (s.mode === "step" && s.root) {
+			const node = getNodeAtPath(s.root, s.cursor);
+			if (!node || node.children.length === 0) {
+				s.advanceTurn();
+				return;
+			}
+		}
+		stepForward();
+	};
 
 	const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -114,13 +131,26 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 					>
 						<IconChevronLeft size={16} />
 					</ActionIcon>
-					<ActionIcon variant="subtle" size="sm" onClick={togglePlay}>
-						{autoplay ? (
-							<IconPlayerPause size={16} />
-						) : (
-							<IconPlayerPlay size={16} />
-						)}
-					</ActionIcon>
+					{mode === "auto" && (
+						<ActionIcon variant="subtle" size="sm" onClick={togglePlay}>
+							{autoplay ? (
+								<IconPlayerPause size={16} />
+							) : (
+								<IconPlayerPlay size={16} />
+							)}
+						</ActionIcon>
+					)}
+					{mode === "step" && (
+						<Button
+							size="compact-xs"
+							variant="light"
+							leftSection={<IconPlayerTrackNext size={14} />}
+							onClick={() => advanceTurn()}
+							disabled={!isAtTip || matchPhase !== "playing"}
+						>
+							Advance
+						</Button>
+					)}
 					{mode === "auto" &&
 						matchPhase === "playing" &&
 						cursorDepth < mainlineDepth && (
@@ -137,8 +167,8 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 					<ActionIcon
 						variant="subtle"
 						size="sm"
-						onClick={stepForward}
-						disabled={cursorDepth >= totalTurns}
+						onClick={handleStepForward}
+						disabled={mode === "auto" ? cursorDepth >= totalTurns : false}
 					>
 						<IconChevronRight size={16} />
 					</ActionIcon>
@@ -150,16 +180,20 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 					>
 						<IconChevronsRight size={16} />
 					</ActionIcon>
-					<Select
-						size="xs"
-						data={SPEED_OPTIONS}
-						value={String(playbackSpeed)}
-						onChange={(v) => v && setPlaybackSpeed(Number(v))}
-						allowDeselect={false}
-						style={{ width: 80 }}
-					/>
+					{mode === "auto" && (
+						<Select
+							size="xs"
+							data={SPEED_OPTIONS}
+							value={String(playbackSpeed)}
+							onChange={(v) => v && setPlaybackSpeed(Number(v))}
+							allowDeselect={false}
+							style={{ width: 80 }}
+						/>
+					)}
 					<Text size="xs" c="dimmed" ml={4}>
-						Turn {cursorDepth} / {totalTurns}
+						{mode === "step"
+							? `Turn ${cursorDepth}`
+							: `Turn ${cursorDepth} / ${totalTurns}`}
 					</Text>
 				</Group>
 			)}

@@ -98,6 +98,7 @@ interface MatchState {
 	mode: MatchMode;
 	matchPhase: MatchPhase;
 	autoplay: boolean;
+	analyzing: boolean;
 	playbackSpeed: number; // ms between frames
 	showPlayer1Arrows: boolean;
 	showPlayer2Arrows: boolean;
@@ -158,6 +159,7 @@ const IDLE_MATCH = {
 	disconnection: null as BotDisconnectedEvent | null,
 	matchPhase: "idle" as MatchPhase,
 	autoplay: true,
+	analyzing: false,
 };
 
 export const useMatchStore = create<MatchState>((set, get) => ({
@@ -313,6 +315,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	startAnalysis: async () => {
 		const { mode, matchPhase } = get();
 		if (mode !== "step" || matchPhase !== "playing") return;
+		set({ analyzing: true });
 		const res = await commands.startAnalysisTurn(0);
 		if (res.status === "error") get().onError(res.error);
 	},
@@ -321,6 +324,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		const { mode, matchPhase } = get();
 		if (mode !== "step" || matchPhase !== "playing") return null;
 		const res = await commands.stopAnalysisTurn();
+		set({ analyzing: false });
 		if (res.status === "error") {
 			get().onError(res.error);
 			return null;
@@ -348,7 +352,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 
 	// ── Navigation ───────────────────────────────────────────
 	goToStart: () => {
-		set({ cursor: [], autoplay: false });
+		set({ cursor: [], autoplay: false, analyzing: false });
 	},
 
 	goToEnd: () => {
@@ -361,9 +365,13 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 				path.push(0);
 				node = node.children[0];
 			}
-			set({ cursor: path, autoplay: false });
+			set({ cursor: path, autoplay: false, analyzing: false });
 		} else {
-			set({ cursor: mainlinePath(mainlineDepth), autoplay: false });
+			set({
+				cursor: mainlinePath(mainlineDepth),
+				autoplay: false,
+				analyzing: false,
+			});
 		}
 	},
 
@@ -372,13 +380,13 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		if (!root) return;
 		const node = getNodeAtPath(root, cursor);
 		if (!node || node.children.length === 0) return;
-		set({ cursor: [...cursor, 0], autoplay: false });
+		set({ cursor: [...cursor, 0], autoplay: false, analyzing: false });
 	},
 
 	stepBack: () => {
 		const { cursor } = get();
 		if (cursor.length === 0) return;
-		set({ cursor: cursor.slice(0, -1), autoplay: false });
+		set({ cursor: cursor.slice(0, -1), autoplay: false, analyzing: false });
 	},
 
 	stepForwardIntoVariation: (idx) => {
@@ -386,7 +394,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		if (!root) return;
 		const node = getNodeAtPath(root, cursor);
 		if (!node || idx < 0 || idx >= node.children.length) return;
-		set({ cursor: [...cursor, idx], autoplay: false });
+		set({ cursor: [...cursor, idx], autoplay: false, analyzing: false });
 	},
 
 	cycleVariation: (delta) => {
@@ -401,6 +409,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		set({
 			cursor: [...parentPath, newIdx],
 			autoplay: false,
+			analyzing: false,
 		});
 	},
 
@@ -415,11 +424,25 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 			path.push(0);
 			node = node.children[0];
 		}
-		set({ cursor: path, autoplay: false });
+		set({ cursor: path, autoplay: false, analyzing: false });
 	},
 
 	goToTurn: (n) => {
-		set({ cursor: mainlinePath(n), autoplay: false });
+		const { cursor, root } = get();
+		if (!root) return;
+		if (n <= cursor.length) {
+			// Truncate to depth n on current branch
+			set({ cursor: cursor.slice(0, n), autoplay: false, analyzing: false });
+		} else {
+			// Extend along children[0] from cursor tip
+			const extended = [...cursor];
+			let node = getNodeAtPath(root, extended);
+			while (node && extended.length < n && node.children.length > 0) {
+				extended.push(0);
+				node = node.children[0];
+			}
+			set({ cursor: extended, autoplay: false, analyzing: false });
+		}
 	},
 
 	togglePlay: () => {
