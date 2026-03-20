@@ -233,7 +233,10 @@ async fn reader_task<R: AsyncRead + Unpin>(
                 pong_sender.send(&build_pong());
             },
             Ok(msg) => {
-                if matches!(&msg, HostMsg::Stop | HostMsg::Timeout { .. }) {
+                if matches!(
+                    &msg,
+                    HostMsg::Stop | HostMsg::Timeout { .. } | HostMsg::GameOver { .. }
+                ) {
                     stopped.store(true, Ordering::Relaxed);
                 }
                 let _ = msg_tx.send(msg);
