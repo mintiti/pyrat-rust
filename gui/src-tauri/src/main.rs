@@ -2,6 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod bot_discovery;
+mod bot_probe;
 mod commands;
 mod events;
 mod json_store;
@@ -10,6 +11,7 @@ mod match_runner;
 mod state;
 
 use bot_discovery::{discover_bots, load_scan_paths, save_scan_paths};
+use bot_probe::probe_bot;
 use commands::{
     advance_analysis, get_game_state, start_analysis_turn, start_match, stop_analysis_turn,
     stop_match,
@@ -41,7 +43,8 @@ fn main() {
             save_scan_paths,
             discover_bots,
             load_match_config,
-            save_match_config
+            save_match_config,
+            probe_bot
         ])
         .events(collect_events![
             MatchStartedEvent,

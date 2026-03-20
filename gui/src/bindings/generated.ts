@@ -13,9 +13,9 @@ async getGameState(config: MatchConfigParams | null) : Promise<Result<MazeState,
     else return { status: "error", error: e  as any };
 }
 },
-async startMatch(player1Cmd: string, player2Cmd: string, player1WorkingDir: string | null, player2WorkingDir: string | null, player1AgentId: string, player2AgentId: string, config: MatchConfigParams | null, stepMode: boolean | null) : Promise<Result<null, string>> {
+async startMatch(player1Cmd: string, player2Cmd: string, player1WorkingDir: string | null, player2WorkingDir: string | null, player1AgentId: string, player2AgentId: string, config: MatchConfigParams | null, stepMode: boolean | null, botOptions: MatchBotOptions | null) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("start_match", { player1Cmd, player2Cmd, player1WorkingDir, player2WorkingDir, player1AgentId, player2AgentId, config, stepMode }) };
+    return { status: "ok", data: await TAURI_INVOKE("start_match", { player1Cmd, player2Cmd, player1WorkingDir, player2WorkingDir, player1AgentId, player2AgentId, config, stepMode, botOptions }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -87,6 +87,14 @@ async saveMatchConfig(config: MatchConfigParams) : Promise<Result<null, string>>
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async probeBot(runCommand: string, workingDir: string, agentId: string) : Promise<Result<BotProbeResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("probe_bot", { runCommand, workingDir, agentId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -128,6 +136,13 @@ export type BotDisconnectedEvent = { match_id: number; player: PlayerSide; reaso
  * Bot debug/analysis info forwarded from the host event stream.
  */
 export type BotInfoEvent = { match_id: number; sender: PlayerSide; subject: PlayerSide; turn: number; multipv: number; target: Coord | null; depth: number; nodes: number; score: number | null; pv: Direction[]; message: string }
+export type BotOptionDef = { name: string; option_type: BotOptionType; default_value: string; min: number; max: number; choices: string[] }
+export type BotOptionType = "Check" | "Spin" | "Combo" | "String" | "Button"
+/**
+ * A single option name-value pair for configuring a bot before match start.
+ */
+export type BotOptionValue = { name: string; value: string }
+export type BotProbeResult = { name: string; author: string; agent_id: string; options: BotOptionDef[] }
 export type Coord = { x: number; y: number }
 /**
  * Movement direction — specta-friendly mirror of pyrat_wire::Direction.
@@ -138,6 +153,10 @@ export type DiscoveredBot = { agent_id: string; name: string; run_command: strin
  * Absolute path to the directory containing bot.toml.
  */
 working_dir: string; description: string; developer: string; language: string; tags: string[] }
+/**
+ * Per-player option overrides, bundled so start_match stays under specta's 10-arg limit.
+ */
+export type MatchBotOptions = { player1?: BotOptionValue[]; player2?: BotOptionValue[] }
 export type MatchConfigParams = {
 /**
  * Named preset, or "custom" for manual configuration.

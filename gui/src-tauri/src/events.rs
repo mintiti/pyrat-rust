@@ -15,7 +15,7 @@ pub enum Direction {
 }
 
 /// Player identity — specta-friendly mirror of pyrat_wire::Player.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, Type)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Hash, Type)]
 pub enum PlayerSide {
     Player1,
     Player2,

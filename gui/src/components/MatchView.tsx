@@ -2,6 +2,7 @@ import { Stack } from "@mantine/core";
 import { useAtomValue } from "jotai";
 import { useEffect, useRef } from "react";
 import { events, commands } from "../bindings";
+import type { BotOptionValue } from "../bindings/generated";
 import {
 	RANDOM_BOT_ID,
 	botsAtom,
@@ -212,6 +213,10 @@ export default function MatchView({ onNewMatch }: Props) {
 			...cfg,
 			seed: cfg.seed ?? previewSeed,
 		};
+		const { player1Options, player2Options } = useMatchStore.getState();
+		const toValues = (opts: Record<string, string>): BotOptionValue[] =>
+			Object.entries(opts).map(([name, value]) => ({ name, value }));
+
 		const res = await commands.startMatch(
 			p1.cmd,
 			p2.cmd,
@@ -221,6 +226,7 @@ export default function MatchView({ onNewMatch }: Props) {
 			p2.agentId,
 			configWithSeed,
 			currentMode === "step" ? true : null,
+			{ player1: toValues(player1Options), player2: toValues(player2Options) },
 		);
 		if (res.status === "error") {
 			useMatchStore.getState().onError(res.error);

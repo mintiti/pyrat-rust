@@ -1,5 +1,5 @@
 import { produce } from "immer";
-import { useMemo } from "react";
+import { startTransition, useMemo } from "react";
 import { create } from "zustand";
 import { useShallow } from "zustand/shallow";
 import { commands } from "../bindings";
@@ -96,6 +96,10 @@ interface MatchState {
 	previewSeed: number | null;
 	previewError: string | null;
 
+	// Bot options (per-slot overrides, name → value)
+	player1Options: Record<string, string>;
+	player2Options: Record<string, string>;
+
 	// Viewer
 	mode: MatchMode;
 	matchPhase: MatchPhase;
@@ -112,6 +116,8 @@ interface MatchState {
 	setPlayer1BotId: (cmd: string | null) => void;
 	setPlayer2BotId: (cmd: string | null) => void;
 	setMode: (mode: MatchMode) => void;
+	setPlayer1Options: (opts: Record<string, string>) => void;
+	setPlayer2Options: (opts: Record<string, string>) => void;
 
 	// Event handlers
 	onMatchStarted: (maze: MazeState, matchId: number) => void;
@@ -171,6 +177,39 @@ const NAVIGATION_RESET = {
 	},
 };
 
+// ── BotInfo rAF batching ─────────────────────────────────────────
+// Buffer incoming BotInfo events and flush once per animation frame
+// inside a startTransition, so cursor navigation stays responsive.
+
+let botInfoBuffer: BotInfoEvent[] = [];
+let botInfoRafId: number | null = null;
+
+function flushBotInfo() {
+	botInfoRafId = null;
+	const batch = botInfoBuffer;
+	botInfoBuffer = [];
+	if (batch.length === 0) return;
+
+	startTransition(() => {
+		useMatchStore.setState(
+			produce((state: MatchState) => {
+				if (!state.root) return;
+				for (const e of batch) {
+					if (state.pausedSenders[e.sender]) continue;
+					if (state.mode === "step") {
+						const node = getNodeAtPath(state.root, state.cursor);
+						if (!node || node.turn !== e.turn) continue;
+						accumulateBotInfo(node.botInfo, e);
+					} else {
+						const node = getNodeAtPath(state.root, mainlinePath(e.turn));
+						if (node) accumulateBotInfo(node.botInfo, e);
+					}
+				}
+			}),
+		);
+	});
+}
+
 /** Fields that get wiped when returning to idle/preview state. */
 const IDLE_MATCH = {
 	matchId: null as number | null,
@@ -182,6 +221,8 @@ const IDLE_MATCH = {
 	error: null as string | null,
 	analysisError: null as string | null,
 	disconnection: null as BotDisconnectedEvent | null,
+	player1Options: {} as Record<string, string>,
+	player2Options: {} as Record<string, string>,
 	matchPhase: "idle" as MatchPhase,
 	autoplay: true,
 	analyzing: false,
@@ -213,6 +254,8 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	setPlayer1BotId: (cmd) => set({ player1BotId: cmd }),
 	setPlayer2BotId: (cmd) => set({ player2BotId: cmd }),
 	setMode: (mode) => set({ mode }),
+	setPlayer1Options: (opts) => set({ player1Options: opts }),
+	setPlayer2Options: (opts) => set({ player2Options: opts }),
 
 	// ── Event handlers ───────────────────────────────────────
 	onMatchStarted: (maze, matchId) => {
@@ -290,21 +333,10 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	},
 
 	onBotInfo: (e) => {
-		set(
-			produce((state: MatchState) => {
-				if (!state.root) return;
-				if (state.pausedSenders[e.sender]) return;
-				if (state.mode === "step") {
-					const node = getNodeAtPath(state.root, state.cursor);
-					if (!node || node.turn !== e.turn) return;
-					accumulateBotInfo(node.botInfo, e);
-				} else {
-					const node = getNodeAtPath(state.root, mainlinePath(e.turn));
-					if (!node) return;
-					accumulateBotInfo(node.botInfo, e);
-				}
-			}),
-		);
+		botInfoBuffer.push(e);
+		if (botInfoRafId === null) {
+			botInfoRafId = requestAnimationFrame(flushBotInfo);
+		}
 	},
 
 	onError: (message) => {

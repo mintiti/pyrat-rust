@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use tokio::sync::{mpsc, oneshot};
 
+use crate::bot_probe::MatchBotOptions;
 use crate::events::{Direction as SpectaDirection, MatchErrorEvent, MatchStartedEvent};
 use crate::match_runner::{run_match, specta_to_wire, wire_to_specta, PlayerSetup};
 use crate::state::{AnalysisCmd, AnalysisResp, AnalysisTx, AppState, MatchPhase};
@@ -273,6 +274,7 @@ pub async fn start_match(
     player2_agent_id: String,
     config: Option<MatchConfigParams>,
     step_mode: Option<bool>,
+    bot_options: Option<MatchBotOptions>,
 ) -> Result<(), String> {
     use tauri_specta::Event;
     use tokio_util::sync::CancellationToken;
@@ -310,6 +312,18 @@ pub async fn start_match(
     let match_phase = state.match_phase.clone();
     let cancel_check = cancel.clone();
 
+    let opts = bot_options.unwrap_or_default();
+    let p1_opts: Vec<(String, String)> = opts
+        .player1
+        .into_iter()
+        .map(|o| (o.name, o.value))
+        .collect();
+    let p2_opts: Vec<(String, String)> = opts
+        .player2
+        .into_iter()
+        .map(|o| (o.name, o.value))
+        .collect();
+
     let handle = tokio::spawn(async move {
         let result = run_match(
             app_handle.clone(),
@@ -319,11 +333,13 @@ pub async fn start_match(
                     command: player1_cmd,
                     working_dir: player1_working_dir,
                     agent_id: player1_agent_id,
+                    options: p1_opts,
                 },
                 PlayerSetup {
                     command: player2_cmd,
                     working_dir: player2_working_dir,
                     agent_id: player2_agent_id,
+                    options: p2_opts,
                 },
             ],
             cancel,
