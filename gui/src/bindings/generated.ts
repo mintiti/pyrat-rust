@@ -13,9 +13,9 @@ async getGameState(config: MatchConfigParams | null) : Promise<Result<MazeState,
     else return { status: "error", error: e  as any };
 }
 },
-async startMatch(player1Cmd: string, player2Cmd: string, player1WorkingDir: string | null, player2WorkingDir: string | null, config: MatchConfigParams | null, stepMode: boolean | null) : Promise<Result<null, string>> {
+async startMatch(player1Cmd: string, player2Cmd: string, player1WorkingDir: string | null, player2WorkingDir: string | null, player1AgentId: string, player2AgentId: string, config: MatchConfigParams | null, stepMode: boolean | null) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("start_match", { player1Cmd, player2Cmd, player1WorkingDir, player2WorkingDir, config, stepMode }) };
+    return { status: "ok", data: await TAURI_INVOKE("start_match", { player1Cmd, player2Cmd, player1WorkingDir, player2WorkingDir, player1AgentId, player2AgentId, config, stepMode }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -53,21 +53,24 @@ async advanceAnalysis(actions: AnalysisActions | null) : Promise<Result<AdvanceA
     else return { status: "error", error: e  as any };
 }
 },
-async loadBotConfigs() : Promise<Result<BotConfigEntry[], string>> {
+async loadScanPaths() : Promise<Result<string[], string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("load_bot_configs") };
+    return { status: "ok", data: await TAURI_INVOKE("load_scan_paths") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async saveBotConfigs(configs: BotConfigEntry[]) : Promise<Result<null, string>> {
+async saveScanPaths(paths: string[]) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("save_bot_configs", { configs }) };
+    return { status: "ok", data: await TAURI_INVOKE("save_scan_paths", { paths }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async discoverBots(paths: string[]) : Promise<DiscoveredBot[]> {
+    return await TAURI_INVOKE("discover_bots", { paths });
 },
 async loadMatchConfig() : Promise<Result<MatchConfigParams, string>> {
     try {
@@ -117,7 +120,6 @@ export type AdvanceAnalysisResult = { player1_action: Direction; player2_action:
  * Pair of player actions for `advance_analysis`. Both must be provided together.
  */
 export type AnalysisActions = { player1: Direction; player2: Direction }
-export type BotConfigEntry = { id: string; name: string; command: string; working_dir: string | null }
 /**
  * Emitted when a bot disconnects mid-game.
  */
@@ -131,6 +133,11 @@ export type Coord = { x: number; y: number }
  * Movement direction — specta-friendly mirror of pyrat_wire::Direction.
  */
 export type Direction = "Up" | "Right" | "Down" | "Left" | "Stay"
+export type DiscoveredBot = { agent_id: string; name: string; run_command: string;
+/**
+ * Absolute path to the directory containing bot.toml.
+ */
+working_dir: string; description: string; developer: string; language: string; tags: string[] }
 export type MatchConfigParams = {
 /**
  * Named preset, or "custom" for manual configuration.

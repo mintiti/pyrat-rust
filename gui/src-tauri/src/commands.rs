@@ -258,6 +258,7 @@ pub async fn stop_match(state: tauri::State<'_, AppState>) -> Result<(), String>
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 #[specta::specta]
 #[allow(clippy::too_many_arguments)]
@@ -268,6 +269,8 @@ pub async fn start_match(
     player2_cmd: String,
     player1_working_dir: Option<String>,
     player2_working_dir: Option<String>,
+    player1_agent_id: String,
+    player2_agent_id: String,
     config: Option<MatchConfigParams>,
     step_mode: Option<bool>,
 ) -> Result<(), String> {
@@ -315,10 +318,12 @@ pub async fn start_match(
                 PlayerSetup {
                     command: player1_cmd,
                     working_dir: player1_working_dir,
+                    agent_id: player1_agent_id,
                 },
                 PlayerSetup {
                     command: player2_cmd,
                     working_dir: player2_working_dir,
+                    agent_id: player2_agent_id,
                 },
             ],
             cancel,

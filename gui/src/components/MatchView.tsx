@@ -2,7 +2,12 @@ import { Stack } from "@mantine/core";
 import { useAtomValue } from "jotai";
 import { useEffect, useRef } from "react";
 import { events, commands } from "../bindings";
-import { RANDOM_BOT_ID, botsAtom } from "../stores/botConfigAtom";
+import {
+	RANDOM_BOT_ID,
+	botsAtom,
+	discoveredBotsAtom,
+	resolveDiscoveredBot,
+} from "../stores/botConfigAtom";
 import { matchConfigAtom } from "../stores/matchConfigAtom";
 import {
 	useCurrentBotInfo,
@@ -25,6 +30,7 @@ export default function MatchView({ onNewMatch }: Props) {
 	const hasAutoStarted = useRef(false);
 	const displayState = useDisplayState();
 	const bots = useAtomValue(botsAtom);
+	const discovered = useAtomValue(discoveredBotsAtom);
 	const matchConfig = useAtomValue(matchConfigAtom);
 	const matchConfigRef = useRef(matchConfig);
 	matchConfigRef.current = matchConfig;
@@ -181,10 +187,14 @@ export default function MatchView({ onNewMatch }: Props) {
 
 	const resolveBotId = (botId: string) => {
 		if (botId === RANDOM_BOT_ID)
-			return { cmd: RANDOM_BOT_ID, workingDir: null };
-		const bot = bots.find((b) => b.id === botId);
+			return { cmd: RANDOM_BOT_ID, workingDir: null, agentId: "random" };
+		const bot = resolveDiscoveredBot(botId, discovered);
 		if (!bot) return null;
-		return { cmd: bot.command, workingDir: bot.working_dir };
+		return {
+			cmd: bot.run_command,
+			workingDir: bot.working_dir,
+			agentId: bot.agent_id,
+		};
 	};
 
 	const handleStart = async () => {
@@ -207,6 +217,8 @@ export default function MatchView({ onNewMatch }: Props) {
 			p2.cmd,
 			p1.workingDir,
 			p2.workingDir,
+			p1.agentId,
+			p2.agentId,
 			configWithSeed,
 			currentMode === "step" ? true : null,
 		);

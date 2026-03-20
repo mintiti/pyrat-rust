@@ -1,7 +1,7 @@
 // Prevents additional console window on Windows in release.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod bot_config;
+mod bot_discovery;
 mod commands;
 mod events;
 mod json_store;
@@ -9,7 +9,7 @@ mod match_config;
 mod match_runner;
 mod state;
 
-use bot_config::{load_bot_configs, save_bot_configs};
+use bot_discovery::{discover_bots, load_scan_paths, save_scan_paths};
 use commands::{
     advance_analysis, get_game_state, start_analysis_turn, start_match, stop_analysis_turn,
     stop_match,
@@ -37,8 +37,9 @@ fn main() {
             start_analysis_turn,
             stop_analysis_turn,
             advance_analysis,
-            load_bot_configs,
-            save_bot_configs,
+            load_scan_paths,
+            save_scan_paths,
+            discover_bots,
             load_match_config,
             save_match_config
         ])
@@ -62,6 +63,7 @@ fn main() {
         .expect("failed to export typescript bindings");
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(state::AppState::default())
         .invoke_handler(builder.invoke_handler())
         .setup(move |app| {

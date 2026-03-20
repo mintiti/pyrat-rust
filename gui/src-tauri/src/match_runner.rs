@@ -59,6 +59,7 @@ const STUB_SENTINEL: &str = "__random__";
 pub struct PlayerSetup {
     pub command: String,
     pub working_dir: Option<String>,
+    pub agent_id: String,
 }
 
 /// Run a full match, emitting Tauri events for each phase.
@@ -76,6 +77,14 @@ pub async fn run_match(
     let p1_is_stub = p1.command == STUB_SENTINEL;
     let p2_is_stub = p2.command == STUB_SENTINEL;
 
+    // Disambiguate agent_ids when both players use the same bot,
+    // otherwise the host treats them as a hivemind (one process, both slots).
+    let (p1_agent_id, p2_agent_id) = if p1.agent_id == p2.agent_id {
+        (format!("{}/1", p1.agent_id), format!("{}/2", p2.agent_id))
+    } else {
+        (p1.agent_id.clone(), p2.agent_id.clone())
+    };
+
     // 1. Build match config
     let match_config = build_owned_match_config(&game, TimingMode::Wait, 3000, 10000);
 
@@ -83,11 +92,11 @@ pub async fn run_match(
         players: vec![
             PlayerEntry {
                 player: Player::Player1,
-                agent_id: "player1".into(),
+                agent_id: p1_agent_id.clone(),
             },
             PlayerEntry {
                 player: Player::Player2,
-                agent_id: "player2".into(),
+                agent_id: p2_agent_id.clone(),
             },
         ],
         match_config,
@@ -114,7 +123,7 @@ pub async fn run_match(
         next_session_id += 1;
         _stub_handles.push(spawn_stub_bot(
             sid,
-            "player1".into(),
+            p1_agent_id.clone(),
             "Random Bot".into(),
             game_tx.clone(),
         ));
@@ -125,7 +134,7 @@ pub async fn run_match(
         let _ = next_session_id;
         _stub_handles.push(spawn_stub_bot(
             sid,
-            "player2".into(),
+            p2_agent_id.clone(),
             "Random Bot".into(),
             game_tx.clone(),
         ));
@@ -151,7 +160,7 @@ pub async fn run_match(
                     .as_deref()
                     .map(PathBuf::from)
                     .unwrap_or_else(|| default_cwd.clone()),
-                agent_id: "player1".into(),
+                agent_id: p1_agent_id.clone(),
             });
         }
         if !p2_is_stub {
@@ -162,7 +171,7 @@ pub async fn run_match(
                     .as_deref()
                     .map(PathBuf::from)
                     .unwrap_or(default_cwd),
-                agent_id: "player2".into(),
+                agent_id: p2_agent_id,
             });
         }
 
