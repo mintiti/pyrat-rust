@@ -245,10 +245,10 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 							),
 					);
 					if (existingIdx >= 0) {
-						state.cursor = [...state.cursor, existingIdx];
+						state.cursor.push(existingIdx);
 					} else {
 						parent.children.push(newChild);
-						state.cursor = [...state.cursor, parent.children.length - 1];
+						state.cursor.push(parent.children.length - 1);
 					}
 				} else {
 					const end = getMainlineEnd(state.root);

@@ -36,7 +36,6 @@ export default function MatchView({ onNewMatch }: Props) {
 	const previewError = useMatchStore((s) => s.previewError);
 	const player1BotId = useMatchStore((s) => s.player1BotId);
 	const player2BotId = useMatchStore((s) => s.player2BotId);
-	const cursor = useMatchStore((s) => s.cursor);
 	const isAtTip = useIsAtTip();
 
 	const {
@@ -105,14 +104,14 @@ export default function MatchView({ onNewMatch }: Props) {
 	}, [autoplay, playbackSpeed, mode]);
 
 	// Reactive analysis: auto-start analysis when cursor lands on a tree tip in step mode
-	// biome-ignore lint/correctness/useExhaustiveDependencies: cursor identity change is the trigger
+	// biome-ignore lint/correctness/useExhaustiveDependencies: startAnalysis is a stable ref from getState()
 	useEffect(() => {
 		if (mode !== "step" || matchPhase !== "playing" || !isAtTip) return;
 		const timer = setTimeout(() => {
 			startAnalysis();
 		}, 50);
 		return () => clearTimeout(timer);
-	}, [mode, matchPhase, cursor, isAtTip]);
+	}, [mode, matchPhase, isAtTip]);
 
 	// Keyboard shortcuts
 	// biome-ignore lint/correctness/useExhaustiveDependencies: navigation actions are stable refs from getState()
