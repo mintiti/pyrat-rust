@@ -37,17 +37,17 @@ async startAnalysisTurn(durationMs: number) : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async stopAnalysis() : Promise<Result<StopAnalysisResult, string>> {
+async stopAnalysisTurn() : Promise<Result<StopAnalysisTurnResult, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("stop_analysis") };
+    return { status: "ok", data: await TAURI_INVOKE("stop_analysis_turn") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async advanceAnalysis(player1Action: Direction | null, player2Action: Direction | null) : Promise<Result<AdvanceAnalysisResult, string>> {
+async advanceAnalysis(actions: AnalysisActions | null) : Promise<Result<AdvanceAnalysisResult, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("advance_analysis", { player1Action, player2Action }) };
+    return { status: "ok", data: await TAURI_INVOKE("advance_analysis", { actions }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -113,6 +113,7 @@ turnPlayedEvent: "turn-played-event"
 /** user-defined types **/
 
 export type AdvanceAnalysisResult = { player1_action: Direction; player2_action: Direction; game_over: boolean }
+export type AnalysisActions = { player1: Direction; player2: Direction }
 export type BotConfigEntry = { id: string; name: string; command: string; working_dir: string | null }
 /**
  * Emitted when a bot disconnects mid-game.
@@ -160,7 +161,7 @@ export type MudEntry = { from: Coord; to: Coord; cost: number }
  */
 export type PlayerSide = "Player1" | "Player2"
 export type PlayerState = { position: Coord; score: number; mud_turns: number }
-export type StopAnalysisResult = { player1_action: Direction; player2_action: Direction }
+export type StopAnalysisTurnResult = { player1_action: Direction; player2_action: Direction }
 /**
  * Per-turn delta. Walls/mud never change, so we only send positions + cheese.
  */

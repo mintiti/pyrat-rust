@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import { create } from "zustand";
 import { commands } from "../bindings";
 import type {
+	AnalysisActions,
 	BotDisconnectedEvent,
 	BotInfoEvent,
 	Coord,
@@ -43,6 +44,7 @@ export interface GameNode {
 }
 
 export type MatchPhase = "idle" | "connecting" | "playing" | "finished";
+export type MatchMode = "auto" | "step";
 
 // ── Tree helpers ─────────────────────────────────────────────────
 
@@ -93,6 +95,7 @@ interface MatchState {
 	previewError: string | null;
 
 	// Viewer
+	mode: MatchMode;
 	matchPhase: MatchPhase;
 	autoplay: boolean;
 	playbackSpeed: number; // ms between frames
@@ -102,6 +105,7 @@ interface MatchState {
 	// Setters for bot selectors
 	setPlayer1BotId: (cmd: string | null) => void;
 	setPlayer2BotId: (cmd: string | null) => void;
+	setMode: (mode: MatchMode) => void;
 
 	// Event handlers
 	onMatchStarted: (maze: MazeState, matchId: number) => void;
@@ -117,11 +121,22 @@ interface MatchState {
 
 	toggleArrows: (sender: PlayerSide) => void;
 
+	// Analysis actions (step mode)
+	startAnalysis: () => Promise<void>;
+	stopAnalysis: () => Promise<{
+		player1: Direction;
+		player2: Direction;
+	} | null>;
+	advanceTurn: (actions?: AnalysisActions) => Promise<void>;
+
 	// Navigation
 	goToStart: () => void;
 	goToEnd: () => void;
 	stepForward: () => void;
 	stepBack: () => void;
+	stepForwardIntoVariation: (idx: number) => void;
+	cycleVariation: (delta: number) => void;
+	returnToMainline: () => void;
 	goToTurn: (n: number) => void;
 	togglePlay: () => void;
 	goLive: () => void;
@@ -141,6 +156,7 @@ const IDLE_MATCH = {
 	result: null as MatchOverEvent | null,
 	error: null as string | null,
 	disconnection: null as BotDisconnectedEvent | null,
+	mode: "auto" as MatchMode,
 	matchPhase: "idle" as MatchPhase,
 	autoplay: true,
 };
@@ -160,9 +176,11 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	// ── Setters ──────────────────────────────────────────────
 	setPlayer1BotId: (cmd) => set({ player1BotId: cmd }),
 	setPlayer2BotId: (cmd) => set({ player2BotId: cmd }),
+	setMode: (mode) => set({ mode }),
 
 	// ── Event handlers ───────────────────────────────────────
 	onMatchStarted: (maze, matchId) => {
+		const { mode } = get();
 		const root: GameNode = {
 			turn: maze.turn,
 			player1: maze.player1,
@@ -174,6 +192,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		};
 		set({
 			...IDLE_MATCH,
+			mode,
 			matchId,
 			mazeConfig: {
 				width: maze.width,
@@ -185,7 +204,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 			},
 			root,
 			matchPhase: "playing",
-			autoplay: true,
+			autoplay: mode === "auto",
 		});
 	},
 
@@ -207,9 +226,33 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 					children: [],
 				};
 
-				const end = getMainlineEnd(state.root);
-				end.children.push(newChild);
-				state.mainlineDepth += 1;
+				if (state.mode === "step") {
+					const parent = getNodeAtPath(state.root, state.cursor);
+					if (!parent) return;
+					// Dedup by resulting state (not raw actions — invalid moves become Stay)
+					const existingIdx = parent.children.findIndex(
+						(c) =>
+							c.player1.position.x === e.player1.position.x &&
+							c.player1.position.y === e.player1.position.y &&
+							c.player1.score === e.player1.score &&
+							c.player1.mud_turns === e.player1.mud_turns &&
+							c.player2.position.x === e.player2.position.x &&
+							c.player2.position.y === e.player2.position.y &&
+							c.player2.score === e.player2.score &&
+							c.player2.mud_turns === e.player2.mud_turns &&
+							c.cheese.length === e.cheese.length,
+					);
+					if (existingIdx >= 0) {
+						state.cursor = [...state.cursor, existingIdx];
+					} else {
+						parent.children.push(newChild);
+						state.cursor = [...state.cursor, parent.children.length - 1];
+					}
+				} else {
+					const end = getMainlineEnd(state.root);
+					end.children.push(newChild);
+					state.mainlineDepth += 1;
+				}
 			}),
 		);
 	},
@@ -222,9 +265,15 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		set(
 			produce((state: MatchState) => {
 				if (!state.root) return;
-				const node = getNodeAtPath(state.root, mainlinePath(e.turn));
-				if (!node) return;
-				accumulateBotInfo(node.botInfo, e);
+				if (state.mode === "step") {
+					const node = getNodeAtPath(state.root, state.cursor);
+					if (!node || node.turn !== e.turn) return;
+					accumulateBotInfo(node.botInfo, e);
+				} else {
+					const node = getNodeAtPath(state.root, mainlinePath(e.turn));
+					if (!node) return;
+					accumulateBotInfo(node.botInfo, e);
+				}
 			}),
 		);
 	},
@@ -258,14 +307,62 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		set((s) => ({ [key]: !s[key] }));
 	},
 
+	// ── Analysis actions (step mode) ────────────────────────
+	startAnalysis: async () => {
+		const { mode, matchPhase } = get();
+		if (mode !== "step" || matchPhase !== "playing") return;
+		const res = await commands.startAnalysisTurn(0);
+		if (res.status === "error") console.error("startAnalysis:", res.error);
+	},
+
+	stopAnalysis: async () => {
+		const res = await commands.stopAnalysisTurn();
+		if (res.status === "error") {
+			console.error("stopAnalysis:", res.error);
+			return null;
+		}
+		return {
+			player1: res.data.player1_action,
+			player2: res.data.player2_action,
+		};
+	},
+
+	advanceTurn: async (actions) => {
+		const { mode, matchPhase, root, cursor } = get();
+		if (mode !== "step" || matchPhase !== "playing" || !root) return;
+		// Guard: cursor must be at a tree tip
+		const node = getNodeAtPath(root, cursor);
+		if (!node || node.children.length > 0) return;
+		const res = await commands.advanceAnalysis(actions ?? null);
+		if (res.status === "error") {
+			console.error("advanceTurn:", res.error);
+			return;
+		}
+		// Tree mutation + cursor advance happens in onTurnPlayed
+		if (res.data.game_over) {
+			// Match will end via onMatchOver event
+		}
+	},
+
 	// ── Navigation ───────────────────────────────────────────
 	goToStart: () => {
 		set({ cursor: [], autoplay: false });
 	},
 
 	goToEnd: () => {
-		const { mainlineDepth } = get();
-		set({ cursor: mainlinePath(mainlineDepth), autoplay: false });
+		const { mode, root, cursor, mainlineDepth } = get();
+		if (mode === "step" && root) {
+			// Follow first child from cursor to the tip of this branch
+			const path = [...cursor];
+			let node = getNodeAtPath(root, path);
+			while (node && node.children.length > 0) {
+				path.push(0);
+				node = node.children[0];
+			}
+			set({ cursor: path, autoplay: false });
+		} else {
+			set({ cursor: mainlinePath(mainlineDepth), autoplay: false });
+		}
 	},
 
 	stepForward: () => {
@@ -280,6 +377,43 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		const { cursor } = get();
 		if (cursor.length === 0) return;
 		set({ cursor: cursor.slice(0, -1), autoplay: false });
+	},
+
+	stepForwardIntoVariation: (idx) => {
+		const { root, cursor } = get();
+		if (!root) return;
+		const node = getNodeAtPath(root, cursor);
+		if (!node || idx < 0 || idx >= node.children.length) return;
+		set({ cursor: [...cursor, idx], autoplay: false });
+	},
+
+	cycleVariation: (delta) => {
+		const { root, cursor } = get();
+		if (!root || cursor.length === 0) return;
+		const parentPath = cursor.slice(0, -1);
+		const parent = getNodeAtPath(root, parentPath);
+		if (!parent) return;
+		const currentIdx = cursor[cursor.length - 1];
+		const newIdx = currentIdx + delta;
+		if (newIdx < 0 || newIdx >= parent.children.length) return;
+		set({
+			cursor: [...parentPath, newIdx],
+			autoplay: false,
+		});
+	},
+
+	returnToMainline: () => {
+		const { root, cursor } = get();
+		if (!root) return;
+		// Follow mainline (first child) to the same depth as cursor
+		const path: number[] = [];
+		let node: GameNode | null = root;
+		for (let i = 0; i < cursor.length; i++) {
+			if (!node || node.children.length === 0) break;
+			path.push(0);
+			node = node.children[0];
+		}
+		set({ cursor: path, autoplay: false });
 	},
 
 	goToTurn: (n) => {
@@ -368,6 +502,36 @@ export function useMainlineLength(): number {
 /** Current cursor depth (which turn we're viewing). */
 export function useCursorDepth(): number {
 	return useMatchStore((s) => s.cursor.length);
+}
+
+/** True if the cursor node has no children (at a tree tip). */
+export function useIsAtTip(): boolean {
+	return useMatchStore((s) => {
+		if (!s.root) return true;
+		const node = getNodeAtPath(s.root, s.cursor);
+		return !node || node.children.length === 0;
+	});
+}
+
+/** True if all cursor indices are 0 (on the mainline). */
+export function useIsOnMainline(): boolean {
+	return useMatchStore((s) => s.cursor.every((idx) => idx === 0));
+}
+
+/** Number of sibling variations at the cursor's parent. */
+export function useVariationCount(): number {
+	return useMatchStore((s) => {
+		if (!s.root || s.cursor.length === 0) return 0;
+		const parent = getNodeAtPath(s.root, s.cursor.slice(0, -1));
+		return parent?.children.length ?? 0;
+	});
+}
+
+/** Index of the current variation (last element of cursor). */
+export function useCurrentVariationIndex(): number {
+	return useMatchStore((s) =>
+		s.cursor.length > 0 ? s.cursor[s.cursor.length - 1] : 0,
+	);
 }
 
 // ── Preview generation ──────────────────────────────────────────

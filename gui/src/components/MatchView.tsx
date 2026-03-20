@@ -7,6 +7,7 @@ import { matchConfigAtom } from "../stores/matchConfigAtom";
 import {
 	useCurrentBotInfo,
 	useDisplayState,
+	useIsAtTip,
 	useMatchStore,
 } from "../stores/matchStore";
 import MatchToolbar from "./MatchToolbar";
@@ -28,12 +29,15 @@ export default function MatchView({ onNewMatch }: Props) {
 	matchConfigRef.current = matchConfig;
 
 	const botInfo = useCurrentBotInfo();
+	const mode = useMatchStore((s) => s.mode);
 	const matchPhase = useMatchStore((s) => s.matchPhase);
 	const autoplay = useMatchStore((s) => s.autoplay);
 	const playbackSpeed = useMatchStore((s) => s.playbackSpeed);
 	const previewError = useMatchStore((s) => s.previewError);
 	const player1BotId = useMatchStore((s) => s.player1BotId);
 	const player2BotId = useMatchStore((s) => s.player2BotId);
+	const cursor = useMatchStore((s) => s.cursor);
+	const isAtTip = useIsAtTip();
 
 	const {
 		onMatchStarted,
@@ -43,10 +47,12 @@ export default function MatchView({ onNewMatch }: Props) {
 		onError,
 		onDisconnect,
 		advanceCursor,
+		startAnalysis,
 		goToStart,
 		goToEnd,
 		stepForward,
 		stepBack,
+		cycleVariation,
 		togglePlay,
 		goLive,
 	} = useMatchStore.getState();
@@ -88,22 +94,33 @@ export default function MatchView({ onNewMatch }: Props) {
 		};
 	}, []);
 
-	// Auto-advance cursor during playback
+	// Auto-advance cursor during playback (disabled in step mode)
 	// biome-ignore lint/correctness/useExhaustiveDependencies: advanceCursor is a stable ref from getState()
 	useEffect(() => {
-		if (!autoplay) return;
+		if (!autoplay || mode === "step") return;
 		const id = setInterval(() => {
 			advanceCursor();
 		}, playbackSpeed);
 		return () => clearInterval(id);
-	}, [autoplay, playbackSpeed]);
+	}, [autoplay, playbackSpeed, mode]);
+
+	// Reactive analysis: auto-start analysis when cursor lands on a tree tip in step mode
+	// biome-ignore lint/correctness/useExhaustiveDependencies: cursor identity change is the trigger
+	useEffect(() => {
+		if (mode !== "step" || matchPhase !== "playing" || !isAtTip) return;
+		const timer = setTimeout(() => {
+			startAnalysis();
+		}, 50);
+		return () => clearTimeout(timer);
+	}, [mode, matchPhase, cursor, isAtTip]);
 
 	// Keyboard shortcuts
 	// biome-ignore lint/correctness/useExhaustiveDependencies: navigation actions are stable refs from getState()
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
-			const phase = useMatchStore.getState().matchPhase;
-			if (phase === "idle" || phase === "connecting") return;
+			const state = useMatchStore.getState();
+			if (state.matchPhase === "idle" || state.matchPhase === "connecting")
+				return;
 
 			const tag = (e.target as HTMLElement)?.tagName;
 			if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
@@ -116,6 +133,18 @@ export default function MatchView({ onNewMatch }: Props) {
 				case "ArrowRight":
 					e.preventDefault();
 					stepForward();
+					break;
+				case "ArrowUp":
+					if (state.mode === "step") {
+						e.preventDefault();
+						cycleVariation(-1);
+					}
+					break;
+				case "ArrowDown":
+					if (state.mode === "step") {
+						e.preventDefault();
+						cycleVariation(1);
+					}
 					break;
 				case "Home":
 					e.preventDefault();
@@ -130,7 +159,7 @@ export default function MatchView({ onNewMatch }: Props) {
 					togglePlay();
 					break;
 				case "l":
-					if (useMatchStore.getState().matchPhase === "playing") {
+					if (state.matchPhase === "playing") {
 						e.preventDefault();
 						goLive();
 					}
@@ -158,7 +187,7 @@ export default function MatchView({ onNewMatch }: Props) {
 			return;
 		}
 		useMatchStore.getState().beginConnecting();
-		const { previewSeed } = useMatchStore.getState();
+		const { previewSeed, mode: currentMode } = useMatchStore.getState();
 		const cfg = matchConfigRef.current;
 		const configWithSeed = {
 			...cfg,
@@ -170,7 +199,7 @@ export default function MatchView({ onNewMatch }: Props) {
 			p1.workingDir,
 			p2.workingDir,
 			configWithSeed,
-			null,
+			currentMode === "step" ? true : null,
 		);
 		if (res.status === "error") {
 			useMatchStore.getState().onError(res.error);
