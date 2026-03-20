@@ -46,6 +46,7 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 	const disconnection = useMatchStore((s) => s.disconnection);
 	const player1BotId = useMatchStore((s) => s.player1BotId);
 	const player2BotId = useMatchStore((s) => s.player2BotId);
+	const mode = useMatchStore((s) => s.mode);
 	const mainlineDepth = useMatchStore((s) => s.mainlineDepth);
 	const bots = useAtomValue(botsAtom);
 
@@ -120,17 +121,19 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 							<IconPlayerPlay size={16} />
 						)}
 					</ActionIcon>
-					{matchPhase === "playing" && cursorDepth < mainlineDepth && (
-						<Badge
-							size="sm"
-							color="red"
-							variant="filled"
-							style={{ cursor: "pointer" }}
-							onClick={goLive}
-						>
-							LIVE
-						</Badge>
-					)}
+					{mode === "auto" &&
+						matchPhase === "playing" &&
+						cursorDepth < mainlineDepth && (
+							<Badge
+								size="sm"
+								color="red"
+								variant="filled"
+								style={{ cursor: "pointer" }}
+								onClick={goLive}
+							>
+								LIVE
+							</Badge>
+						)}
 					<ActionIcon
 						variant="subtle"
 						size="sm"

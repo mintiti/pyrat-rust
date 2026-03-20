@@ -129,6 +129,7 @@ type Props = {
 export default function EventTimeline({ layout }: Props) {
 	const data = useTimelineData();
 	const cursorDepth = useMatchStore((s) => s.cursor.length);
+	const mode = useMatchStore((s) => s.mode);
 	const svgRef = useRef<SVGSVGElement>(null);
 	const [dragging, setDragging] = useState(false);
 
@@ -269,15 +270,15 @@ export default function EventTimeline({ layout }: Props) {
 				preserveAspectRatio="none"
 				style={{
 					display: "block",
-					cursor: "pointer",
+					cursor: mode === "step" ? "default" : "pointer",
 					position: "absolute",
 					left: layout.mazeX,
 					width: mazePixelW,
 					height: TIMELINE_HEIGHT,
 				}}
-				onPointerDown={handlePointerDown}
-				onPointerMove={handlePointerMove}
-				onPointerUp={handlePointerUp}
+				onPointerDown={mode === "step" ? undefined : handlePointerDown}
+				onPointerMove={mode === "step" ? undefined : handlePointerMove}
+				onPointerUp={mode === "step" ? undefined : handlePointerUp}
 			>
 				{/* Guide lines */}
 				<line
