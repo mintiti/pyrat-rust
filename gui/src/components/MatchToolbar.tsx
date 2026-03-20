@@ -63,7 +63,12 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 		setPlaybackSpeed,
 		resetToPreview,
 		advanceTurn,
+		confirmStagedMoves,
 	} = useMatchStore.getState();
+
+	const hasStagedMoves = useMatchStore(
+		(s) => s.stagedMoves.player1 !== null || s.stagedMoves.player2 !== null,
+	);
 
 	const cursorDepth = useCursorDepth();
 	const totalTurns = useMainlineLength();
@@ -144,11 +149,16 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 						<Button
 							size="compact-xs"
 							variant="light"
+							color={hasStagedMoves ? "green" : undefined}
 							leftSection={<IconPlayerTrackNext size={14} />}
-							onClick={() => advanceTurn()}
+							onClick={
+								hasStagedMoves
+									? () => confirmStagedMoves()
+									: () => advanceTurn()
+							}
 							disabled={!isAtTip || matchPhase !== "playing"}
 						>
-							Advance
+							{hasStagedMoves ? "Confirm" : "Advance"}
 						</Button>
 					)}
 					{mode === "auto" &&

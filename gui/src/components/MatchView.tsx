@@ -15,6 +15,7 @@ import MatchToolbar from "./MatchToolbar";
 import MazeColumn from "./MazeColumn";
 import ResultBanner from "./ResultBanner";
 import ThinkingPanel from "./ThinkingPanel";
+import NotationPanel from "./notation/NotationPanel";
 
 type Props = {
 	onNewMatch: () => void;
@@ -57,6 +58,7 @@ export default function MatchView({ onNewMatch }: Props) {
 		cycleVariation,
 		togglePlay,
 		goLive,
+		clearStagedMoves,
 	} = useMatchStore.getState();
 
 	// Event listeners — wire Tauri events to store actions
@@ -128,6 +130,9 @@ export default function MatchView({ onNewMatch }: Props) {
 			if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
 
 			switch (e.key) {
+				case "Escape":
+					clearStagedMoves();
+					break;
 				case "ArrowLeft":
 					e.preventDefault();
 					stepBack();
@@ -244,7 +249,21 @@ export default function MatchView({ onNewMatch }: Props) {
 					previewError={previewError}
 					hasMatch={hasMatch}
 				/>
-				{hasMatch && <ThinkingPanel botInfo={botInfo ?? {}} />}
+				{hasMatch && (
+					<div
+						style={{
+							width: 320,
+							flexShrink: 0,
+							display: "flex",
+							flexDirection: "column",
+							borderLeft: "1px solid var(--mantine-color-dark-4)",
+							overflow: "hidden",
+						}}
+					>
+						<ThinkingPanel botInfo={botInfo ?? {}} />
+						<NotationPanel />
+					</div>
+				)}
 			</div>
 		</Stack>
 	);

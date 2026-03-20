@@ -73,9 +73,8 @@ export default function ThinkingPanel({ botInfo }: Props) {
 	return (
 		<ScrollArea
 			style={{
-				width: 320,
-				flexShrink: 0,
-				borderLeft: "1px solid var(--mantine-color-dark-4)",
+				flex: 1,
+				minHeight: 0,
 			}}
 			p="sm"
 		>

@@ -11,7 +11,12 @@ import {
 import { type LayoutMetrics, computeLayout } from "../renderer/layout";
 import { buildPvOverlay, buildWallSet } from "../renderer/pvArrows";
 import { generateTileMap } from "../renderer/tileMap";
-import { useCurrentBotInfo, useMatchStore } from "../stores/matchStore";
+import {
+	useCurrentBotInfo,
+	useIsAtTip,
+	useMatchStore,
+} from "../stores/matchStore";
+import DragOverlay from "./DragOverlay";
 import MazeCanvas from "./MazeCanvas";
 import PvOverlay from "./PvOverlay";
 
@@ -33,6 +38,11 @@ export default function MazeRenderer({
 	const botInfo = useCurrentBotInfo();
 	const showP1Arrows = useMatchStore((s) => s.showPlayer1Arrows);
 	const showP2Arrows = useMatchStore((s) => s.showPlayer2Arrows);
+	const mode = useMatchStore((s) => s.mode);
+	const matchPhase = useMatchStore((s) => s.matchPhase);
+	const isAtTip = useIsAtTip();
+	const showDragOverlay =
+		mode === "step" && isAtTip && matchPhase === "playing";
 
 	useEffect(() => {
 		loadAssets().then(setAssets);
@@ -127,6 +137,14 @@ export default function MazeRenderer({
 							overlay={pvOverlayData}
 							width={layout.canvasWidth}
 							height={layout.canvasHeight}
+						/>
+					)}
+					{showDragOverlay && assets && (
+						<DragOverlay
+							layout={layout}
+							wallSet={wallSet}
+							gameState={gameState}
+							assetMap={assets}
 						/>
 					)}
 				</div>

@@ -113,6 +113,9 @@ turnPlayedEvent: "turn-played-event"
 /** user-defined types **/
 
 export type AdvanceAnalysisResult = { player1_action: Direction; player2_action: Direction; game_over: boolean }
+/**
+ * Pair of player actions for `advance_analysis`. Both must be provided together.
+ */
 export type AnalysisActions = { player1: Direction; player2: Direction }
 export type BotConfigEntry = { id: string; name: string; command: string; working_dir: string | null }
 /**
