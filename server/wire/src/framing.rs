@@ -41,6 +41,10 @@ pub enum FrameError {
 ///
 /// Wire format: `[u32 BE payload length][payload bytes]`
 ///
+/// **Cancel-safe:** partial read progress is tracked in the struct, so dropping
+/// a `read_frame` future mid-read and calling it again resumes correctly. This
+/// is essential when used inside `tokio::select!`.
+///
 /// Reuses an internal buffer across reads (high-water mark — never shrinks).
 /// The returned `&[u8]` borrows from this buffer, so the caller must finish
 /// parsing before calling `read_frame` again.
@@ -48,6 +52,10 @@ pub struct FrameReader<R> {
     reader: R,
     buf: Vec<u8>,
     max_payload: u32,
+    // Cancel-safe state: persists across dropped read_frame() futures.
+    header: [u8; 4],
+    header_pos: u8,
+    payload_pos: usize,
 }
 
 impl<R: AsyncRead + Unpin> FrameReader<R> {
@@ -57,6 +65,9 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
             reader,
             buf: Vec::with_capacity(4096),
             max_payload,
+            header: [0; 4],
+            header_pos: 0,
+            payload_pos: 0,
         }
     }
 
@@ -75,58 +86,59 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
     /// should be dropped — subsequent reads will return garbage.
     pub async fn read_frame(&mut self) -> Result<&[u8], FrameError> {
         // --- Read the 4-byte length header ---
-        // Two-step read: probe the first byte to distinguish clean disconnect
-        // (0 bytes) from mid-header EOF (1-3 bytes then EOF).
-        let mut header = [0u8; 4];
-
-        let n = self.reader.read(&mut header[..1]).await?;
-        if n == 0 {
-            return Err(FrameError::Disconnected);
+        // Progress is tracked in self.header / self.header_pos so that
+        // dropping this future mid-read and calling it again resumes correctly.
+        while self.header_pos < 4 {
+            let pos = self.header_pos as usize;
+            let n = self.reader.read(&mut self.header[pos..4]).await?;
+            if n == 0 {
+                return if self.header_pos == 0 {
+                    Err(FrameError::Disconnected)
+                } else {
+                    self.header_pos = 0;
+                    Err(FrameError::UnexpectedEof)
+                };
+            }
+            self.header_pos += n as u8;
         }
 
-        self.reader
-            .read_exact(&mut header[1..])
-            .await
-            .map_err(|e| {
-                if e.kind() == io::ErrorKind::UnexpectedEof {
-                    FrameError::UnexpectedEof
-                } else {
-                    FrameError::Io(e)
-                }
-            })?;
-
-        let payload_len = u32::from_be_bytes(header);
+        let payload_len = u32::from_be_bytes(self.header);
 
         // --- Guard against OOM ---
         if payload_len > self.max_payload {
+            self.header_pos = 0;
+            self.payload_pos = 0;
             return Err(FrameError::PayloadTooLarge {
                 size: u64::from(payload_len),
                 max: self.max_payload,
             });
         }
 
-        let len = payload_len as usize;
+        let target = payload_len as usize;
 
         // Grow buffer if needed (never shrinks).
-        if self.buf.len() < len {
-            self.buf.resize(len, 0);
+        if self.buf.len() < target {
+            self.buf.resize(target, 0);
         }
 
         // --- Read payload ---
-        if len > 0 {
-            self.reader
-                .read_exact(&mut self.buf[..len])
-                .await
-                .map_err(|e| {
-                    if e.kind() == io::ErrorKind::UnexpectedEof {
-                        FrameError::UnexpectedEof
-                    } else {
-                        FrameError::Io(e)
-                    }
-                })?;
+        while self.payload_pos < target {
+            let n = self
+                .reader
+                .read(&mut self.buf[self.payload_pos..target])
+                .await?;
+            if n == 0 {
+                self.header_pos = 0;
+                self.payload_pos = 0;
+                return Err(FrameError::UnexpectedEof);
+            }
+            self.payload_pos += n;
         }
 
-        Ok(&self.buf[..len])
+        // --- Complete: reset and return ---
+        self.header_pos = 0;
+        self.payload_pos = 0;
+        Ok(&self.buf[..target])
     }
 
     /// Consume the reader, returning the underlying stream.
@@ -405,5 +417,44 @@ mod tests {
         if let Ok(data) = result {
             assert_ne!(data, b"hello", "stream should be desynchronized");
         }
+    }
+
+    #[tokio::test]
+    async fn test_cancel_safety_header_read_then_resume() {
+        // Simulate the select! cancellation scenario: header arrives but payload
+        // hasn't yet. The read_frame future is dropped (cancelled). A second
+        // call must resume and read the payload correctly.
+        let (mut write_end, read_end) = duplex(64);
+        let mut reader = FrameReader::with_default_max(read_end);
+
+        // Write only the 4-byte header (payload = 5 bytes, not yet sent).
+        let len: u32 = 5;
+        write_end.write_all(&len.to_be_bytes()).await.unwrap();
+
+        // Start read_frame, cancel it via select! when it blocks on the payload.
+        let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();
+        cancel_tx.send(()).unwrap();
+        tokio::select! {
+            biased;
+            // read_frame will read the header, then block waiting for payload.
+            // On the next poll, select! sees cancel_rx is ready and picks it.
+            _ = reader.read_frame() => panic!("should not complete — payload not sent yet"),
+            _ = cancel_rx => { /* cancelled as expected */ }
+        }
+
+        // Now send the payload.
+        write_end.write_all(b"hello").await.unwrap();
+
+        // read_frame must resume from saved state and return the complete frame.
+        let frame = reader.read_frame().await.unwrap();
+        assert_eq!(frame, b"hello");
+
+        // Subsequent frames work normally.
+        write_end.write_all(&5u32.to_be_bytes()).await.unwrap();
+        write_end.write_all(b"world").await.unwrap();
+        drop(write_end);
+
+        let frame2 = reader.read_frame().await.unwrap();
+        assert_eq!(frame2, b"world");
     }
 }
