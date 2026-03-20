@@ -143,6 +143,7 @@ interface MatchState {
 	goToStart: () => void;
 	goToEnd: () => void;
 	stepForward: () => void;
+	stepForwardOrAdvance: () => void;
 	stepBack: () => void;
 	stepForwardIntoVariation: (idx: number) => void;
 	cycleVariation: (delta: number) => void;
@@ -155,6 +156,16 @@ interface MatchState {
 	// Auto-advance (called by the interval timer)
 	advanceCursor: () => void;
 }
+
+/** Resets applied whenever the cursor moves (navigation actions). */
+const NAVIGATION_RESET = {
+	autoplay: false,
+	analyzing: false,
+	stagedMoves: { player1: null, player2: null } as {
+		player1: Direction | null;
+		player2: Direction | null;
+	},
+};
 
 /** Fields that get wiped when returning to idle/preview state. */
 const IDLE_MATCH = {
@@ -407,21 +418,11 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		const { root } = get();
 		if (!root) return;
 		if (getNodeAtPath(root, path) === null) return;
-		set({
-			cursor: path,
-			autoplay: false,
-			analyzing: false,
-			stagedMoves: { player1: null, player2: null },
-		});
+		set({ cursor: path, ...NAVIGATION_RESET });
 	},
 
 	goToStart: () => {
-		set({
-			cursor: [],
-			autoplay: false,
-			analyzing: false,
-			stagedMoves: { player1: null, player2: null },
-		});
+		set({ cursor: [], ...NAVIGATION_RESET });
 	},
 
 	goToEnd: () => {
@@ -433,19 +434,9 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 				path.push(0);
 				node = node.children[0];
 			}
-			set({
-				cursor: path,
-				autoplay: false,
-				analyzing: false,
-				stagedMoves: { player1: null, player2: null },
-			});
+			set({ cursor: path, ...NAVIGATION_RESET });
 		} else {
-			set({
-				cursor: mainlinePath(mainlineDepth),
-				autoplay: false,
-				analyzing: false,
-				stagedMoves: { player1: null, player2: null },
-			});
+			set({ cursor: mainlinePath(mainlineDepth), ...NAVIGATION_RESET });
 		}
 	},
 
@@ -454,23 +445,25 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		if (!root) return;
 		const node = getNodeAtPath(root, cursor);
 		if (!node || node.children.length === 0) return;
-		set({
-			cursor: [...cursor, 0],
-			autoplay: false,
-			analyzing: false,
-			stagedMoves: { player1: null, player2: null },
-		});
+		set({ cursor: [...cursor, 0], ...NAVIGATION_RESET });
+	},
+
+	stepForwardOrAdvance: () => {
+		const { mode, root, cursor } = get();
+		if (mode === "step" && root) {
+			const node = getNodeAtPath(root, cursor);
+			if (!node || node.children.length === 0) {
+				get().advanceTurn();
+				return;
+			}
+		}
+		get().stepForward();
 	},
 
 	stepBack: () => {
 		const { cursor } = get();
 		if (cursor.length === 0) return;
-		set({
-			cursor: cursor.slice(0, -1),
-			autoplay: false,
-			analyzing: false,
-			stagedMoves: { player1: null, player2: null },
-		});
+		set({ cursor: cursor.slice(0, -1), ...NAVIGATION_RESET });
 	},
 
 	stepForwardIntoVariation: (idx) => {
@@ -478,12 +471,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		if (!root) return;
 		const node = getNodeAtPath(root, cursor);
 		if (!node || idx < 0 || idx >= node.children.length) return;
-		set({
-			cursor: [...cursor, idx],
-			autoplay: false,
-			analyzing: false,
-			stagedMoves: { player1: null, player2: null },
-		});
+		set({ cursor: [...cursor, idx], ...NAVIGATION_RESET });
 	},
 
 	cycleVariation: (delta) => {
@@ -495,12 +483,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		const currentIdx = cursor[cursor.length - 1];
 		const newIdx = currentIdx + delta;
 		if (newIdx < 0 || newIdx >= parent.children.length) return;
-		set({
-			cursor: [...parentPath, newIdx],
-			autoplay: false,
-			analyzing: false,
-			stagedMoves: { player1: null, player2: null },
-		});
+		set({ cursor: [...parentPath, newIdx], ...NAVIGATION_RESET });
 	},
 
 	returnToMainline: () => {
@@ -513,24 +496,14 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 			path.push(0);
 			node = node.children[0];
 		}
-		set({
-			cursor: path,
-			autoplay: false,
-			analyzing: false,
-			stagedMoves: { player1: null, player2: null },
-		});
+		set({ cursor: path, ...NAVIGATION_RESET });
 	},
 
 	goToTurn: (n) => {
 		const { cursor, root } = get();
 		if (!root) return;
 		if (n <= cursor.length) {
-			set({
-				cursor: cursor.slice(0, n),
-				autoplay: false,
-				analyzing: false,
-				stagedMoves: { player1: null, player2: null },
-			});
+			set({ cursor: cursor.slice(0, n), ...NAVIGATION_RESET });
 		} else {
 			const extended = [...cursor];
 			let node = getNodeAtPath(root, extended);
@@ -538,12 +511,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 				extended.push(0);
 				node = node.children[0];
 			}
-			set({
-				cursor: extended,
-				autoplay: false,
-				analyzing: false,
-				stagedMoves: { player1: null, player2: null },
-			});
+			set({ cursor: extended, ...NAVIGATION_RESET });
 		}
 	},
 

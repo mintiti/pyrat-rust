@@ -5,7 +5,6 @@ import { events, commands } from "../bindings";
 import { RANDOM_BOT_ID, botsAtom } from "../stores/botConfigAtom";
 import { matchConfigAtom } from "../stores/matchConfigAtom";
 import {
-	getNodeAtPath,
 	useCurrentBotInfo,
 	useDisplayState,
 	useIsAtTip,
@@ -50,10 +49,9 @@ export default function MatchView({ onNewMatch }: Props) {
 		advanceCursor,
 		startAnalysis,
 		stopAnalysis,
-		advanceTurn,
 		goToStart,
 		goToEnd,
-		stepForward,
+		stepForwardOrAdvance,
 		stepBack,
 		cycleVariation,
 		togglePlay,
@@ -137,19 +135,10 @@ export default function MatchView({ onNewMatch }: Props) {
 					e.preventDefault();
 					stepBack();
 					break;
-				case "ArrowRight": {
+				case "ArrowRight":
 					e.preventDefault();
-					const s = useMatchStore.getState();
-					if (s.mode === "step" && s.root) {
-						const node = getNodeAtPath(s.root, s.cursor);
-						if (!node || node.children.length === 0) {
-							advanceTurn();
-							break;
-						}
-					}
-					stepForward();
+					stepForwardOrAdvance();
 					break;
-				}
 				case "ArrowUp":
 					if (state.mode === "step") {
 						e.preventDefault();

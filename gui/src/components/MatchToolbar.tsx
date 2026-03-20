@@ -12,7 +12,6 @@ import { useAtomValue } from "jotai";
 import { useState } from "react";
 import { botsAtom, resolveBotName } from "../stores/botConfigAtom";
 import {
-	getNodeAtPath,
 	useCursorDepth,
 	useIsAtTip,
 	useMainlineLength,
@@ -56,7 +55,7 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 	const {
 		goToStart,
 		goToEnd,
-		stepForward,
+		stepForwardOrAdvance,
 		stepBack,
 		togglePlay,
 		goLive,
@@ -73,18 +72,6 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 	const cursorDepth = useCursorDepth();
 	const totalTurns = useMainlineLength();
 	const isAtTip = useIsAtTip();
-
-	const handleStepForward = () => {
-		const s = useMatchStore.getState();
-		if (s.mode === "step" && s.root) {
-			const node = getNodeAtPath(s.root, s.cursor);
-			if (!node || node.children.length === 0) {
-				s.advanceTurn();
-				return;
-			}
-		}
-		stepForward();
-	};
 
 	const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -177,7 +164,7 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 					<ActionIcon
 						variant="subtle"
 						size="sm"
-						onClick={handleStepForward}
+						onClick={stepForwardOrAdvance}
 						disabled={mode === "auto" ? cursorDepth >= totalTurns : false}
 					>
 						<IconChevronRight size={16} />

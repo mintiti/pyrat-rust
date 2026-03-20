@@ -57,9 +57,6 @@ export default function TurnCell({ entry, isCurrent, onClick }: Props) {
 					: "2px solid transparent",
 				borderRadius: "var(--mantine-radius-xs)",
 				cursor: "pointer",
-				"&:hover": {
-					background: "rgba(255,255,255,0.05)",
-				},
 			}}
 		>
 			<Text

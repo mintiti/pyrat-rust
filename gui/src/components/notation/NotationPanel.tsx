@@ -59,12 +59,12 @@ export default function NotationPanel() {
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const currentRef = useRef<HTMLDivElement>(null);
 
-	// mainlineDepth and cursor are extra deps to rebuild entries when tree grows or cursor moves into new branches
-	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional extra deps to trigger rebuild
+	// mainlineDepth is an extra dep to rebuild entries when mainline grows (root ref changes cover branch additions via Immer)
+	// biome-ignore lint/correctness/useExhaustiveDependencies: mainlineDepth triggers rebuild as turns arrive
 	const entries = useMemo(() => {
 		if (!root) return [];
 		return buildEntries(root);
-	}, [root, mainlineDepth, cursor]);
+	}, [root, mainlineDepth]);
 
 	// Auto-scroll to current entry when cursor changes
 	// biome-ignore lint/correctness/useExhaustiveDependencies: cursor drives scroll position via currentRef
