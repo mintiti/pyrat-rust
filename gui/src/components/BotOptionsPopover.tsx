@@ -23,20 +23,26 @@ import { probeCacheAtom, triggerProbeAtom } from "../stores/botProbeAtom";
 import { useMatchStore } from "../stores/matchStore";
 import SettingRow from "./common/SettingRow";
 
+type Slot = "player1" | "player2";
+
 type Props = {
 	agentId: string;
-	slot: "player1" | "player2";
+	slot: Slot;
 };
+
+function getSlotOptions(slot: Slot): Record<string, string> {
+	const s = useMatchStore.getState();
+	return slot === "player1" ? s.player1Options : s.player2Options;
+}
 
 export default function BotOptionsPopover({ agentId, slot }: Props) {
 	const discovered = useAtomValue(discoveredBotsAtom);
 	const probeCache = useAtomValue(probeCacheAtom);
 	const triggerProbe = useSetAtom(triggerProbeAtom);
 
-	const options =
-		slot === "player1"
-			? useMatchStore((s) => s.player1Options)
-			: useMatchStore((s) => s.player2Options);
+	const options = useMatchStore((s) =>
+		slot === "player1" ? s.player1Options : s.player2Options,
+	);
 	const setOptions =
 		slot === "player1"
 			? useMatchStore.getState().setPlayer1Options
@@ -58,11 +64,7 @@ export default function BotOptionsPopover({ agentId, slot }: Props) {
 	// Pre-fill defaults when probe succeeds and options are empty
 	useEffect(() => {
 		if (entry?.status !== "ok") return;
-		const current =
-			slot === "player1"
-				? useMatchStore.getState().player1Options
-				: useMatchStore.getState().player2Options;
-		if (Object.keys(current).length > 0) return;
+		if (Object.keys(getSlotOptions(slot)).length > 0) return;
 
 		const configurable = entry.data.options.filter(
 			(d) => d.option_type !== "Button",
@@ -109,11 +111,7 @@ export default function BotOptionsPopover({ agentId, slot }: Props) {
 	if (defs.length === 0) return null;
 
 	const updateOption = (name: string, value: string) => {
-		const current =
-			slot === "player1"
-				? useMatchStore.getState().player1Options
-				: useMatchStore.getState().player2Options;
-		setOptions({ ...current, [name]: value });
+		setOptions({ ...getSlotOptions(slot), [name]: value });
 	};
 
 	return (
