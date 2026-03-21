@@ -10,9 +10,12 @@ export const RANDOM_BOT_ID = "__random__" as const;
 // Scan paths — persisted list of directories to scan for bot.toml files
 // ---------------------------------------------------------------------------
 
-const baseScanPathsAtom = atom<string[] | Promise<string[]>>(
-	commands.loadScanPaths().then((res) => (res.status === "ok" ? res.data : [])),
-);
+/** Shared promise so both atoms chain off a single IPC call. */
+const scanPathsPromise = commands
+	.loadScanPaths()
+	.then((res) => (res.status === "ok" ? res.data : []));
+
+const baseScanPathsAtom = atom<string[] | Promise<string[]>>(scanPathsPromise);
 
 /** Writable atom — persists scan paths to disk on every write. */
 export const asyncScanPathsAtom = atom(
@@ -32,10 +35,7 @@ export const scanPathsAtom = unwrap(asyncScanPathsAtom, (prev) => prev ?? []);
 
 /** Holds the latest scan results. Initialized by scanning on first load. */
 const baseDiscoveredBotsAtom = atom<DiscoveredBot[] | Promise<DiscoveredBot[]>>(
-	commands
-		.loadScanPaths()
-		.then((res) => (res.status === "ok" ? res.data : []))
-		.then((paths) => commands.discoverBots(paths)),
+	scanPathsPromise.then((paths) => commands.discoverBots(paths)),
 );
 
 /** Read-only sync atom for discovered bots. */

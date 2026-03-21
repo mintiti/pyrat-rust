@@ -77,7 +77,13 @@ fn should_skip(name: &str) -> bool {
 // ---------------------------------------------------------------------------
 
 fn parse_bot_toml(path: &Path) -> Option<DiscoveredBot> {
-    let contents = std::fs::read_to_string(path).ok()?;
+    let contents = match std::fs::read_to_string(path) {
+        Ok(c) => c,
+        Err(e) => {
+            warn!(path = %path.display(), error = %e, "failed to read bot.toml");
+            return None;
+        },
+    };
     let manifest: BotManifest = match toml::from_str(&contents) {
         Ok(m) => m,
         Err(e) => {
@@ -146,7 +152,13 @@ pub fn discover_bots(paths: Vec<String>) -> Vec<DiscoveredBot> {
                 }
             });
 
-        for entry in walker.flatten() {
+        for entry in walker.filter_map(|e| match e {
+            Ok(entry) => Some(entry),
+            Err(e) => {
+                warn!(error = %e, "error scanning for bots");
+                None
+            },
+        }) {
             if entry.file_type().is_file() && entry.file_name() == "bot.toml" {
                 if let Some(bot) = parse_bot_toml(entry.path()) {
                     if seen.insert(bot.agent_id.clone()) {

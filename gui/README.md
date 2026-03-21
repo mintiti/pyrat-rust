@@ -33,17 +33,15 @@ The game engine and match host compile as part of the Tauri backend, so there's 
 
 ## Adding bots
 
-The GUI discovers bots automatically. On the Bots page, add a **scan path**: a directory that contains bots. The GUI walks it (up to 3 levels deep) looking for `bot.toml` files. Every bot it finds appears in the grid, ready to play.
+On the Bots page, add a **scan path** pointing at a directory that contains bots. Every bot it finds shows up in the grid, ready to play. Point it at `botpack/` for the full collection, or at your own project directory. Bots just need a [`bot.toml`](../botpack/#bottoml) in their folder.
 
-Point it at `botpack/` and you'll get the full collection immediately. Point it at your own project directory and your bot shows up too, as long as it has a `bot.toml`. See the [botpack README](../botpack/#bottoml) for the manifest format.
+Some bots have configurable [options](../sdk/#options) (search depth, strategy, etc.). A gear icon on the setup page lets you tweak them before the match starts.
 
-If a bot declares configurable [options](../sdk/#options) (search depth, strategy, etc.), a gear icon appears next to it on the setup page. Click it to tweak settings before the match starts. These overrides are per-slot and ephemeral: they don't persist across matches.
-
-There's also a built-in random stub for quick testing, no setup needed.
+There's also a built-in random bot for quick testing, no setup needed.
 
 ## What's next
 
-🚧 Right now the GUI runs matches and lets you watch them back. There's more coming.
+The GUI today is a match viewer. The goal is a bot development environment.
 
 ### Bot thinking visualization
 

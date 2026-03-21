@@ -123,6 +123,7 @@ export default memo(
 		prev.line.subcycle === next.line.subcycle &&
 		prev.line.multipv === next.line.multipv &&
 		prev.line.depth === next.line.depth &&
+		prev.line.nodes === next.line.nodes &&
 		prev.line.score === next.line.score &&
 		prev.color === next.color,
 );

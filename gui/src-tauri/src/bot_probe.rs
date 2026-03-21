@@ -30,7 +30,11 @@ impl From<OptionType> for BotOptionType {
         } else if ot == OptionType::Button {
             Self::Button
         } else {
-            Self::Check // fallback for unknown variants
+            tracing::warn!(
+                value = ot.0,
+                "unknown OptionType variant, falling back to Check"
+            );
+            Self::Check
         }
     }
 }

@@ -710,6 +710,7 @@ async fn forward_events(
 
     loop {
         tokio::select! {
+            biased;
             event = event_rx.recv() => {
                 let Some(event) = event else {
                     // Channel closed — flush remaining buffer
