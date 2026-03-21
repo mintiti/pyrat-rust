@@ -1,6 +1,6 @@
 import { Stack } from "@mantine/core";
 import { useAtomValue } from "jotai";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { events, commands } from "../bindings";
 import type { BotOptionValue } from "../bindings/generated";
 import {
@@ -11,9 +11,9 @@ import {
 } from "../stores/botConfigAtom";
 import { matchConfigAtom } from "../stores/matchConfigAtom";
 import {
+	buildAnalysisPosition,
 	useCurrentBotInfo,
 	useDisplayState,
-	useIsAtTip,
 	useMatchStore,
 } from "../stores/matchStore";
 import MatchToolbar from "./MatchToolbar";
@@ -44,7 +44,9 @@ export default function MatchView({ onNewMatch }: Props) {
 	const previewError = useMatchStore((s) => s.previewError);
 	const player1BotId = useMatchStore((s) => s.player1BotId);
 	const player2BotId = useMatchStore((s) => s.player2BotId);
-	const isAtTip = useIsAtTip();
+	const analyzing = useMatchStore((s) => s.analyzing);
+	const cursor = useMatchStore((s) => s.cursor);
+	const cursorKey = useMemo(() => cursor.join(","), [cursor]);
 
 	const {
 		onMatchStarted,
@@ -54,8 +56,6 @@ export default function MatchView({ onNewMatch }: Props) {
 		onError,
 		onDisconnect,
 		advanceCursor,
-		startAnalysis,
-		stopAnalysis,
 		goToStart,
 		goToEnd,
 		stepForwardOrAdvance,
@@ -113,15 +113,25 @@ export default function MatchView({ onNewMatch }: Props) {
 		return () => clearInterval(id);
 	}, [autoplay, playbackSpeed, mode]);
 
-	// Reactive analysis: auto-start analysis when cursor lands on a tree tip in step mode
-	// biome-ignore lint/correctness/useExhaustiveDependencies: startAnalysis is a stable ref from getState()
+	// Cursor-follows-analysis: start analysis on the current position, restart on cursor change
+	// biome-ignore lint/correctness/useExhaustiveDependencies: cursorKey is a derived stable dep
 	useEffect(() => {
-		if (mode !== "step" || matchPhase !== "playing" || !isAtTip) return;
+		if (mode !== "step" || matchPhase !== "playing" || !analyzing) return;
+
+		const { root, cursor } = useMatchStore.getState();
+		if (!root) return;
+		const position = buildAnalysisPosition(root, cursor);
+		if (!position) return;
+
 		const timer = setTimeout(() => {
-			startAnalysis();
+			commands.startAnalysisTurn(position).catch(console.error);
 		}, 50);
-		return () => clearTimeout(timer);
-	}, [mode, matchPhase, isAtTip]);
+
+		return () => {
+			clearTimeout(timer);
+			commands.stopAnalysisTurn().catch(() => {});
+		};
+	}, [mode, matchPhase, analyzing, cursorKey]);
 
 	// Keyboard shortcuts
 	// biome-ignore lint/correctness/useExhaustiveDependencies: navigation actions are stable refs from getState()
@@ -169,7 +179,7 @@ export default function MatchView({ onNewMatch }: Props) {
 				case " ":
 					e.preventDefault();
 					if (state.mode === "step") {
-						state.analyzing ? stopAnalysis() : startAnalysis();
+						state.setAnalyzing(!state.analyzing);
 					} else {
 						togglePlay();
 					}

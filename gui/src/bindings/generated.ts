@@ -29,9 +29,9 @@ async stopMatch() : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async startAnalysisTurn(durationMs: number) : Promise<Result<null, string>> {
+async startAnalysisTurn(position: AnalysisPosition | null) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("start_analysis_turn", { durationMs }) };
+    return { status: "ok", data: await TAURI_INVOKE("start_analysis_turn", { position }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -128,6 +128,10 @@ export type AdvanceAnalysisResult = { player1_action: Direction; player2_action:
  * Pair of player actions for `advance_analysis`. Both must be provided together.
  */
 export type AnalysisActions = { player1: Direction; player2: Direction }
+/**
+ * Arbitrary game-tree position for cursor-follows-analysis.
+ */
+export type AnalysisPosition = { turn: number; player1: PlayerState; player2: PlayerState; cheese: Coord[]; player1_last_move: Direction; player2_last_move: Direction }
 /**
  * Emitted when a bot disconnects mid-game.
  */

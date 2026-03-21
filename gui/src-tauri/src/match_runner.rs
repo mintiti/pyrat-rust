@@ -9,7 +9,7 @@ use tracing::{debug, info, warn};
 use pyrat::game::game_logic::GameState;
 use pyrat_host::game_loop::{
     build_owned_match_config, determine_result, run_playing, run_setup, wire_to_engine, MatchEvent,
-    MatchSetup, PlayerEntry, PlayingConfig, PlayingState, SetupTiming,
+    MatchSetup, OwnedTurnState, PlayerEntry, PlayingConfig, PlayingState, SetupTiming,
 };
 use pyrat_host::session::messages::{HostCommand, OwnedInfo, SessionId, SessionMsg};
 use pyrat_host::stub::spawn_stub_bot;
@@ -17,7 +17,7 @@ use pyrat_host::wire::{Direction as WireDirection, GameResult, Player, TimingMod
 
 use tauri_specta::Event;
 
-use crate::commands::{Coord, PlayerState};
+use crate::commands::{AnalysisPosition, Coord, PlayerState};
 use crate::events::{
     BotDisconnectedEvent, BotInfoEvent, Direction as SpectaDirection, MatchOverEvent, MatchWinner,
     PlayerSide, TurnPlayedEvent,
@@ -87,7 +87,9 @@ pub async fn run_match(
     };
 
     // 1. Build match config
-    let match_config = build_owned_match_config(&game, TimingMode::Wait, 3000, 10000);
+    // In step (analysis) mode, use 0 timeout so bots loop on should_stop() indefinitely
+    let move_timeout = if cmd_rx.is_some() { 0 } else { 3000 };
+    let match_config = build_owned_match_config(&game, TimingMode::Wait, move_timeout, 10000);
 
     let mut bot_options: HashMap<String, Vec<(String, String)>> = HashMap::new();
     if !p1.options.is_empty() {
@@ -292,28 +294,26 @@ async fn run_analysis_inner(
             cmd = cmd_rx.recv() => {
                 let Some((cmd, reply)) = cmd else { break; };
                 match cmd {
-                    AnalysisCmd::StartTurn { duration_ms } => {
+                    AnalysisCmd::StartTurn { position } => {
                         // If collecting, stop + drain first
                         if collecting {
                             send_stop(sessions, &mut playing).await;
                             drain_rx(game_rx);
                         }
 
-                        // Build and send turn state to all connected sessions
-                        let turn_state = playing.build_turn_state(game);
+                        // Build turn state: from explicit position or from live game state
+                        let turn_state = match position {
+                            Some(pos) => build_turn_state_from_position(pos),
+                            None => playing.build_turn_state(game),
+                        };
+                        let turn = turn_state.turn;
                         send_turn_state(sessions, &mut playing, &turn_state).await;
 
-                        let dl = if duration_ms > 0 {
-                            Some(tokio::time::Instant::now() + Duration::from_millis(duration_ms))
-                        } else {
-                            None
-                        };
-
                         phase = AnalysisPhase::Collecting {
-                            turn: game.turn,
+                            turn,
                             p1_action: None,
                             p2_action: None,
-                            deadline: dl,
+                            deadline: None,
                         };
                         let _ = reply.send(AnalysisResp::TurnStarted);
                     }
@@ -391,6 +391,22 @@ async fn run_analysis_inner(
 
     shutdown_sessions(sessions, game_rx).await;
     Ok(())
+}
+
+/// Build an OwnedTurnState from an arbitrary game-tree position (cursor-follows-analysis).
+fn build_turn_state_from_position(pos: AnalysisPosition) -> OwnedTurnState {
+    OwnedTurnState {
+        turn: pos.turn,
+        player1_position: (pos.player1.position.x, pos.player1.position.y),
+        player2_position: (pos.player2.position.x, pos.player2.position.y),
+        player1_score: pos.player1.score,
+        player2_score: pos.player2.score,
+        player1_mud_turns: pos.player1.mud_turns,
+        player2_mud_turns: pos.player2.mud_turns,
+        cheese: pos.cheese.iter().map(|c| (c.x, c.y)).collect(),
+        player1_last_move: specta_to_wire(pos.player1_last_move),
+        player2_last_move: specta_to_wire(pos.player2_last_move),
+    }
 }
 
 /// Send HostCommand::Stop to all connected sessions.

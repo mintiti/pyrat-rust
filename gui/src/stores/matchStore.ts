@@ -5,6 +5,7 @@ import { useShallow } from "zustand/shallow";
 import { commands } from "../bindings";
 import type {
 	AnalysisActions,
+	AnalysisPosition,
 	BotDisconnectedEvent,
 	BotInfoEvent,
 	Coord,
@@ -71,6 +72,23 @@ export function getMainlineEnd(root: GameNode): GameNode {
 /** Build a cursor path of `n` zeros (follow mainline for n steps). */
 function mainlinePath(n: number): number[] {
 	return new Array(n).fill(0);
+}
+
+/** Build an AnalysisPosition from a tree node (for cursor-follows-analysis). */
+export function buildAnalysisPosition(
+	root: GameNode,
+	cursor: number[],
+): AnalysisPosition | null {
+	const node = getNodeAtPath(root, cursor);
+	if (!node) return null;
+	return {
+		turn: node.turn,
+		player1: node.player1,
+		player2: node.player2,
+		cheese: node.cheese,
+		player1_last_move: node.actions?.player1 ?? "Stay",
+		player2_last_move: node.actions?.player2 ?? "Stay",
+	};
 }
 
 // ── Store ────────────────────────────────────────────────────────
@@ -141,8 +159,8 @@ interface MatchState {
 	confirmStagedMoves: () => Promise<void>;
 
 	// Analysis actions (step mode)
-	startAnalysis: () => Promise<void>;
-	stopAnalysis: () => Promise<{
+	setAnalyzing: (val: boolean) => void;
+	collectActions: () => Promise<{
 		player1: Direction;
 		player2: Direction;
 	} | null>;
@@ -170,7 +188,6 @@ interface MatchState {
 /** Resets applied whenever the cursor moves (navigation actions). */
 const NAVIGATION_RESET = {
 	autoplay: false,
-	analyzing: false,
 	stagedMoves: { player1: null, player2: null } as {
 		player1: Direction | null;
 		player2: Direction | null;
@@ -283,6 +300,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 			root,
 			matchPhase: "playing",
 			autoplay: mode === "auto",
+			analyzing: mode === "step",
 		});
 	},
 
@@ -399,11 +417,11 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 			matchPhase,
 			advanceInFlight,
 			stagedMoves,
-			stopAnalysis,
+			collectActions,
 			advanceTurn,
 		} = get();
 		if (mode !== "step" || matchPhase !== "playing" || advanceInFlight) return;
-		const botMoves = await stopAnalysis();
+		const botMoves = await collectActions();
 		const merged: AnalysisActions = {
 			player1:
 				stagedMoves.player1 ?? botMoves?.player1 ?? ("Stay" as Direction),
@@ -415,20 +433,14 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	},
 
 	// ── Analysis actions (step mode) ────────────────────────
-	startAnalysis: async () => {
-		const { mode, matchPhase, analyzing } = get();
-		if (mode !== "step" || matchPhase !== "playing" || analyzing) return;
-		set({ analyzing: true, analysisError: null });
-		const res = await commands.startAnalysisTurn(0);
-		if (res.status === "error") get().onAnalysisError(res.error);
+	setAnalyzing: (val) => {
+		set({ analyzing: val, analysisError: null });
 	},
 
-	stopAnalysis: async () => {
+	collectActions: async () => {
 		const { mode, matchPhase } = get();
 		if (mode !== "step" || matchPhase !== "playing") return null;
-		set({ analysisError: null });
 		const res = await commands.stopAnalysisTurn();
-		set({ analyzing: false });
 		if (res.status === "error") {
 			get().onAnalysisError(res.error);
 			return null;

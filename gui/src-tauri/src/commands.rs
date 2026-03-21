@@ -18,6 +18,17 @@ pub struct AnalysisActions {
     pub player2: SpectaDirection,
 }
 
+/// Arbitrary game-tree position for cursor-follows-analysis.
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct AnalysisPosition {
+    pub turn: u16,
+    pub player1: PlayerState,
+    pub player2: PlayerState,
+    pub cheese: Vec<Coord>,
+    pub player1_last_move: SpectaDirection,
+    pub player2_last_move: SpectaDirection,
+}
+
 // ---------------------------------------------------------------------------
 // MatchConfigParams — flat DTO for the frontend
 // ---------------------------------------------------------------------------
@@ -423,10 +434,10 @@ async fn send_analysis_cmd(tx: &AnalysisTx, cmd: AnalysisCmd) -> Result<Analysis
 #[specta::specta]
 pub async fn start_analysis_turn(
     state: tauri::State<'_, AppState>,
-    duration_ms: u64,
+    position: Option<AnalysisPosition>,
 ) -> Result<(), String> {
     let tx = get_cmd_tx(&state.match_phase).await?;
-    let resp = send_analysis_cmd(&tx, AnalysisCmd::StartTurn { duration_ms }).await?;
+    let resp = send_analysis_cmd(&tx, AnalysisCmd::StartTurn { position }).await?;
     match resp {
         AnalysisResp::TurnStarted => Ok(()),
         _ => Err("unexpected response".into()),

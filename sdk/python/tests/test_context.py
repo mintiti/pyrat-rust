@@ -12,9 +12,16 @@ from pyrat_sdk.bot import Context
 
 def test_should_stop_deadline_only():
     """Past deadline, no stop event -> should_stop returns True."""
+    ctx = Context(1, MockConnection([]))  # 1ms timeout
+    time.sleep(0.01)
+    assert ctx.should_stop() is True
+
+
+def test_zero_timeout_is_infinite():
+    """timeout_ms=0 is treated as infinite — should_stop is False."""
     ctx = Context(0, MockConnection([]))
     time.sleep(0.001)
-    assert ctx.should_stop() is True
+    assert ctx.should_stop() is False
 
 
 def test_should_stop_flag_only():
