@@ -2,6 +2,7 @@ mod codec;
 pub mod messages;
 pub mod state;
 
+pub use codec::{extract_bot_packet, BotPayload};
 pub use messages::{DisconnectReason, HostCommand, SessionId, SessionMsg};
 pub use state::SessionState;
 
@@ -14,7 +15,7 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tracing::{debug, warn};
 
-use codec::{extract_bot_packet, serialize_host_command, BotPayload};
+use codec::serialize_host_command;
 use pyrat_wire::framing::{FrameError, FrameReader, FrameWriter};
 use pyrat_wire::Player;
 

@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use tokio::sync::{mpsc, oneshot};
 
+use crate::bot_probe::MatchBotOptions;
 use crate::events::{Direction as SpectaDirection, MatchErrorEvent, MatchStartedEvent};
 use crate::match_runner::{run_match, specta_to_wire, wire_to_specta, PlayerSetup};
 use crate::state::{AnalysisCmd, AnalysisResp, AnalysisTx, AppState, MatchPhase};
@@ -15,6 +16,17 @@ use crate::state::{AnalysisCmd, AnalysisResp, AnalysisTx, AppState, MatchPhase};
 pub struct AnalysisActions {
     pub player1: SpectaDirection,
     pub player2: SpectaDirection,
+}
+
+/// Arbitrary game-tree position for cursor-follows-analysis.
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct AnalysisPosition {
+    pub turn: u16,
+    pub player1: PlayerState,
+    pub player2: PlayerState,
+    pub cheese: Vec<Coord>,
+    pub player1_last_move: SpectaDirection,
+    pub player2_last_move: SpectaDirection,
 }
 
 // ---------------------------------------------------------------------------
@@ -258,9 +270,9 @@ pub async fn stop_match(state: tauri::State<'_, AppState>) -> Result<(), String>
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 #[tauri::command]
 #[specta::specta]
-#[allow(clippy::too_many_arguments)]
 pub async fn start_match(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
@@ -268,14 +280,17 @@ pub async fn start_match(
     player2_cmd: String,
     player1_working_dir: Option<String>,
     player2_working_dir: Option<String>,
+    player1_agent_id: String,
+    player2_agent_id: String,
     config: Option<MatchConfigParams>,
-    step_mode: Option<bool>,
+    bot_options: Option<MatchBotOptions>,
 ) -> Result<(), String> {
     use tauri_specta::Event;
     use tokio_util::sync::CancellationToken;
 
     let params = config.unwrap_or_default();
-    let step = step_mode.unwrap_or(false);
+    let opts = bot_options.unwrap_or_default();
+    let step = opts.step_mode;
 
     // Cancel existing match and wait for cleanup before proceeding.
     cancel_running_match(&state.match_phase).await;
@@ -307,6 +322,17 @@ pub async fn start_match(
     let match_phase = state.match_phase.clone();
     let cancel_check = cancel.clone();
 
+    let p1_opts: Vec<(String, String)> = opts
+        .player1
+        .into_iter()
+        .map(|o| (o.name, o.value))
+        .collect();
+    let p2_opts: Vec<(String, String)> = opts
+        .player2
+        .into_iter()
+        .map(|o| (o.name, o.value))
+        .collect();
+
     let handle = tokio::spawn(async move {
         let result = run_match(
             app_handle.clone(),
@@ -315,10 +341,14 @@ pub async fn start_match(
                 PlayerSetup {
                     command: player1_cmd,
                     working_dir: player1_working_dir,
+                    agent_id: player1_agent_id,
+                    options: p1_opts,
                 },
                 PlayerSetup {
                     command: player2_cmd,
                     working_dir: player2_working_dir,
+                    agent_id: player2_agent_id,
+                    options: p2_opts,
                 },
             ],
             cancel,
@@ -404,10 +434,10 @@ async fn send_analysis_cmd(tx: &AnalysisTx, cmd: AnalysisCmd) -> Result<Analysis
 #[specta::specta]
 pub async fn start_analysis_turn(
     state: tauri::State<'_, AppState>,
-    duration_ms: u64,
+    position: Option<AnalysisPosition>,
 ) -> Result<(), String> {
     let tx = get_cmd_tx(&state.match_phase).await?;
-    let resp = send_analysis_cmd(&tx, AnalysisCmd::StartTurn { duration_ms }).await?;
+    let resp = send_analysis_cmd(&tx, AnalysisCmd::StartTurn { position }).await?;
     match resp {
         AnalysisResp::TurnStarted => Ok(()),
         _ => Err("unexpected response".into()),

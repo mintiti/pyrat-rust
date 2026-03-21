@@ -4,6 +4,7 @@ import {
 	IconPlayerPlay,
 	IconRoute,
 } from "@tabler/icons-react";
+import { memo } from "react";
 import pythonIconUrl from "../../assets/sprites/players/python/neutral.png";
 import ratIconUrl from "../../assets/sprites/players/rat/neutral.png";
 import type { PlayerSide } from "../../bindings/generated";
@@ -54,91 +55,103 @@ function headerSummary(subjects: SubjectEntry[]): string | null {
 	return null;
 }
 
-export default function BotPanel({ sender, botName, color, subjects }: Props) {
-	const showArrows = useMatchStore((s) =>
-		sender === "Player1" ? s.showPlayer1Arrows : s.showPlayer2Arrows,
-	);
-	const paused = useMatchStore((s) => s.pausedSenders[sender]);
-	const { toggleArrows, togglePauseSender } = useMatchStore.getState();
-	const summary = headerSummary(subjects);
+export default memo(
+	function BotPanel({ sender, botName, color, subjects }: Props) {
+		const showArrows = useMatchStore((s) =>
+			sender === "Player1" ? s.showPlayer1Arrows : s.showPlayer2Arrows,
+		);
+		const paused = useMatchStore((s) => s.pausedSenders[sender]);
+		const { toggleArrows, togglePauseSender } = useMatchStore.getState();
+		const summary = headerSummary(subjects);
 
-	return (
-		<Accordion.Item value={sender}>
-			<Accordion.Control
-				style={{
-					borderLeft: `3px solid var(--mantine-color-${color}-5)`,
-				}}
-			>
-				<Group gap="xs" wrap="nowrap">
-					<Text size="sm" fw={600}>
-						{botName}
-					</Text>
-					{subjects.map(({ subject }) => (
-						<img
-							key={subject}
-							src={SUBJECT_ICON[subject]}
-							alt={PLAYER_LABEL[subject]}
-							width={14}
-							height={14}
-						/>
-					))}
-					{summary && (
-						<Text size="xs" c="dimmed" ff="monospace">
-							{summary}
+		return (
+			<Accordion.Item value={sender}>
+				<Accordion.Control
+					style={{
+						borderLeft: `3px solid var(--mantine-color-${color}-5)`,
+					}}
+				>
+					<Group gap="xs" wrap="nowrap">
+						<Text size="sm" fw={600}>
+							{botName}
 						</Text>
-					)}
-					<Group ml="auto" gap={2}>
-						<ActionIcon
-							variant={paused ? "transparent" : "filled"}
-							color={color}
-							size="xs"
-							onClick={(e) => {
-								e.stopPropagation();
-								togglePauseSender(sender);
-							}}
-							title={`${paused ? "Resume" : "Pause"} ${PLAYER_LABEL[sender]} analysis feed`}
-						>
-							{paused ? (
-								<IconPlayerPlay size={12} />
-							) : (
-								<IconPlayerPause size={12} />
-							)}
-						</ActionIcon>
-						<ActionIcon
-							variant={showArrows ? "filled" : "subtle"}
-							color={color}
-							size="xs"
-							onClick={(e) => {
-								e.stopPropagation();
-								toggleArrows(sender);
-							}}
-							title={`Toggle ${PLAYER_LABEL[sender]} PV arrows`}
-						>
-							<IconRoute size={12} />
-						</ActionIcon>
+						{subjects.map(({ subject }) => (
+							<img
+								key={subject}
+								src={SUBJECT_ICON[subject]}
+								alt={PLAYER_LABEL[subject]}
+								width={14}
+								height={14}
+							/>
+						))}
+						{summary && (
+							<Text size="xs" c="dimmed" ff="monospace">
+								{summary}
+							</Text>
+						)}
+						<Group ml="auto" gap={2}>
+							<ActionIcon
+								variant={paused ? "transparent" : "filled"}
+								color={color}
+								size="xs"
+								onClick={(e) => {
+									e.stopPropagation();
+									togglePauseSender(sender);
+								}}
+								title={`${paused ? "Resume" : "Pause"} ${PLAYER_LABEL[sender]} analysis feed`}
+							>
+								{paused ? (
+									<IconPlayerPlay size={12} />
+								) : (
+									<IconPlayerPause size={12} />
+								)}
+							</ActionIcon>
+							<ActionIcon
+								variant={showArrows ? "filled" : "subtle"}
+								color={color}
+								size="xs"
+								onClick={(e) => {
+									e.stopPropagation();
+									toggleArrows(sender);
+								}}
+								title={`Toggle ${PLAYER_LABEL[sender]} PV arrows`}
+							>
+								<IconRoute size={12} />
+							</ActionIcon>
+						</Group>
 					</Group>
-				</Group>
-			</Accordion.Control>
-			<Accordion.Panel>
-				<Stack gap={8}>
-					{subjects.map(({ subject, bucket }) => {
-						const lines = currentLines(bucket);
-						if (lines.length === 0) return null;
-						return (
-							<Stack key={subject} gap={4}>
-								{lines.map((line) => (
-									<AnalysisLine
-										key={line.multipv}
-										line={line}
-										color={color}
-										subjectIcon={SUBJECT_ICON[subject]}
-									/>
-								))}
-							</Stack>
-						);
-					})}
-				</Stack>
-			</Accordion.Panel>
-		</Accordion.Item>
-	);
-}
+				</Accordion.Control>
+				<Accordion.Panel>
+					<Stack gap={8}>
+						{subjects.map(({ subject, bucket }) => {
+							const lines = currentLines(bucket);
+							if (lines.length === 0) return null;
+							return (
+								<Stack key={subject} gap={4}>
+									{lines.map((line) => (
+										<AnalysisLine
+											key={line.multipv}
+											line={line}
+											color={color}
+											subjectIcon={SUBJECT_ICON[subject]}
+										/>
+									))}
+								</Stack>
+							);
+						})}
+					</Stack>
+				</Accordion.Panel>
+			</Accordion.Item>
+		);
+	},
+	(prev, next) => {
+		if (prev.sender !== next.sender || prev.botName !== next.botName)
+			return false;
+		if (prev.subjects.length !== next.subjects.length) return false;
+		for (let i = 0; i < prev.subjects.length; i++) {
+			if (prev.subjects[i].bucket.subcycle !== next.subjects[i].bucket.subcycle)
+				return false;
+		}
+		return true;
+	},
+);

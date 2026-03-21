@@ -1,10 +1,11 @@
 import { produce } from "immer";
-import { useMemo } from "react";
+import { startTransition, useMemo } from "react";
 import { create } from "zustand";
 import { useShallow } from "zustand/shallow";
 import { commands } from "../bindings";
 import type {
 	AnalysisActions,
+	AnalysisPosition,
 	BotDisconnectedEvent,
 	BotInfoEvent,
 	Coord,
@@ -73,6 +74,23 @@ function mainlinePath(n: number): number[] {
 	return new Array(n).fill(0);
 }
 
+/** Build an AnalysisPosition from a tree node (for cursor-follows-analysis). */
+export function buildAnalysisPosition(
+	root: GameNode,
+	cursor: number[],
+): AnalysisPosition | null {
+	const node = getNodeAtPath(root, cursor);
+	if (!node) return null;
+	return {
+		turn: node.turn,
+		player1: node.player1,
+		player2: node.player2,
+		cheese: node.cheese,
+		player1_last_move: node.actions?.player1 ?? "Stay",
+		player2_last_move: node.actions?.player2 ?? "Stay",
+	};
+}
+
 // ── Store ────────────────────────────────────────────────────────
 
 interface MatchState {
@@ -96,6 +114,10 @@ interface MatchState {
 	previewSeed: number | null;
 	previewError: string | null;
 
+	// Bot options (per-slot overrides, name → value)
+	player1Options: Record<string, string>;
+	player2Options: Record<string, string>;
+
 	// Viewer
 	mode: MatchMode;
 	matchPhase: MatchPhase;
@@ -112,6 +134,8 @@ interface MatchState {
 	setPlayer1BotId: (cmd: string | null) => void;
 	setPlayer2BotId: (cmd: string | null) => void;
 	setMode: (mode: MatchMode) => void;
+	setPlayer1Options: (opts: Record<string, string>) => void;
+	setPlayer2Options: (opts: Record<string, string>) => void;
 
 	// Event handlers
 	onMatchStarted: (maze: MazeState, matchId: number) => void;
@@ -135,8 +159,8 @@ interface MatchState {
 	confirmStagedMoves: () => Promise<void>;
 
 	// Analysis actions (step mode)
-	startAnalysis: () => Promise<void>;
-	stopAnalysis: () => Promise<{
+	setAnalyzing: (val: boolean) => void;
+	collectActions: () => Promise<{
 		player1: Direction;
 		player2: Direction;
 	} | null>;
@@ -164,12 +188,44 @@ interface MatchState {
 /** Resets applied whenever the cursor moves (navigation actions). */
 const NAVIGATION_RESET = {
 	autoplay: false,
-	analyzing: false,
 	stagedMoves: { player1: null, player2: null } as {
 		player1: Direction | null;
 		player2: Direction | null;
 	},
 };
+
+// ── BotInfo rAF batching ─────────────────────────────────────────
+// Buffer incoming BotInfo events and flush once per animation frame
+// inside a startTransition, so cursor navigation stays responsive.
+
+let botInfoBuffer: BotInfoEvent[] = [];
+let botInfoRafId: number | null = null;
+
+function flushBotInfo() {
+	botInfoRafId = null;
+	const batch = botInfoBuffer;
+	botInfoBuffer = [];
+	if (batch.length === 0) return;
+
+	startTransition(() => {
+		useMatchStore.setState(
+			produce((state: MatchState) => {
+				if (!state.root) return;
+				for (const e of batch) {
+					if (state.pausedSenders[e.sender]) continue;
+					if (state.mode === "step") {
+						const node = getNodeAtPath(state.root, state.cursor);
+						if (!node || node.turn !== e.turn) continue;
+						accumulateBotInfo(node.botInfo, e);
+					} else {
+						const node = getNodeAtPath(state.root, mainlinePath(e.turn));
+						if (node) accumulateBotInfo(node.botInfo, e);
+					}
+				}
+			}),
+		);
+	});
+}
 
 /** Fields that get wiped when returning to idle/preview state. */
 const IDLE_MATCH = {
@@ -182,6 +238,8 @@ const IDLE_MATCH = {
 	error: null as string | null,
 	analysisError: null as string | null,
 	disconnection: null as BotDisconnectedEvent | null,
+	player1Options: {} as Record<string, string>,
+	player2Options: {} as Record<string, string>,
 	matchPhase: "idle" as MatchPhase,
 	autoplay: true,
 	analyzing: false,
@@ -213,6 +271,8 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	setPlayer1BotId: (cmd) => set({ player1BotId: cmd }),
 	setPlayer2BotId: (cmd) => set({ player2BotId: cmd }),
 	setMode: (mode) => set({ mode }),
+	setPlayer1Options: (opts) => set({ player1Options: opts }),
+	setPlayer2Options: (opts) => set({ player2Options: opts }),
 
 	// ── Event handlers ───────────────────────────────────────
 	onMatchStarted: (maze, matchId) => {
@@ -240,6 +300,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 			root,
 			matchPhase: "playing",
 			autoplay: mode === "auto",
+			analyzing: mode === "step",
 		});
 	},
 
@@ -290,21 +351,10 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	},
 
 	onBotInfo: (e) => {
-		set(
-			produce((state: MatchState) => {
-				if (!state.root) return;
-				if (state.pausedSenders[e.sender]) return;
-				if (state.mode === "step") {
-					const node = getNodeAtPath(state.root, state.cursor);
-					if (!node || node.turn !== e.turn) return;
-					accumulateBotInfo(node.botInfo, e);
-				} else {
-					const node = getNodeAtPath(state.root, mainlinePath(e.turn));
-					if (!node) return;
-					accumulateBotInfo(node.botInfo, e);
-				}
-			}),
-		);
+		botInfoBuffer.push(e);
+		if (botInfoRafId === null) {
+			botInfoRafId = requestAnimationFrame(flushBotInfo);
+		}
 	},
 
 	onError: (message) => {
@@ -367,11 +417,11 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 			matchPhase,
 			advanceInFlight,
 			stagedMoves,
-			stopAnalysis,
+			collectActions,
 			advanceTurn,
 		} = get();
 		if (mode !== "step" || matchPhase !== "playing" || advanceInFlight) return;
-		const botMoves = await stopAnalysis();
+		const botMoves = await collectActions();
 		const merged: AnalysisActions = {
 			player1:
 				stagedMoves.player1 ?? botMoves?.player1 ?? ("Stay" as Direction),
@@ -383,20 +433,14 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	},
 
 	// ── Analysis actions (step mode) ────────────────────────
-	startAnalysis: async () => {
-		const { mode, matchPhase, analyzing } = get();
-		if (mode !== "step" || matchPhase !== "playing" || analyzing) return;
-		set({ analyzing: true, analysisError: null });
-		const res = await commands.startAnalysisTurn(0);
-		if (res.status === "error") get().onAnalysisError(res.error);
+	setAnalyzing: (val) => {
+		set({ analyzing: val, analysisError: null });
 	},
 
-	stopAnalysis: async () => {
+	collectActions: async () => {
 		const { mode, matchPhase } = get();
 		if (mode !== "step" || matchPhase !== "playing") return null;
-		set({ analysisError: null });
 		const res = await commands.stopAnalysisTurn();
-		set({ analyzing: false });
 		if (res.status === "error") {
 			get().onAnalysisError(res.error);
 			return null;

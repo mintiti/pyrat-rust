@@ -1,194 +1,163 @@
 import {
+	ActionIcon,
+	Badge,
 	Box,
 	Button,
 	Center,
-	Divider,
+	Code,
 	Group,
 	Paper,
 	ScrollArea,
 	SimpleGrid,
 	Stack,
 	Text,
-	TextInput,
 	ThemeIcon,
 	Title,
+	Tooltip,
 } from "@mantine/core";
-import { IconPlus, IconRobot } from "@tabler/icons-react";
-import { useAtom, useAtomValue } from "jotai";
-import { useEffect, useState } from "react";
 import {
-	type BotConfig,
-	asyncBotsAtom,
-	botsAtom,
+	IconFolderPlus,
+	IconRefresh,
+	IconRobot,
+	IconTrash,
+} from "@tabler/icons-react";
+import { open } from "@tauri-apps/plugin-dialog";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
+import { useState } from "react";
+import type { DiscoveredBot } from "../bindings/generated";
+import {
+	asyncScanPathsAtom,
+	discoveredBotsAtom,
+	refreshBotsAtom,
+	scanPathsAtom,
 } from "../stores/botConfigAtom";
 
 export default function BotsPage() {
-	const bots = useAtomValue(botsAtom);
-	const [, setBots] = useAtom(asyncBotsAtom);
-	const [selectedBotId, setSelectedBotId] = useState<string | null>(null);
+	const scanPaths = useAtomValue(scanPathsAtom);
+	const [, setScanPaths] = useAtom(asyncScanPathsAtom);
+	const discovered = useAtomValue(discoveredBotsAtom);
+	const refresh = useSetAtom(refreshBotsAtom);
+	const [selectedId, setSelectedId] = useState<string | null>(null);
 
-	// Local draft for the selected bot — edits are cheap, only persisted on blur.
-	const selectedBot = bots.find((b) => b.id === selectedBotId) ?? null;
-	const [draft, setDraft] = useState<BotConfig | null>(null);
+	const selectedBot = discovered.find((b) => b.agent_id === selectedId) ?? null;
 
-	// Sync draft when selection changes — keyed on ID, not object ref
-	// biome-ignore lint/correctness/useExhaustiveDependencies: intentionally keyed on selectedBotId
-	useEffect(() => {
-		setDraft(selectedBot ? { ...selectedBot } : null);
-	}, [selectedBotId]);
-
-	const flushDraft = () => {
-		if (!draft) return;
-		setBots(bots.map((b) => (b.id === draft.id ? draft : b)));
+	const handleAddFolder = async () => {
+		const result = await open({ directory: true, multiple: false });
+		if (typeof result === "string") {
+			const next = [...scanPaths, result];
+			await setScanPaths(next);
+			await refresh();
+		}
 	};
 
-	const handleAdd = () => {
-		const newBot: BotConfig = {
-			id: crypto.randomUUID(),
-			name: "New Bot",
-			command: "",
-			working_dir: null,
-		};
-		setBots([...bots, newBot]);
-		setSelectedBotId(newBot.id);
+	const handleRemovePath = async (path: string) => {
+		const next = scanPaths.filter((p) => p !== path);
+		await setScanPaths(next);
+		await refresh();
 	};
 
-	const handleDelete = (id: string) => {
-		setBots(bots.filter((b) => b.id !== id));
-		if (selectedBotId === id) setSelectedBotId(null);
+	const handleRefresh = () => {
+		refresh();
 	};
 
 	return (
 		<Stack h="100%" px="lg" pb="lg">
+			{/* Header */}
 			<Group
 				justify="space-between"
 				py="sm"
 				style={{ borderBottom: "1px solid var(--mantine-color-dark-4)" }}
 			>
-				<Title order={3}>Bot Management</Title>
+				<Title order={3}>Bots</Title>
+				<Tooltip label="Re-scan all paths">
+					<ActionIcon variant="subtle" onClick={handleRefresh}>
+						<IconRefresh size={18} />
+					</ActionIcon>
+				</Tooltip>
 			</Group>
 
+			{/* Scan paths */}
+			<Stack gap="xs">
+				<Text size="sm" fw={500}>
+					Scan Paths
+				</Text>
+				{scanPaths.length === 0 && (
+					<Text size="sm" c="dimmed">
+						No scan paths yet. Add a folder to discover bots.
+					</Text>
+				)}
+				{scanPaths.map((path) => (
+					<Group key={path} gap="xs" wrap="nowrap">
+						<Code
+							style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}
+						>
+							{path}
+						</Code>
+						<ActionIcon
+							variant="subtle"
+							color="red"
+							size="sm"
+							onClick={() => handleRemovePath(path)}
+						>
+							<IconTrash size={14} />
+						</ActionIcon>
+					</Group>
+				))}
+				<Button
+					variant="light"
+					size="xs"
+					leftSection={<IconFolderPlus size={14} />}
+					onClick={handleAddFolder}
+					style={{ alignSelf: "start" }}
+				>
+					Add Folder
+				</Button>
+			</Stack>
+
+			{/* Bot grid + detail panel */}
 			<Group grow flex={1} style={{ overflow: "hidden" }} align="start">
 				<ScrollArea h="100%" offsetScrollbars>
-					<SimpleGrid cols={{ base: 1, md: 2 }} spacing="sm">
-						{/* Built-in random bot card */}
-						<Box
-							p="md"
-							style={{
-								border: "1px solid var(--mantine-color-dark-4)",
-								borderRadius: "var(--mantine-radius-md)",
-								opacity: 0.5,
-							}}
-						>
-							<Text fw="bold" lineClamp={1}>
-								Random Bot
+					{scanPaths.length > 0 && discovered.length === 0 ? (
+						<Center py="xl">
+							<Text c="dimmed">
+								No bots found. Each bot needs a bot.toml file.
 							</Text>
-							<Text size="xs" c="dimmed">
-								(built-in)
-							</Text>
-						</Box>
-
-						{/* User bot cards */}
-						{bots.map((bot) => (
+						</Center>
+					) : (
+						<SimpleGrid cols={{ base: 1, md: 2 }} spacing="sm">
+							{/* Built-in random bot card */}
 							<Box
-								key={bot.id}
 								p="md"
-								component="button"
-								type="button"
-								onClick={() => setSelectedBotId(bot.id)}
 								style={{
-									cursor: "pointer",
-									border:
-										selectedBotId === bot.id
-											? "2px solid var(--mantine-color-yellow-filled)"
-											: "1px solid var(--mantine-color-dark-4)",
+									border: "1px solid var(--mantine-color-dark-4)",
 									borderRadius: "var(--mantine-radius-md)",
-									background: "transparent",
-									color: "inherit",
-									textAlign: "left",
-									width: "100%",
-									boxShadow:
-										selectedBotId === bot.id
-											? "var(--mantine-shadow-sm)"
-											: undefined,
+									opacity: 0.5,
 								}}
 							>
 								<Text fw="bold" lineClamp={1}>
-									{bot.name}
+									Random Bot
 								</Text>
-								<Text size="xs" c="dimmed" lineClamp={1}>
-									{bot.command || "(no command)"}
+								<Text size="xs" c="dimmed">
+									(built-in)
 								</Text>
 							</Box>
-						))}
 
-						{/* Add bot card */}
-						<Box
-							p="md"
-							component="button"
-							type="button"
-							onClick={handleAdd}
-							style={{
-								cursor: "pointer",
-								border: "1px dashed var(--mantine-color-dark-4)",
-								borderRadius: "var(--mantine-radius-md)",
-								background: "transparent",
-								color: "inherit",
-								width: "100%",
-							}}
-						>
-							<Stack gap={0} justify="center" align="center" w="100%" h="100%">
-								<Text mb={10}>Add New</Text>
-								<IconPlus size="1.3rem" />
-							</Stack>
-						</Box>
-					</SimpleGrid>
+							{/* Discovered bot cards */}
+							{discovered.map((bot) => (
+								<BotCard
+									key={bot.agent_id}
+									bot={bot}
+									selected={selectedId === bot.agent_id}
+									onClick={() => setSelectedId(bot.agent_id)}
+								/>
+							))}
+						</SimpleGrid>
+					)}
 				</ScrollArea>
 
-				{/* Right panel: details or empty state */}
-				{draft ? (
-					<Paper withBorder p="md" h="100%">
-						<ScrollArea h="100%" offsetScrollbars>
-							<Stack>
-								<Divider variant="dashed" label="General Settings" />
-								<TextInput
-									label="Name"
-									value={draft.name}
-									onChange={(e) =>
-										setDraft({ ...draft, name: e.currentTarget.value })
-									}
-									onBlur={flushDraft}
-								/>
-								<TextInput
-									label="Command"
-									description="Shell command to launch the bot"
-									value={draft.command}
-									onChange={(e) =>
-										setDraft({ ...draft, command: e.currentTarget.value })
-									}
-									onBlur={flushDraft}
-								/>
-								<TextInput
-									label="Working Directory"
-									description="Optional. Defaults to current dir."
-									value={draft.working_dir ?? ""}
-									onChange={(e) =>
-										setDraft({
-											...draft,
-											working_dir: e.currentTarget.value || null,
-										})
-									}
-									onBlur={flushDraft}
-								/>
-
-								<Group justify="end">
-									<Button color="red" onClick={() => handleDelete(draft.id)}>
-										Remove
-									</Button>
-								</Group>
-							</Stack>
-						</ScrollArea>
-					</Paper>
+				{/* Right panel: detail or empty state */}
+				{selectedBot ? (
+					<BotDetail bot={selectedBot} />
 				) : (
 					<Center h="100%">
 						<Stack align="center" gap="sm">
@@ -196,12 +165,115 @@ export default function BotsPage() {
 								<IconRobot size={40} />
 							</ThemeIcon>
 							<Text c="dimmed" fw={500} size="lg">
-								Select a bot to configure
+								Select a bot to view details
 							</Text>
 						</Stack>
 					</Center>
 				)}
 			</Group>
 		</Stack>
+	);
+}
+
+function BotCard({
+	bot,
+	selected,
+	onClick,
+}: {
+	bot: DiscoveredBot;
+	selected: boolean;
+	onClick: () => void;
+}) {
+	return (
+		<Box
+			p="md"
+			component="button"
+			type="button"
+			onClick={onClick}
+			style={{
+				cursor: "pointer",
+				border: selected
+					? "2px solid var(--mantine-color-yellow-filled)"
+					: "1px solid var(--mantine-color-dark-4)",
+				borderRadius: "var(--mantine-radius-md)",
+				background: "transparent",
+				color: "inherit",
+				textAlign: "left",
+				width: "100%",
+				boxShadow: selected ? "var(--mantine-shadow-sm)" : undefined,
+			}}
+		>
+			<Group gap="xs" mb={4}>
+				<Text fw="bold" lineClamp={1} style={{ flex: 1 }}>
+					{bot.name}
+				</Text>
+				{bot.language && (
+					<Badge size="xs" variant="light">
+						{bot.language}
+					</Badge>
+				)}
+			</Group>
+			<Text size="xs" c="dimmed" lineClamp={2}>
+				{bot.description || "(no description)"}
+			</Text>
+		</Box>
+	);
+}
+
+function BotDetail({ bot }: { bot: DiscoveredBot }) {
+	return (
+		<Paper withBorder p="md" h="100%">
+			<ScrollArea h="100%" offsetScrollbars>
+				<Stack gap="sm">
+					<Title order={4}>{bot.name}</Title>
+
+					<DetailRow label="Agent ID" value={bot.agent_id} />
+					<DetailRow label="Language" value={bot.language} />
+					<DetailRow label="Developer" value={bot.developer} />
+					<DetailRow label="Description" value={bot.description} />
+					<DetailRow label="Run Command">
+						<Code>{bot.run_command}</Code>
+					</DetailRow>
+					<DetailRow label="Working Directory">
+						<Code>{bot.working_dir}</Code>
+					</DetailRow>
+
+					{bot.tags.length > 0 && (
+						<div>
+							<Text size="xs" c="dimmed" mb={4}>
+								Tags
+							</Text>
+							<Group gap={4}>
+								{bot.tags.map((tag) => (
+									<Badge key={tag} size="xs" variant="outline">
+										{tag}
+									</Badge>
+								))}
+							</Group>
+						</div>
+					)}
+				</Stack>
+			</ScrollArea>
+		</Paper>
+	);
+}
+
+function DetailRow({
+	label,
+	value,
+	children,
+}: {
+	label: string;
+	value?: string;
+	children?: React.ReactNode;
+}) {
+	const content = children ?? <Text size="sm">{value || "\u2014"}</Text>;
+	return (
+		<div>
+			<Text size="xs" c="dimmed">
+				{label}
+			</Text>
+			{content}
+		</div>
 	);
 }

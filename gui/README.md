@@ -33,19 +33,15 @@ The game engine and match host compile as part of the Tauri backend, so there's 
 
 ## Adding bots
 
-Each bot is a shell command. Add it once in the bot management panel, then pick it from the toolbar whenever you want to run a match. Some examples to start with:
+On the Bots page, add a **scan path** pointing at a directory that contains bots. Every bot it finds shows up in the grid, ready to play. Point it at `botpack/` for the full collection, or at your own project directory. Bots just need a [`bot.toml`](../botpack/#bottoml) in their folder.
 
-| Name | Command |
-|------|---------|
-| Greedy (Rust) | `cd botpack/greedy && cargo run --release` |
-| Greedy (Python) | `cd botpack/greedy-py && uv run python bot.py` |
-| Smart Random (Rust) | `cd botpack/smart-random && cargo run --release` |
+Some bots have configurable [options](../sdk/#options) (search depth, strategy, etc.). A gear icon on the setup page lets you tweak them before the match starts.
 
-There's also a built-in random stub for quick testing, no command needed.
+There's also a built-in random bot for quick testing, no setup needed.
 
 ## What's next
 
-🚧 Right now the GUI runs matches and lets you watch them back. There's more coming.
+The GUI today is a match viewer. The goal is a bot development environment.
 
 ### Bot thinking visualization
 
@@ -70,7 +66,7 @@ Your bot knows things it can't show you yet: cell values, danger zones, planned 
 - **Tauri v2** (Rust backend) + **React 19** + **TypeScript** + **Vite**
 - **Mantine** for UI components, **Canvas 2D** for maze rendering
 - **Zustand** + **Immer** for match state (game tree with cursor-based navigation)
-- **Jotai** for persistent config (bot list, match settings, saved to disk via Tauri commands)
+- **Jotai** for persistent config (scan paths, match settings, saved to disk via Tauri commands)
 - **tauri-specta** for type-safe IPC (TypeScript bindings generated from Rust types)
 
 ### Running in dev mode
@@ -122,10 +118,14 @@ The frontend accumulates events into a game tree, where each node holds the full
 | `src-tauri/src/main.rs` | App entry, Tauri builder, tracing init, specta export |
 | `src-tauri/src/commands.rs` | Tauri commands: `get_game_state`, `start_match`, `stop_match` |
 | `src-tauri/src/match_runner.rs` | Match orchestration: bot launch, TCP, host, event forwarding |
+| `src-tauri/src/bot_discovery.rs` | Scan-path persistence and `bot.toml` discovery |
+| `src-tauri/src/bot_probe.rs` | Probe a bot process to read its option definitions |
 | `src-tauri/src/events.rs` | Tauri event types (specta-derived) |
 | `src/App.tsx` | View router (match view vs bot management) |
 | `src/stores/matchStore.ts` | Zustand store: game tree, cursor, viewer mode, event handlers |
-| `src/stores/botConfigAtom.ts` | Jotai atoms for persistent bot configs |
+| `src/stores/botConfigAtom.ts` | Jotai atoms for scan paths and discovered bots |
+| `src/stores/botProbeAtom.ts` | Probe cache: per-agent_id option definitions |
+| `src/components/BotOptionsPopover.tsx` | Per-slot option editor (gear icon on setup page) |
 | `src/renderer/instructions.ts` | Game state → draw instructions (the rendering pipeline) |
 | `src/components/MazeCanvas.tsx` | Canvas 2D drawing, DPR-aware |
 

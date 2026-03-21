@@ -107,6 +107,7 @@ pub struct Context {
     deadline: Instant,
     info_sender: Mutex<Option<InfoSender>>,
     stopped: Arc<AtomicBool>,
+    game_over: Arc<AtomicBool>,
 }
 
 impl Context {
@@ -115,22 +116,26 @@ impl Context {
         deadline: Instant,
         info_sender: Option<InfoSender>,
         stopped: Arc<AtomicBool>,
+        game_over: Arc<AtomicBool>,
     ) -> Self {
         Self {
             deadline,
             info_sender: Mutex::new(info_sender),
             stopped,
+            game_over,
         }
     }
 
     /// Whether the bot should stop thinking (deadline passed **or** server sent Stop/Timeout).
     pub fn should_stop(&self) -> bool {
-        Instant::now() >= self.deadline || self.stopped.load(Ordering::Relaxed)
+        Instant::now() >= self.deadline
+            || self.stopped.load(Ordering::Relaxed)
+            || self.game_over.load(Ordering::Relaxed)
     }
 
     /// Milliseconds remaining before the deadline. Returns 0 if stopped by the server.
     pub fn time_remaining_ms(&self) -> u64 {
-        if self.stopped.load(Ordering::Relaxed) {
+        if self.stopped.load(Ordering::Relaxed) || self.game_over.load(Ordering::Relaxed) {
             return 0;
         }
         self.deadline
@@ -276,25 +281,67 @@ mod tests {
 
     #[test]
     fn should_stop_deadline_only() {
-        let ctx = Context::new(Instant::now() - Duration::from_secs(1), None, flag(false));
+        let ctx = Context::new(
+            Instant::now() - Duration::from_secs(1),
+            None,
+            flag(false),
+            flag(false),
+        );
         assert!(ctx.should_stop());
     }
 
     #[test]
     fn should_stop_flag_only() {
-        let ctx = Context::new(Instant::now() + Duration::from_secs(10), None, flag(true));
+        let ctx = Context::new(
+            Instant::now() + Duration::from_secs(10),
+            None,
+            flag(true),
+            flag(false),
+        );
+        assert!(ctx.should_stop());
+    }
+
+    #[test]
+    fn should_stop_game_over() {
+        let ctx = Context::new(
+            Instant::now() + Duration::from_secs(10),
+            None,
+            flag(false),
+            flag(true),
+        );
         assert!(ctx.should_stop());
     }
 
     #[test]
     fn should_stop_neither() {
-        let ctx = Context::new(Instant::now() + Duration::from_secs(10), None, flag(false));
+        let ctx = Context::new(
+            Instant::now() + Duration::from_secs(10),
+            None,
+            flag(false),
+            flag(false),
+        );
         assert!(!ctx.should_stop());
     }
 
     #[test]
     fn time_remaining_returns_zero_when_stopped() {
-        let ctx = Context::new(Instant::now() + Duration::from_secs(10), None, flag(true));
+        let ctx = Context::new(
+            Instant::now() + Duration::from_secs(10),
+            None,
+            flag(true),
+            flag(false),
+        );
+        assert_eq!(ctx.time_remaining_ms(), 0);
+    }
+
+    #[test]
+    fn time_remaining_returns_zero_when_game_over() {
+        let ctx = Context::new(
+            Instant::now() + Duration::from_secs(10),
+            None,
+            flag(false),
+            flag(true),
+        );
         assert_eq!(ctx.time_remaining_ms(), 0);
     }
 }

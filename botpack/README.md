@@ -16,7 +16,7 @@ cargo run -p pyrat-headless -- \
 
 Replace `your_bot_command` with however you launch your bot. Each bot's `bot.toml` has its run command.
 
-The GUI will discover botpack bots automatically from their `bot.toml` metadata once bot management lands.
+The [GUI](../gui/) discovers botpack bots automatically. Point it at `botpack/` as a scan path and they all show up.
 
 ## Bots
 
@@ -24,12 +24,12 @@ Listed from simplest to most complex.
 
 | Bot | Strategy | SDK features | Tags | Language |
 |-----|----------|--------------|------|----------|
-| [Smart Random.rs](smart-random/) | Random valid direction each turn | `effective_moves` | baseline | Rust |
-| [Smart Random.py](smart-random-py/) | Random valid direction each turn | `effective_moves` | baseline | Python |
-| [Greedy.rs](greedy/) | Nearest cheese, random tiebreaking | `nearest_cheeses`, `send_info` | greedy, shortest-path | Rust |
-| [Greedy.py](greedy-py/) | Nearest cheese, random tiebreaking | `nearest_cheeses`, `send_info` | greedy, shortest-path | Python |
-| [Search.rs](search/) | Naive tree search with iterative deepening, both players think ahead to grab the most cheese | `GameSim`, `effective_moves`, `should_stop`, `send_info` | tree-search, iterative-deepening | Rust |
-| [Search.py](search-py/) | Naive tree search with iterative deepening, both players think ahead to grab the most cheese | `GameSim`, `effective_moves`, `should_stop`, `send_info` | tree-search, iterative-deepening | Python |
+| [Smart Random.rs](smart-random/) | Random valid direction each turn | [`effective_moves`](../sdk/#raw-state-whats-happening-right-now) | baseline | Rust |
+| [Smart Random.py](smart-random-py/) | Random valid direction each turn | [`effective_moves`](../sdk/#raw-state-whats-happening-right-now) | baseline | Python |
+| [Greedy.rs](greedy/) | Nearest cheese, random tiebreaking | [`nearest_cheeses`](../sdk/#pathfinding-where-should-i-go), [`send_info`](../sdk/#thinking-out-loud) | greedy, shortest-path | Rust |
+| [Greedy.py](greedy-py/) | Nearest cheese, random tiebreaking | [`nearest_cheeses`](../sdk/#pathfinding-where-should-i-go), [`send_info`](../sdk/#thinking-out-loud) | greedy, shortest-path | Python |
+| [Search.rs](search/) | Naive tree search with iterative deepening, both players think ahead to grab the most cheese | [`GameSim`](../sdk/#simulation-what-happens-if-i-go-there), [`effective_moves`](../sdk/#raw-state-whats-happening-right-now), [`should_stop`](../sdk/#lifecycle), [`send_info`](../sdk/#thinking-out-loud) | tree-search, iterative-deepening | Rust |
+| [Search.py](search-py/) | Naive tree search with iterative deepening, both players think ahead to grab the most cheese | [`GameSim`](../sdk/#simulation-what-happens-if-i-go-there), [`effective_moves`](../sdk/#raw-state-whats-happening-right-now), [`should_stop`](../sdk/#lifecycle), [`send_info`](../sdk/#thinking-out-loud) | tree-search, iterative-deepening | Python |
 
 Looking for a specific SDK feature? The source code is the documentation: each bot's comments explain the strategy reasoning and SDK usage.
 
@@ -50,9 +50,13 @@ language = "Rust"
 tags = ["greedy", "shortest-path"]
 ```
 
-`settings` tells the runner how to launch the bot. `details` is metadata for discovery and the bot listing above.
+`settings` tells the runner how to launch the bot. `details` is metadata for discovery and the bot listing above. The entire `[details]` section is optional: all fields default to empty.
+
+`agent_id` must be globally unique. Discovery deduplicates on it. The convention for botpack bots is `pyrat/<name>` (e.g. `pyrat/greedy`).
 
 `run_command` is passed to `sh -c`, so it runs as a shell command. Only run bots you trust.
+
+The GUI scans directories up to 3 levels deep for these files. Add a scan path that contains your bots and they appear automatically.
 
 ## Contributing a bot
 

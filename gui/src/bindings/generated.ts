@@ -13,9 +13,9 @@ async getGameState(config: MatchConfigParams | null) : Promise<Result<MazeState,
     else return { status: "error", error: e  as any };
 }
 },
-async startMatch(player1Cmd: string, player2Cmd: string, player1WorkingDir: string | null, player2WorkingDir: string | null, config: MatchConfigParams | null, stepMode: boolean | null) : Promise<Result<null, string>> {
+async startMatch(player1Cmd: string, player2Cmd: string, player1WorkingDir: string | null, player2WorkingDir: string | null, player1AgentId: string, player2AgentId: string, config: MatchConfigParams | null, botOptions: MatchBotOptions | null) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("start_match", { player1Cmd, player2Cmd, player1WorkingDir, player2WorkingDir, config, stepMode }) };
+    return { status: "ok", data: await TAURI_INVOKE("start_match", { player1Cmd, player2Cmd, player1WorkingDir, player2WorkingDir, player1AgentId, player2AgentId, config, botOptions }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -29,9 +29,9 @@ async stopMatch() : Promise<Result<null, string>> {
     else return { status: "error", error: e  as any };
 }
 },
-async startAnalysisTurn(durationMs: number) : Promise<Result<null, string>> {
+async startAnalysisTurn(position: AnalysisPosition | null) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("start_analysis_turn", { durationMs }) };
+    return { status: "ok", data: await TAURI_INVOKE("start_analysis_turn", { position }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -53,21 +53,24 @@ async advanceAnalysis(actions: AnalysisActions | null) : Promise<Result<AdvanceA
     else return { status: "error", error: e  as any };
 }
 },
-async loadBotConfigs() : Promise<Result<BotConfigEntry[], string>> {
+async loadScanPaths() : Promise<Result<string[], string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("load_bot_configs") };
+    return { status: "ok", data: await TAURI_INVOKE("load_scan_paths") };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async saveBotConfigs(configs: BotConfigEntry[]) : Promise<Result<null, string>> {
+async saveScanPaths(paths: string[]) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("save_bot_configs", { configs }) };
+    return { status: "ok", data: await TAURI_INVOKE("save_scan_paths", { paths }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async discoverBots(paths: string[]) : Promise<DiscoveredBot[]> {
+    return await TAURI_INVOKE("discover_bots", { paths });
 },
 async loadMatchConfig() : Promise<Result<MatchConfigParams, string>> {
     try {
@@ -80,6 +83,14 @@ async loadMatchConfig() : Promise<Result<MatchConfigParams, string>> {
 async saveMatchConfig(config: MatchConfigParams) : Promise<Result<null, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("save_match_config", { config }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async probeBot(runCommand: string, workingDir: string, agentId: string) : Promise<Result<BotProbeResult, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("probe_bot", { runCommand, workingDir, agentId }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -117,7 +128,10 @@ export type AdvanceAnalysisResult = { player1_action: Direction; player2_action:
  * Pair of player actions for `advance_analysis`. Both must be provided together.
  */
 export type AnalysisActions = { player1: Direction; player2: Direction }
-export type BotConfigEntry = { id: string; name: string; command: string; working_dir: string | null }
+/**
+ * Arbitrary game-tree position for cursor-follows-analysis.
+ */
+export type AnalysisPosition = { turn: number; player1: PlayerState; player2: PlayerState; cheese: Coord[]; player1_last_move: Direction; player2_last_move: Direction }
 /**
  * Emitted when a bot disconnects mid-game.
  */
@@ -126,11 +140,31 @@ export type BotDisconnectedEvent = { match_id: number; player: PlayerSide; reaso
  * Bot debug/analysis info forwarded from the host event stream.
  */
 export type BotInfoEvent = { match_id: number; sender: PlayerSide; subject: PlayerSide; turn: number; multipv: number; target: Coord | null; depth: number; nodes: number; score: number | null; pv: Direction[]; message: string }
+export type BotOptionDef = { name: string; option_type: BotOptionType; default_value: string; min: number; max: number; choices: string[] }
+export type BotOptionType = "Check" | "Spin" | "Combo" | "String" | "Button"
+/**
+ * A single option name-value pair for configuring a bot before match start.
+ */
+export type BotOptionValue = { name: string; value: string }
+export type BotProbeResult = { name: string; author: string; agent_id: string; options: BotOptionDef[] }
 export type Coord = { x: number; y: number }
 /**
  * Movement direction — specta-friendly mirror of pyrat_wire::Direction.
  */
 export type Direction = "Up" | "Right" | "Down" | "Left" | "Stay"
+export type DiscoveredBot = { agent_id: string; name: string; run_command: string;
+/**
+ * Absolute path to the directory containing bot.toml.
+ */
+working_dir: string; description: string; developer: string; language: string; tags: string[] }
+/**
+ * Per-player option overrides + match flags, bundled so start_match stays under specta's 10-arg limit.
+ */
+export type MatchBotOptions = { player1?: BotOptionValue[]; player2?: BotOptionValue[];
+/**
+ * When true, run in analysis (step-by-step) mode instead of auto-play.
+ */
+step_mode?: boolean }
 export type MatchConfigParams = {
 /**
  * Named preset, or "custom" for manual configuration.

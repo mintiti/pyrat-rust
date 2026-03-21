@@ -37,6 +37,7 @@ import {
 	useDisplayState,
 	useMatchStore,
 } from "../stores/matchStore";
+import BotOptionsPopover from "./BotOptionsPopover";
 import MazeRenderer from "./MazeRenderer";
 import SettingRow from "./common/SettingRow";
 
@@ -69,7 +70,12 @@ export default function SetupView({ onStartMatch }: Props) {
 	const player2BotId = useMatchStore((s) => s.player2BotId);
 	const previewSeed = useMatchStore((s) => s.previewSeed);
 	const previewError = useMatchStore((s) => s.previewError);
-	const { setPlayer1BotId, setPlayer2BotId } = useMatchStore.getState();
+	const {
+		setPlayer1BotId,
+		setPlayer2BotId,
+		setPlayer1Options,
+		setPlayer2Options,
+	} = useMatchStore.getState();
 
 	const displayState = useDisplayState();
 
@@ -101,6 +107,16 @@ export default function SetupView({ onStartMatch }: Props) {
 	useEffect(() => {
 		generatePreview(committed);
 	}, [committed]);
+
+	// Clear options when bot changes
+	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional reset on botId change
+	useEffect(() => {
+		setPlayer1Options({});
+	}, [player1BotId]);
+	// biome-ignore lint/correctness/useExhaustiveDependencies: intentional reset on botId change
+	useEffect(() => {
+		setPlayer2Options({});
+	}, [player2BotId]);
 
 	const errors = validate(draft);
 
@@ -193,6 +209,9 @@ export default function SetupView({ onStartMatch }: Props) {
 						style={{ width: 180 }}
 						allowDeselect={false}
 					/>
+					{player1BotId && player1BotId !== RANDOM_BOT_ID && (
+						<BotOptionsPopover agentId={player1BotId} slot="player1" />
+					)}
 					<Text size="sm" c="dimmed">
 						vs
 					</Text>
@@ -208,6 +227,9 @@ export default function SetupView({ onStartMatch }: Props) {
 						style={{ width: 180 }}
 						allowDeselect={false}
 					/>
+					{player2BotId && player2BotId !== RANDOM_BOT_ID && (
+						<BotOptionsPopover agentId={player2BotId} slot="player2" />
+					)}
 				</Group>
 				<Button
 					size="xs"

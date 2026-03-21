@@ -1,13 +1,19 @@
 import { Stack } from "@mantine/core";
 import { useAtomValue } from "jotai";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { events, commands } from "../bindings";
-import { RANDOM_BOT_ID, botsAtom } from "../stores/botConfigAtom";
+import type { BotOptionValue } from "../bindings/generated";
+import {
+	RANDOM_BOT_ID,
+	botsAtom,
+	discoveredBotsAtom,
+	resolveDiscoveredBot,
+} from "../stores/botConfigAtom";
 import { matchConfigAtom } from "../stores/matchConfigAtom";
 import {
+	buildAnalysisPosition,
 	useCurrentBotInfo,
 	useDisplayState,
-	useIsAtTip,
 	useMatchStore,
 } from "../stores/matchStore";
 import MatchToolbar from "./MatchToolbar";
@@ -25,6 +31,7 @@ export default function MatchView({ onNewMatch }: Props) {
 	const hasAutoStarted = useRef(false);
 	const displayState = useDisplayState();
 	const bots = useAtomValue(botsAtom);
+	const discovered = useAtomValue(discoveredBotsAtom);
 	const matchConfig = useAtomValue(matchConfigAtom);
 	const matchConfigRef = useRef(matchConfig);
 	matchConfigRef.current = matchConfig;
@@ -37,7 +44,9 @@ export default function MatchView({ onNewMatch }: Props) {
 	const previewError = useMatchStore((s) => s.previewError);
 	const player1BotId = useMatchStore((s) => s.player1BotId);
 	const player2BotId = useMatchStore((s) => s.player2BotId);
-	const isAtTip = useIsAtTip();
+	const analyzing = useMatchStore((s) => s.analyzing);
+	const cursor = useMatchStore((s) => s.cursor);
+	const cursorKey = useMemo(() => cursor.join(","), [cursor]);
 
 	const {
 		onMatchStarted,
@@ -47,8 +56,6 @@ export default function MatchView({ onNewMatch }: Props) {
 		onError,
 		onDisconnect,
 		advanceCursor,
-		startAnalysis,
-		stopAnalysis,
 		goToStart,
 		goToEnd,
 		stepForwardOrAdvance,
@@ -106,15 +113,25 @@ export default function MatchView({ onNewMatch }: Props) {
 		return () => clearInterval(id);
 	}, [autoplay, playbackSpeed, mode]);
 
-	// Reactive analysis: auto-start analysis when cursor lands on a tree tip in step mode
-	// biome-ignore lint/correctness/useExhaustiveDependencies: startAnalysis is a stable ref from getState()
+	// Cursor-follows-analysis: start analysis on the current position, restart on cursor change
+	// biome-ignore lint/correctness/useExhaustiveDependencies: cursorKey is a derived stable dep
 	useEffect(() => {
-		if (mode !== "step" || matchPhase !== "playing" || !isAtTip) return;
+		if (mode !== "step" || matchPhase !== "playing" || !analyzing) return;
+
+		const { root, cursor } = useMatchStore.getState();
+		if (!root) return;
+		const position = buildAnalysisPosition(root, cursor);
+		if (!position) return;
+
 		const timer = setTimeout(() => {
-			startAnalysis();
+			commands.startAnalysisTurn(position).catch(console.error);
 		}, 50);
-		return () => clearTimeout(timer);
-	}, [mode, matchPhase, isAtTip]);
+
+		return () => {
+			clearTimeout(timer);
+			commands.stopAnalysisTurn().catch(() => {});
+		};
+	}, [mode, matchPhase, analyzing, cursorKey]);
 
 	// Keyboard shortcuts
 	// biome-ignore lint/correctness/useExhaustiveDependencies: navigation actions are stable refs from getState()
@@ -162,7 +179,7 @@ export default function MatchView({ onNewMatch }: Props) {
 				case " ":
 					e.preventDefault();
 					if (state.mode === "step") {
-						state.analyzing ? stopAnalysis() : startAnalysis();
+						state.setAnalyzing(!state.analyzing);
 					} else {
 						togglePlay();
 					}
@@ -181,10 +198,14 @@ export default function MatchView({ onNewMatch }: Props) {
 
 	const resolveBotId = (botId: string) => {
 		if (botId === RANDOM_BOT_ID)
-			return { cmd: RANDOM_BOT_ID, workingDir: null };
-		const bot = bots.find((b) => b.id === botId);
+			return { cmd: RANDOM_BOT_ID, workingDir: null, agentId: "random" };
+		const bot = resolveDiscoveredBot(botId, discovered);
 		if (!bot) return null;
-		return { cmd: bot.command, workingDir: bot.working_dir };
+		return {
+			cmd: bot.run_command,
+			workingDir: bot.working_dir,
+			agentId: bot.agent_id,
+		};
 	};
 
 	const handleStart = async () => {
@@ -202,13 +223,23 @@ export default function MatchView({ onNewMatch }: Props) {
 			...cfg,
 			seed: cfg.seed ?? previewSeed,
 		};
+		const { player1Options, player2Options } = useMatchStore.getState();
+		const toValues = (opts: Record<string, string>): BotOptionValue[] =>
+			Object.entries(opts).map(([name, value]) => ({ name, value }));
+
 		const res = await commands.startMatch(
 			p1.cmd,
 			p2.cmd,
 			p1.workingDir,
 			p2.workingDir,
+			p1.agentId,
+			p2.agentId,
 			configWithSeed,
-			currentMode === "step" ? true : null,
+			{
+				player1: toValues(player1Options),
+				player2: toValues(player2Options),
+				step_mode: currentMode === "step",
+			},
 		);
 		if (res.status === "error") {
 			useMatchStore.getState().onError(res.error);

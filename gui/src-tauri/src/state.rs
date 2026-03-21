@@ -7,10 +7,12 @@ use tokio_util::sync::CancellationToken;
 
 use pyrat_host::wire::Direction as WireDirection;
 
+use crate::commands::AnalysisPosition;
+
 // ── Analysis channel types ──────────────────────────
 
 pub enum AnalysisCmd {
-    StartTurn { duration_ms: u64 },
+    StartTurn { position: Option<AnalysisPosition> },
     StopTurn,
     Advance { actions: Option<[WireDirection; 2]> },
 }
