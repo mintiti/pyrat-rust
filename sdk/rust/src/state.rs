@@ -277,10 +277,11 @@ impl GameState {
         game.player2.score = self.player2_score;
         game.player2.mud_timer = self.player2_mud_turns;
 
-        // Rebuild cheese to match current turn
-        game.cheese.clear();
-        for &pos in &self.cheese {
-            game.cheese.place_cheese(pos);
+        // Remove collected cheese (preserves initial_cheese_count for win threshold)
+        for pos in game.cheese_positions() {
+            if !self.cheese.contains(&pos) {
+                game.cheese.take_cheese(pos);
+            }
         }
 
         game.turn = self.turn;
@@ -433,6 +434,43 @@ mod tests {
         assert!((sim.player1_score() - 1.0).abs() < f32::EPSILON);
         assert_eq!(sim.turn, 5);
         assert_eq!(sim.cheese_positions().len(), 1);
+    }
+
+    #[test]
+    fn to_sim_preserves_total_cheese() {
+        let cfg = test_config();
+        let mut state = GameState::from_config(&cfg).unwrap();
+        let original_cheese_count = cfg.cheese.len();
+
+        // Simulate mid-game: one cheese collected, player has some score
+        state.update(TurnStateData {
+            turn: 10,
+            player1_position: Coordinates::new(2, 2),
+            player2_position: Coordinates::new(0, 0),
+            player1_score: 1.0,
+            player2_score: 0.0,
+            player1_mud_turns: 0,
+            player2_mud_turns: 0,
+            cheese: vec![Coordinates::new(4, 4)], // one cheese collected
+            player1_last_move: Direction::Stay,
+            player2_last_move: Direction::Stay,
+        });
+
+        let sim = state.to_sim();
+
+        // total_cheese must reflect the original count, not remaining
+        assert_eq!(
+            sim.cheese.total_cheese() as usize,
+            original_cheese_count,
+            "to_sim() must preserve initial_cheese_count"
+        );
+        assert_eq!(sim.cheese_positions().len(), 1);
+
+        // score=1 with 2 total cheese => threshold is 1.0, not over yet
+        assert!(
+            !sim.check_game_over(),
+            "game should NOT be over: score 1.0 does not exceed half of 2 total cheese"
+        );
     }
 
     #[test]

@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
@@ -240,7 +241,10 @@ pub async fn run_setup(
         }
     }
 
-    let preprocessing_deadline = Instant::now() + setup.timing.preprocessing_timeout;
+    // The bot SDK uses the same timeout value to decide when to stop work.
+    // Add 500ms margin so PreprocessingDone has time to arrive over TCP.
+    let preprocessing_deadline =
+        Instant::now() + setup.timing.preprocessing_timeout + Duration::from_millis(500);
 
     if !all_keys_in(&handles, &done_set) {
         loop {

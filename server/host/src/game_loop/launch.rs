@@ -40,6 +40,18 @@ impl BotProcesses {
     pub fn is_empty(&self) -> bool {
         self.children.is_empty()
     }
+
+    /// Returns the `agent_id` of the first child that has exited, or `None` if all are still
+    /// running.
+    pub fn try_exited(&mut self) -> Option<&str> {
+        for (agent_id, child) in &mut self.children {
+            match child.try_wait() {
+                Ok(Some(_)) | Err(_) => return Some(agent_id),
+                Ok(None) => {},
+            }
+        }
+        None
+    }
 }
 
 impl Drop for BotProcesses {
