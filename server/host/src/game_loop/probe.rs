@@ -9,7 +9,7 @@ use crate::session::{extract_bot_packet, BotPayload};
 use pyrat_wire::framing::FrameReader;
 
 use super::config::BotConfig;
-use super::launch::{launch_bots, LaunchError};
+use super::launch::{launch_bots, BotProcesses, LaunchError};
 
 // ── Public types ─────────────────────────────────────
 
@@ -27,8 +27,8 @@ pub struct ProbeResult {
 pub enum ProbeError {
     #[error("failed to spawn bot: {0}")]
     SpawnFailed(#[from] LaunchError),
-    #[error("no connection within {0:?}")]
-    ConnectionTimeout(Duration),
+    #[error("bot process exited before connecting (agent: {0})")]
+    ProcessExited(String),
     #[error("no Identify within {0:?}")]
     IdentifyTimeout(Duration),
     #[error("protocol error: {0}")]
@@ -39,10 +39,23 @@ pub enum ProbeError {
 
 // ── Probe implementation ─────────────────────────────
 
-const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
-const IDENTIFY_TIMEOUT: Duration = Duration::from_secs(5);
+const IDENTIFY_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Poll `BotProcesses` until a child exits, then return its agent_id.
+async fn poll_process_exit(procs: &mut BotProcesses) -> String {
+    let mut interval = tokio::time::interval(Duration::from_millis(100));
+    loop {
+        interval.tick().await;
+        if let Some(agent_id) = procs.try_exited() {
+            return agent_id.to_owned();
+        }
+    }
+}
 
 /// Spawn a bot, read its Identify message, and return the declared metadata.
+///
+/// Waits indefinitely for the bot to connect as long as the process is alive.
+/// If the process exits (build failure, crash), fails immediately.
 ///
 /// The bot process is killed when this function returns (via `BotProcesses` drop).
 pub async fn probe_bot(
@@ -56,7 +69,7 @@ pub async fn probe_bot(
     debug!(port, agent_id, "probe: listening");
 
     // 2. Spawn bot (RAII: killed on drop)
-    let _procs = launch_bots(
+    let mut procs = launch_bots(
         &[BotConfig {
             run_command,
             working_dir: PathBuf::from(&working_dir),
@@ -65,17 +78,18 @@ pub async fn probe_bot(
         port,
     )?;
 
-    // 3. Accept one connection
-    let stream = tokio::time::timeout(CONNECT_TIMEOUT, listener.accept())
-        .await
-        .map_err(|_| ProbeError::ConnectionTimeout(CONNECT_TIMEOUT))?
-        .map_err(ProbeError::Io)?
-        .0;
+    // 3. Accept one connection — wait as long as the process is alive
+    let stream = tokio::select! {
+        result = listener.accept() => result?.0,
+        dead = poll_process_exit(&mut procs) => {
+            return Err(ProbeError::ProcessExited(dead));
+        }
+    };
 
     let (read_half, _write_half) = tokio::io::split(stream);
     let mut reader = FrameReader::with_default_max(read_half);
 
-    // 4. Read one frame (Identify)
+    // 4. Read one frame (Identify) — 30s safety net for hung-after-connect bots
     let buf = tokio::time::timeout(IDENTIFY_TIMEOUT, reader.read_frame())
         .await
         .map_err(|_| ProbeError::IdentifyTimeout(IDENTIFY_TIMEOUT))?
@@ -108,5 +122,5 @@ pub async fn probe_bot(
         )),
     }
 
-    // _procs drops here, killing the bot process
+    // procs drops here, killing the bot process
 }
