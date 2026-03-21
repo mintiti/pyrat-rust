@@ -253,7 +253,7 @@ async fn reader_task<R: AsyncRead + Unpin>(
                 ) {
                     stopped.store(true, Ordering::Relaxed);
                 }
-                if matches!(&msg, HostMsg::GameOver { .. } | HostMsg::Stop) {
+                if matches!(&msg, HostMsg::GameOver { .. }) {
                     game_over.store(true, Ordering::Relaxed);
                 }
                 let _ = msg_tx.send(msg);
@@ -293,9 +293,13 @@ async fn turn_loop<T: bot::Runner>(
             HostMsg::TurnState(ts) => {
                 state.update(ts);
 
-                let timeout_ms =
-                    u64::from(state.move_timeout_ms()).saturating_sub(MOVE_SAFETY_MARGIN_MS);
-                let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+                let raw_ms = u64::from(state.move_timeout_ms());
+                let deadline = if raw_ms == 0 {
+                    Instant::now() + Duration::from_secs(86400)
+                } else {
+                    Instant::now()
+                        + Duration::from_millis(raw_ms.saturating_sub(MOVE_SAFETY_MARGIN_MS))
+                };
 
                 stopped.store(false, Ordering::Relaxed);
                 let ctx = Context::new(
@@ -327,7 +331,7 @@ async fn turn_loop<T: bot::Runner>(
                 bot.runner_on_game_over(go.result, (go.player1_score, go.player2_score));
                 break;
             },
-            HostMsg::Stop => break,
+            HostMsg::Stop => {},
             other => {
                 eprintln!("[sdk] unexpected message during play: {}", msg_name(&other));
             },
@@ -427,29 +431,32 @@ mod tests {
 
         let (client, server) = tokio::io::duplex(4096);
         let reader = pyrat_wire::framing::FrameReader::with_default_max(client);
-        let fw = pyrat_wire::framing::FrameWriter::with_default_max(server);
+        let mut fw = pyrat_wire::framing::FrameWriter::with_default_max(server);
 
         let (info_sender, _tcp_server) = dummy_info_sender();
         let stopped = Arc::new(AtomicBool::new(false));
         let game_over = Arc::new(AtomicBool::new(false));
         let (msg_tx, mut msg_rx) = mpsc::unbounded_channel();
 
-        tokio::spawn(write_frames(fw, vec![frame]));
-        reader_task(
-            reader,
-            msg_tx,
-            stopped.clone(),
-            game_over.clone(),
-            info_sender,
-        )
-        .await;
+        // Write Stop but keep writer alive — no Disconnect yet.
+        fw.write_frame(&frame).await.unwrap();
 
-        assert!(stopped.load(Ordering::Relaxed));
-        assert!(game_over.load(Ordering::Relaxed));
+        let r_stopped = stopped.clone();
+        let r_game_over = game_over.clone();
+        tokio::spawn(async move {
+            reader_task(reader, msg_tx, r_stopped, r_game_over, info_sender).await;
+        });
+
         match msg_rx.recv().await {
             Some(HostMsg::Stop) => {},
             other => panic!("expected Stop, got {other:#?}"),
         }
+
+        assert!(stopped.load(Ordering::Relaxed));
+        // Stop is non-terminal — only GameOver and Disconnected set game_over.
+        assert!(!game_over.load(Ordering::Relaxed));
+
+        drop(fw); // Let reader_task exit cleanly.
     }
 
     #[tokio::test]

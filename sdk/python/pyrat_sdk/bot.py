@@ -44,7 +44,9 @@ class Context:
         conn: Connection,
         stop_event: threading.Event | None = None,
     ) -> None:
-        self._deadline = time.monotonic() + timeout_ms / 1000.0
+        self._deadline = time.monotonic() + (
+            86400.0 if timeout_ms == 0 else timeout_ms / 1000.0
+        )
         self._conn = conn
         self._stop_event = stop_event
 
@@ -381,6 +383,6 @@ def _run_lifecycle(
                 traceback.print_exc()
             break
         elif msg_type == HostMessage.Stop:
-            break
+            pass  # Non-terminal — flag already set by reader thread.
         elif msg_type == HostMessage.Timeout:
             pass  # Flag already set by reader thread.
