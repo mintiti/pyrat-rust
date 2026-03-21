@@ -262,7 +262,6 @@ pub async fn stop_match(state: tauri::State<'_, AppState>) -> Result<(), String>
 #[allow(clippy::too_many_arguments)]
 #[tauri::command]
 #[specta::specta]
-#[allow(clippy::too_many_arguments)]
 pub async fn start_match(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
@@ -273,14 +272,14 @@ pub async fn start_match(
     player1_agent_id: String,
     player2_agent_id: String,
     config: Option<MatchConfigParams>,
-    step_mode: Option<bool>,
     bot_options: Option<MatchBotOptions>,
 ) -> Result<(), String> {
     use tauri_specta::Event;
     use tokio_util::sync::CancellationToken;
 
     let params = config.unwrap_or_default();
-    let step = step_mode.unwrap_or(false);
+    let opts = bot_options.unwrap_or_default();
+    let step = opts.step_mode;
 
     // Cancel existing match and wait for cleanup before proceeding.
     cancel_running_match(&state.match_phase).await;
@@ -312,7 +311,6 @@ pub async fn start_match(
     let match_phase = state.match_phase.clone();
     let cancel_check = cancel.clone();
 
-    let opts = bot_options.unwrap_or_default();
     let p1_opts: Vec<(String, String)> = opts
         .player1
         .into_iter()

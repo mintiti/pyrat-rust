@@ -225,8 +225,11 @@ export default function MatchView({ onNewMatch }: Props) {
 			p1.agentId,
 			p2.agentId,
 			configWithSeed,
-			currentMode === "step" ? true : null,
-			{ player1: toValues(player1Options), player2: toValues(player2Options) },
+			{
+				player1: toValues(player1Options),
+				player2: toValues(player2Options),
+				step_mode: currentMode === "step",
+			},
 		);
 		if (res.status === "error") {
 			useMatchStore.getState().onError(res.error);

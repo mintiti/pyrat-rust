@@ -13,9 +13,9 @@ async getGameState(config: MatchConfigParams | null) : Promise<Result<MazeState,
     else return { status: "error", error: e  as any };
 }
 },
-async startMatch(player1Cmd: string, player2Cmd: string, player1WorkingDir: string | null, player2WorkingDir: string | null, player1AgentId: string, player2AgentId: string, config: MatchConfigParams | null, stepMode: boolean | null, botOptions: MatchBotOptions | null) : Promise<Result<null, string>> {
+async startMatch(player1Cmd: string, player2Cmd: string, player1WorkingDir: string | null, player2WorkingDir: string | null, player1AgentId: string, player2AgentId: string, config: MatchConfigParams | null, botOptions: MatchBotOptions | null) : Promise<Result<null, string>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("start_match", { player1Cmd, player2Cmd, player1WorkingDir, player2WorkingDir, player1AgentId, player2AgentId, config, stepMode, botOptions }) };
+    return { status: "ok", data: await TAURI_INVOKE("start_match", { player1Cmd, player2Cmd, player1WorkingDir, player2WorkingDir, player1AgentId, player2AgentId, config, botOptions }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -154,9 +154,13 @@ export type DiscoveredBot = { agent_id: string; name: string; run_command: strin
  */
 working_dir: string; description: string; developer: string; language: string; tags: string[] }
 /**
- * Per-player option overrides, bundled so start_match stays under specta's 10-arg limit.
+ * Per-player option overrides + match flags, bundled so start_match stays under specta's 10-arg limit.
  */
-export type MatchBotOptions = { player1?: BotOptionValue[]; player2?: BotOptionValue[] }
+export type MatchBotOptions = { player1?: BotOptionValue[]; player2?: BotOptionValue[];
+/**
+ * When true, run in analysis (step-by-step) mode instead of auto-play.
+ */
+step_mode?: boolean }
 export type MatchConfigParams = {
 /**
  * Named preset, or "custom" for manual configuration.

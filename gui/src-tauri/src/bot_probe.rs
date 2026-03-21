@@ -64,13 +64,16 @@ pub struct BotOptionValue {
     pub value: String,
 }
 
-/// Per-player option overrides, bundled so start_match stays under specta's 10-arg limit.
+/// Per-player option overrides + match flags, bundled so start_match stays under specta's 10-arg limit.
 #[derive(Serialize, Deserialize, Debug, Clone, Default, Type)]
 pub struct MatchBotOptions {
     #[serde(default)]
     pub player1: Vec<BotOptionValue>,
     #[serde(default)]
     pub player2: Vec<BotOptionValue>,
+    /// When true, run in analysis (step-by-step) mode instead of auto-play.
+    #[serde(default)]
+    pub step_mode: bool,
 }
 
 // ---------------------------------------------------------------------------
