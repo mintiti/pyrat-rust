@@ -16,7 +16,7 @@ cargo run -p pyrat-headless -- \
 
 Replace `your_bot_command` with however you launch your bot. Each bot's `bot.toml` has its run command.
 
-The GUI will discover botpack bots automatically from their `bot.toml` metadata once bot management lands.
+The [GUI](../gui/) discovers botpack bots automatically. Point it at `botpack/` as a scan path and they all show up.
 
 ## Bots
 
@@ -50,9 +50,13 @@ language = "Rust"
 tags = ["greedy", "shortest-path"]
 ```
 
-`settings` tells the runner how to launch the bot. `details` is metadata for discovery and the bot listing above.
+`settings` tells the runner how to launch the bot. `details` is metadata for discovery and the bot listing above. The entire `[details]` section is optional: all fields default to empty.
+
+`agent_id` must be globally unique. Discovery deduplicates on it. The convention for botpack bots is `pyrat/<name>` (e.g. `pyrat/greedy`).
 
 `run_command` is passed to `sh -c`, so it runs as a shell command. Only run bots you trust.
+
+The GUI scans directories up to 3 levels deep for these files. Add a scan path that contains your bots and they appear automatically.
 
 ## Contributing a bot
 

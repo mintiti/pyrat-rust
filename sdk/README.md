@@ -210,4 +210,4 @@ cargo run -p pyrat-headless -- \
   "uv run python sdk/python/examples/search.py"
 ```
 
-For visual matches, use the [GUI](../gui/).
+For visual matches, use the [GUI](../gui/). To make your bot show up in the GUI, add a `bot.toml` to its directory. See the [botpack README](../botpack/#bottoml) for the format.
