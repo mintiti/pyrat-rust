@@ -27,7 +27,12 @@ export default function App() {
 	} else if (gameView === "home") {
 		content = <HomePage onNavigate={setGameView} />;
 	} else if (gameView === "setup") {
-		content = <SetupView onStartMatch={() => setGameView("match")} />;
+		content = (
+			<SetupView
+				onBack={() => setGameView("home")}
+				onStartMatch={() => setGameView("match")}
+			/>
+		);
 	} else {
 		content = <MatchView onNewMatch={() => setGameView("setup")} />;
 	}
