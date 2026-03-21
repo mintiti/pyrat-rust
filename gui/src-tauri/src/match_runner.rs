@@ -461,9 +461,9 @@ async fn finish_collecting(
         }
     }
 
-    if p1.is_some() && p2.is_some() {
+    if let (Some(a1), Some(a2)) = (p1, p2) {
         *phase = AnalysisPhase::Idle;
-        return (p1.unwrap(), p2.unwrap());
+        return (a1, a2);
     }
 
     // Send Stop to prompt bots to commit
