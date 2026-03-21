@@ -14,7 +14,12 @@ import {
 	TextInput,
 	Tooltip,
 } from "@mantine/core";
-import { IconCopy, IconDice, IconPlayerPlay } from "@tabler/icons-react";
+import {
+	IconArrowLeft,
+	IconCopy,
+	IconDice,
+	IconPlayerPlay,
+} from "@tabler/icons-react";
 import { useAtom, useAtomValue } from "jotai";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MatchConfigParams } from "../bindings/generated";
@@ -42,6 +47,7 @@ import MazeRenderer from "./MazeRenderer";
 import SettingRow from "./common/SettingRow";
 
 type Props = {
+	onBack: () => void;
 	onStartMatch: () => void;
 };
 
@@ -61,7 +67,7 @@ const MAZE_PRESETS: { name: "classic" | "open"; label: string }[] = [
 	{ name: "open", label: "Open" },
 ];
 
-export default function SetupView({ onStartMatch }: Props) {
+export default function SetupView({ onBack, onStartMatch }: Props) {
 	const committed = useAtomValue(matchConfigAtom);
 	const [, setConfig] = useAtom(asyncMatchConfigAtom);
 	const bots = useAtomValue(botsAtom);
@@ -197,6 +203,14 @@ export default function SetupView({ onStartMatch }: Props) {
 				}}
 			>
 				<Group gap="sm">
+					<Button
+						size="xs"
+						variant="subtle"
+						leftSection={<IconArrowLeft size={14} />}
+						onClick={onBack}
+					>
+						Back
+					</Button>
 					<Text size="sm" fw={600} c={SLOT_PALETTE.Player1.mantine}>
 						Rat
 					</Text>
