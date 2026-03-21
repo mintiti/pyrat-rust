@@ -64,7 +64,7 @@ const SENDER_OFFSET: Record<PlayerSide, { dx: number; dy: number }> = {
 
 // ── Direction → delta ────────────────────────────────────────────
 
-const DIRECTION_DELTA: Record<Direction, { dx: number; dy: number }> = {
+export const DIRECTION_DELTA: Record<Direction, { dx: number; dy: number }> = {
 	Up: { dx: 0, dy: 1 },
 	Down: { dx: 0, dy: -1 },
 	Left: { dx: -1, dy: 0 },
@@ -74,7 +74,7 @@ const DIRECTION_DELTA: Record<Direction, { dx: number; dy: number }> = {
 
 // ── Wall set ─────────────────────────────────────────────────────
 
-function wallKey(a: Coord, b: Coord): string {
+export function wallKey(a: Coord, b: Coord): string {
 	// Normalize: smaller coord first
 	if (a.x < b.x || (a.x === b.x && a.y < b.y)) {
 		return `${a.x},${a.y}|${b.x},${b.y}`;

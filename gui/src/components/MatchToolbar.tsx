@@ -6,12 +6,14 @@ import {
 	IconChevronsRight,
 	IconPlayerPause,
 	IconPlayerPlay,
+	IconPlayerTrackNext,
 } from "@tabler/icons-react";
 import { useAtomValue } from "jotai";
 import { useState } from "react";
 import { botsAtom, resolveBotName } from "../stores/botConfigAtom";
 import {
 	useCursorDepth,
+	useIsAtTip,
 	useMainlineLength,
 	useMatchStore,
 } from "../stores/matchStore";
@@ -43,25 +45,34 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 	const autoplay = useMatchStore((s) => s.autoplay);
 	const playbackSpeed = useMatchStore((s) => s.playbackSpeed);
 	const error = useMatchStore((s) => s.error);
+	const analysisError = useMatchStore((s) => s.analysisError);
 	const disconnection = useMatchStore((s) => s.disconnection);
 	const player1BotId = useMatchStore((s) => s.player1BotId);
 	const player2BotId = useMatchStore((s) => s.player2BotId);
+	const mode = useMatchStore((s) => s.mode);
 	const mainlineDepth = useMatchStore((s) => s.mainlineDepth);
 	const bots = useAtomValue(botsAtom);
 
 	const {
 		goToStart,
 		goToEnd,
-		stepForward,
+		stepForwardOrAdvance,
 		stepBack,
 		togglePlay,
 		goLive,
 		setPlaybackSpeed,
 		resetToPreview,
+		advanceTurn,
+		confirmStagedMoves,
 	} = useMatchStore.getState();
+
+	const hasStagedMoves = useMatchStore(
+		(s) => s.stagedMoves.player1 !== null || s.stagedMoves.player2 !== null,
+	);
 
 	const cursorDepth = useCursorDepth();
 	const totalTurns = useMainlineLength();
+	const isAtTip = useIsAtTip();
 
 	const [confirmOpen, setConfirmOpen] = useState(false);
 
@@ -113,29 +124,49 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 					>
 						<IconChevronLeft size={16} />
 					</ActionIcon>
-					<ActionIcon variant="subtle" size="sm" onClick={togglePlay}>
-						{autoplay ? (
-							<IconPlayerPause size={16} />
-						) : (
-							<IconPlayerPlay size={16} />
-						)}
-					</ActionIcon>
-					{matchPhase === "playing" && cursorDepth < mainlineDepth && (
-						<Badge
-							size="sm"
-							color="red"
-							variant="filled"
-							style={{ cursor: "pointer" }}
-							onClick={goLive}
-						>
-							LIVE
-						</Badge>
+					{mode === "auto" && (
+						<ActionIcon variant="subtle" size="sm" onClick={togglePlay}>
+							{autoplay ? (
+								<IconPlayerPause size={16} />
+							) : (
+								<IconPlayerPlay size={16} />
+							)}
+						</ActionIcon>
 					)}
+					{mode === "step" && (
+						<Button
+							size="compact-xs"
+							variant="light"
+							color={hasStagedMoves ? "green" : undefined}
+							leftSection={<IconPlayerTrackNext size={14} />}
+							onClick={
+								hasStagedMoves
+									? () => confirmStagedMoves()
+									: () => advanceTurn()
+							}
+							disabled={!isAtTip || matchPhase !== "playing"}
+						>
+							{hasStagedMoves ? "Confirm" : "Advance"}
+						</Button>
+					)}
+					{mode === "auto" &&
+						matchPhase === "playing" &&
+						cursorDepth < mainlineDepth && (
+							<Badge
+								size="sm"
+								color="red"
+								variant="filled"
+								style={{ cursor: "pointer" }}
+								onClick={goLive}
+							>
+								LIVE
+							</Badge>
+						)}
 					<ActionIcon
 						variant="subtle"
 						size="sm"
-						onClick={stepForward}
-						disabled={cursorDepth >= totalTurns}
+						onClick={stepForwardOrAdvance}
+						disabled={mode === "auto" ? cursorDepth >= totalTurns : false}
 					>
 						<IconChevronRight size={16} />
 					</ActionIcon>
@@ -147,16 +178,20 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 					>
 						<IconChevronsRight size={16} />
 					</ActionIcon>
-					<Select
-						size="xs"
-						data={SPEED_OPTIONS}
-						value={String(playbackSpeed)}
-						onChange={(v) => v && setPlaybackSpeed(Number(v))}
-						allowDeselect={false}
-						style={{ width: 80 }}
-					/>
+					{mode === "auto" && (
+						<Select
+							size="xs"
+							data={SPEED_OPTIONS}
+							value={String(playbackSpeed)}
+							onChange={(v) => v && setPlaybackSpeed(Number(v))}
+							allowDeselect={false}
+							style={{ width: 80 }}
+						/>
+					)}
 					<Text size="xs" c="dimmed" ml={4}>
-						Turn {cursorDepth} / {totalTurns}
+						{mode === "step"
+							? `Turn ${cursorDepth}`
+							: `Turn ${cursorDepth} / ${totalTurns}`}
 					</Text>
 				</Group>
 			)}
@@ -170,6 +205,11 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 						)}{" "}
 						disconnected:{" "}
 						{DISCONNECT_REASONS[disconnection.reason] ?? disconnection.reason}
+					</Badge>
+				)}
+				{analysisError && (
+					<Badge color="yellow" variant="filled" size="lg">
+						{analysisError}
 					</Badge>
 				)}
 				{error && (

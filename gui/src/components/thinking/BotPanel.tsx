@@ -1,5 +1,9 @@
 import { Accordion, ActionIcon, Group, Stack, Text } from "@mantine/core";
-import { IconRoute } from "@tabler/icons-react";
+import {
+	IconPlayerPause,
+	IconPlayerPlay,
+	IconRoute,
+} from "@tabler/icons-react";
 import pythonIconUrl from "../../assets/sprites/players/python/neutral.png";
 import ratIconUrl from "../../assets/sprites/players/rat/neutral.png";
 import type { PlayerSide } from "../../bindings/generated";
@@ -54,7 +58,8 @@ export default function BotPanel({ sender, botName, color, subjects }: Props) {
 	const showArrows = useMatchStore((s) =>
 		sender === "Player1" ? s.showPlayer1Arrows : s.showPlayer2Arrows,
 	);
-	const toggleArrows = useMatchStore.getState().toggleArrows;
+	const paused = useMatchStore((s) => s.pausedSenders[sender]);
+	const { toggleArrows, togglePauseSender } = useMatchStore.getState();
 	const summary = headerSummary(subjects);
 
 	return (
@@ -82,19 +87,36 @@ export default function BotPanel({ sender, botName, color, subjects }: Props) {
 							{summary}
 						</Text>
 					)}
-					<ActionIcon
-						variant={showArrows ? "filled" : "subtle"}
-						color={color}
-						size="xs"
-						onClick={(e) => {
-							e.stopPropagation();
-							toggleArrows(sender);
-						}}
-						title={`Toggle ${PLAYER_LABEL[sender]} PV arrows`}
-						ml="auto"
-					>
-						<IconRoute size={12} />
-					</ActionIcon>
+					<Group ml="auto" gap={2}>
+						<ActionIcon
+							variant={paused ? "transparent" : "filled"}
+							color={color}
+							size="xs"
+							onClick={(e) => {
+								e.stopPropagation();
+								togglePauseSender(sender);
+							}}
+							title={`${paused ? "Resume" : "Pause"} ${PLAYER_LABEL[sender]} analysis feed`}
+						>
+							{paused ? (
+								<IconPlayerPlay size={12} />
+							) : (
+								<IconPlayerPause size={12} />
+							)}
+						</ActionIcon>
+						<ActionIcon
+							variant={showArrows ? "filled" : "subtle"}
+							color={color}
+							size="xs"
+							onClick={(e) => {
+								e.stopPropagation();
+								toggleArrows(sender);
+							}}
+							title={`Toggle ${PLAYER_LABEL[sender]} PV arrows`}
+						>
+							<IconRoute size={12} />
+						</ActionIcon>
+					</Group>
 				</Group>
 			</Accordion.Control>
 			<Accordion.Panel>

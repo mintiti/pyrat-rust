@@ -75,3 +75,28 @@ export function gameToCellCenter(
 	const tl = gameToCanvas(coord, layout);
 	return { x: tl.x + layout.cellSize / 2, y: tl.y + layout.cellSize / 2 };
 }
+
+/** Convert a canvas pixel position to a game coordinate. Returns null if outside the maze. */
+export function canvasToGame(
+	px: { x: number; y: number },
+	layout: LayoutMetrics,
+): Coord | null {
+	const gx = Math.floor((px.x - layout.mazeX) / layout.cellSize);
+	const gy =
+		layout.mazeH - 1 - Math.floor((px.y - layout.mazeY) / layout.cellSize);
+	if (gx < 0 || gx >= layout.mazeW || gy < 0 || gy >= layout.mazeH) return null;
+	return { x: gx, y: gy };
+}
+
+/** Hit-test: is the pixel position over a player sprite? Uses 50% of cellSize centered on cell. */
+export function isOnPlayer(
+	px: { x: number; y: number },
+	playerPos: Coord,
+	layout: LayoutMetrics,
+): boolean {
+	const center = gameToCellCenter(playerPos, layout);
+	const halfHit = layout.cellSize * 0.35;
+	return (
+		Math.abs(px.x - center.x) <= halfHit && Math.abs(px.y - center.y) <= halfHit
+	);
+}

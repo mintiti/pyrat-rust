@@ -1,13 +1,6 @@
 import { Group, Stack, Text } from "@mantine/core";
 import type { BotInfoEvent, Direction } from "../../bindings/generated";
-
-const DIR_ARROW: Record<Direction, string> = {
-	Up: "↑",
-	Down: "↓",
-	Left: "←",
-	Right: "→",
-	Stay: "·",
-};
+import { DIR_ARROW } from "../../lib/directions";
 
 /** Run-length encode PV arrows: →→→ becomes →×3 */
 function formatPv(pv: Direction[], max = 16): string {

@@ -7,12 +7,14 @@ import { matchConfigAtom } from "../stores/matchConfigAtom";
 import {
 	useCurrentBotInfo,
 	useDisplayState,
+	useIsAtTip,
 	useMatchStore,
 } from "../stores/matchStore";
 import MatchToolbar from "./MatchToolbar";
 import MazeColumn from "./MazeColumn";
 import ResultBanner from "./ResultBanner";
 import ThinkingPanel from "./ThinkingPanel";
+import NotationPanel from "./notation/NotationPanel";
 
 type Props = {
 	onNewMatch: () => void;
@@ -28,12 +30,14 @@ export default function MatchView({ onNewMatch }: Props) {
 	matchConfigRef.current = matchConfig;
 
 	const botInfo = useCurrentBotInfo();
+	const mode = useMatchStore((s) => s.mode);
 	const matchPhase = useMatchStore((s) => s.matchPhase);
 	const autoplay = useMatchStore((s) => s.autoplay);
 	const playbackSpeed = useMatchStore((s) => s.playbackSpeed);
 	const previewError = useMatchStore((s) => s.previewError);
 	const player1BotId = useMatchStore((s) => s.player1BotId);
 	const player2BotId = useMatchStore((s) => s.player2BotId);
+	const isAtTip = useIsAtTip();
 
 	const {
 		onMatchStarted,
@@ -43,12 +47,16 @@ export default function MatchView({ onNewMatch }: Props) {
 		onError,
 		onDisconnect,
 		advanceCursor,
+		startAnalysis,
+		stopAnalysis,
 		goToStart,
 		goToEnd,
-		stepForward,
+		stepForwardOrAdvance,
 		stepBack,
+		cycleVariation,
 		togglePlay,
 		goLive,
+		clearStagedMoves,
 	} = useMatchStore.getState();
 
 	// Event listeners — wire Tauri events to store actions
@@ -88,34 +96,60 @@ export default function MatchView({ onNewMatch }: Props) {
 		};
 	}, []);
 
-	// Auto-advance cursor during playback
+	// Auto-advance cursor during playback (disabled in step mode)
 	// biome-ignore lint/correctness/useExhaustiveDependencies: advanceCursor is a stable ref from getState()
 	useEffect(() => {
-		if (!autoplay) return;
+		if (!autoplay || mode === "step") return;
 		const id = setInterval(() => {
 			advanceCursor();
 		}, playbackSpeed);
 		return () => clearInterval(id);
-	}, [autoplay, playbackSpeed]);
+	}, [autoplay, playbackSpeed, mode]);
+
+	// Reactive analysis: auto-start analysis when cursor lands on a tree tip in step mode
+	// biome-ignore lint/correctness/useExhaustiveDependencies: startAnalysis is a stable ref from getState()
+	useEffect(() => {
+		if (mode !== "step" || matchPhase !== "playing" || !isAtTip) return;
+		const timer = setTimeout(() => {
+			startAnalysis();
+		}, 50);
+		return () => clearTimeout(timer);
+	}, [mode, matchPhase, isAtTip]);
 
 	// Keyboard shortcuts
 	// biome-ignore lint/correctness/useExhaustiveDependencies: navigation actions are stable refs from getState()
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
-			const phase = useMatchStore.getState().matchPhase;
-			if (phase === "idle" || phase === "connecting") return;
+			const state = useMatchStore.getState();
+			if (state.matchPhase === "idle" || state.matchPhase === "connecting")
+				return;
 
 			const tag = (e.target as HTMLElement)?.tagName;
 			if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
 
 			switch (e.key) {
+				case "Escape":
+					clearStagedMoves();
+					break;
 				case "ArrowLeft":
 					e.preventDefault();
 					stepBack();
 					break;
 				case "ArrowRight":
 					e.preventDefault();
-					stepForward();
+					stepForwardOrAdvance();
+					break;
+				case "ArrowUp":
+					if (state.mode === "step") {
+						e.preventDefault();
+						cycleVariation(-1);
+					}
+					break;
+				case "ArrowDown":
+					if (state.mode === "step") {
+						e.preventDefault();
+						cycleVariation(1);
+					}
 					break;
 				case "Home":
 					e.preventDefault();
@@ -127,10 +161,14 @@ export default function MatchView({ onNewMatch }: Props) {
 					break;
 				case " ":
 					e.preventDefault();
-					togglePlay();
+					if (state.mode === "step") {
+						state.analyzing ? stopAnalysis() : startAnalysis();
+					} else {
+						togglePlay();
+					}
 					break;
 				case "l":
-					if (useMatchStore.getState().matchPhase === "playing") {
+					if (state.matchPhase === "playing") {
 						e.preventDefault();
 						goLive();
 					}
@@ -158,7 +196,7 @@ export default function MatchView({ onNewMatch }: Props) {
 			return;
 		}
 		useMatchStore.getState().beginConnecting();
-		const { previewSeed } = useMatchStore.getState();
+		const { previewSeed, mode: currentMode } = useMatchStore.getState();
 		const cfg = matchConfigRef.current;
 		const configWithSeed = {
 			...cfg,
@@ -170,6 +208,7 @@ export default function MatchView({ onNewMatch }: Props) {
 			p1.workingDir,
 			p2.workingDir,
 			configWithSeed,
+			currentMode === "step" ? true : null,
 		);
 		if (res.status === "error") {
 			useMatchStore.getState().onError(res.error);
@@ -199,7 +238,21 @@ export default function MatchView({ onNewMatch }: Props) {
 					previewError={previewError}
 					hasMatch={hasMatch}
 				/>
-				{hasMatch && <ThinkingPanel botInfo={botInfo ?? {}} />}
+				{hasMatch && (
+					<div
+						style={{
+							width: 320,
+							flexShrink: 0,
+							display: "flex",
+							flexDirection: "column",
+							borderLeft: "1px solid var(--mantine-color-dark-4)",
+							overflow: "hidden",
+						}}
+					>
+						<ThinkingPanel botInfo={botInfo ?? {}} />
+						<NotationPanel />
+					</div>
+				)}
 			</div>
 		</Stack>
 	);

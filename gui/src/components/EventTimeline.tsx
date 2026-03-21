@@ -13,6 +13,7 @@ interface TurnEntry {
 	p2MudTurns: number;
 	p1ScoreDelta: number;
 	p2ScoreDelta: number;
+	hasBranch: boolean;
 }
 
 // ── Color helpers ────────────────────────────────────────────────
@@ -35,6 +36,7 @@ const MUD: [number, number, number] = [160, 110, 55];
 // ── Data hook ────────────────────────────────────────────────────
 
 function useTimelineData(): TurnEntry[] | null {
+	const cursor = useMatchStore((s) => s.cursor);
 	const mainlineDepth = useMatchStore((s) => s.mainlineDepth);
 
 	// biome-ignore lint/correctness/useExhaustiveDependencies: mainlineDepth triggers recomputation as turns arrive; root is read via getState() to avoid re-renders
@@ -47,6 +49,24 @@ function useTimelineData(): TurnEntry[] | null {
 		let prevP1Score = root.player1.score;
 		let prevP2Score = root.player2.score;
 
+		// Phase 1: walk cursor path
+		for (const idx of cursor) {
+			if (idx < 0 || idx >= node.children.length) break;
+			const child = node.children[idx];
+			entries.push({
+				turn: child.turn,
+				p1MudTurns: child.player1.mud_turns,
+				p2MudTurns: child.player2.mud_turns,
+				p1ScoreDelta: child.player1.score - prevP1Score,
+				p2ScoreDelta: child.player2.score - prevP2Score,
+				hasBranch: child.children.length > 1,
+			});
+			prevP1Score = child.player1.score;
+			prevP2Score = child.player2.score;
+			node = child;
+		}
+
+		// Phase 2: extend along children[0] past cursor
 		while (node.children.length > 0) {
 			const child = node.children[0];
 			entries.push({
@@ -55,6 +75,7 @@ function useTimelineData(): TurnEntry[] | null {
 				p2MudTurns: child.player2.mud_turns,
 				p1ScoreDelta: child.player1.score - prevP1Score,
 				p2ScoreDelta: child.player2.score - prevP2Score,
+				hasBranch: child.children.length > 1,
 			});
 			prevP1Score = child.player1.score;
 			prevP2Score = child.player2.score;
@@ -62,7 +83,7 @@ function useTimelineData(): TurnEntry[] | null {
 		}
 
 		return entries.length > 0 ? entries : null;
-	}, [mainlineDepth]);
+	}, [cursor, mainlineDepth]);
 }
 
 // ── Constants ────────────────────────────────────────────────────
@@ -180,8 +201,9 @@ export default function EventTimeline({ layout }: Props) {
 	}, [dragging]);
 
 	// Memoize SVG elements — only rebuild when data changes, not on cursor moves
-	const { rects, cheeseMarkers, ticks } = useMemo(() => {
-		if (!data) return { rects: [], cheeseMarkers: [], ticks: [] };
+	const { rects, cheeseMarkers, ticks, branchMarkers } = useMemo(() => {
+		if (!data)
+			return { rects: [], cheeseMarkers: [], ticks: [], branchMarkers: [] };
 
 		const r: React.ReactNode[] = [];
 		const c: React.ReactNode[] = [];
@@ -214,7 +236,23 @@ export default function EventTimeline({ layout }: Props) {
 			);
 		}
 
-		return { rects: r, cheeseMarkers: c, ticks: t };
+		const b: React.ReactNode[] = [];
+		for (let i = 0; i < data.length; i++) {
+			if (data[i].hasBranch) {
+				b.push(
+					<circle
+						key={`br-${i}`}
+						cx={data[i].turn}
+						cy={4}
+						r={1.5}
+						fill="var(--mantine-color-blue-5)"
+						opacity={0.7}
+					/>,
+				);
+			}
+		}
+
+		return { rects: r, cheeseMarkers: c, ticks: t, branchMarkers: b };
 	}, [data]);
 
 	if (!data || !layout) return null;
@@ -305,6 +343,9 @@ export default function EventTimeline({ layout }: Props) {
 
 				{/* Cheese markers */}
 				{cheeseMarkers}
+
+				{/* Branch markers */}
+				{branchMarkers}
 
 				{/* Cursor line */}
 				<line
