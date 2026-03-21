@@ -348,14 +348,7 @@ async fn run_analysis_inner(
                             break;
                         }
 
-                        // Auto-start new analysis turn (no deadline)
-                        send_turn_state(sessions, &mut playing, &turn_state).await;
-                        phase = AnalysisPhase::Collecting {
-                            turn: game.turn,
-                            p1_action: None,
-                            p2_action: None,
-                            deadline: None,
-                        };
+                        phase = AnalysisPhase::Idle;
                         let _ = reply.send(AnalysisResp::Advanced {
                             p1, p2, game_over: false,
                         });

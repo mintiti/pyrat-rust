@@ -38,8 +38,6 @@ function background(
 }
 
 export default function TurnCell({ entry, isCurrent, onClick }: Props) {
-	const indent = entry.variationLevel * 16;
-
 	return (
 		<UnstyledButton
 			onClick={onClick}
@@ -47,7 +45,7 @@ export default function TurnCell({ entry, isCurrent, onClick }: Props) {
 				display: "flex",
 				alignItems: "center",
 				gap: 6,
-				paddingLeft: indent + 6,
+				paddingLeft: 6,
 				paddingRight: 6,
 				paddingTop: 2,
 				paddingBottom: 2,

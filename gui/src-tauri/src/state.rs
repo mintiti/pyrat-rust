@@ -15,7 +15,6 @@ pub enum AnalysisCmd {
     Advance { actions: Option<[WireDirection; 2]> },
 }
 
-#[allow(dead_code)] // Error variant reserved for future use by the analysis loop
 pub enum AnalysisResp {
     TurnStarted,
     Actions {
@@ -27,7 +26,6 @@ pub enum AnalysisResp {
         p2: WireDirection,
         game_over: bool,
     },
-    Error(String),
 }
 
 pub type AnalysisTx = mpsc::Sender<(AnalysisCmd, oneshot::Sender<AnalysisResp>)>;

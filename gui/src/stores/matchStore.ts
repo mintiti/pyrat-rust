@@ -1,6 +1,7 @@
 import { produce } from "immer";
 import { useMemo } from "react";
 import { create } from "zustand";
+import { useShallow } from "zustand/shallow";
 import { commands } from "../bindings";
 import type {
 	AnalysisActions,
@@ -82,6 +83,7 @@ interface MatchState {
 	player2BotId: string | null;
 	result: MatchOverEvent | null;
 	error: string | null;
+	analysisError: string | null;
 	disconnection: BotDisconnectedEvent | null;
 
 	// Game tree
@@ -104,6 +106,7 @@ interface MatchState {
 	showPlayer2Arrows: boolean;
 	pausedSenders: Record<PlayerSide, boolean>;
 	stagedMoves: { player1: Direction | null; player2: Direction | null };
+	advanceInFlight: boolean;
 
 	// Setters for bot selectors
 	setPlayer1BotId: (cmd: string | null) => void;
@@ -116,6 +119,7 @@ interface MatchState {
 	onMatchOver: (e: MatchOverEvent) => void;
 	onBotInfo: (e: BotInfoEvent) => void;
 	onError: (message: string) => void;
+	onAnalysisError: (message: string) => void;
 	onDisconnect: (e: BotDisconnectedEvent) => void;
 
 	// Actions
@@ -176,6 +180,7 @@ const IDLE_MATCH = {
 	mainlineDepth: 0,
 	result: null as MatchOverEvent | null,
 	error: null as string | null,
+	analysisError: null as string | null,
 	disconnection: null as BotDisconnectedEvent | null,
 	matchPhase: "idle" as MatchPhase,
 	autoplay: true,
@@ -188,6 +193,7 @@ const IDLE_MATCH = {
 		player1: Direction | null;
 		player2: Direction | null;
 	},
+	advanceInFlight: false,
 };
 
 export const useMatchStore = create<MatchState>((set, get) => ({
@@ -258,21 +264,11 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 				if (state.mode === "step") {
 					const parent = getNodeAtPath(state.root, state.cursor);
 					if (!parent) return;
-					// Dedup by resulting state (not raw actions — invalid moves become Stay)
+					// Dedup by resolved action pair — same inputs from same state produce identical results
 					const existingIdx = parent.children.findIndex(
 						(c) =>
-							c.player1.position.x === e.player1.position.x &&
-							c.player1.position.y === e.player1.position.y &&
-							c.player1.score === e.player1.score &&
-							c.player1.mud_turns === e.player1.mud_turns &&
-							c.player2.position.x === e.player2.position.x &&
-							c.player2.position.y === e.player2.position.y &&
-							c.player2.score === e.player2.score &&
-							c.player2.mud_turns === e.player2.mud_turns &&
-							c.cheese.length === e.cheese.length &&
-							c.cheese.every(
-								(ch, i) => ch.x === e.cheese[i].x && ch.y === e.cheese[i].y,
-							),
+							c.actions?.player1 === e.player1_action &&
+							c.actions?.player2 === e.player2_action,
 					);
 					if (existingIdx >= 0) {
 						state.cursor.push(existingIdx);
@@ -312,7 +308,11 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	},
 
 	onError: (message) => {
-		set({ ...IDLE_MATCH, error: message });
+		set({ ...IDLE_MATCH, error: message, analysisError: null });
+	},
+
+	onAnalysisError: (message) => {
+		set({ analysisError: message });
 	},
 
 	onDisconnect: (e) => {
@@ -362,7 +362,15 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	},
 
 	confirmStagedMoves: async () => {
-		const { stagedMoves, stopAnalysis, advanceTurn } = get();
+		const {
+			mode,
+			matchPhase,
+			advanceInFlight,
+			stagedMoves,
+			stopAnalysis,
+			advanceTurn,
+		} = get();
+		if (mode !== "step" || matchPhase !== "playing" || advanceInFlight) return;
 		const botMoves = await stopAnalysis();
 		const merged: AnalysisActions = {
 			player1:
@@ -376,20 +384,21 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 
 	// ── Analysis actions (step mode) ────────────────────────
 	startAnalysis: async () => {
-		const { mode, matchPhase } = get();
-		if (mode !== "step" || matchPhase !== "playing") return;
-		set({ analyzing: true });
+		const { mode, matchPhase, analyzing } = get();
+		if (mode !== "step" || matchPhase !== "playing" || analyzing) return;
+		set({ analyzing: true, analysisError: null });
 		const res = await commands.startAnalysisTurn(0);
-		if (res.status === "error") get().onError(res.error);
+		if (res.status === "error") get().onAnalysisError(res.error);
 	},
 
 	stopAnalysis: async () => {
 		const { mode, matchPhase } = get();
 		if (mode !== "step" || matchPhase !== "playing") return null;
+		set({ analysisError: null });
 		const res = await commands.stopAnalysisTurn();
 		set({ analyzing: false });
 		if (res.status === "error") {
-			get().onError(res.error);
+			get().onAnalysisError(res.error);
 			return null;
 		}
 		return {
@@ -399,14 +408,17 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	},
 
 	advanceTurn: async (actions) => {
+		if (get().advanceInFlight) return;
 		const { mode, matchPhase, root, cursor } = get();
 		if (mode !== "step" || matchPhase !== "playing" || !root) return;
 		// Guard: cursor must be at a tree tip
 		const node = getNodeAtPath(root, cursor);
 		if (!node || node.children.length > 0) return;
+		set({ advanceInFlight: true, analysisError: null });
 		const res = await commands.advanceAnalysis(actions ?? null);
+		set({ advanceInFlight: false });
 		if (res.status === "error") {
-			get().onError(res.error);
+			get().onAnalysisError(res.error);
 			return;
 		}
 		// Tree mutation + cursor advance happens in onTurnPlayed
@@ -521,7 +533,12 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 
 	goLive: () => {
 		const { mainlineDepth } = get();
-		set({ cursor: mainlinePath(mainlineDepth), autoplay: true });
+		set({
+			cursor: mainlinePath(mainlineDepth),
+			autoplay: true,
+			analyzing: false,
+			stagedMoves: { player1: null, player2: null },
+		});
 	},
 
 	setPlaybackSpeed: (ms) => {
@@ -582,11 +599,13 @@ export function useDisplayState(): MazeState | null {
 
 /** Current node's bot info, or null if at root with nothing. */
 export function useCurrentBotInfo() {
-	return useMatchStore((s) => {
-		if (!s.root) return null;
-		const node = getNodeAtPath(s.root, s.cursor);
-		return node?.botInfo ?? null;
-	});
+	return useMatchStore(
+		useShallow((s: MatchState) => {
+			if (!s.root) return null;
+			const node = getNodeAtPath(s.root, s.cursor);
+			return node?.botInfo ?? null;
+		}),
+	);
 }
 
 /** Number of turns in the mainline (for "Turn X / Y" display). */

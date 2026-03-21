@@ -45,6 +45,7 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 	const autoplay = useMatchStore((s) => s.autoplay);
 	const playbackSpeed = useMatchStore((s) => s.playbackSpeed);
 	const error = useMatchStore((s) => s.error);
+	const analysisError = useMatchStore((s) => s.analysisError);
 	const disconnection = useMatchStore((s) => s.disconnection);
 	const player1BotId = useMatchStore((s) => s.player1BotId);
 	const player2BotId = useMatchStore((s) => s.player2BotId);
@@ -204,6 +205,11 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 						)}{" "}
 						disconnected:{" "}
 						{DISCONNECT_REASONS[disconnection.reason] ?? disconnection.reason}
+					</Badge>
+				)}
+				{analysisError && (
+					<Badge color="yellow" variant="filled" size="lg">
+						{analysisError}
 					</Badge>
 				)}
 				{error && (

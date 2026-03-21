@@ -410,7 +410,6 @@ pub async fn start_analysis_turn(
     let resp = send_analysis_cmd(&tx, AnalysisCmd::StartTurn { duration_ms }).await?;
     match resp {
         AnalysisResp::TurnStarted => Ok(()),
-        AnalysisResp::Error(e) => Err(e),
         _ => Err("unexpected response".into()),
     }
 }
@@ -427,7 +426,6 @@ pub async fn stop_analysis_turn(
             player1_action: wire_to_specta(p1),
             player2_action: wire_to_specta(p2),
         }),
-        AnalysisResp::Error(e) => Err(e),
         _ => Err("unexpected response".into()),
     }
 }
@@ -447,7 +445,6 @@ pub async fn advance_analysis(
             player2_action: wire_to_specta(p2),
             game_over,
         }),
-        AnalysisResp::Error(e) => Err(e),
         _ => Err("unexpected response".into()),
     }
 }
