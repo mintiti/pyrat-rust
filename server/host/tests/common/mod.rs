@@ -83,7 +83,7 @@ pub fn action_frame(direction: Direction, player: Player, turn: u16) -> Vec<u8> 
                 player,
                 turn,
                 provisional: false,
-                think_ms: 0,
+                think_ms: 1,
             },
         )
         .as_union_value()
