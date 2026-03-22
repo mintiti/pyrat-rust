@@ -163,7 +163,7 @@ class Bot:
             )
 
         direction = _validate_direction(direction, "think()")
-        think_ms = ctx.think_elapsed_ms()
+        think_ms = max(1, ctx.think_elapsed_ms())
         conn.send_frame(
             codec.encode_action(
                 int(direction),
@@ -222,7 +222,7 @@ class HivemindBot:
             )
             moves = {}
 
-        think_ms = ctx.think_elapsed_ms()
+        think_ms = max(1, ctx.think_elapsed_ms())
         for player in (Player.PLAYER1, Player.PLAYER2):
             direction = moves.get(player, Direction.STAY)
             direction = _validate_direction(direction, f"think()[{player.name}]")

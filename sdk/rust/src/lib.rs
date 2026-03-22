@@ -349,7 +349,8 @@ async fn turn_loop<T: bot::Runner>(
                     }
                 });
 
-                let think_ms = think_start.elapsed().as_millis() as u32;
+                // Clamp to 1: the host rejects think_ms == 0 (indistinguishable from missing field).
+                let think_ms = (think_start.elapsed().as_millis() as u32).max(1);
                 for (player, direction) in actions {
                     info_sender.send(&build_action_full(player, direction, turn, false, think_ms));
                 }
