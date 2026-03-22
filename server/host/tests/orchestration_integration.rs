@@ -103,6 +103,7 @@ async fn full_flow_with_events() {
     let mut game = tiny_game(3);
     let config = PlayingConfig {
         move_timeout: Duration::from_millis(500),
+        ..PlayingConfig::default()
     };
 
     let play_task = tokio::spawn(async move {
@@ -286,6 +287,7 @@ async fn info_forwarded_as_event() {
     let mut game = tiny_game(1);
     let config = PlayingConfig {
         move_timeout: Duration::from_millis(500),
+        ..PlayingConfig::default()
     };
 
     let play_task = tokio::spawn(async move {
@@ -409,6 +411,7 @@ async fn timeout_emits_event() {
     let mut game = tiny_game(1);
     let config = PlayingConfig {
         move_timeout: Duration::from_millis(100),
+        ..PlayingConfig::default()
     };
 
     let play_task = tokio::spawn(async move {
@@ -515,6 +518,7 @@ async fn disconnect_emits_event() {
     let mut game = tiny_game(3);
     let config = PlayingConfig {
         move_timeout: Duration::from_millis(200),
+        ..PlayingConfig::default()
     };
 
     let play_task = tokio::spawn(async move {

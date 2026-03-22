@@ -45,8 +45,22 @@ class Action(object):
             return self._tab.Get(flatbuffers.number_types.Uint16Flags, o + self._tab.Pos)
         return 0
 
+    # Action
+    def Provisional(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(10))
+        if o != 0:
+            return bool(self._tab.Get(flatbuffers.number_types.BoolFlags, o + self._tab.Pos))
+        return False
+
+    # Action
+    def ThinkMs(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(12))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Uint32Flags, o + self._tab.Pos)
+        return 0
+
 def ActionStart(builder):
-    builder.StartObject(3)
+    builder.StartObject(5)
 
 def Start(builder):
     ActionStart(builder)
@@ -68,6 +82,18 @@ def ActionAddTurn(builder, turn):
 
 def AddTurn(builder, turn):
     ActionAddTurn(builder, turn)
+
+def ActionAddProvisional(builder, provisional):
+    builder.PrependBoolSlot(3, provisional, 0)
+
+def AddProvisional(builder, provisional):
+    ActionAddProvisional(builder, provisional)
+
+def ActionAddThinkMs(builder, thinkMs):
+    builder.PrependUint32Slot(4, thinkMs, 0)
+
+def AddThinkMs(builder, thinkMs):
+    ActionAddThinkMs(builder, thinkMs)
 
 def ActionEnd(builder):
     return builder.EndObject()

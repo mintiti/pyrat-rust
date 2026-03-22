@@ -308,8 +308,20 @@ pub fn build_pong() -> Vec<u8> {
     })
 }
 
-/// Build an Action bot packet.
+/// Build an Action bot packet (convenience — committed, think_ms=0).
+#[allow(dead_code)]
 pub fn build_action(player: wire::Player, direction: pyrat::Direction, turn: u16) -> Vec<u8> {
+    build_action_full(player, direction, turn, false, 0)
+}
+
+/// Build an Action bot packet with provisional and think_ms fields.
+pub fn build_action_full(
+    player: wire::Player,
+    direction: pyrat::Direction,
+    turn: u16,
+    provisional: bool,
+    think_ms: u32,
+) -> Vec<u8> {
     let wire_dir = engine_to_wire_dir(direction);
     build_bot_frame(BotMessage::Action, move |fbb| {
         wire::Action::create(
@@ -318,6 +330,8 @@ pub fn build_action(player: wire::Player, direction: pyrat::Direction, turn: u16
                 direction: wire_dir,
                 player,
                 turn,
+                provisional,
+                think_ms,
             },
         )
         .as_union_value()

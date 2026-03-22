@@ -82,6 +82,8 @@ pub fn action_frame(direction: Direction, player: Player, turn: u16) -> Vec<u8> 
                 direction,
                 player,
                 turn,
+                provisional: false,
+                think_ms: 0,
             },
         )
         .as_union_value()
@@ -124,6 +126,7 @@ pub fn fast_session_config() -> SessionConfig {
 pub fn fast_playing_config() -> PlayingConfig {
     PlayingConfig {
         move_timeout: Duration::from_millis(500),
+        ..PlayingConfig::default()
     }
 }
 

@@ -271,6 +271,7 @@ pub async fn run_check(bot_dir: &Path) -> CheckReport {
 
     let playing_config = PlayingConfig {
         move_timeout: Duration::from_secs(3),
+        ..PlayingConfig::default()
     };
 
     let mut playing_state = PlayingState::new(&setup_result.sessions);

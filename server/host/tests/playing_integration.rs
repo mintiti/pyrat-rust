@@ -254,6 +254,7 @@ async fn timeout_defaults_to_stay() {
     let mut game = tiny_game(3);
     let config = PlayingConfig {
         move_timeout: Duration::from_millis(100), // Short timeout for fast test.
+        ..PlayingConfig::default()
     };
 
     let play_task = tokio::spawn(async move {
@@ -313,6 +314,7 @@ async fn disconnect_mid_game() {
     let mut game = tiny_game(5);
     let config = PlayingConfig {
         move_timeout: Duration::from_millis(200),
+        ..PlayingConfig::default()
     };
 
     let play_task = tokio::spawn(async move {
@@ -376,6 +378,7 @@ async fn both_disconnect() {
     let mut game = tiny_game(3);
     let config = PlayingConfig {
         move_timeout: Duration::from_millis(200),
+        ..PlayingConfig::default()
     };
 
     let play_task = tokio::spawn(async move {
@@ -699,6 +702,7 @@ async fn gui_turn_by_turn_with_stop_and_infinite_timeout() {
     let mut game = tiny_game(10);
     let config = PlayingConfig {
         move_timeout: Duration::ZERO, // infinite — no timeout
+        ..PlayingConfig::default()
     };
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
     let mut state = PlayingState::new(&sessions);
@@ -825,6 +829,7 @@ async fn late_action_from_previous_turn_is_rejected() {
     let mut game = tiny_game(5);
     let config = PlayingConfig {
         move_timeout: Duration::from_millis(100),
+        ..PlayingConfig::default()
     };
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
 
@@ -924,6 +929,7 @@ async fn multiple_late_actions_dont_cascade() {
     let mut game = tiny_game(5);
     let config = PlayingConfig {
         move_timeout: Duration::from_millis(100),
+        ..PlayingConfig::default()
     };
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
 

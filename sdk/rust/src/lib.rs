@@ -57,7 +57,7 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 
 use wire::{
-    build_action, build_identify, build_pong, build_preprocessing_done, build_ready,
+    build_action_full, build_identify, build_pong, build_preprocessing_done, build_ready,
     extract_host_msg, HostMsg,
 };
 
@@ -294,7 +294,15 @@ async fn turn_loop<T: bot::Runner>(
     {
         let deadline =
             Instant::now() + Duration::from_millis(state.preprocessing_timeout_ms().into());
-        let ctx = Context::new(deadline, None, stopped.clone(), game_over.clone());
+        let ctx = Context::new(
+            deadline,
+            Instant::now(),
+            Player::Player1, // doesn't matter for preprocess
+            0,
+            None,
+            stopped.clone(),
+            game_over.clone(),
+        );
         tokio::task::block_in_place(|| {
             bot.runner_preprocess(state, &ctx);
         });
@@ -308,16 +316,23 @@ async fn turn_loop<T: bot::Runner>(
                 state.update(ts);
 
                 let raw_ms = u64::from(state.move_timeout_ms());
+                let think_start = Instant::now();
                 let deadline = if raw_ms == 0 {
-                    Instant::now() + Duration::from_secs(86400)
+                    think_start + Duration::from_secs(86400)
                 } else {
-                    Instant::now()
+                    think_start
                         + Duration::from_millis(raw_ms.saturating_sub(MOVE_SAFETY_MARGIN_MS))
                 };
+
+                let turn = state.turn();
+                let my_player = state.my_player();
 
                 stopped.store(false, Ordering::Relaxed);
                 let ctx = Context::new(
                     deadline,
+                    think_start,
+                    my_player,
+                    turn,
                     Some(info_sender.clone()),
                     stopped.clone(),
                     game_over.clone(),
@@ -334,9 +349,9 @@ async fn turn_loop<T: bot::Runner>(
                     }
                 });
 
-                let turn = state.turn();
+                let think_ms = think_start.elapsed().as_millis() as u32;
                 for (player, direction) in actions {
-                    info_sender.send(&build_action(player, direction, turn));
+                    info_sender.send(&build_action_full(player, direction, turn, false, think_ms));
                 }
             },
             HostMsg::Timeout { .. } => {

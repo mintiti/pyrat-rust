@@ -98,6 +98,9 @@ impl InfoParams<'_> {
 /// `std::thread::spawn`.
 pub struct Context {
     deadline: Instant,
+    think_start: Instant,
+    player: Player,
+    turn: u16,
     info_sender: Mutex<Option<InfoSender>>,
     stopped: Arc<AtomicBool>,
     game_over: Arc<AtomicBool>,
@@ -107,12 +110,18 @@ impl Context {
     /// Create a context with a deadline and optional server-stop flag.
     pub(crate) fn new(
         deadline: Instant,
+        think_start: Instant,
+        player: Player,
+        turn: u16,
         info_sender: Option<InfoSender>,
         stopped: Arc<AtomicBool>,
         game_over: Arc<AtomicBool>,
     ) -> Self {
         Self {
             deadline,
+            think_start,
+            player,
+            turn,
             info_sender: Mutex::new(info_sender),
             stopped,
             game_over,
@@ -136,6 +145,11 @@ impl Context {
             .map_or(0, |d| d.as_millis() as u64)
     }
 
+    /// Milliseconds elapsed since think started.
+    pub fn think_elapsed_ms(&self) -> u32 {
+        self.think_start.elapsed().as_millis() as u32
+    }
+
     /// Clone the inner [`InfoSender`], if available.
     ///
     /// Use this to get an owned sender you can move into `std::thread::spawn`.
@@ -148,6 +162,23 @@ impl Context {
     pub fn send_info(&self, params: &InfoParams) {
         if let Some(sender) = self.info_sender.lock().unwrap().as_ref() {
             sender.send_info(params);
+        }
+    }
+
+    /// Send a provisional (best-so-far) action to the host.
+    ///
+    /// The host uses the latest provisional as fallback if the committed
+    /// action doesn't arrive in time.
+    pub fn send_provisional(&self, direction: Direction) {
+        if let Some(sender) = self.info_sender.lock().unwrap().as_ref() {
+            let frame = crate::wire::build_action_full(
+                self.player,
+                direction,
+                self.turn,
+                true,
+                self.think_elapsed_ms(),
+            );
+            sender.send(&frame);
         }
     }
 }
@@ -270,11 +301,26 @@ mod tests {
         Arc::new(AtomicBool::new(val))
     }
 
+    fn test_ctx(
+        deadline: Instant,
+        stopped: Arc<AtomicBool>,
+        game_over: Arc<AtomicBool>,
+    ) -> Context {
+        Context::new(
+            deadline,
+            Instant::now(),
+            Player::Player1,
+            0,
+            None,
+            stopped,
+            game_over,
+        )
+    }
+
     #[test]
     fn should_stop_deadline_only() {
-        let ctx = Context::new(
+        let ctx = test_ctx(
             Instant::now() - Duration::from_secs(1),
-            None,
             flag(false),
             flag(false),
         );
@@ -283,9 +329,8 @@ mod tests {
 
     #[test]
     fn should_stop_flag_only() {
-        let ctx = Context::new(
+        let ctx = test_ctx(
             Instant::now() + Duration::from_secs(10),
-            None,
             flag(true),
             flag(false),
         );
@@ -294,9 +339,8 @@ mod tests {
 
     #[test]
     fn should_stop_game_over() {
-        let ctx = Context::new(
+        let ctx = test_ctx(
             Instant::now() + Duration::from_secs(10),
-            None,
             flag(false),
             flag(true),
         );
@@ -305,9 +349,8 @@ mod tests {
 
     #[test]
     fn should_stop_neither() {
-        let ctx = Context::new(
+        let ctx = test_ctx(
             Instant::now() + Duration::from_secs(10),
-            None,
             flag(false),
             flag(false),
         );
@@ -316,9 +359,8 @@ mod tests {
 
     #[test]
     fn time_remaining_returns_zero_when_stopped() {
-        let ctx = Context::new(
+        let ctx = test_ctx(
             Instant::now() + Duration::from_secs(10),
-            None,
             flag(true),
             flag(false),
         );
@@ -327,9 +369,8 @@ mod tests {
 
     #[test]
     fn time_remaining_returns_zero_when_game_over() {
-        let ctx = Context::new(
+        let ctx = test_ctx(
             Instant::now() + Duration::from_secs(10),
-            None,
             flag(false),
             flag(true),
         );

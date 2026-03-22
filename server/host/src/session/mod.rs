@@ -267,6 +267,8 @@ async fn handle_bot_frame(
             mut player,
             direction,
             turn,
+            provisional,
+            think_ms,
         } => {
             // Default player inference: if there's exactly one controlled player
             // that is NOT the FlatBuffers default (Player1), and the bot sent the
@@ -293,6 +295,8 @@ async fn handle_bot_frame(
                 player,
                 direction,
                 turn,
+                provisional,
+                think_ms,
             }
         },
         BotPayload::Info(info) => SessionMsg::Info { session_id, info },

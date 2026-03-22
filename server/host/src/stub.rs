@@ -151,6 +151,8 @@ async fn run_stub(
                             player,
                             direction: dir,
                             turn,
+                            provisional: false,
+                            think_ms: 0,
                         })
                         .await
                         .is_err()

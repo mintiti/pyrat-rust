@@ -32,6 +32,8 @@ pub enum BotPayload {
         player: wire::Player,
         direction: wire::Direction,
         turn: u16,
+        provisional: bool,
+        think_ms: u32,
     },
     Pong,
     Info(OwnedInfo),
@@ -86,6 +88,8 @@ pub fn extract_bot_packet(buf: &[u8]) -> Result<(BotMessage, BotPayload), String
             player: a.player(),
             direction: a.direction(),
             turn: a.turn(),
+            provisional: a.provisional(),
+            think_ms: a.think_ms(),
         }
     } else if msg_type == BotMessage::Pong {
         BotPayload::Pong
@@ -356,6 +360,8 @@ mod tests {
                 direction,
                 player,
                 turn,
+                provisional: false,
+                think_ms: 0,
             },
         );
         let packet = wire::BotPacket::create(
@@ -442,10 +448,14 @@ mod tests {
                 player,
                 direction,
                 turn,
+                provisional,
+                think_ms,
             } => {
                 assert_eq!(player, Player::Player2);
                 assert_eq!(direction, Direction::Left);
                 assert_eq!(turn, 7);
+                assert!(!provisional);
+                assert_eq!(think_ms, 0);
             },
             _ => panic!("expected Action"),
         }

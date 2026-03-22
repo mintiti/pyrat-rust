@@ -146,6 +146,8 @@ table Action {
   direction: Direction;
   player: Player;
   turn: uint16;
+  provisional: bool = false;
+  think_ms: uint32 = 0;
 }
 
 table Pong {}

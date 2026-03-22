@@ -50,6 +50,12 @@ struct Cli {
     /// Write game record JSON to this file
     #[arg(long)]
     output: Option<PathBuf>,
+    /// Think margin: how much a bot's self-reported think_ms may exceed move_timeout (fraction, e.g. 0.10 = 10%)
+    #[arg(long, default_value_t = 0.10)]
+    think_margin: f32,
+    /// Network grace period in ms added on top of the think deadline
+    #[arg(long, default_value_t = 50)]
+    network_grace_ms: u32,
 }
 
 fn build_game_config(cli: &Cli) -> Result<GameConfig, String> {
@@ -92,6 +98,8 @@ struct TurnRecord {
     p1_score: f32,
     p2_score: f32,
     cheese_remaining: usize,
+    p1_think_ms: u32,
+    p2_think_ms: u32,
 }
 
 #[derive(Serialize)]
@@ -152,6 +160,8 @@ fn build_game_record(
                 state,
                 p1_action,
                 p2_action,
+                p1_think_ms,
+                p2_think_ms,
             } => {
                 turns.push(TurnRecord {
                     turn: state.turn,
@@ -162,6 +172,8 @@ fn build_game_record(
                     p1_score: state.player1_score,
                     p2_score: state.player2_score,
                     cheese_remaining: state.cheese.len(),
+                    p1_think_ms,
+                    p2_think_ms,
                 });
             },
             _ => {},
@@ -289,6 +301,8 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     // 10. Run playing
     let playing_config = PlayingConfig {
         move_timeout: Duration::from_millis(u64::from(cli.move_timeout_ms)),
+        think_margin: cli.think_margin,
+        network_grace: Duration::from_millis(u64::from(cli.network_grace_ms)),
     };
     let match_result = run_playing(
         &mut game,

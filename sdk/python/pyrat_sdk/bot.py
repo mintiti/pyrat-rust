@@ -43,12 +43,17 @@ class Context:
         timeout_ms: int,
         conn: Connection,
         stop_event: threading.Event | None = None,
+        player: Player = Player.PLAYER1,
+        turn: int = 0,
     ) -> None:
-        self._deadline = time.monotonic() + (
+        self._think_start = time.monotonic()
+        self._deadline = self._think_start + (
             86400.0 if timeout_ms == 0 else timeout_ms / 1000.0
         )
         self._conn = conn
         self._stop_event = stop_event
+        self._player = player
+        self._turn = turn
 
     def time_remaining_ms(self) -> float:
         if self._stop_event is not None and self._stop_event.is_set():
@@ -59,6 +64,32 @@ class Context:
         return time.monotonic() >= self._deadline or (
             self._stop_event is not None and self._stop_event.is_set()
         )
+
+    def think_elapsed_ms(self) -> int:
+        """Milliseconds elapsed since think started."""
+        return int((time.monotonic() - self._think_start) * 1000.0)
+
+    def send_provisional(
+        self, direction: Direction, player: Player | None = None
+    ) -> None:
+        """Send a provisional (best-so-far) action to the host.
+
+        The host uses the latest provisional as fallback if the committed
+        action doesn't arrive in time.
+        """
+        p = player if player is not None else self._player
+        try:
+            self._conn.send_frame(
+                codec.encode_action(
+                    int(direction),
+                    int(p),
+                    self._turn,
+                    provisional=True,
+                    think_ms=self.think_elapsed_ms(),
+                )
+            )
+        except Exception as e:
+            print(f"send_provisional() failed: {e}", file=sys.stderr)
 
     def send_info(
         self,
@@ -132,8 +163,14 @@ class Bot:
             )
 
         direction = _validate_direction(direction, "think()")
+        think_ms = ctx.think_elapsed_ms()
         conn.send_frame(
-            codec.encode_action(int(direction), int(state.my_player), state.turn)
+            codec.encode_action(
+                int(direction),
+                int(state.my_player),
+                state.turn,
+                think_ms=think_ms,
+            )
         )
 
 
@@ -185,11 +222,17 @@ class HivemindBot:
             )
             moves = {}
 
+        think_ms = ctx.think_elapsed_ms()
         for player in (Player.PLAYER1, Player.PLAYER2):
             direction = moves.get(player, Direction.STAY)
             direction = _validate_direction(direction, f"think()[{player.name}]")
             conn.send_frame(
-                codec.encode_action(int(direction), int(player), state.turn)
+                codec.encode_action(
+                    int(direction),
+                    int(player),
+                    state.turn,
+                    think_ms=think_ms,
+                )
             )
 
 
@@ -374,7 +417,13 @@ def _run_lifecycle(
                 raise ConnectionError(f"Failed to decode TurnState: {e}") from e
             state.update(ts)
             stop_event.clear()
-            ctx = Context(config["move_timeout_ms"], conn, stop_event)
+            ctx = Context(
+                config["move_timeout_ms"],
+                conn,
+                stop_event,
+                player=state.my_player,
+                turn=state.turn,
+            )
             turn_fn(state, ctx, conn)
         elif msg_type == HostMessage.GameOver:
             try:

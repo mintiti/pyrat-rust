@@ -109,6 +109,8 @@ async fn main() {
                             direction,
                             player: Player::Player1, // Session infers the actual player
                             turn,
+                            provisional: false,
+                            think_ms: 0,
                         },
                     )
                     .as_union_value()
