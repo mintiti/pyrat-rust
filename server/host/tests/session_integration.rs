@@ -16,9 +16,19 @@ use common::*;
 
 // ── Session-specific helpers ────────────────────────
 
-fn action_frame(direction: Direction, player: Player) -> Vec<u8> {
+fn action_frame(direction: Direction, player: Player, turn: u16) -> Vec<u8> {
     build_bot_frame(BotMessage::Action, move |fbb| {
-        Action::create(fbb, &ActionArgs { direction, player }).as_union_value()
+        Action::create(
+            fbb,
+            &ActionArgs {
+                direction,
+                player,
+                turn,
+                provisional: false,
+                think_ms: 0,
+            },
+        )
+        .as_union_value()
     })
 }
 
@@ -171,7 +181,7 @@ async fn happy_path_full_lifecycle() {
     assert_eq!(packet.message_type(), HostMessage::TurnState);
 
     bot_writer
-        .write_frame(&action_frame(Direction::Left, Player::Player1))
+        .write_frame(&action_frame(Direction::Left, Player::Player1, 1))
         .await
         .unwrap();
     let msg = recv(&mut game_rx).await;
@@ -237,7 +247,7 @@ async fn wrong_state_rejection_action_before_playing() {
 
     // Send Action in Connected state — should be rejected silently
     bot_writer
-        .write_frame(&action_frame(Direction::Up, Player::Player1))
+        .write_frame(&action_frame(Direction::Up, Player::Player1, 0))
         .await
         .unwrap();
 
@@ -316,7 +326,7 @@ async fn ownership_validation_rejects_non_controlled_player() {
 
     // Now Playing — send Action for Python (not controlled)
     bot_writer
-        .write_frame(&action_frame(Direction::Up, Player::Player2))
+        .write_frame(&action_frame(Direction::Up, Player::Player2, 0))
         .await
         .unwrap();
 
@@ -329,7 +339,7 @@ async fn ownership_validation_rejects_non_controlled_player() {
 
     // Send valid Action for Rat
     bot_writer
-        .write_frame(&action_frame(Direction::Down, Player::Player1))
+        .write_frame(&action_frame(Direction::Down, Player::Player1, 0))
         .await
         .unwrap();
     let msg = recv(&mut game_rx).await;
@@ -564,7 +574,7 @@ async fn default_player_inference_single_bot() {
 
     // Send Action with default player (Rat/0) — should be inferred as Python
     bot_writer
-        .write_frame(&action_frame(Direction::Up, Player::Player1))
+        .write_frame(&action_frame(Direction::Up, Player::Player1, 0))
         .await
         .unwrap();
     let msg = recv(&mut game_rx).await;
@@ -671,7 +681,7 @@ async fn stop_sends_wire_stop_and_session_stays_alive() {
 
     // Bot can still send actions.
     bot_writer
-        .write_frame(&action_frame(Direction::Left, Player::Player1))
+        .write_frame(&action_frame(Direction::Left, Player::Player1, 0))
         .await
         .unwrap();
     let msg = recv(&mut game_rx).await;
@@ -753,7 +763,7 @@ async fn game_over_then_bot_message_rejected() {
 
     // Bot sends Action after GameOver — should be drained, not forwarded
     bot_writer
-        .write_frame(&action_frame(Direction::Up, Player::Player1))
+        .write_frame(&action_frame(Direction::Up, Player::Player1, 0))
         .await
         .unwrap();
 
@@ -825,7 +835,7 @@ async fn multiple_controlled_players_no_inference() {
 
     // Bot sends Rat action — should NOT be inferred, stays as Rat
     bot_writer
-        .write_frame(&action_frame(Direction::Left, Player::Player1))
+        .write_frame(&action_frame(Direction::Left, Player::Player1, 0))
         .await
         .unwrap();
     let msg = recv(&mut game_rx).await;
@@ -950,7 +960,7 @@ async fn empty_controlled_players_skips_ownership_check() {
 
     // Any player should be accepted when controlled_players is empty
     bot_writer
-        .write_frame(&action_frame(Direction::Up, Player::Player2))
+        .write_frame(&action_frame(Direction::Up, Player::Player2, 0))
         .await
         .unwrap();
     let msg = recv(&mut game_rx).await;
@@ -1053,6 +1063,64 @@ async fn drain_budget_exhausted_breaks_loop() {
             assert_eq!(reason, DisconnectReason::DrainComplete);
         },
         other => panic!("expected Disconnected with DrainComplete, got {other:?}"),
+    }
+
+    session_handle.await.unwrap();
+}
+
+#[tokio::test]
+async fn write_error_reports_frame_error() {
+    // Use separate duplex pairs for each direction so we can independently
+    // break the write path without affecting reads.
+    // bot_write → session_read (bot sends to session)
+    let (session_read, bot_write_stream) = tokio::io::duplex(8192);
+    // session_write → bot_read (session sends to bot)
+    let (bot_read_stream, session_write) = tokio::io::duplex(8192);
+
+    let (game_tx, mut game_rx) = mpsc::channel(32);
+
+    let session_handle = tokio::spawn(run_session(
+        SessionId(16),
+        session_read,
+        session_write,
+        game_tx,
+        SessionConfig::default(),
+    ));
+
+    let mut bot_writer = FrameWriter::with_default_max(bot_write_stream);
+
+    let cmd_tx = match recv(&mut game_rx).await {
+        SessionMsg::Connected { cmd_tx, .. } => cmd_tx,
+        other => panic!("expected Connected, got {other:?}"),
+    };
+
+    // Bot identifies so the session is alive and the cmd channel is active.
+    bot_writer
+        .write_frame(&identify_frame("Bot", "Auth"))
+        .await
+        .unwrap();
+    let _ = recv(&mut game_rx).await; // Identified
+
+    // Drop the bot's read stream — session's write side will get BrokenPipe.
+    drop(bot_read_stream);
+
+    // Host sends a command that requires writing to the bot.
+    cmd_tx
+        .send(HostCommand::MatchConfig(Box::new(session_match_config())))
+        .await
+        .unwrap();
+
+    // Session should exit with FrameError, not PeerClosed.
+    let msg = recv(&mut game_rx).await;
+    match msg {
+        SessionMsg::Disconnected { reason, .. } => {
+            assert_eq!(
+                reason,
+                DisconnectReason::FrameError,
+                "write failure should report FrameError, not PeerClosed"
+            );
+        },
+        other => panic!("expected Disconnected, got {other:?}"),
     }
 
     session_handle.await.unwrap();

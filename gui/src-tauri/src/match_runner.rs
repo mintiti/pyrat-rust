@@ -235,6 +235,7 @@ async fn run_match_inner(
 
     let playing_config = PlayingConfig {
         move_timeout: Duration::from_secs(3),
+        ..PlayingConfig::default()
     };
     let _match_result = run_playing(
         game,
@@ -352,6 +353,8 @@ async fn run_analysis_inner(
                             state: turn_state.clone(),
                             p1_action: p1,
                             p2_action: p2,
+                            p1_think_ms: 0,
+                            p2_think_ms: 0,
                         });
 
                         if result.game_over {
@@ -738,6 +741,7 @@ async fn forward_events(
                         state,
                         p1_action,
                         p2_action,
+                        ..
                     } => {
                         let payload = TurnPlayedEvent {
                             match_id,

@@ -1,45 +1,38 @@
 //! Bot and Hivemind traits, Context for timing and info sending.
 
-use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use pyrat::Direction;
 use pyrat_wire::{GameResult, Player};
+use tokio::sync::mpsc;
 
 use crate::options::Options;
 use crate::state::GameState;
 
-/// Synchronous writer for Info frames during `think()`.
+/// Non-blocking writer for Info frames during `think()`.
 ///
-/// Wraps a `TcpStream` behind `Arc<Mutex<…>>` so it is `Send + Sync` and
-/// cheaply cloneable. Multi-threaded bots (e.g. MCTS) can clone the sender
+/// Sends frames through an `mpsc` channel to a background writer task that
+/// handles the actual I/O via tokio's async `FrameWriter`. This avoids the
+/// `O_NONBLOCK` sharing bug that occurred with a cloned `TcpStream`.
+///
+/// Cheaply cloneable — multi-threaded bots (e.g. MCTS) can clone the sender
 /// and move it into worker threads.
 #[derive(Clone)]
 pub struct InfoSender {
-    stream: Arc<Mutex<std::net::TcpStream>>,
+    tx: mpsc::UnboundedSender<Vec<u8>>,
 }
 
 impl InfoSender {
-    pub(crate) fn new(stream: std::net::TcpStream) -> Self {
-        Self {
-            stream: Arc::new(Mutex::new(stream)),
-        }
+    pub(crate) fn new(tx: mpsc::UnboundedSender<Vec<u8>>) -> Self {
+        Self { tx }
     }
 
-    /// Send a pre-built Info frame. Locks the stream internally.
+    /// Send a pre-built frame through the writer channel.
     pub fn send(&self, frame: &[u8]) {
-        let Ok(mut stream) = self.stream.lock() else {
-            eprintln!("[sdk] send_info() failed: mutex poisoned");
-            return;
-        };
-        let len = (frame.len() as u32).to_be_bytes();
-        if let Err(e) = stream
-            .write_all(&len)
-            .and_then(|()| stream.write_all(frame))
-        {
-            eprintln!("[sdk] send_info() failed: {e}");
+        if let Err(e) = self.tx.send(frame.to_vec()) {
+            eprintln!("[sdk] send() failed: channel closed ({e})");
         }
     }
 
@@ -105,6 +98,9 @@ impl InfoParams<'_> {
 /// `std::thread::spawn`.
 pub struct Context {
     deadline: Instant,
+    think_start: Instant,
+    player: Player,
+    turn: u16,
     info_sender: Mutex<Option<InfoSender>>,
     stopped: Arc<AtomicBool>,
     game_over: Arc<AtomicBool>,
@@ -114,12 +110,18 @@ impl Context {
     /// Create a context with a deadline and optional server-stop flag.
     pub(crate) fn new(
         deadline: Instant,
+        think_start: Instant,
+        player: Player,
+        turn: u16,
         info_sender: Option<InfoSender>,
         stopped: Arc<AtomicBool>,
         game_over: Arc<AtomicBool>,
     ) -> Self {
         Self {
             deadline,
+            think_start,
+            player,
+            turn,
             info_sender: Mutex::new(info_sender),
             stopped,
             game_over,
@@ -143,6 +145,11 @@ impl Context {
             .map_or(0, |d| d.as_millis() as u64)
     }
 
+    /// Milliseconds elapsed since think started.
+    pub fn think_elapsed_ms(&self) -> u32 {
+        self.think_start.elapsed().as_millis() as u32
+    }
+
     /// Clone the inner [`InfoSender`], if available.
     ///
     /// Use this to get an owned sender you can move into `std::thread::spawn`.
@@ -152,11 +159,26 @@ impl Context {
     }
 
     /// Send an Info message to the host (for GUI / debugging).
-    ///
-    /// Writes synchronously on a cloned TCP socket. Errors are logged to stderr.
     pub fn send_info(&self, params: &InfoParams) {
         if let Some(sender) = self.info_sender.lock().unwrap().as_ref() {
             sender.send_info(params);
+        }
+    }
+
+    /// Send a provisional (best-so-far) action to the host.
+    ///
+    /// The host uses the latest provisional as fallback if the committed
+    /// action doesn't arrive in time.
+    pub fn send_provisional(&self, direction: Direction) {
+        if let Some(sender) = self.info_sender.lock().unwrap().as_ref() {
+            let frame = crate::wire::build_action_full(
+                self.player,
+                direction,
+                self.turn,
+                true,
+                self.think_elapsed_ms(),
+            );
+            sender.send(&frame);
         }
     }
 }
@@ -279,11 +301,26 @@ mod tests {
         Arc::new(AtomicBool::new(val))
     }
 
+    fn test_ctx(
+        deadline: Instant,
+        stopped: Arc<AtomicBool>,
+        game_over: Arc<AtomicBool>,
+    ) -> Context {
+        Context::new(
+            deadline,
+            Instant::now(),
+            Player::Player1,
+            0,
+            None,
+            stopped,
+            game_over,
+        )
+    }
+
     #[test]
     fn should_stop_deadline_only() {
-        let ctx = Context::new(
+        let ctx = test_ctx(
             Instant::now() - Duration::from_secs(1),
-            None,
             flag(false),
             flag(false),
         );
@@ -292,9 +329,8 @@ mod tests {
 
     #[test]
     fn should_stop_flag_only() {
-        let ctx = Context::new(
+        let ctx = test_ctx(
             Instant::now() + Duration::from_secs(10),
-            None,
             flag(true),
             flag(false),
         );
@@ -303,9 +339,8 @@ mod tests {
 
     #[test]
     fn should_stop_game_over() {
-        let ctx = Context::new(
+        let ctx = test_ctx(
             Instant::now() + Duration::from_secs(10),
-            None,
             flag(false),
             flag(true),
         );
@@ -314,9 +349,8 @@ mod tests {
 
     #[test]
     fn should_stop_neither() {
-        let ctx = Context::new(
+        let ctx = test_ctx(
             Instant::now() + Duration::from_secs(10),
-            None,
             flag(false),
             flag(false),
         );
@@ -325,9 +359,8 @@ mod tests {
 
     #[test]
     fn time_remaining_returns_zero_when_stopped() {
-        let ctx = Context::new(
+        let ctx = test_ctx(
             Instant::now() + Duration::from_secs(10),
-            None,
             flag(true),
             flag(false),
         );
@@ -336,9 +369,8 @@ mod tests {
 
     #[test]
     fn time_remaining_returns_zero_when_game_over() {
-        let ctx = Context::new(
+        let ctx = test_ctx(
             Instant::now() + Duration::from_secs(10),
-            None,
             flag(false),
             flag(true),
         );

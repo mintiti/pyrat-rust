@@ -103,19 +103,20 @@ async fn full_flow_with_events() {
     let mut game = tiny_game(3);
     let config = PlayingConfig {
         move_timeout: Duration::from_millis(500),
+        ..PlayingConfig::default()
     };
 
     let play_task = tokio::spawn(async move {
         run_playing(&mut game, &sessions, &mut game_rx, &config, Some(&event_tx)).await
     });
 
-    for _ in 0..3 {
+    for turn in 0..3 {
         let _ = read_turn_state(&mut r1).await;
         let _ = read_turn_state(&mut r2).await;
-        w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
+        w1.write_frame(&action_frame(Direction::Stay, Player::Player1, turn))
             .await
             .unwrap();
-        w2.write_frame(&action_frame(Direction::Stay, Player::Player2))
+        w2.write_frame(&action_frame(Direction::Stay, Player::Player2, turn))
             .await
             .unwrap();
     }
@@ -286,6 +287,7 @@ async fn info_forwarded_as_event() {
     let mut game = tiny_game(1);
     let config = PlayingConfig {
         move_timeout: Duration::from_millis(500),
+        ..PlayingConfig::default()
     };
 
     let play_task = tokio::spawn(async move {
@@ -316,10 +318,10 @@ async fn info_forwarded_as_event() {
     w1.write_frame(&info_frame).await.unwrap();
 
     // Now send actions
-    w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
+    w1.write_frame(&action_frame(Direction::Stay, Player::Player1, 0))
         .await
         .unwrap();
-    w2.write_frame(&action_frame(Direction::Stay, Player::Player2))
+    w2.write_frame(&action_frame(Direction::Stay, Player::Player2, 0))
         .await
         .unwrap();
 
@@ -409,6 +411,7 @@ async fn timeout_emits_event() {
     let mut game = tiny_game(1);
     let config = PlayingConfig {
         move_timeout: Duration::from_millis(100),
+        ..PlayingConfig::default()
     };
 
     let play_task = tokio::spawn(async move {
@@ -418,7 +421,7 @@ async fn timeout_emits_event() {
     // Turn 0: P1 responds, P2 silent → timeout
     let _ = read_turn_state(&mut r1).await;
     let _ = read_turn_state(&mut r2).await;
-    w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
+    w1.write_frame(&action_frame(Direction::Stay, Player::Player1, 0))
         .await
         .unwrap();
     // P2 silent
@@ -515,6 +518,7 @@ async fn disconnect_emits_event() {
     let mut game = tiny_game(3);
     let config = PlayingConfig {
         move_timeout: Duration::from_millis(200),
+        ..PlayingConfig::default()
     };
 
     let play_task = tokio::spawn(async move {
@@ -524,10 +528,10 @@ async fn disconnect_emits_event() {
     // Turn 0: both respond
     let _ = read_turn_state(&mut r1).await;
     let _ = read_turn_state(&mut r2).await;
-    w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
+    w1.write_frame(&action_frame(Direction::Stay, Player::Player1, 0))
         .await
         .unwrap();
-    w2.write_frame(&action_frame(Direction::Stay, Player::Player2))
+    w2.write_frame(&action_frame(Direction::Stay, Player::Player2, 0))
         .await
         .unwrap();
 
@@ -536,14 +540,14 @@ async fn disconnect_emits_event() {
     let _ = read_turn_state(&mut r2).await;
     drop(w2);
     drop(r2);
-    w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
+    w1.write_frame(&action_frame(Direction::Stay, Player::Player1, 1))
         .await
         .unwrap();
 
     // Remaining turns
-    for _ in 2..3 {
+    for turn in 2..3 {
         let _ = read_turn_state(&mut r1).await;
-        w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
+        w1.write_frame(&action_frame(Direction::Stay, Player::Player1, turn))
             .await
             .unwrap();
     }

@@ -53,12 +53,20 @@ pub struct PlayingConfig {
     /// or disconnects. Use this with [`HostCommand::Stop`] for GUI-driven
     /// turn-by-turn control.
     pub move_timeout: Duration,
+    /// How much a bot's self-reported think_ms may exceed move_timeout
+    /// before the action is rejected. 0.10 = 10% grace.
+    pub think_margin: f32,
+    /// Fixed network delivery buffer added on top of the think deadline.
+    /// The host waits this long past the think deadline for packets to arrive.
+    pub network_grace: Duration,
 }
 
 impl Default for PlayingConfig {
     fn default() -> Self {
         Self {
             move_timeout: Duration::from_secs(3),
+            think_margin: 0.10,
+            network_grace: Duration::from_millis(50),
         }
     }
 }

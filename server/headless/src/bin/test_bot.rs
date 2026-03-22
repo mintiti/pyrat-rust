@@ -97,6 +97,8 @@ async fn main() {
 
         match packet.message_type() {
             HostMessage::TurnState => {
+                let ts = packet.message_as_turn_state().unwrap();
+                let turn = ts.turn();
                 // Pick a random direction (0-4: Up, Right, Down, Left, Stay)
                 let dir_val: u8 = rng.random_range(0..5);
                 let direction = Direction(dir_val);
@@ -106,6 +108,9 @@ async fn main() {
                         &ActionArgs {
                             direction,
                             player: Player::Player1, // Session infers the actual player
+                            turn,
+                            provisional: false,
+                            think_ms: 0,
                         },
                     )
                     .as_union_value()

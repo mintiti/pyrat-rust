@@ -204,7 +204,7 @@ class TestExtractTimeout:
 
 class TestEncodeAction:
     def test_roundtrip(self):
-        buf = codec.encode_action(direction=2, player=1)  # DOWN, PLAYER2
+        buf = codec.encode_action(direction=2, player=1, turn=42)  # DOWN, PLAYER2
         packet = BotPacket.GetRootAs(buf)
         assert packet.MessageType() == BotMessage.Action
 
@@ -212,6 +212,7 @@ class TestEncodeAction:
         action.Init(packet.Message().Bytes, packet.Message().Pos)
         assert action.Direction() == 2
         assert action.Player() == 1
+        assert action.Turn() == 42
 
     def test_stay(self):
         buf = codec.encode_action(direction=4, player=0)
@@ -220,6 +221,7 @@ class TestEncodeAction:
         action.Init(packet.Message().Bytes, packet.Message().Pos)
         assert action.Direction() == 4
         assert action.Player() == 0
+        assert action.Turn() == 0
 
 
 # ══════════════════════════════════════════════════════════

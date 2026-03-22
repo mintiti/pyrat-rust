@@ -1,7 +1,6 @@
 //! Playing phase: the core turn loop that drives a match to completion.
 
 use std::collections::{HashMap, HashSet};
-use std::time::Duration;
 
 use tokio::sync::mpsc;
 use tokio::time::Instant;
@@ -97,6 +96,14 @@ pub enum PlayingError {
     AllDisconnected,
 }
 
+/// Actions collected for a single turn, including timing metadata.
+struct CollectedActions {
+    p1: WireDirection,
+    p2: WireDirection,
+    p1_think_ms: u32,
+    p2_think_ms: u32,
+}
+
 // ── Direction conversion ─────────────────────────────
 
 /// Convert a wire Direction (u8 newtype) to an engine Direction enum.
@@ -150,20 +157,20 @@ pub async fn run_one_turn(
     }
 
     // Collect actions.
-    let (p1_wire, p2_wire) = collect_actions(
+    let actions = collect_actions(
         game_rx,
         current_turn,
         sessions,
         &state.session_players,
         &mut state.disconnected,
-        config.move_timeout,
+        config,
         event_tx,
     )
     .await?;
 
     // Step the engine.
-    let p1_move = wire_to_engine(p1_wire);
-    let p2_move = wire_to_engine(p2_wire);
+    let p1_move = wire_to_engine(actions.p1);
+    let p2_move = wire_to_engine(actions.p2);
     let result = game.process_turn(p1_move, p2_move);
 
     state.last_p1 = engine_to_wire(p1_move);
@@ -174,8 +181,10 @@ pub async fn run_one_turn(
         event_tx,
         MatchEvent::TurnPlayed {
             state: build_turn_state(game, state.last_p1, state.last_p2),
-            p1_action: p1_wire,
-            p2_action: p2_wire,
+            p1_action: actions.p1,
+            p2_action: actions.p2,
+            p1_think_ms: actions.p1_think_ms,
+            p2_think_ms: actions.p2_think_ms,
         },
     );
 
@@ -267,46 +276,64 @@ fn build_turn_state(
 
 /// Collect one action per player for this turn.
 ///
-/// Pre-fills STAY for disconnected players. Uses a `select!` loop to receive
-/// actions or detect disconnects/timeouts. First valid action per player wins.
+/// Pre-fills STAY for disconnected players. Supports provisional actions
+/// (best-so-far) and judges committed actions by `think_ms` against the
+/// configured think margin, with a network grace period for packet delivery.
 async fn collect_actions(
     game_rx: &mut mpsc::Receiver<SessionMsg>,
     current_turn: u16,
     sessions: &[SessionHandle],
     session_players: &HashMap<SessionId, Vec<Player>>,
     disconnected: &mut HashSet<SessionId>,
-    move_timeout: Duration,
+    config: &PlayingConfig,
     event_tx: Option<&mpsc::UnboundedSender<MatchEvent>>,
-) -> Result<(WireDirection, WireDirection), PlayingError> {
+) -> Result<CollectedActions, PlayingError> {
     let stay = WireDirection::Stay;
-    let mut p1_action: Option<WireDirection> = None;
-    let mut p2_action: Option<WireDirection> = None;
+    let mut p1_slot: Option<ActionSlot> = None;
+    let mut p2_slot: Option<ActionSlot> = None;
 
-    // Pre-fill for disconnected players.
+    // Pre-fill committed Stay for disconnected players.
     for sid in disconnected.iter() {
         if let Some(players) = session_players.get(sid) {
             for &p in players {
-                fill_action(p, stay, &mut p1_action, &mut p2_action);
+                let slot = match p {
+                    Player::Player1 => &mut p1_slot,
+                    Player::Player2 => &mut p2_slot,
+                    _ => continue,
+                };
+                update_action(slot, stay, false, 0);
             }
         }
     }
 
-    // Track which sessions have responded (sent at least one action this turn).
+    // Track which sessions have committed an accepted action this turn.
     let mut responded: HashSet<SessionId> = HashSet::new();
 
-    if both_filled(p1_action, p2_action) {
-        return Ok((p1_action.unwrap(), p2_action.unwrap()));
+    if both_committed(&p1_slot, &p2_slot) {
+        return Ok(CollectedActions {
+            p1: resolve_action(&p1_slot),
+            p2: resolve_action(&p2_slot),
+            p1_think_ms: resolve_think_ms(&p1_slot),
+            p2_think_ms: resolve_think_ms(&p2_slot),
+        });
     }
 
     // Duration::ZERO = infinite timeout (no deadline, wait for actions or disconnects).
+    let move_timeout = config.move_timeout;
     let infinite = move_timeout.is_zero();
-    let deadline = Instant::now() + move_timeout;
+
+    // Think threshold: move_timeout_ms × (1 + think_margin)
+    let move_timeout_ms = move_timeout.as_millis() as u32;
+    let think_threshold_ms = (move_timeout_ms as f64 * (1.0 + config.think_margin as f64)) as u32;
+
+    // Hard deadline = think deadline + network grace
+    let deadline =
+        Instant::now() + move_timeout.mul_f32(1.0 + config.think_margin) + config.network_grace;
 
     loop {
         tokio::select! {
             msg = game_rx.recv() => {
                 let Some(msg) = msg else {
-                    // Channel closed — all senders gone.
                     return Err(PlayingError::AllDisconnected);
                 };
                 match msg {
@@ -315,20 +342,52 @@ async fn collect_actions(
                         player,
                         direction,
                         turn,
+                        provisional,
+                        think_ms,
                     } => {
                         if turn != current_turn {
                             debug!(turn, current_turn, "stale action ignored");
                             continue;
                         }
-                        responded.insert(session_id);
-                        fill_action(player, direction, &mut p1_action, &mut p2_action);
+
+                        let slot = match player {
+                            Player::Player1 => &mut p1_slot,
+                            Player::Player2 => &mut p2_slot,
+                            _ => {
+                                warn!(player = player.0, "unknown player in action");
+                                continue;
+                            },
+                        };
+
+                        if provisional {
+                            // Provisional: overwrite freely, don't count as responded.
+                            update_action(slot, direction, true, think_ms);
+                        } else if !infinite && (think_ms == 0 || think_ms > think_threshold_ms) {
+                            // Committed but rejected: think_ms missing or over threshold.
+                            // Don't lock slot — latest provisional remains as fallback.
+                            debug!(
+                                player = player.0,
+                                think_ms,
+                                think_threshold_ms,
+                                "committed action rejected — think_ms out of range"
+                            );
+                        } else {
+                            // Committed and accepted.
+                            update_action(slot, direction, false, think_ms);
+                            responded.insert(session_id);
+                        }
                     }
                     SessionMsg::Disconnected { session_id, reason } => {
                         debug!(session = session_id.0, ?reason, "session disconnected during play");
                         disconnected.insert(session_id);
                         if let Some(players) = session_players.get(&session_id) {
                             for &p in players {
-                                fill_action(p, stay, &mut p1_action, &mut p2_action);
+                                let slot = match p {
+                                    Player::Player1 => &mut p1_slot,
+                                    Player::Player2 => &mut p2_slot,
+                                    _ => continue,
+                                };
+                                update_action(slot, stay, false, 0);
                                 emit(event_tx, MatchEvent::BotDisconnected { player: p, reason });
                             }
                         }
@@ -344,26 +403,23 @@ async fn collect_actions(
                             }
                         }
                     }
-                    _ => {
-                        // Ignore other messages during playing phase.
-                    }
+                    _ => {}
                 }
 
-                if both_filled(p1_action, p2_action) {
-                    return Ok((p1_action.unwrap(), p2_action.unwrap()));
+                if both_committed(&p1_slot, &p2_slot) {
+                    return Ok(CollectedActions {
+                        p1: resolve_action(&p1_slot),
+                        p2: resolve_action(&p2_slot),
+                        p1_think_ms: resolve_think_ms(&p1_slot),
+                        p2_think_ms: resolve_think_ms(&p2_slot),
+                    });
                 }
             }
             _ = tokio::time::sleep_until(deadline), if !infinite => {
-                // Timeout: fill remaining with STAY, notify timed-out sessions.
-                debug!(turn = current_turn, "move timeout — defaulting remaining players to STAY");
-                if p1_action.is_none() {
-                    p1_action = Some(stay);
-                }
-                if p2_action.is_none() {
-                    p2_action = Some(stay);
-                }
+                // Hard deadline: use whatever we have (provisional or Stay).
+                debug!(turn = current_turn, "move timeout — using provisional or STAY");
 
-                // Send Timeout only to sessions that didn't respond.
+                // Emit BotTimeout + send Timeout command for sessions that didn't respond.
                 for s in sessions {
                     if !disconnected.contains(&s.session_id) && !responded.contains(&s.session_id) {
                         let _ = s.cmd_tx.send(HostCommand::Timeout {
@@ -375,38 +431,73 @@ async fn collect_actions(
                     }
                 }
 
-                return Ok((p1_action.unwrap(), p2_action.unwrap()));
+                return Ok(CollectedActions {
+                    p1: resolve_action(&p1_slot),
+                    p2: resolve_action(&p2_slot),
+                    p1_think_ms: resolve_think_ms(&p1_slot),
+                    p2_think_ms: resolve_think_ms(&p2_slot),
+                });
             }
         }
     }
 }
 
-/// Insert a direction for the given player, first-wins.
-fn fill_action(
-    player: Player,
+/// Per-player action state during action collection.
+struct ActionSlot {
     direction: WireDirection,
-    p1: &mut Option<WireDirection>,
-    p2: &mut Option<WireDirection>,
+    committed: bool,
+    think_ms: u32,
+}
+
+/// Update a player's action slot. Provisional actions overwrite freely;
+/// committed actions lock the slot.
+fn update_action(
+    slot: &mut Option<ActionSlot>,
+    direction: WireDirection,
+    provisional: bool,
+    think_ms: u32,
 ) {
-    match player {
-        Player::Player1 => {
-            if p1.is_none() {
-                *p1 = Some(direction);
-            }
-        },
-        Player::Player2 => {
-            if p2.is_none() {
-                *p2 = Some(direction);
-            }
+    match slot {
+        Some(existing) if existing.committed => {
+            // Already committed — ignore further actions.
         },
         _ => {
-            warn!(player = player.0, "unknown player in action");
+            *slot = Some(ActionSlot {
+                direction,
+                committed: !provisional,
+                think_ms,
+            });
         },
     }
 }
 
-fn both_filled(p1: Option<WireDirection>, p2: Option<WireDirection>) -> bool {
-    p1.is_some() && p2.is_some()
+/// True when both slots have a committed action.
+fn both_committed(p1: &Option<ActionSlot>, p2: &Option<ActionSlot>) -> bool {
+    matches!(
+        (p1, p2),
+        (
+            Some(ActionSlot {
+                committed: true,
+                ..
+            }),
+            Some(ActionSlot {
+                committed: true,
+                ..
+            })
+        )
+    )
+}
+
+/// Resolve a slot to a direction: committed > provisional > Stay.
+fn resolve_action(slot: &Option<ActionSlot>) -> WireDirection {
+    slot.as_ref()
+        .map(|s| s.direction)
+        .unwrap_or(WireDirection::Stay)
+}
+
+/// Extract think_ms from a slot (0 if absent).
+fn resolve_think_ms(slot: &Option<ActionSlot>) -> u32 {
+    slot.as_ref().map(|s| s.think_ms).unwrap_or(0)
 }
 
 pub fn determine_result(game: &GameState) -> MatchResult {
@@ -436,15 +527,21 @@ mod tests {
     use std::time::Duration;
     use tokio::sync::mpsc;
 
-    /// Stale action (wrong turn number) is silently dropped; the player times out.
-    #[tokio::test]
-    async fn stale_action_is_ignored() {
-        let (game_tx, mut game_rx) = mpsc::channel::<SessionMsg>(16);
+    fn test_config(move_timeout: Duration) -> PlayingConfig {
+        PlayingConfig {
+            move_timeout,
+            think_margin: 0.10,
+            network_grace: Duration::from_millis(50),
+        }
+    }
 
-        // Two sessions, each controlling one player.
-        let (cmd_tx1, mut cmd_rx1) = mpsc::channel::<HostCommand>(16);
-        let (cmd_tx2, mut cmd_rx2) = mpsc::channel::<HostCommand>(16);
-
+    fn make_sessions() -> (
+        Vec<SessionHandle>,
+        mpsc::Receiver<HostCommand>,
+        mpsc::Receiver<HostCommand>,
+    ) {
+        let (cmd_tx1, cmd_rx1) = mpsc::channel::<HostCommand>(16);
+        let (cmd_tx2, cmd_rx2) = mpsc::channel::<HostCommand>(16);
         let sessions = vec![
             SessionHandle {
                 session_id: SessionId(1),
@@ -463,6 +560,14 @@ mod tests {
                 controlled_players: vec![Player::Player2],
             },
         ];
+        (sessions, cmd_rx1, cmd_rx2)
+    }
+
+    /// Stale action (wrong turn number) is silently dropped; the player times out.
+    #[tokio::test]
+    async fn stale_action_is_ignored() {
+        let (game_tx, mut game_rx) = mpsc::channel::<SessionMsg>(16);
+        let (sessions, mut cmd_rx1, mut cmd_rx2) = make_sessions();
 
         let session_players: HashMap<SessionId, Vec<Player>> = sessions
             .iter()
@@ -478,6 +583,8 @@ mod tests {
                 player: Player::Player1,
                 direction: WireDirection::Right,
                 turn: current_turn,
+                provisional: false,
+                think_ms: 50,
             })
             .await
             .unwrap();
@@ -489,26 +596,29 @@ mod tests {
                 player: Player::Player2,
                 direction: WireDirection::Right,
                 turn: 3,
+                provisional: false,
+                think_ms: 50,
             })
             .await
             .unwrap();
 
         let mut disconnected = HashSet::new();
-        let (p1, p2) = collect_actions(
+        let config = test_config(Duration::from_millis(100));
+        let actions = collect_actions(
             &mut game_rx,
             current_turn,
             &sessions,
             &session_players,
             &mut disconnected,
-            Duration::from_millis(100),
+            &config,
             None,
         )
         .await
         .expect("collect_actions should not fail");
 
         // P1 got Right (accepted), P2 got Stay (stale → timeout default).
-        assert_eq!(p1, WireDirection::Right);
-        assert_eq!(p2, WireDirection::Stay);
+        assert_eq!(actions.p1, WireDirection::Right);
+        assert_eq!(actions.p2, WireDirection::Stay);
 
         // Session 2 should have received a Timeout command.
         let cmd = cmd_rx2.try_recv().expect("session 2 should get Timeout");
@@ -525,31 +635,11 @@ mod tests {
     }
 
     /// Zero timeout = infinite mode: Info relayed as BotInfo, actions collected, no timeout.
+    /// In infinite mode, think_ms=0 is accepted (no timing enforcement).
     #[tokio::test]
     async fn infinite_timeout_collects_actions_and_relays_info() {
         let (game_tx, mut game_rx) = mpsc::channel::<SessionMsg>(16);
-
-        let (cmd_tx1, _cmd_rx1) = mpsc::channel::<HostCommand>(16);
-        let (cmd_tx2, _cmd_rx2) = mpsc::channel::<HostCommand>(16);
-
-        let sessions = vec![
-            SessionHandle {
-                session_id: SessionId(1),
-                cmd_tx: cmd_tx1,
-                name: "Bot1".into(),
-                author: "A".into(),
-                agent_id: "bot-1".into(),
-                controlled_players: vec![Player::Player1],
-            },
-            SessionHandle {
-                session_id: SessionId(2),
-                cmd_tx: cmd_tx2,
-                name: "Bot2".into(),
-                author: "B".into(),
-                agent_id: "bot-2".into(),
-                controlled_players: vec![Player::Player2],
-            },
-        ];
+        let (sessions, _cmd_rx1, _cmd_rx2) = make_sessions();
 
         let session_players: HashMap<SessionId, Vec<Player>> = sessions
             .iter()
@@ -577,13 +667,15 @@ mod tests {
             .await
             .unwrap();
 
-        // Then both players send actions.
+        // Then both players send committed actions (think_ms=0 OK in infinite mode).
         game_tx
             .send(SessionMsg::Action {
                 session_id: SessionId(1),
                 player: Player::Player1,
                 direction: WireDirection::Up,
                 turn: current_turn,
+                provisional: false,
+                think_ms: 0,
             })
             .await
             .unwrap();
@@ -593,25 +685,28 @@ mod tests {
                 player: Player::Player2,
                 direction: WireDirection::Down,
                 turn: current_turn,
+                provisional: false,
+                think_ms: 0,
             })
             .await
             .unwrap();
 
         let mut disconnected = HashSet::new();
-        let (p1, p2) = collect_actions(
+        let config = test_config(Duration::ZERO); // infinite
+        let actions = collect_actions(
             &mut game_rx,
             current_turn,
             &sessions,
             &session_players,
             &mut disconnected,
-            Duration::ZERO, // infinite
+            &config,
             Some(&event_tx),
         )
         .await
         .expect("collect_actions should not fail");
 
-        assert_eq!(p1, WireDirection::Up);
-        assert_eq!(p2, WireDirection::Down);
+        assert_eq!(actions.p1, WireDirection::Up);
+        assert_eq!(actions.p2, WireDirection::Down);
 
         // Info should have been relayed as BotInfo event.
         let event = event_rx.try_recv().expect("should have BotInfo event");
@@ -632,28 +727,7 @@ mod tests {
     #[tokio::test]
     async fn disconnect_during_infinite_timeout_fills_stay() {
         let (game_tx, mut game_rx) = mpsc::channel::<SessionMsg>(16);
-
-        let (cmd_tx1, _cmd_rx1) = mpsc::channel::<HostCommand>(16);
-        let (cmd_tx2, _cmd_rx2) = mpsc::channel::<HostCommand>(16);
-
-        let sessions = vec![
-            SessionHandle {
-                session_id: SessionId(1),
-                cmd_tx: cmd_tx1,
-                name: "Bot1".into(),
-                author: "A".into(),
-                agent_id: "bot-1".into(),
-                controlled_players: vec![Player::Player1],
-            },
-            SessionHandle {
-                session_id: SessionId(2),
-                cmd_tx: cmd_tx2,
-                name: "Bot2".into(),
-                author: "B".into(),
-                agent_id: "bot-2".into(),
-                controlled_players: vec![Player::Player2],
-            },
-        ];
+        let (sessions, _cmd_rx1, _cmd_rx2) = make_sessions();
 
         let session_players: HashMap<SessionId, Vec<Player>> = sessions
             .iter()
@@ -678,26 +752,161 @@ mod tests {
                 player: Player::Player2,
                 direction: WireDirection::Down,
                 turn: current_turn,
+                provisional: false,
+                think_ms: 0,
             })
             .await
             .unwrap();
 
         let mut disconnected = HashSet::new();
-        let (p1, p2) = collect_actions(
+        let config = test_config(Duration::ZERO); // infinite
+        let actions = collect_actions(
             &mut game_rx,
             current_turn,
             &sessions,
             &session_players,
             &mut disconnected,
-            Duration::ZERO, // infinite
+            &config,
             None,
         )
         .await
         .expect("collect_actions should not fail");
 
         // Disconnected player gets STAY, other player's action is used.
-        assert_eq!(p1, WireDirection::Stay);
-        assert_eq!(p2, WireDirection::Down);
+        assert_eq!(actions.p1, WireDirection::Stay);
+        assert_eq!(actions.p2, WireDirection::Down);
         assert!(disconnected.contains(&SessionId(1)));
+    }
+
+    /// Provisional action is used as fallback when committed action is rejected.
+    #[tokio::test]
+    async fn provisional_action_used_as_fallback() {
+        let (game_tx, mut game_rx) = mpsc::channel::<SessionMsg>(16);
+        let (sessions, _cmd_rx1, _cmd_rx2) = make_sessions();
+
+        let session_players: HashMap<SessionId, Vec<Player>> = sessions
+            .iter()
+            .map(|s| (s.session_id, s.controlled_players.clone()))
+            .collect();
+
+        let current_turn: u16 = 1;
+
+        // P1 sends provisional Left, then committed with think_ms=0 (rejected).
+        game_tx
+            .send(SessionMsg::Action {
+                session_id: SessionId(1),
+                player: Player::Player1,
+                direction: WireDirection::Left,
+                turn: current_turn,
+                provisional: true,
+                think_ms: 0,
+            })
+            .await
+            .unwrap();
+        game_tx
+            .send(SessionMsg::Action {
+                session_id: SessionId(1),
+                player: Player::Player1,
+                direction: WireDirection::Up,
+                turn: current_turn,
+                provisional: false,
+                think_ms: 0, // rejected — missing think_ms
+            })
+            .await
+            .unwrap();
+
+        // P2 sends a valid committed action.
+        game_tx
+            .send(SessionMsg::Action {
+                session_id: SessionId(2),
+                player: Player::Player2,
+                direction: WireDirection::Down,
+                turn: current_turn,
+                provisional: false,
+                think_ms: 50,
+            })
+            .await
+            .unwrap();
+
+        let mut disconnected = HashSet::new();
+        let config = test_config(Duration::from_millis(100));
+        let actions = collect_actions(
+            &mut game_rx,
+            current_turn,
+            &sessions,
+            &session_players,
+            &mut disconnected,
+            &config,
+            None,
+        )
+        .await
+        .expect("collect_actions should not fail");
+
+        // P1 gets provisional Left (committed was rejected), P2 gets committed Down.
+        assert_eq!(actions.p1, WireDirection::Left);
+        assert_eq!(actions.p2, WireDirection::Down);
+    }
+
+    /// Committed action within think margin is accepted.
+    #[tokio::test]
+    async fn committed_action_within_margin_accepted() {
+        let (game_tx, mut game_rx) = mpsc::channel::<SessionMsg>(16);
+        let (sessions, _cmd_rx1, _cmd_rx2) = make_sessions();
+
+        let session_players: HashMap<SessionId, Vec<Player>> = sessions
+            .iter()
+            .map(|s| (s.session_id, s.controlled_players.clone()))
+            .collect();
+
+        let current_turn: u16 = 1;
+        // Config: 1000ms timeout, 10% margin → threshold = 1100ms
+        let config = PlayingConfig {
+            move_timeout: Duration::from_millis(1000),
+            think_margin: 0.10,
+            network_grace: Duration::from_millis(50),
+        };
+
+        // P1: think_ms=1050 (within 1100 threshold) → accepted
+        game_tx
+            .send(SessionMsg::Action {
+                session_id: SessionId(1),
+                player: Player::Player1,
+                direction: WireDirection::Right,
+                turn: current_turn,
+                provisional: false,
+                think_ms: 1050,
+            })
+            .await
+            .unwrap();
+
+        // P2: think_ms=1200 (over 1100 threshold) → rejected, falls back to Stay
+        game_tx
+            .send(SessionMsg::Action {
+                session_id: SessionId(2),
+                player: Player::Player2,
+                direction: WireDirection::Left,
+                turn: current_turn,
+                provisional: false,
+                think_ms: 1200,
+            })
+            .await
+            .unwrap();
+
+        let mut disconnected = HashSet::new();
+        let actions = collect_actions(
+            &mut game_rx,
+            current_turn,
+            &sessions,
+            &session_players,
+            &mut disconnected,
+            &config,
+            None,
+        )
+        .await
+        .expect("collect_actions should not fail");
+
+        assert_eq!(actions.p1, WireDirection::Right);
+        // P2's committed was rejected, no provisional → Stay at timeout
+        assert_eq!(actions.p2, WireDirection::Stay);
     }
 }

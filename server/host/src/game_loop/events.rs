@@ -34,6 +34,8 @@ pub enum MatchEvent {
         state: OwnedTurnState,
         p1_action: Direction,
         p2_action: Direction,
+        p1_think_ms: u32,
+        p2_think_ms: u32,
     },
     /// A bot sent debug/analysis info.
     BotInfo {

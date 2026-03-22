@@ -106,6 +106,8 @@ pub enum SessionMsg {
         player: Player,
         direction: Direction,
         turn: u16,
+        provisional: bool,
+        think_ms: u32,
     },
     /// Bot sent debug/analysis info (forwarded as-is).
     Info {

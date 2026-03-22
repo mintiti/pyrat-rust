@@ -333,6 +333,10 @@ pub async fn accept_connections(
             },
         };
 
+        if let Err(e) = stream.set_nodelay(true) {
+            warn!(error = %e, "failed to set TCP_NODELAY");
+        }
+
         let session_id = SessionId(next_id);
         next_id += 1;
         info!(session = session_id.0, %addr, "new TCP connection");
