@@ -4,7 +4,7 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, info_span, warn, Instrument};
 
 use crate::session::messages::HostCommand;
 use crate::session::{run_session, SessionConfig, SessionId, SessionMsg};
@@ -147,6 +147,8 @@ pub async fn run_setup(
         }
     }
 
+    info!("setup phase A complete — all bots identified");
+
     // ── Phase B: Send SetOption + MatchConfig, wait for Ready ───
     for handle in handles.values() {
         if let Some(opts) = setup.bot_options.get(&handle.agent_id) {
@@ -226,6 +228,8 @@ pub async fn run_setup(
         }
     }
 
+    info!("setup phase B complete — all bots configured");
+
     // ── Phase C: StartPreprocessing, wait for PreprocessingDone ───
     for handle in handles.values() {
         if handle
@@ -294,6 +298,8 @@ pub async fn run_setup(
         }
     }
 
+    info!("setup phase C complete — preprocessing done");
+
     emit(event_tx, MatchEvent::SetupComplete);
     emit(
         event_tx,
@@ -344,9 +350,18 @@ pub async fn accept_connections(
         let tx = game_tx.clone();
         let cfg = session_config.clone();
 
+        let span = info_span!(
+            "session",
+            id = session_id.0,
+            %addr,
+            agent_id = tracing::field::Empty,
+        );
         let (read, write) = tokio::io::split(stream);
-        tokio::spawn(async move {
-            run_session(session_id, read, write, tx, cfg).await;
-        });
+        tokio::spawn(
+            async move {
+                run_session(session_id, read, write, tx, cfg).await;
+            }
+            .instrument(span),
+        );
     }
 }

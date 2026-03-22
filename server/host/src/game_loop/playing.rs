@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 
 use tokio::sync::mpsc;
 use tokio::time::Instant;
-use tracing::{debug, warn};
+use tracing::{debug, debug_span, warn, Instrument};
 
 use pyrat::game::game_logic::GameState;
 use pyrat::{Coordinates, Direction as EngineDirection};
@@ -132,6 +132,20 @@ pub fn engine_to_wire(d: EngineDirection) -> WireDirection {
 /// blocks until all actions arrive or sessions disconnect. The caller can
 /// send [`HostCommand::Stop`] to prompt bots to commit their moves.
 pub async fn run_one_turn(
+    state: &mut PlayingState,
+    game: &mut GameState,
+    sessions: &[SessionHandle],
+    game_rx: &mut mpsc::Receiver<SessionMsg>,
+    config: &PlayingConfig,
+    event_tx: Option<&mpsc::UnboundedSender<MatchEvent>>,
+) -> Result<TurnOutcome, PlayingError> {
+    let span = debug_span!("turn", turn = game.turn);
+    run_one_turn_inner(state, game, sessions, game_rx, config, event_tx)
+        .instrument(span)
+        .await
+}
+
+async fn run_one_turn_inner(
     state: &mut PlayingState,
     game: &mut GameState,
     sessions: &[SessionHandle],

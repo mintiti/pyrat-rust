@@ -13,7 +13,7 @@ use flatbuffers::FlatBufferBuilder;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use codec::serialize_host_command;
 use pyrat_wire::framing::{FrameError, FrameReader, FrameWriter};
@@ -37,6 +37,20 @@ impl Default for SessionConfig {
             drain_max_frames: 64,
             drain_timeout: Duration::from_secs(2),
         }
+    }
+}
+
+fn cmd_label(cmd: &HostCommand) -> &'static str {
+    match cmd {
+        HostCommand::SetOption { .. } => "SetOption",
+        HostCommand::MatchConfig(_) => "MatchConfig",
+        HostCommand::StartPreprocessing => "StartPreprocessing",
+        HostCommand::TurnState(_) => "TurnState",
+        HostCommand::Timeout { .. } => "Timeout",
+        HostCommand::GameOver { .. } => "GameOver",
+        HostCommand::Ping => "Ping",
+        HostCommand::Stop => "Stop",
+        HostCommand::Shutdown => "Shutdown",
     }
 }
 
@@ -114,16 +128,16 @@ pub async fn run_session<R, W>(
                             &controlled_players,
                             &game_tx,
                         ).await {
-                            warn!(session = session_id.0, error = %e, "bot frame error");
+                            warn!(error = %e, "bot frame error");
                         }
                     }
                     Err(FrameError::Disconnected) => {
-                        debug!(session = session_id.0, "bot disconnected");
+                        debug!("bot disconnected");
                         disconnect_reason = DisconnectReason::PeerClosed;
                         break;
                     }
                     Err(e) => {
-                        warn!(session = session_id.0, error = %e, "frame read error");
+                        warn!(error = %e, "frame read error");
                         disconnect_reason = DisconnectReason::FrameError;
                         break;
                     }
@@ -143,6 +157,7 @@ pub async fn run_session<R, W>(
                             disconnect_reason = DisconnectReason::FrameError;
                             break;
                         }
+                        debug!(cmd = "Shutdown", "→ sent");
                     }
                     Some(HostCommand::GameOver { result, player1_score, player2_score }) => {
                         state = SessionState::Done;
@@ -155,6 +170,7 @@ pub async fn run_session<R, W>(
                             disconnect_reason = DisconnectReason::FrameError;
                             break;
                         }
+                        debug!(cmd = "GameOver", "→ sent");
                     }
                     Some(ref cmd @ HostCommand::MatchConfig(ref cfg)) => {
                         // Record controlled players for ownership validation.
@@ -167,24 +183,28 @@ pub async fn run_session<R, W>(
                             disconnect_reason = DisconnectReason::FrameError;
                             break;
                         }
+                        debug!(cmd = "MatchConfig", "→ sent");
                     }
-                    Some(ref cmd @ HostCommand::TurnState(_)) => {
+                    Some(ref cmd @ HostCommand::TurnState(ref ts)) => {
                         let bytes = serialize_host_command(&mut fbb, cmd);
                         if frame_writer.write_frame(&bytes).await.is_err() {
                             disconnect_reason = DisconnectReason::FrameError;
                             break;
                         }
+                        debug!(cmd = "TurnState", turn = ts.turn, "→ sent");
                     }
                     Some(cmd) => {
+                        let label = cmd_label(&cmd);
                         let bytes = serialize_host_command(&mut fbb, &cmd);
                         if frame_writer.write_frame(&bytes).await.is_err() {
                             disconnect_reason = DisconnectReason::FrameError;
                             break;
                         }
+                        debug!(cmd = label, "→ sent");
                     }
                     None => {
                         // Game loop dropped the sender — clean exit.
-                        debug!(session = session_id.0, "command channel closed");
+                        debug!("command channel closed");
                         disconnect_reason = DisconnectReason::ChannelClosed;
                         break;
                     }
@@ -193,14 +213,14 @@ pub async fn run_session<R, W>(
 
             // ── Handshake timeout ───────────────────
             _ = tokio::time::sleep_until(handshake_deadline), if state == SessionState::Connected => {
-                warn!(session = session_id.0, "handshake timeout — no Identify received");
+                warn!("handshake timeout — no Identify received");
                 disconnect_reason = DisconnectReason::HandshakeTimeout;
                 break;
             }
 
             // ── Drain timeout ───────────────────────
             _ = tokio::time::sleep_until(drain_deadline), if closing => {
-                debug!(session = session_id.0, "drain timeout elapsed");
+                debug!("drain timeout elapsed");
                 disconnect_reason = DisconnectReason::DrainComplete;
                 break;
             }
@@ -228,7 +248,6 @@ async fn handle_bot_frame(
     // State validation.
     if !state.accepts(msg_type) {
         warn!(
-            session = session_id.0,
             msg_type = msg_type.0,
             state = ?state,
             "rejected bot message in wrong state"
@@ -239,7 +258,6 @@ async fn handle_bot_frame(
     // Apply transition.
     if let Some(next) = state.transition(msg_type) {
         debug!(
-            session = session_id.0,
             from = ?state,
             to = ?next,
             "state transition"
@@ -254,12 +272,16 @@ async fn handle_bot_frame(
             author,
             options,
             agent_id,
-        } => SessionMsg::Identified {
-            session_id,
-            name,
-            author,
-            options,
-            agent_id,
+        } => {
+            tracing::Span::current().record("agent_id", agent_id.as_str());
+            info!(agent_id = %agent_id, "bot identified");
+            SessionMsg::Identified {
+                session_id,
+                name,
+                author,
+                options,
+                agent_id,
+            }
         },
         BotPayload::Ready => SessionMsg::Ready { session_id },
         BotPayload::PreprocessingDone => SessionMsg::PreprocessingDone { session_id },
@@ -282,11 +304,7 @@ async fn handle_bot_frame(
 
             // Ownership validation.
             if !controlled_players.is_empty() && !controlled_players.contains(&player) {
-                warn!(
-                    session = session_id.0,
-                    player = player.0,
-                    "action for non-controlled player"
-                );
+                warn!(player = player.0, "action for non-controlled player");
                 return Ok(());
             }
 
