@@ -152,20 +152,20 @@ async fn happy_path_both_respond() {
     let _ = read_turn_state(&mut r1).await;
     let _ = read_turn_state(&mut r2).await;
     // P1 goes Right, P2 stays.
-    w1.write_frame(&action_frame(Direction::Right, Player::Player1))
+    w1.write_frame(&action_frame(Direction::Right, Player::Player1, 0))
         .await
         .unwrap();
-    w2.write_frame(&action_frame(Direction::Stay, Player::Player2))
+    w2.write_frame(&action_frame(Direction::Stay, Player::Player2, 0))
         .await
         .unwrap();
 
     // Turn 1: P1 at (1,0), go Up.
     let _ = read_turn_state(&mut r1).await;
     let _ = read_turn_state(&mut r2).await;
-    w1.write_frame(&action_frame(Direction::Up, Player::Player1))
+    w1.write_frame(&action_frame(Direction::Up, Player::Player1, 1))
         .await
         .unwrap();
-    w2.write_frame(&action_frame(Direction::Stay, Player::Player2))
+    w2.write_frame(&action_frame(Direction::Stay, Player::Player2, 1))
         .await
         .unwrap();
 
@@ -210,13 +210,13 @@ async fn both_stay_reaches_max_turns() {
         run_playing(&mut game, &sessions, &mut game_rx, &config, None).await
     });
 
-    for _ in 0..5 {
+    for turn in 0..5 {
         let _ = read_turn_state(&mut r1).await;
         let _ = read_turn_state(&mut r2).await;
-        w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
+        w1.write_frame(&action_frame(Direction::Stay, Player::Player1, turn))
             .await
             .unwrap();
-        w2.write_frame(&action_frame(Direction::Stay, Player::Player2))
+        w2.write_frame(&action_frame(Direction::Stay, Player::Player2, turn))
             .await
             .unwrap();
     }
@@ -263,7 +263,7 @@ async fn timeout_defaults_to_stay() {
     // Turn 0: P1 responds, P2 silent.
     let _ = read_turn_state(&mut r1).await;
     let _ = read_turn_state(&mut r2).await;
-    w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
+    w1.write_frame(&action_frame(Direction::Stay, Player::Player1, 0))
         .await
         .unwrap();
     // P2 doesn't respond — timeout fires.
@@ -272,10 +272,10 @@ async fn timeout_defaults_to_stay() {
     read_timeout(&mut r2).await;
 
     // Remaining turns: P1 responds, P2 silent.
-    for _ in 1..3 {
+    for turn in 1..3 {
         let _ = read_turn_state(&mut r1).await;
         let _ = read_turn_state(&mut r2).await;
-        w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
+        w1.write_frame(&action_frame(Direction::Stay, Player::Player1, turn))
             .await
             .unwrap();
         // P2 silent again — timeout.
@@ -322,10 +322,10 @@ async fn disconnect_mid_game() {
     // Turn 0: both respond.
     let _ = read_turn_state(&mut r1).await;
     let _ = read_turn_state(&mut r2).await;
-    w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
+    w1.write_frame(&action_frame(Direction::Stay, Player::Player1, 0))
         .await
         .unwrap();
-    w2.write_frame(&action_frame(Direction::Stay, Player::Player2))
+    w2.write_frame(&action_frame(Direction::Stay, Player::Player2, 0))
         .await
         .unwrap();
 
@@ -335,14 +335,14 @@ async fn disconnect_mid_game() {
     drop(w2);
     drop(r2);
     // P1 responds normally.
-    w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
+    w1.write_frame(&action_frame(Direction::Stay, Player::Player1, 1))
         .await
         .unwrap();
 
     // Game should continue. Remaining turns P2 gets STAY automatically.
-    for _ in 2..5 {
+    for turn in 2..5 {
         let _ = read_turn_state(&mut r1).await;
-        w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
+        w1.write_frame(&action_frame(Direction::Stay, Player::Player1, turn))
             .await
             .unwrap();
     }
@@ -385,10 +385,10 @@ async fn both_disconnect() {
     // Turn 0: both respond.
     let _ = read_turn_state(&mut r1).await;
     let _ = read_turn_state(&mut r2).await;
-    w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
+    w1.write_frame(&action_frame(Direction::Stay, Player::Player1, 0))
         .await
         .unwrap();
-    w2.write_frame(&action_frame(Direction::Stay, Player::Player2))
+    w2.write_frame(&action_frame(Direction::Stay, Player::Player2, 0))
         .await
         .unwrap();
 
@@ -459,13 +459,13 @@ async fn hivemind_two_actions() {
         run_playing(&mut game, &sessions, &mut game_rx, &config, None).await
     });
 
-    for _ in 0..3 {
+    for turn in 0..3 {
         let _ = read_turn_state(&mut r1).await;
         // One session sends two actions — one per player.
-        w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
+        w1.write_frame(&action_frame(Direction::Stay, Player::Player1, turn))
             .await
             .unwrap();
-        w1.write_frame(&action_frame(Direction::Stay, Player::Player2))
+        w1.write_frame(&action_frame(Direction::Stay, Player::Player2, turn))
             .await
             .unwrap();
     }
@@ -504,10 +504,10 @@ async fn game_over_sent() {
 
     let _ = read_turn_state(&mut r1).await;
     let _ = read_turn_state(&mut r2).await;
-    w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
+    w1.write_frame(&action_frame(Direction::Stay, Player::Player1, 0))
         .await
         .unwrap();
-    w2.write_frame(&action_frame(Direction::Stay, Player::Player2))
+    w2.write_frame(&action_frame(Direction::Stay, Player::Player2, 0))
         .await
         .unwrap();
 
@@ -552,10 +552,10 @@ async fn game_completes_after_event_receiver_dropped() {
     // Turn 0: both respond.
     let _ = read_turn_state(&mut r1).await;
     let _ = read_turn_state(&mut r2).await;
-    w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
+    w1.write_frame(&action_frame(Direction::Stay, Player::Player1, 0))
         .await
         .unwrap();
-    w2.write_frame(&action_frame(Direction::Stay, Player::Player2))
+    w2.write_frame(&action_frame(Direction::Stay, Player::Player2, 0))
         .await
         .unwrap();
 
@@ -566,13 +566,13 @@ async fn game_completes_after_event_receiver_dropped() {
     drop(event_rx);
 
     // Turns 1–2: emit() hits a closed channel, but the game continues.
-    for _ in 1..3 {
+    for turn in 1..3 {
         let _ = read_turn_state(&mut r1).await;
         let _ = read_turn_state(&mut r2).await;
-        w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
+        w1.write_frame(&action_frame(Direction::Stay, Player::Player1, turn))
             .await
             .unwrap();
-        w2.write_frame(&action_frame(Direction::Stay, Player::Player2))
+        w2.write_frame(&action_frame(Direction::Stay, Player::Player2, turn))
             .await
             .unwrap();
     }
@@ -635,10 +635,10 @@ async fn cheese_updates_in_state() {
     assert_eq!(cheese0.len(), 3, "turn 0 should have 3 cheese");
 
     // P1 moves Right to (1,0) to collect cheese. P2 stays.
-    w1.write_frame(&action_frame(Direction::Right, Player::Player1))
+    w1.write_frame(&action_frame(Direction::Right, Player::Player1, 0))
         .await
         .unwrap();
-    w2.write_frame(&action_frame(Direction::Stay, Player::Player2))
+    w2.write_frame(&action_frame(Direction::Stay, Player::Player2, 0))
         .await
         .unwrap();
 
@@ -653,10 +653,10 @@ async fn cheese_updates_in_state() {
     );
 
     // Both stay. Game ends at max_turns = 2.
-    w1.write_frame(&action_frame(Direction::Stay, Player::Player1))
+    w1.write_frame(&action_frame(Direction::Stay, Player::Player1, 1))
         .await
         .unwrap();
-    w2.write_frame(&action_frame(Direction::Stay, Player::Player2))
+    w2.write_frame(&action_frame(Direction::Stay, Player::Player2, 1))
         .await
         .unwrap();
 
@@ -726,10 +726,10 @@ async fn gui_turn_by_turn_with_stop_and_infinite_timeout() {
             let p2 = flatbuffers::root::<HostPacket>(frame2).unwrap();
             assert_eq!(p2.message_type(), HostMessage::Stop);
 
-            w1.write_frame(&action_frame(Direction::Right, Player::Player1))
+            w1.write_frame(&action_frame(Direction::Right, Player::Player1, 0))
                 .await
                 .unwrap();
-            w2.write_frame(&action_frame(Direction::Stay, Player::Player2))
+            w2.write_frame(&action_frame(Direction::Stay, Player::Player2, 0))
                 .await
                 .unwrap();
         };
@@ -766,10 +766,10 @@ async fn gui_turn_by_turn_with_stop_and_infinite_timeout() {
             let _ = r1.read_frame().await.unwrap(); // Stop
             let _ = r2.read_frame().await.unwrap(); // Stop
 
-            w1.write_frame(&action_frame(Direction::Up, Player::Player1))
+            w1.write_frame(&action_frame(Direction::Up, Player::Player1, 1))
                 .await
                 .unwrap();
-            w2.write_frame(&action_frame(Direction::Stay, Player::Player2))
+            w2.write_frame(&action_frame(Direction::Stay, Player::Player2, 1))
                 .await
                 .unwrap();
         };
@@ -795,6 +795,215 @@ async fn gui_turn_by_turn_with_stop_and_infinite_timeout() {
 
     drop(event_tx);
     drop(event_rx);
+    drop(w1);
+    drop(r1);
+    drop(w2);
+    drop(r2);
+    let _ = h1.await;
+    let _ = h2.await;
+}
+
+/// Late action from a previous turn is rejected and doesn't affect the current turn.
+///
+/// Scenario: P2 times out on turn 0 (gets STAY). On turn 1, P2 sends its
+/// late turn-0 action followed by its real turn-1 action. The late action
+/// carries `turn=0` on the wire, so the game loop drops it as stale.
+/// P2's turn-1 action (Right) is accepted.
+///
+/// Before the fix (no turn field in Action), the session would stamp both
+/// actions with its local `current_turn` (already updated to 1 by the
+/// TurnState), so the stale action would pass as turn 1 and consume the
+/// slot. The real action would be ignored as a duplicate.
+#[tokio::test]
+async fn late_action_from_previous_turn_is_rejected() {
+    let (game_tx, mut game_rx) = mpsc::channel(64);
+    let (mut w1, mut r1, h1) = spawn_session(SessionId(1), game_tx.clone());
+    let (mut w2, mut r2, h2) = spawn_session(SessionId(2), game_tx.clone());
+
+    let sessions = setup_two_bots(game_tx, &mut game_rx, &mut w1, &mut r1, &mut w2, &mut r2).await;
+
+    let mut game = tiny_game(5);
+    let config = PlayingConfig {
+        move_timeout: Duration::from_millis(100),
+    };
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
+
+    let play_task = tokio::spawn(async move {
+        run_playing(&mut game, &sessions, &mut game_rx, &config, Some(&event_tx)).await
+    });
+
+    // Turn 0: P1 responds, P2 is silent → P2 times out.
+    let (turn, _) = read_turn_state(&mut r1).await;
+    assert_eq!(turn, 0);
+    let _ = read_turn_state(&mut r2).await;
+    w1.write_frame(&action_frame(Direction::Stay, Player::Player1, 0))
+        .await
+        .unwrap();
+    // P2 doesn't respond in time.
+
+    // P2 receives Timeout notification.
+    read_timeout(&mut r2).await;
+
+    // Turn 1: P2 sends its late turn-0 action, then its real turn-1 action.
+    let (turn, _) = read_turn_state(&mut r1).await;
+    assert_eq!(turn, 1);
+    let _ = read_turn_state(&mut r2).await;
+
+    w1.write_frame(&action_frame(Direction::Stay, Player::Player1, 1))
+        .await
+        .unwrap();
+
+    // P2 sends late action (turn=0) — should be rejected as stale.
+    w2.write_frame(&action_frame(Direction::Left, Player::Player2, 0))
+        .await
+        .unwrap();
+    // P2 sends real action (turn=1) — should be accepted.
+    w2.write_frame(&action_frame(Direction::Right, Player::Player2, 1))
+        .await
+        .unwrap();
+
+    // Remaining turns: both respond normally.
+    for turn in 2..5 {
+        let _ = read_turn_state(&mut r1).await;
+        let _ = read_turn_state(&mut r2).await;
+        w1.write_frame(&action_frame(Direction::Stay, Player::Player1, turn))
+            .await
+            .unwrap();
+        w2.write_frame(&action_frame(Direction::Stay, Player::Player2, turn))
+            .await
+            .unwrap();
+    }
+
+    let _ = read_game_over(&mut r1).await;
+    let _ = read_game_over(&mut r2).await;
+
+    let result = timeout(Duration::from_secs(5), play_task)
+        .await
+        .expect("play timed out")
+        .expect("play panicked")
+        .expect("play returned error");
+
+    assert_eq!(result.result, GameResult::Draw);
+
+    // Check events: turn 0 should have a BotTimeout for P2, turn 1 should not.
+    let mut p2_timeout_turns = vec![];
+    while let Ok(event) = event_rx.try_recv() {
+        if let MatchEvent::BotTimeout { player, turn } = event {
+            if player == Player::Player2 {
+                p2_timeout_turns.push(turn);
+            }
+        }
+    }
+    assert_eq!(
+        p2_timeout_turns,
+        vec![0],
+        "P2 should only time out on turn 0, not on turn 1 (late action must be rejected)"
+    );
+
+    drop(w1);
+    drop(r1);
+    drop(w2);
+    drop(r2);
+    let _ = h1.await;
+    let _ = h2.await;
+}
+
+/// Multiple consecutive late actions don't cascade into subsequent turns.
+///
+/// P2 times out on turns 0 and 1. On turn 2, P2 sends late actions for
+/// turns 0 and 1, then its real turn-2 action. All late actions are
+/// rejected; only the turn-2 action is accepted.
+#[tokio::test]
+async fn multiple_late_actions_dont_cascade() {
+    let (game_tx, mut game_rx) = mpsc::channel(64);
+    let (mut w1, mut r1, h1) = spawn_session(SessionId(1), game_tx.clone());
+    let (mut w2, mut r2, h2) = spawn_session(SessionId(2), game_tx.clone());
+
+    let sessions = setup_two_bots(game_tx, &mut game_rx, &mut w1, &mut r1, &mut w2, &mut r2).await;
+
+    let mut game = tiny_game(5);
+    let config = PlayingConfig {
+        move_timeout: Duration::from_millis(100),
+    };
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
+
+    let play_task = tokio::spawn(async move {
+        run_playing(&mut game, &sessions, &mut game_rx, &config, Some(&event_tx)).await
+    });
+
+    // Turn 0: P2 silent → timeout.
+    let _ = read_turn_state(&mut r1).await;
+    let _ = read_turn_state(&mut r2).await;
+    w1.write_frame(&action_frame(Direction::Stay, Player::Player1, 0))
+        .await
+        .unwrap();
+    read_timeout(&mut r2).await;
+
+    // Turn 1: P2 silent again → timeout.
+    let _ = read_turn_state(&mut r1).await;
+    let _ = read_turn_state(&mut r2).await;
+    w1.write_frame(&action_frame(Direction::Stay, Player::Player1, 1))
+        .await
+        .unwrap();
+    read_timeout(&mut r2).await;
+
+    // Turn 2: P2 sends late actions for turns 0 and 1, then the real turn-2 action.
+    let _ = read_turn_state(&mut r1).await;
+    let _ = read_turn_state(&mut r2).await;
+    w1.write_frame(&action_frame(Direction::Stay, Player::Player1, 2))
+        .await
+        .unwrap();
+
+    // Late actions — both should be rejected.
+    w2.write_frame(&action_frame(Direction::Left, Player::Player2, 0))
+        .await
+        .unwrap();
+    w2.write_frame(&action_frame(Direction::Left, Player::Player2, 1))
+        .await
+        .unwrap();
+    // Real action for turn 2.
+    w2.write_frame(&action_frame(Direction::Stay, Player::Player2, 2))
+        .await
+        .unwrap();
+
+    // Remaining turns: both respond normally.
+    for turn in 3..5 {
+        let _ = read_turn_state(&mut r1).await;
+        let _ = read_turn_state(&mut r2).await;
+        w1.write_frame(&action_frame(Direction::Stay, Player::Player1, turn))
+            .await
+            .unwrap();
+        w2.write_frame(&action_frame(Direction::Stay, Player::Player2, turn))
+            .await
+            .unwrap();
+    }
+
+    let _ = read_game_over(&mut r1).await;
+    let _ = read_game_over(&mut r2).await;
+
+    let result = timeout(Duration::from_secs(5), play_task)
+        .await
+        .expect("play timed out")
+        .expect("play panicked")
+        .expect("play returned error");
+
+    assert_eq!(result.result, GameResult::Draw);
+
+    // P2 should time out on turns 0 and 1 only — not on turn 2+.
+    let mut p2_timeout_turns = vec![];
+    while let Ok(event) = event_rx.try_recv() {
+        if let MatchEvent::BotTimeout { player, turn } = event {
+            if player == Player::Player2 {
+                p2_timeout_turns.push(turn);
+            }
+        }
+    }
+    assert_eq!(
+        p2_timeout_turns,
+        vec![0, 1],
+        "P2 should time out on turns 0 and 1 only; late actions must not steal turn 2's slot"
+    );
+
     drop(w1);
     drop(r1);
     drop(w2);

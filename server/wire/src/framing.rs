@@ -7,7 +7,7 @@
 
 use std::io;
 
-use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, BufWriter};
 
 /// Default maximum payload size: 16 MB.
 pub const DEFAULT_MAX_PAYLOAD: u32 = 16 * 1024 * 1024;
@@ -151,8 +151,11 @@ impl<R: AsyncRead + Unpin> FrameReader<R> {
 /// Writes length-prefixed frames to an async byte stream.
 ///
 /// Wire format: `[u32 BE payload length][payload bytes]`
+///
+/// Wraps the inner writer in a [`BufWriter`] so that the header and payload
+/// are coalesced into a single syscall, flushed at the end of each frame.
 pub struct FrameWriter<W> {
-    writer: W,
+    writer: BufWriter<W>,
     max_payload: u32,
 }
 
@@ -160,7 +163,7 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
     #[must_use]
     pub fn new(writer: W, max_payload: u32) -> Self {
         Self {
-            writer,
+            writer: BufWriter::new(writer),
             max_payload,
         }
     }
@@ -197,7 +200,7 @@ impl<W: AsyncWrite + Unpin> FrameWriter<W> {
     /// Consume the writer, returning the underlying stream.
     #[must_use]
     pub fn into_inner(self) -> W {
-        self.writer
+        self.writer.into_inner()
     }
 }
 

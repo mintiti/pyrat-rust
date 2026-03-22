@@ -1,45 +1,38 @@
 //! Bot and Hivemind traits, Context for timing and info sending.
 
-use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use pyrat::Direction;
 use pyrat_wire::{GameResult, Player};
+use tokio::sync::mpsc;
 
 use crate::options::Options;
 use crate::state::GameState;
 
-/// Synchronous writer for Info frames during `think()`.
+/// Non-blocking writer for Info frames during `think()`.
 ///
-/// Wraps a `TcpStream` behind `Arc<Mutex<…>>` so it is `Send + Sync` and
-/// cheaply cloneable. Multi-threaded bots (e.g. MCTS) can clone the sender
+/// Sends frames through an `mpsc` channel to a background writer task that
+/// handles the actual I/O via tokio's async `FrameWriter`. This avoids the
+/// `O_NONBLOCK` sharing bug that occurred with a cloned `TcpStream`.
+///
+/// Cheaply cloneable — multi-threaded bots (e.g. MCTS) can clone the sender
 /// and move it into worker threads.
 #[derive(Clone)]
 pub struct InfoSender {
-    stream: Arc<Mutex<std::net::TcpStream>>,
+    tx: mpsc::UnboundedSender<Vec<u8>>,
 }
 
 impl InfoSender {
-    pub(crate) fn new(stream: std::net::TcpStream) -> Self {
-        Self {
-            stream: Arc::new(Mutex::new(stream)),
-        }
+    pub(crate) fn new(tx: mpsc::UnboundedSender<Vec<u8>>) -> Self {
+        Self { tx }
     }
 
-    /// Send a pre-built Info frame. Locks the stream internally.
+    /// Send a pre-built frame through the writer channel.
     pub fn send(&self, frame: &[u8]) {
-        let Ok(mut stream) = self.stream.lock() else {
-            eprintln!("[sdk] send_info() failed: mutex poisoned");
-            return;
-        };
-        let len = (frame.len() as u32).to_be_bytes();
-        if let Err(e) = stream
-            .write_all(&len)
-            .and_then(|()| stream.write_all(frame))
-        {
-            eprintln!("[sdk] send_info() failed: {e}");
+        if let Err(e) = self.tx.send(frame.to_vec()) {
+            eprintln!("[sdk] send() failed: channel closed ({e})");
         }
     }
 
@@ -152,8 +145,6 @@ impl Context {
     }
 
     /// Send an Info message to the host (for GUI / debugging).
-    ///
-    /// Writes synchronously on a cloned TCP socket. Errors are logged to stderr.
     pub fn send_info(&self, params: &InfoParams) {
         if let Some(sender) = self.info_sender.lock().unwrap().as_ref() {
             sender.send_info(params);

@@ -145,6 +145,7 @@ table PreprocessingDone {}
 table Action {
   direction: Direction;
   player: Player;
+  turn: uint16;
 }
 
 table Pong {}

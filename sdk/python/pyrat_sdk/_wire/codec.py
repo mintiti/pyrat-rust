@@ -238,11 +238,12 @@ def encode_preprocessing_done() -> bytes:
     return _build_bot_packet(BotMessage.PreprocessingDone, build)
 
 
-def encode_action(direction: int, player: int) -> bytes:
+def encode_action(direction: int, player: int, turn: int = 0) -> bytes:
     def build(b):
         ActionMod.Start(b)
         ActionMod.AddDirection(b, direction)
         ActionMod.AddPlayer(b, player)
+        ActionMod.AddTurn(b, turn)
         return ActionMod.End(b)
 
     return _build_bot_packet(BotMessage.Action, build)

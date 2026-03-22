@@ -74,9 +74,17 @@ pub fn preprocessing_done_frame() -> Vec<u8> {
     })
 }
 
-pub fn action_frame(direction: Direction, player: Player) -> Vec<u8> {
+pub fn action_frame(direction: Direction, player: Player, turn: u16) -> Vec<u8> {
     build_bot_frame(BotMessage::Action, move |fbb| {
-        Action::create(fbb, &ActionArgs { direction, player }).as_union_value()
+        Action::create(
+            fbb,
+            &ActionArgs {
+                direction,
+                player,
+                turn,
+            },
+        )
+        .as_union_value()
     })
 }
 

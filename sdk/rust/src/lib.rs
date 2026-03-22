@@ -66,7 +66,7 @@ use wire::{
 /// Reads `PYRAT_HOST_PORT` and `PYRAT_AGENT_ID` from the environment,
 /// connects to the host, and runs the full lifecycle.
 pub fn run(mut bot: impl Bot, name: &str, author: &str) {
-    let (std_stream, sync_clone) = connect();
+    let std_stream = connect();
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -77,13 +77,12 @@ pub fn run(mut bot: impl Bot, name: &str, author: &str) {
         name,
         author,
         std_stream,
-        sync_clone,
     ));
 }
 
 /// Run a hivemind bot controlling both players. Blocks until the game ends.
 pub fn run_hivemind(mut bot: impl Hivemind, name: &str, author: &str) {
-    let (std_stream, sync_clone) = connect();
+    let std_stream = connect();
     let rt = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -94,23 +93,20 @@ pub fn run_hivemind(mut bot: impl Hivemind, name: &str, author: &str) {
         name,
         author,
         std_stream,
-        sync_clone,
     ));
 }
 
-/// Connect to the host, returning the std stream and a clone for sync Info writes.
-///
-/// The std→tokio conversion happens inside `run_async` where the reactor is available.
-fn connect() -> (std::net::TcpStream, std::net::TcpStream) {
+/// Connect to the host. The std→tokio conversion happens inside `run_async`.
+fn connect() -> std::net::TcpStream {
     let port: u16 = std::env::var("PYRAT_HOST_PORT")
         .expect("PYRAT_HOST_PORT not set")
         .parse()
         .expect("PYRAT_HOST_PORT not a valid port");
 
-    let std_stream = std::net::TcpStream::connect(format!("127.0.0.1:{port}"))
+    let stream = std::net::TcpStream::connect(format!("127.0.0.1:{port}"))
         .expect("failed to connect to host");
-    let sync_clone = std_stream.try_clone().expect("failed to clone TCP socket");
-    (std_stream, sync_clone)
+    stream.set_nodelay(true).expect("failed to set TCP_NODELAY");
+    stream
 }
 
 fn get_agent_id() -> String {
@@ -124,7 +120,6 @@ async fn run_async(
     name: &str,
     author: &str,
     std_stream: std::net::TcpStream,
-    sync_clone: std::net::TcpStream,
 ) {
     std_stream
         .set_nonblocking(true)
@@ -141,8 +136,12 @@ async fn run_async(
 
     let mut state = setup_phase(bot, &mut reader).await;
 
-    // All writes after setup go through the sync InfoSender.
-    let info_sender = bot::InfoSender::new(sync_clone);
+    // Repurpose the async writer as a persistent writer task behind a channel.
+    // This avoids the O_NONBLOCK sharing bug from try_clone()'d TcpStreams.
+    let (write_tx, write_rx) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
+    tokio::spawn(writer_task(writer, write_rx));
+    let info_sender = bot::InfoSender::new(write_tx);
+
     let stopped = Arc::new(AtomicBool::new(false));
     let game_over = Arc::new(AtomicBool::new(false));
     let (msg_tx, msg_rx) = tokio::sync::mpsc::unbounded_channel();
@@ -163,6 +162,21 @@ async fn run_async(
     });
 
     turn_loop(bot, &mut state, msg_rx, &info_sender, stopped, game_over).await;
+}
+
+// ── Writer task ──────────────────────────────────────
+
+/// Drains the write channel and sends each frame through the async `FrameWriter`.
+async fn writer_task<W: AsyncWrite + Unpin>(
+    mut writer: FrameWriter<W>,
+    mut rx: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
+) {
+    while let Some(frame) = rx.recv().await {
+        if let Err(e) = writer.write_frame(&frame).await {
+            eprintln!("[sdk] writer task error: {e}");
+            break;
+        }
+    }
 }
 
 // ── Setup phase ──────────────────────────────────────
@@ -320,8 +334,9 @@ async fn turn_loop<T: bot::Runner>(
                     }
                 });
 
+                let turn = state.turn();
                 for (player, direction) in actions {
-                    info_sender.send(&build_action(player, direction));
+                    info_sender.send(&build_action(player, direction, turn));
                 }
             },
             HostMsg::Timeout { .. } => {
@@ -375,8 +390,6 @@ fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
 mod tests {
     use super::*;
     use pyrat_wire::{self as wire, HostMessage};
-    use std::io::Read as _;
-    use std::net::TcpListener;
     use std::sync::atomic::Ordering;
     use tokio::sync::mpsc;
 
@@ -401,15 +414,9 @@ mod tests {
         fbb.finished_data().to_vec()
     }
 
-    fn dummy_info_sender() -> (bot::InfoSender, std::net::TcpStream) {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let addr = listener.local_addr().unwrap();
-        let client = std::net::TcpStream::connect(addr).unwrap();
-        let (server, _) = listener.accept().unwrap();
-        server
-            .set_read_timeout(Some(Duration::from_secs(1)))
-            .unwrap();
-        (bot::InfoSender::new(client), server)
+    fn dummy_info_sender() -> (bot::InfoSender, mpsc::UnboundedReceiver<Vec<u8>>) {
+        let (tx, rx) = mpsc::unbounded_channel();
+        (bot::InfoSender::new(tx), rx)
     }
 
     /// Write length-prefixed frames to a tokio duplex writer.
@@ -433,7 +440,7 @@ mod tests {
         let reader = pyrat_wire::framing::FrameReader::with_default_max(client);
         let mut fw = pyrat_wire::framing::FrameWriter::with_default_max(server);
 
-        let (info_sender, _tcp_server) = dummy_info_sender();
+        let (info_sender, _write_rx) = dummy_info_sender();
         let stopped = Arc::new(AtomicBool::new(false));
         let game_over = Arc::new(AtomicBool::new(false));
         let (msg_tx, mut msg_rx) = mpsc::unbounded_channel();
@@ -475,7 +482,7 @@ mod tests {
         let reader = pyrat_wire::framing::FrameReader::with_default_max(client);
         let fw = pyrat_wire::framing::FrameWriter::with_default_max(server);
 
-        let (info_sender, _tcp_server) = dummy_info_sender();
+        let (info_sender, _write_rx) = dummy_info_sender();
         let stopped = Arc::new(AtomicBool::new(false));
         let game_over = Arc::new(AtomicBool::new(false));
         let (msg_tx, mut msg_rx) = mpsc::unbounded_channel();
@@ -506,7 +513,7 @@ mod tests {
         drop(server); // EOF on the read side
         let reader = pyrat_wire::framing::FrameReader::with_default_max(client);
 
-        let (info_sender, _tcp_server) = dummy_info_sender();
+        let (info_sender, _write_rx) = dummy_info_sender();
         let stopped = Arc::new(AtomicBool::new(false));
         let game_over = Arc::new(AtomicBool::new(false));
         let (msg_tx, mut msg_rx) = mpsc::unbounded_channel();
@@ -535,7 +542,7 @@ mod tests {
         let reader = pyrat_wire::framing::FrameReader::with_default_max(client);
         let fw = pyrat_wire::framing::FrameWriter::with_default_max(server);
 
-        let (info_sender, mut tcp_server) = dummy_info_sender();
+        let (info_sender, mut write_rx) = dummy_info_sender();
         let stopped = Arc::new(AtomicBool::new(false));
         let game_over = Arc::new(AtomicBool::new(false));
         let (msg_tx, mut msg_rx) = mpsc::unbounded_channel();
@@ -554,15 +561,50 @@ mod tests {
         assert!(msg_rx.recv().await.is_none());
         assert!(!stopped.load(Ordering::Relaxed));
 
-        // Read the Pong from the TCP server side (length-prefixed).
-        let mut len_buf = [0u8; 4];
-        tcp_server.read_exact(&mut len_buf).unwrap();
-        let len = u32::from_be_bytes(len_buf) as usize;
-        let mut pong_buf = vec![0u8; len];
-        tcp_server.read_exact(&mut pong_buf).unwrap();
-
+        // Read the Pong from the write channel.
+        let pong_buf = write_rx
+            .recv()
+            .await
+            .expect("expected Pong frame in channel");
         let packet = flatbuffers::root::<wire::BotPacket>(&pong_buf).unwrap();
         assert_eq!(packet.message_type(), wire::BotMessage::Pong);
+    }
+
+    // ── InfoSender regression test ─────────────────────
+
+    /// Verifies that many rapid Info writes all arrive intact through the
+    /// channel-based InfoSender + async writer task.
+    ///
+    /// This is the fix for the O_NONBLOCK sharing bug: try_clone()'d
+    /// TcpStreams share the file description, so set_nonblocking(true) on
+    /// one side also makes the clone non-blocking. write_all() then fails
+    /// with EAGAIN or produces partial writes that corrupt framing.
+    #[tokio::test]
+    async fn info_sender_writes_survive_nonblocking_socket() {
+        let (client, server) = tokio::io::duplex(4096);
+        let writer = FrameWriter::with_default_max(client);
+        let mut reader = FrameReader::with_default_max(server);
+
+        let (write_tx, write_rx) = mpsc::unbounded_channel::<Vec<u8>>();
+        tokio::spawn(writer_task(writer, write_rx));
+        let info_sender = bot::InfoSender::new(write_tx);
+
+        const N: usize = 200;
+        for i in 0..N {
+            let frame = format!("frame-{i}").into_bytes();
+            info_sender.send(&frame);
+        }
+        // Drop sender → writer task drains remaining frames → closes writer → EOF.
+        drop(info_sender);
+
+        let mut received = Vec::new();
+        while let Ok(frame) = reader.read_frame().await {
+            received.push(frame.to_vec());
+        }
+        assert_eq!(received.len(), N, "expected all {N} frames to arrive");
+        for (i, frame) in received.iter().enumerate() {
+            assert_eq!(frame, &format!("frame-{i}").into_bytes());
+        }
     }
 
     // ── Turn-loop regression tests ──────────────────────
@@ -618,7 +660,7 @@ mod tests {
         let stopped = Arc::new(AtomicBool::new(true));
         let game_over = Arc::new(AtomicBool::new(true));
 
-        let (info_sender, _tcp_server) = dummy_info_sender();
+        let (info_sender, _write_rx) = dummy_info_sender();
         let iterations = Arc::new(AtomicU32::new(0));
 
         // Channel contents: TurnState → GameOver.

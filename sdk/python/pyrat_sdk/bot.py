@@ -132,7 +132,9 @@ class Bot:
             )
 
         direction = _validate_direction(direction, "think()")
-        conn.send_frame(codec.encode_action(int(direction), int(state.my_player)))
+        conn.send_frame(
+            codec.encode_action(int(direction), int(state.my_player), state.turn)
+        )
 
 
 # ── HivemindBot ───────────────────────────────────────
@@ -186,7 +188,9 @@ class HivemindBot:
         for player in (Player.PLAYER1, Player.PLAYER2):
             direction = moves.get(player, Direction.STAY)
             direction = _validate_direction(direction, f"think()[{player.name}]")
-            conn.send_frame(codec.encode_action(int(direction), int(player)))
+            conn.send_frame(
+                codec.encode_action(int(direction), int(player), state.turn)
+            )
 
 
 # ── Shared lifecycle ──────────────────────────────────

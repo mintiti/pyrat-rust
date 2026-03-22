@@ -309,7 +309,7 @@ pub fn build_pong() -> Vec<u8> {
 }
 
 /// Build an Action bot packet.
-pub fn build_action(player: wire::Player, direction: pyrat::Direction) -> Vec<u8> {
+pub fn build_action(player: wire::Player, direction: pyrat::Direction, turn: u16) -> Vec<u8> {
     let wire_dir = engine_to_wire_dir(direction);
     build_bot_frame(BotMessage::Action, move |fbb| {
         wire::Action::create(
@@ -317,6 +317,7 @@ pub fn build_action(player: wire::Player, direction: pyrat::Direction) -> Vec<u8
             &wire::ActionArgs {
                 direction: wire_dir,
                 player,
+                turn,
             },
         )
         .as_union_value()
@@ -595,12 +596,13 @@ mod tests {
 
     #[test]
     fn build_and_extract_action_roundtrip() {
-        let bytes = build_action(Player::Player1, pyrat::Direction::Left);
+        let bytes = build_action(Player::Player1, pyrat::Direction::Left, 42);
         let packet = flatbuffers::root::<wire::BotPacket>(&bytes).unwrap();
         assert_eq!(packet.message_type(), BotMessage::Action);
         let action = packet.message_as_action().unwrap();
         assert_eq!(action.player(), Player::Player1);
         assert_eq!(action.direction(), WireDir::Left);
+        assert_eq!(action.turn(), 42);
     }
 
     #[test]

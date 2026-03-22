@@ -65,7 +65,6 @@ pub async fn run_session<R, W>(
     let mut state = SessionState::Connected;
     let mut controlled_players: HashSet<Player> = HashSet::new();
     let mut closing = false;
-    let mut current_turn: u16 = 0;
 
     // Drain bookkeeping — set when entering wind-down.
     let mut drain_frames_remaining: u32 = 0;
@@ -75,6 +74,9 @@ pub async fn run_session<R, W>(
     // Handshake deadline — only active while state == Connected.
     let handshake_deadline = Instant::now() + config.handshake_timeout;
 
+    // Every break path below sets this explicitly. The initial value is a
+    // defensive fallback if a new exit path is ever added without one.
+    #[allow(unused_assignments)]
     let mut disconnect_reason = DisconnectReason::PeerClosed;
 
     // Per-session command channel — sent to the game loop in Connected.
@@ -110,7 +112,6 @@ pub async fn run_session<R, W>(
                             session_id,
                             &mut state,
                             &controlled_players,
-                            current_turn,
                             &game_tx,
                         ).await {
                             warn!(session = session_id.0, error = %e, "bot frame error");
@@ -139,6 +140,7 @@ pub async fn run_session<R, W>(
                         // Send Stop on the wire, then drain.
                         let bytes = serialize_host_command(&mut fbb, &HostCommand::Shutdown);
                         if frame_writer.write_frame(&bytes).await.is_err() {
+                            disconnect_reason = DisconnectReason::FrameError;
                             break;
                         }
                     }
@@ -150,6 +152,7 @@ pub async fn run_session<R, W>(
                         let cmd = HostCommand::GameOver { result, player1_score, player2_score };
                         let bytes = serialize_host_command(&mut fbb, &cmd);
                         if frame_writer.write_frame(&bytes).await.is_err() {
+                            disconnect_reason = DisconnectReason::FrameError;
                             break;
                         }
                     }
@@ -161,20 +164,21 @@ pub async fn run_session<R, W>(
                         }
                         let bytes = serialize_host_command(&mut fbb, cmd);
                         if frame_writer.write_frame(&bytes).await.is_err() {
+                            disconnect_reason = DisconnectReason::FrameError;
                             break;
                         }
                     }
-                    Some(HostCommand::TurnState(ref ts)) => {
-                        current_turn = ts.turn;
-                        let cmd = HostCommand::TurnState(ts.clone());
-                        let bytes = serialize_host_command(&mut fbb, &cmd);
+                    Some(ref cmd @ HostCommand::TurnState(_)) => {
+                        let bytes = serialize_host_command(&mut fbb, cmd);
                         if frame_writer.write_frame(&bytes).await.is_err() {
+                            disconnect_reason = DisconnectReason::FrameError;
                             break;
                         }
                     }
                     Some(cmd) => {
                         let bytes = serialize_host_command(&mut fbb, &cmd);
                         if frame_writer.write_frame(&bytes).await.is_err() {
+                            disconnect_reason = DisconnectReason::FrameError;
                             break;
                         }
                     }
@@ -217,7 +221,6 @@ async fn handle_bot_frame(
     session_id: SessionId,
     state: &mut SessionState,
     controlled_players: &HashSet<Player>,
-    current_turn: u16,
     game_tx: &mpsc::Sender<SessionMsg>,
 ) -> Result<(), String> {
     let (msg_type, payload) = extract_bot_packet(buf)?;
@@ -263,6 +266,7 @@ async fn handle_bot_frame(
         BotPayload::Action {
             mut player,
             direction,
+            turn,
         } => {
             // Default player inference: if there's exactly one controlled player
             // that is NOT the FlatBuffers default (Player1), and the bot sent the
@@ -288,7 +292,7 @@ async fn handle_bot_frame(
                 session_id,
                 player,
                 direction,
-                turn: current_turn,
+                turn,
             }
         },
         BotPayload::Info(info) => SessionMsg::Info { session_id, info },

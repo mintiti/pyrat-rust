@@ -38,8 +38,15 @@ class Action(object):
             return self._tab.Get(flatbuffers.number_types.Uint8Flags, o + self._tab.Pos)
         return 0
 
+    # Action
+    def Turn(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(8))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Uint16Flags, o + self._tab.Pos)
+        return 0
+
 def ActionStart(builder):
-    builder.StartObject(2)
+    builder.StartObject(3)
 
 def Start(builder):
     ActionStart(builder)
@@ -55,6 +62,12 @@ def ActionAddPlayer(builder, player):
 
 def AddPlayer(builder, player):
     ActionAddPlayer(builder, player)
+
+def ActionAddTurn(builder, turn):
+    builder.PrependUint16Slot(2, turn, 0)
+
+def AddTurn(builder, turn):
+    ActionAddTurn(builder, turn)
 
 def ActionEnd(builder):
     return builder.EndObject()

@@ -31,6 +31,7 @@ pub enum BotPayload {
     Action {
         player: wire::Player,
         direction: wire::Direction,
+        turn: u16,
     },
     Pong,
     Info(OwnedInfo),
@@ -84,6 +85,7 @@ pub fn extract_bot_packet(buf: &[u8]) -> Result<(BotMessage, BotPayload), String
         BotPayload::Action {
             player: a.player(),
             direction: a.direction(),
+            turn: a.turn(),
         }
     } else if msg_type == BotMessage::Pong {
         BotPayload::Pong
@@ -346,9 +348,16 @@ mod tests {
         fbb.finished_data().to_vec()
     }
 
-    fn build_action(direction: Direction, player: Player) -> Vec<u8> {
+    fn build_action(direction: Direction, player: Player, turn: u16) -> Vec<u8> {
         let mut fbb = FlatBufferBuilder::new();
-        let action = wire::Action::create(&mut fbb, &wire::ActionArgs { direction, player });
+        let action = wire::Action::create(
+            &mut fbb,
+            &wire::ActionArgs {
+                direction,
+                player,
+                turn,
+            },
+        );
         let packet = wire::BotPacket::create(
             &mut fbb,
             &wire::BotPacketArgs {
@@ -425,13 +434,18 @@ mod tests {
 
     #[test]
     fn extract_action() {
-        let buf = build_action(Direction::Left, Player::Player2);
+        let buf = build_action(Direction::Left, Player::Player2, 7);
         let (msg_type, payload) = extract_bot_packet(&buf).unwrap();
         assert_eq!(msg_type, BotMessage::Action);
         match payload {
-            BotPayload::Action { player, direction } => {
+            BotPayload::Action {
+                player,
+                direction,
+                turn,
+            } => {
                 assert_eq!(player, Player::Player2);
                 assert_eq!(direction, Direction::Left);
+                assert_eq!(turn, 7);
             },
             _ => panic!("expected Action"),
         }

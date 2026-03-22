@@ -3498,6 +3498,7 @@ pub mod pyrat {
         impl<'a> Action<'a> {
             pub const VT_DIRECTION: ::flatbuffers::VOffsetT = 4;
             pub const VT_PLAYER: ::flatbuffers::VOffsetT = 6;
+            pub const VT_TURN: ::flatbuffers::VOffsetT = 8;
 
             #[inline]
             pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -3514,6 +3515,7 @@ pub mod pyrat {
                 args: &'args ActionArgs,
             ) -> ::flatbuffers::WIPOffset<Action<'bldr>> {
                 let mut builder = ActionBuilder::new(_fbb);
+                builder.add_turn(args.turn);
                 builder.add_player(args.player);
                 builder.add_direction(args.direction);
                 builder.finish()
@@ -3541,6 +3543,13 @@ pub mod pyrat {
                         .unwrap()
                 }
             }
+            #[inline]
+            pub fn turn(&self) -> u16 {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe { self._tab.get::<u16>(Action::VT_TURN, Some(0)).unwrap() }
+            }
         }
 
         impl ::flatbuffers::Verifiable for Action<'_> {
@@ -3552,6 +3561,7 @@ pub mod pyrat {
                 v.visit_table(pos)?
                     .visit_field::<Direction>("direction", Self::VT_DIRECTION, false)?
                     .visit_field::<Player>("player", Self::VT_PLAYER, false)?
+                    .visit_field::<u16>("turn", Self::VT_TURN, false)?
                     .finish();
                 Ok(())
             }
@@ -3559,6 +3569,7 @@ pub mod pyrat {
         pub struct ActionArgs {
             pub direction: Direction,
             pub player: Player,
+            pub turn: u16,
         }
         impl<'a> Default for ActionArgs {
             #[inline]
@@ -3566,6 +3577,7 @@ pub mod pyrat {
                 ActionArgs {
                     direction: Direction::Up,
                     player: Player::Player1,
+                    turn: 0,
                 }
             }
         }
@@ -3584,6 +3596,10 @@ pub mod pyrat {
             pub fn add_player(&mut self, player: Player) {
                 self.fbb_
                     .push_slot::<Player>(Action::VT_PLAYER, player, Player::Player1);
+            }
+            #[inline]
+            pub fn add_turn(&mut self, turn: u16) {
+                self.fbb_.push_slot::<u16>(Action::VT_TURN, turn, 0);
             }
             #[inline]
             pub fn new(
@@ -3607,6 +3623,7 @@ pub mod pyrat {
                 let mut ds = f.debug_struct("Action");
                 ds.field("direction", &self.direction());
                 ds.field("player", &self.player());
+                ds.field("turn", &self.turn());
                 ds.finish()
             }
         }
