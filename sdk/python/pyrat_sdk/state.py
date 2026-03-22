@@ -126,7 +126,7 @@ class GameState:
         self._player2_last_move = ts["player2_last_move"]
         self.cheese = ts["cheese"]
         self.cheese_matrix = _build_cheese_matrix(self.cheese, self.width, self.height)
-        self.state_hash = ts.get("state_hash", 0)
+        self.state_hash = ts["state_hash"]
 
     # ── My / opponent perspective ──────────────────────
 

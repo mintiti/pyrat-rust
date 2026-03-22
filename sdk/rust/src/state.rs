@@ -363,6 +363,7 @@ mod tests {
         assert_eq!(state.my_last_move(), Direction::Right);
         assert_eq!(state.opponent_last_move(), Direction::Left);
         assert_eq!(state.cheese().len(), 1);
+        assert_eq!(state.state_hash(), 0xABCD);
     }
 
     #[test]

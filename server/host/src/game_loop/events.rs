@@ -7,7 +7,7 @@
 use tokio::sync::mpsc;
 use tracing::warn;
 
-use crate::session::messages::{DisconnectReason, OwnedInfo, OwnedMatchConfig, OwnedTurnState};
+use crate::session::messages::{DisconnectReason, HashedTurnState, OwnedInfo, OwnedMatchConfig};
 use pyrat_wire::{Direction, Player};
 
 use super::playing::MatchResult;
@@ -31,7 +31,7 @@ pub enum MatchEvent {
     // ── Playing ──────────────────────────────────
     /// A turn was played and the engine stepped.
     TurnPlayed {
-        state: OwnedTurnState,
+        state: HashedTurnState,
         p1_action: Direction,
         p2_action: Direction,
         p1_think_ms: u32,

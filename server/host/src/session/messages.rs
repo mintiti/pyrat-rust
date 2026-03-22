@@ -1,3 +1,6 @@
+use std::hash::{Hash, Hasher};
+use std::ops::Deref;
+
 use tokio::sync::mpsc;
 
 use pyrat_wire::{Direction, GameResult, OptionType, Player, TimingMode};
@@ -62,6 +65,13 @@ pub struct OwnedMatchConfig {
 }
 
 /// Owned turn state sent to the bot each turn.
+///
+/// Contains the raw game-position fields. Does **not** include `state_hash`,
+/// which is a derived value. Use [`HashedTurnState`] to pair a turn state with
+/// its content-addressable hash.
+///
+/// If you add or change position-defining fields here, update
+/// [`HashedTurnState::compute_hash`] in this same file.
 #[derive(Debug, Clone)]
 pub struct OwnedTurnState {
     pub turn: u16,
@@ -74,7 +84,61 @@ pub struct OwnedTurnState {
     pub cheese: Vec<(u8, u8)>,
     pub player1_last_move: Direction,
     pub player2_last_move: Direction,
-    pub state_hash: u64,
+}
+
+/// An [`OwnedTurnState`] paired with a content-addressable hash of its
+/// position-defining fields.
+///
+/// The hash is computed once at construction time. Two states that a bot would
+/// analyze differently will hash differently.
+#[derive(Debug, Clone)]
+pub struct HashedTurnState {
+    inner: OwnedTurnState,
+    state_hash: u64,
+}
+
+impl HashedTurnState {
+    /// Wrap a turn state, computing the hash from its fields.
+    pub fn new(ts: OwnedTurnState) -> Self {
+        let state_hash = Self::compute_hash(&ts);
+        Self {
+            inner: ts,
+            state_hash,
+        }
+    }
+
+    /// The content-addressable hash for this turn state.
+    pub fn state_hash(&self) -> u64 {
+        self.state_hash
+    }
+
+    /// Deterministic hash of all game-position fields.
+    ///
+    /// Two states that a bot would analyze differently must hash differently.
+    /// If you add a field to [`OwnedTurnState`], update this function.
+    fn compute_hash(ts: &OwnedTurnState) -> u64 {
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        ts.turn.hash(&mut h);
+        ts.player1_position.hash(&mut h);
+        ts.player2_position.hash(&mut h);
+        // Hash scores as half-point u16 to avoid float instability
+        ((ts.player1_score * 2.0) as u16).hash(&mut h);
+        ((ts.player2_score * 2.0) as u16).hash(&mut h);
+        ts.player1_mud_turns.hash(&mut h);
+        ts.player2_mud_turns.hash(&mut h);
+        ts.cheese.hash(&mut h);
+        ts.player1_last_move.0.hash(&mut h);
+        ts.player2_last_move.0.hash(&mut h);
+        h.finish()
+    }
+}
+
+impl Deref for HashedTurnState {
+    type Target = OwnedTurnState;
+
+    fn deref(&self) -> &OwnedTurnState {
+        &self.inner
+    }
 }
 
 // ── Session → Game loop ─────────────────────────────
@@ -150,7 +214,7 @@ pub enum HostCommand {
     },
     MatchConfig(Box<OwnedMatchConfig>),
     StartPreprocessing,
-    TurnState(Box<OwnedTurnState>),
+    TurnState(Box<HashedTurnState>),
     Timeout {
         default_move: Direction,
     },

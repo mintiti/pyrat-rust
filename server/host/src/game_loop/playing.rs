@@ -1,7 +1,6 @@
 //! Playing phase: the core turn loop that drives a match to completion.
 
 use std::collections::{HashMap, HashSet};
-use std::hash::{Hash, Hasher};
 
 use tokio::sync::mpsc;
 use tokio::time::Instant;
@@ -10,7 +9,9 @@ use tracing::{debug, warn};
 use pyrat::game::game_logic::GameState;
 use pyrat::{Coordinates, Direction as EngineDirection};
 
-use crate::session::messages::{HostCommand, OwnedTurnState, SessionId, SessionMsg};
+use crate::session::messages::{
+    HashedTurnState, HostCommand, OwnedTurnState, SessionId, SessionMsg,
+};
 use pyrat_wire::{Direction as WireDirection, GameResult, Player};
 
 use super::config::{PlayingConfig, SessionHandle};
@@ -55,7 +56,7 @@ impl PlayingState {
     }
 
     /// Build the turn state for the current game position.
-    pub fn build_turn_state(&self, game: &GameState) -> OwnedTurnState {
+    pub fn build_turn_state(&self, game: &GameState) -> HashedTurnState {
         build_turn_state(game, self.last_p1, self.last_p2)
     }
 
@@ -253,10 +254,10 @@ fn build_turn_state(
     game: &GameState,
     last_p1: WireDirection,
     last_p2: WireDirection,
-) -> OwnedTurnState {
+) -> HashedTurnState {
     let p1 = &game.player1;
     let p2 = &game.player2;
-    let mut ts = OwnedTurnState {
+    HashedTurnState::new(OwnedTurnState {
         turn: game.turn,
         player1_position: (p1.current_pos.x, p1.current_pos.y),
         player2_position: (p2.current_pos.x, p2.current_pos.y),
@@ -272,29 +273,15 @@ fn build_turn_state(
             .collect(),
         player1_last_move: last_p1,
         player2_last_move: last_p2,
-        state_hash: 0,
-    };
-    ts.state_hash = compute_state_hash(&ts);
-    ts
+    })
 }
 
-/// Deterministic hash of all game-position fields in a TurnState.
-///
-/// Two states that a bot would analyze differently must hash differently.
-pub fn compute_state_hash(ts: &OwnedTurnState) -> u64 {
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    ts.turn.hash(&mut h);
-    ts.player1_position.hash(&mut h);
-    ts.player2_position.hash(&mut h);
-    // Hash scores as half-point u16 to avoid float instability
-    ((ts.player1_score * 2.0) as u16).hash(&mut h);
-    ((ts.player2_score * 2.0) as u16).hash(&mut h);
-    ts.player1_mud_turns.hash(&mut h);
-    ts.player2_mud_turns.hash(&mut h);
-    ts.cheese.hash(&mut h);
-    ts.player1_last_move.0.hash(&mut h);
-    ts.player2_last_move.0.hash(&mut h);
-    h.finish()
+/// Timing policy for evaluating committed actions.
+struct ThinkPolicy {
+    /// True when the move timeout is zero (infinite mode).
+    infinite: bool,
+    /// Maximum acceptable `think_ms` value for a committed action.
+    threshold_ms: u32,
 }
 
 /// Collect one action per player for this turn.
@@ -338,11 +325,11 @@ async fn collect_actions(
 
     // Duration::ZERO = infinite timeout (no deadline, wait for actions or disconnects).
     let move_timeout = config.move_timeout;
-    let infinite = move_timeout.is_zero();
-
-    // Think threshold: move_timeout_ms × (1 + think_margin)
     let move_timeout_ms = move_timeout.as_millis() as u32;
-    let think_threshold_ms = (move_timeout_ms as f64 * (1.0 + config.think_margin as f64)) as u32;
+    let think = ThinkPolicy {
+        infinite: move_timeout.is_zero(),
+        threshold_ms: (move_timeout_ms as f64 * (1.0 + config.think_margin as f64)) as u32,
+    };
 
     // Hard deadline = think deadline + network grace
     let deadline =
@@ -374,8 +361,7 @@ async fn collect_actions(
                             current_turn,
                             provisional,
                             think_ms,
-                            infinite,
-                            think_threshold_ms,
+                            &think,
                         );
                     }
                     SessionMsg::Disconnected { session_id, reason } => {
@@ -399,7 +385,7 @@ async fn collect_actions(
                     return Ok(resolve_collected(&p1_slot, &p2_slot));
                 }
             }
-            _ = tokio::time::sleep_until(deadline), if !infinite => {
+            _ = tokio::time::sleep_until(deadline), if !think.infinite => {
                 debug!(turn = current_turn, "move timeout — using provisional or STAY");
                 handle_timeout(sessions, disconnected, &responded, event_tx, current_turn, stay).await;
                 return Ok(resolve_collected(&p1_slot, &p2_slot));
@@ -424,8 +410,7 @@ fn handle_action(
     current_turn: u16,
     provisional: bool,
     think_ms: u32,
-    infinite: bool,
-    think_threshold_ms: u32,
+    think: &ThinkPolicy,
 ) {
     if turn != current_turn {
         debug!(turn, current_turn, "stale action ignored");
@@ -443,10 +428,12 @@ fn handle_action(
 
     if provisional {
         update_action(slot, direction, true, think_ms);
-    } else if !infinite && (think_ms == 0 || think_ms > think_threshold_ms) {
+    } else if !think.infinite && (think_ms == 0 || think_ms > think.threshold_ms) {
         debug!(
             player = player.0,
-            think_ms, think_threshold_ms, "committed action rejected — think_ms out of range"
+            think_ms,
+            threshold_ms = think.threshold_ms,
+            "committed action rejected — think_ms out of range"
         );
     } else {
         update_action(slot, direction, false, think_ms);
@@ -1113,6 +1100,8 @@ mod tests {
         }
     }
 
+    use crate::session::messages::HashedTurnState;
+
     /// Helper: baseline state for hash distinctness tests.
     fn baseline_turn_state() -> OwnedTurnState {
         OwnedTurnState {
@@ -1126,7 +1115,6 @@ mod tests {
             cheese: vec![(5, 5), (10, 7)],
             player1_last_move: WireDirection::Up,
             player2_last_move: WireDirection::Down,
-            state_hash: 0,
         }
     }
 
@@ -1134,7 +1122,7 @@ mod tests {
     #[test]
     fn state_hash_distinguishes_all_fields() {
         let base = baseline_turn_state();
-        let base_hash = compute_state_hash(&base);
+        let base_hash = HashedTurnState::new(base.clone()).state_hash();
         assert_ne!(base_hash, 0, "hash should not be zero");
 
         let cases: Vec<(&str, OwnedTurnState)> = vec![
@@ -1218,7 +1206,7 @@ mod tests {
         ];
 
         for (label, variant) in &cases {
-            let h = compute_state_hash(variant);
+            let h = HashedTurnState::new(variant.clone()).state_hash();
             assert_ne!(h, base_hash, "{label}: hash should differ from baseline");
         }
     }
@@ -1226,9 +1214,9 @@ mod tests {
     /// Identical states produce the same hash (determinism).
     #[test]
     fn identical_states_produce_same_hash() {
-        let a = baseline_turn_state();
-        let b = baseline_turn_state();
-        assert_eq!(compute_state_hash(&a), compute_state_hash(&b));
+        let a = HashedTurnState::new(baseline_turn_state());
+        let b = HashedTurnState::new(baseline_turn_state());
+        assert_eq!(a.state_hash(), b.state_hash());
     }
 
     /// Swapping p1/p2 positions must produce a different hash (not commutative).
@@ -1243,8 +1231,8 @@ mod tests {
             ..base.clone()
         };
         assert_ne!(
-            compute_state_hash(&base),
-            compute_state_hash(&swapped),
+            HashedTurnState::new(base).state_hash(),
+            HashedTurnState::new(swapped).state_hash(),
             "swapped players must hash differently"
         );
     }

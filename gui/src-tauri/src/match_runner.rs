@@ -8,8 +8,9 @@ use tracing::{debug, info, warn};
 
 use pyrat::game::game_logic::GameState;
 use pyrat_host::game_loop::{
-    build_owned_match_config, determine_result, run_playing, run_setup, wire_to_engine, MatchEvent,
-    MatchSetup, OwnedTurnState, PlayerEntry, PlayingConfig, PlayingState, SetupTiming,
+    build_owned_match_config, determine_result, run_playing, run_setup, wire_to_engine,
+    HashedTurnState, MatchEvent, MatchSetup, OwnedTurnState, PlayerEntry, PlayingConfig,
+    PlayingState, SetupTiming,
 };
 use pyrat_host::session::messages::{HostCommand, OwnedInfo, SessionId, SessionMsg};
 use pyrat_host::stub::spawn_stub_bot;
@@ -396,11 +397,9 @@ async fn run_analysis_inner(
     Ok(())
 }
 
-/// Build an OwnedTurnState from an arbitrary game-tree position (cursor-follows-analysis).
-fn build_turn_state_from_position(pos: AnalysisPosition) -> OwnedTurnState {
-    use pyrat_host::game_loop::compute_state_hash;
-
-    let mut ts = OwnedTurnState {
+/// Build a HashedTurnState from an arbitrary game-tree position (cursor-follows-analysis).
+fn build_turn_state_from_position(pos: AnalysisPosition) -> HashedTurnState {
+    HashedTurnState::new(OwnedTurnState {
         turn: pos.turn,
         player1_position: (pos.player1.position.x, pos.player1.position.y),
         player2_position: (pos.player2.position.x, pos.player2.position.y),
@@ -411,10 +410,7 @@ fn build_turn_state_from_position(pos: AnalysisPosition) -> OwnedTurnState {
         cheese: pos.cheese.iter().map(|c| (c.x, c.y)).collect(),
         player1_last_move: specta_to_wire(pos.player1_last_move),
         player2_last_move: specta_to_wire(pos.player2_last_move),
-        state_hash: 0,
-    };
-    ts.state_hash = compute_state_hash(&ts);
-    ts
+    })
 }
 
 /// Send HostCommand::Stop to all connected sessions.
@@ -432,7 +428,7 @@ async fn send_stop(sessions: &[SessionHandle], playing: &mut PlayingState) {
 async fn send_turn_state(
     sessions: &[SessionHandle],
     playing: &mut PlayingState,
-    turn_state: &pyrat_host::game_loop::OwnedTurnState,
+    turn_state: &HashedTurnState,
 ) {
     for s in sessions {
         if !playing.disconnected().contains(&s.session_id)
@@ -481,14 +477,13 @@ async fn finish_collecting(
     phase: &mut AnalysisPhase,
     event_tx: &mpsc::UnboundedSender<MatchEvent>,
 ) -> (WireDirection, WireDirection) {
-    // Extract current action slots and turn
-    let (current_turn, mut p1, mut p2) = match phase {
+    // Extract current action slots
+    let (mut p1, mut p2) = match phase {
         AnalysisPhase::Collecting {
-            turn,
             p1_action,
             p2_action,
             ..
-        } => (*turn, *p1_action, *p2_action),
+        } => (*p1_action, *p2_action),
         AnalysisPhase::Idle => {
             return (WireDirection::Stay, WireDirection::Stay);
         },
@@ -529,7 +524,7 @@ async fn finish_collecting(
                             if let Some(&sender) = players.first() {
                                 emit_event(event_tx, MatchEvent::BotInfo {
                                     sender,
-                                    turn: current_turn,
+                                    turn: info.turn,
                                     state_hash: info.state_hash,
                                     info,
                                 });
@@ -599,7 +594,7 @@ fn handle_bot_msg(
                         event_tx,
                         MatchEvent::BotInfo {
                             sender,
-                            turn: current_turn,
+                            turn: info.turn,
                             state_hash: info.state_hash,
                             info,
                         },
@@ -755,7 +750,7 @@ async fn forward_events(
                         let payload = TurnPlayedEvent {
                             match_id,
                             turn: state.turn,
-                            state_hash: format!("{:016x}", state.state_hash),
+                            state_hash: format!("{:016x}", state.state_hash()),
                             player1: PlayerState {
                                 position: state.player1_position.into(),
                                 score: state.player1_score,
