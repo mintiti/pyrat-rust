@@ -299,6 +299,7 @@ async fn turn_loop<T: bot::Runner>(
             Instant::now(),
             Player::Player1, // doesn't matter for preprocess
             0,
+            0,
             None,
             stopped.clone(),
             game_over.clone(),
@@ -326,6 +327,7 @@ async fn turn_loop<T: bot::Runner>(
 
                 let turn = state.turn();
                 let my_player = state.my_player();
+                let state_hash = state.state_hash();
 
                 stopped.store(false, Ordering::Relaxed);
                 let ctx = Context::new(
@@ -333,6 +335,7 @@ async fn turn_loop<T: bot::Runner>(
                     think_start,
                     my_player,
                     turn,
+                    state_hash,
                     Some(info_sender.clone()),
                     stopped.clone(),
                     game_over.clone(),
@@ -695,6 +698,7 @@ mod tests {
                 cheese: vec![pyrat::Coordinates::new(1, 1)],
                 player1_last_move: pyrat::Direction::Stay,
                 player2_last_move: pyrat::Direction::Stay,
+                state_hash: 0,
             }))
             .unwrap();
 

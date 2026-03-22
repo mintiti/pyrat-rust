@@ -37,6 +37,7 @@ export interface MazeConfig {
 /** One position in the game tree. */
 export interface GameNode {
 	turn: number;
+	stateHash: string;
 	player1: PlayerState;
 	player2: PlayerState;
 	cheese: Coord[];
@@ -215,7 +216,7 @@ function flushBotInfo() {
 					if (state.pausedSenders[e.sender]) continue;
 					if (state.mode === "step") {
 						const node = getNodeAtPath(state.root, state.cursor);
-						if (!node || node.turn !== e.turn) continue;
+						if (!node || node.stateHash !== e.state_hash) continue;
 						accumulateBotInfo(node.botInfo, e);
 					} else {
 						const node = getNodeAtPath(state.root, mainlinePath(e.turn));
@@ -278,6 +279,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	onMatchStarted: (maze, matchId) => {
 		const root: GameNode = {
 			turn: maze.turn,
+			stateHash: "",
 			player1: maze.player1,
 			player2: maze.player2,
 			cheese: maze.cheese,
@@ -311,6 +313,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 
 				const newChild: GameNode = {
 					turn: e.turn,
+					stateHash: e.state_hash,
 					player1: e.player1,
 					player2: e.player2,
 					cheese: e.cheese,

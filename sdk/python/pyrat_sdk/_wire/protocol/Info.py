@@ -104,8 +104,22 @@ class Info(object):
             return self._tab.String(o + self._tab.Pos)
         return None
 
+    # Info
+    def Turn(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(20))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Uint16Flags, o + self._tab.Pos)
+        return 0
+
+    # Info
+    def StateHash(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(22))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Uint64Flags, o + self._tab.Pos)
+        return 0
+
 def InfoStart(builder):
-    builder.StartObject(8)
+    builder.StartObject(10)
 
 def Start(builder):
     InfoStart(builder)
@@ -163,6 +177,18 @@ def InfoAddMessage(builder, message):
 
 def AddMessage(builder, message):
     InfoAddMessage(builder, message)
+
+def InfoAddTurn(builder, turn):
+    builder.PrependUint16Slot(8, turn, 0)
+
+def AddTurn(builder, turn):
+    InfoAddTurn(builder, turn)
+
+def InfoAddStateHash(builder, stateHash):
+    builder.PrependUint64Slot(9, stateHash, 0)
+
+def AddStateHash(builder, stateHash):
+    InfoAddStateHash(builder, stateHash)
 
 def InfoEnd(builder):
     return builder.EndObject()

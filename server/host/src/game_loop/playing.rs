@@ -1,6 +1,7 @@
 //! Playing phase: the core turn loop that drives a match to completion.
 
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 
 use tokio::sync::mpsc;
 use tokio::time::Instant;
@@ -255,7 +256,7 @@ fn build_turn_state(
 ) -> OwnedTurnState {
     let p1 = &game.player1;
     let p2 = &game.player2;
-    OwnedTurnState {
+    let mut ts = OwnedTurnState {
         turn: game.turn,
         player1_position: (p1.current_pos.x, p1.current_pos.y),
         player2_position: (p2.current_pos.x, p2.current_pos.y),
@@ -271,7 +272,29 @@ fn build_turn_state(
             .collect(),
         player1_last_move: last_p1,
         player2_last_move: last_p2,
-    }
+        state_hash: 0,
+    };
+    ts.state_hash = compute_state_hash(&ts);
+    ts
+}
+
+/// Deterministic hash of all game-position fields in a TurnState.
+///
+/// Two states that a bot would analyze differently must hash differently.
+pub fn compute_state_hash(ts: &OwnedTurnState) -> u64 {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    ts.turn.hash(&mut h);
+    ts.player1_position.hash(&mut h);
+    ts.player2_position.hash(&mut h);
+    // Hash scores as half-point u16 to avoid float instability
+    ((ts.player1_score * 2.0) as u16).hash(&mut h);
+    ((ts.player2_score * 2.0) as u16).hash(&mut h);
+    ts.player1_mud_turns.hash(&mut h);
+    ts.player2_mud_turns.hash(&mut h);
+    ts.cheese.hash(&mut h);
+    ts.player1_last_move.0.hash(&mut h);
+    ts.player2_last_move.0.hash(&mut h);
+    h.finish()
 }
 
 /// Collect one action per player for this turn.
@@ -310,12 +333,7 @@ async fn collect_actions(
     let mut responded: HashSet<SessionId> = HashSet::new();
 
     if both_committed(&p1_slot, &p2_slot) {
-        return Ok(CollectedActions {
-            p1: resolve_action(&p1_slot),
-            p2: resolve_action(&p2_slot),
-            p1_think_ms: resolve_think_ms(&p1_slot),
-            p2_think_ms: resolve_think_ms(&p2_slot),
-        });
+        return Ok(resolve_collected(&p1_slot, &p2_slot));
     }
 
     // Duration::ZERO = infinite timeout (no deadline, wait for actions or disconnects).
@@ -345,100 +363,186 @@ async fn collect_actions(
                         provisional,
                         think_ms,
                     } => {
-                        if turn != current_turn {
-                            debug!(turn, current_turn, "stale action ignored");
-                            continue;
-                        }
-
-                        let slot = match player {
-                            Player::Player1 => &mut p1_slot,
-                            Player::Player2 => &mut p2_slot,
-                            _ => {
-                                warn!(player = player.0, "unknown player in action");
-                                continue;
-                            },
-                        };
-
-                        if provisional {
-                            // Provisional: overwrite freely, don't count as responded.
-                            update_action(slot, direction, true, think_ms);
-                        } else if !infinite && (think_ms == 0 || think_ms > think_threshold_ms) {
-                            // Committed but rejected: think_ms missing or over threshold.
-                            // Don't lock slot — latest provisional remains as fallback.
-                            debug!(
-                                player = player.0,
-                                think_ms,
-                                think_threshold_ms,
-                                "committed action rejected — think_ms out of range"
-                            );
-                        } else {
-                            // Committed and accepted.
-                            update_action(slot, direction, false, think_ms);
-                            responded.insert(session_id);
-                        }
+                        handle_action(
+                            &mut p1_slot,
+                            &mut p2_slot,
+                            &mut responded,
+                            session_id,
+                            player,
+                            direction,
+                            turn,
+                            current_turn,
+                            provisional,
+                            think_ms,
+                            infinite,
+                            think_threshold_ms,
+                        );
                     }
                     SessionMsg::Disconnected { session_id, reason } => {
-                        debug!(session = session_id.0, ?reason, "session disconnected during play");
-                        disconnected.insert(session_id);
-                        if let Some(players) = session_players.get(&session_id) {
-                            for &p in players {
-                                let slot = match p {
-                                    Player::Player1 => &mut p1_slot,
-                                    Player::Player2 => &mut p2_slot,
-                                    _ => continue,
-                                };
-                                update_action(slot, stay, false, 0);
-                                emit(event_tx, MatchEvent::BotDisconnected { player: p, reason });
-                            }
-                        }
+                        handle_disconnect(
+                            &mut p1_slot,
+                            &mut p2_slot,
+                            disconnected,
+                            session_players,
+                            event_tx,
+                            session_id,
+                            reason,
+                        );
                     }
                     SessionMsg::Info { session_id, info } => {
-                        if let Some(players) = session_players.get(&session_id) {
-                            if let Some(&sender) = players.first() {
-                                emit(event_tx, MatchEvent::BotInfo {
-                                    sender,
-                                    turn: current_turn,
-                                    info,
-                                });
-                            }
-                        }
+                        handle_info(session_players, event_tx, session_id, info);
                     }
                     _ => {}
                 }
 
                 if both_committed(&p1_slot, &p2_slot) {
-                    return Ok(CollectedActions {
-                        p1: resolve_action(&p1_slot),
-                        p2: resolve_action(&p2_slot),
-                        p1_think_ms: resolve_think_ms(&p1_slot),
-                        p2_think_ms: resolve_think_ms(&p2_slot),
-                    });
+                    return Ok(resolve_collected(&p1_slot, &p2_slot));
                 }
             }
             _ = tokio::time::sleep_until(deadline), if !infinite => {
-                // Hard deadline: use whatever we have (provisional or Stay).
                 debug!(turn = current_turn, "move timeout — using provisional or STAY");
-
-                // Emit BotTimeout + send Timeout command for sessions that didn't respond.
-                for s in sessions {
-                    if !disconnected.contains(&s.session_id) && !responded.contains(&s.session_id) {
-                        let _ = s.cmd_tx.send(HostCommand::Timeout {
-                            default_move: stay,
-                        }).await;
-                        for &p in &s.controlled_players {
-                            emit(event_tx, MatchEvent::BotTimeout { player: p, turn: current_turn });
-                        }
-                    }
-                }
-
-                return Ok(CollectedActions {
-                    p1: resolve_action(&p1_slot),
-                    p2: resolve_action(&p2_slot),
-                    p1_think_ms: resolve_think_ms(&p1_slot),
-                    p2_think_ms: resolve_think_ms(&p2_slot),
-                });
+                handle_timeout(sessions, disconnected, &responded, event_tx, current_turn, stay).await;
+                return Ok(resolve_collected(&p1_slot, &p2_slot));
             }
         }
+    }
+}
+
+// ── Message handlers ─────────────────────────────────
+
+/// Process an incoming Action message: stale-turn check, slot dispatch,
+/// provisional/committed/rejected branching, responded tracking.
+#[allow(clippy::too_many_arguments)]
+fn handle_action(
+    p1_slot: &mut Option<ActionSlot>,
+    p2_slot: &mut Option<ActionSlot>,
+    responded: &mut HashSet<SessionId>,
+    session_id: SessionId,
+    player: Player,
+    direction: WireDirection,
+    turn: u16,
+    current_turn: u16,
+    provisional: bool,
+    think_ms: u32,
+    infinite: bool,
+    think_threshold_ms: u32,
+) {
+    if turn != current_turn {
+        debug!(turn, current_turn, "stale action ignored");
+        return;
+    }
+
+    let slot = match player {
+        Player::Player1 => p1_slot,
+        Player::Player2 => p2_slot,
+        _ => {
+            warn!(player = player.0, "unknown player in action");
+            return;
+        },
+    };
+
+    if provisional {
+        update_action(slot, direction, true, think_ms);
+    } else if !infinite && (think_ms == 0 || think_ms > think_threshold_ms) {
+        debug!(
+            player = player.0,
+            think_ms, think_threshold_ms, "committed action rejected — think_ms out of range"
+        );
+    } else {
+        update_action(slot, direction, false, think_ms);
+        responded.insert(session_id);
+    }
+}
+
+/// Mark a session disconnected, fill STAY for its players, emit BotDisconnected.
+fn handle_disconnect(
+    p1_slot: &mut Option<ActionSlot>,
+    p2_slot: &mut Option<ActionSlot>,
+    disconnected: &mut HashSet<SessionId>,
+    session_players: &HashMap<SessionId, Vec<Player>>,
+    event_tx: Option<&mpsc::UnboundedSender<MatchEvent>>,
+    session_id: SessionId,
+    reason: crate::session::messages::DisconnectReason,
+) {
+    debug!(
+        session = session_id.0,
+        ?reason,
+        "session disconnected during play"
+    );
+    disconnected.insert(session_id);
+    if let Some(players) = session_players.get(&session_id) {
+        for &p in players {
+            let slot = match p {
+                Player::Player1 => &mut *p1_slot,
+                Player::Player2 => &mut *p2_slot,
+                _ => continue,
+            };
+            update_action(slot, WireDirection::Stay, false, 0);
+            emit(event_tx, MatchEvent::BotDisconnected { player: p, reason });
+        }
+    }
+}
+
+/// Resolve sender from session_players, emit BotInfo with the turn from the message.
+fn handle_info(
+    session_players: &HashMap<SessionId, Vec<Player>>,
+    event_tx: Option<&mpsc::UnboundedSender<MatchEvent>>,
+    session_id: SessionId,
+    info: crate::session::messages::OwnedInfo,
+) {
+    if let Some(players) = session_players.get(&session_id) {
+        if let Some(&sender) = players.first() {
+            emit(
+                event_tx,
+                MatchEvent::BotInfo {
+                    sender,
+                    turn: info.turn,
+                    state_hash: info.state_hash,
+                    info,
+                },
+            );
+        }
+    }
+}
+
+/// Send Timeout command to non-responded sessions, emit BotTimeout.
+async fn handle_timeout(
+    sessions: &[SessionHandle],
+    disconnected: &HashSet<SessionId>,
+    responded: &HashSet<SessionId>,
+    event_tx: Option<&mpsc::UnboundedSender<MatchEvent>>,
+    current_turn: u16,
+    stay: WireDirection,
+) {
+    for s in sessions {
+        if !disconnected.contains(&s.session_id) && !responded.contains(&s.session_id) {
+            let _ = s
+                .cmd_tx
+                .send(HostCommand::Timeout { default_move: stay })
+                .await;
+            for &p in &s.controlled_players {
+                emit(
+                    event_tx,
+                    MatchEvent::BotTimeout {
+                        player: p,
+                        turn: current_turn,
+                    },
+                );
+            }
+        }
+    }
+}
+
+/// Build a CollectedActions from the current slots.
+fn resolve_collected(
+    p1_slot: &Option<ActionSlot>,
+    p2_slot: &Option<ActionSlot>,
+) -> CollectedActions {
+    CollectedActions {
+        p1: resolve_action(p1_slot),
+        p2: resolve_action(p2_slot),
+        p1_think_ms: resolve_think_ms(p1_slot),
+        p2_think_ms: resolve_think_ms(p2_slot),
     }
 }
 
@@ -662,6 +766,8 @@ mod tests {
                     score: Some(0.5),
                     pv: vec![],
                     message: "thinking".into(),
+                    turn: current_turn,
+                    state_hash: 0,
                 },
             })
             .await
@@ -908,5 +1014,238 @@ mod tests {
         assert_eq!(actions.p1, WireDirection::Right);
         // P2's committed was rejected, no provisional → Stay at timeout
         assert_eq!(actions.p2, WireDirection::Stay);
+    }
+
+    /// Late Info (sent for a previous turn) is forwarded with the turn
+    /// from the message, not the host's current turn.
+    #[tokio::test]
+    async fn late_info_preserves_original_turn() {
+        let (game_tx, mut game_rx) = mpsc::channel::<SessionMsg>(16);
+        let (sessions, _cmd_rx1, _cmd_rx2) = make_sessions();
+
+        let session_players: HashMap<SessionId, Vec<Player>> = sessions
+            .iter()
+            .map(|s| (s.session_id, s.controlled_players.clone()))
+            .collect();
+
+        let current_turn: u16 = 5;
+        let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
+
+        // Bot1 sends Info with turn=3 (late, from a previous turn).
+        game_tx
+            .send(SessionMsg::Info {
+                session_id: SessionId(1),
+                info: crate::session::messages::OwnedInfo {
+                    player: Player::Player1,
+                    multipv: 1,
+                    target: None,
+                    depth: 3,
+                    nodes: 50,
+                    score: Some(1.0),
+                    pv: vec![],
+                    message: "late".into(),
+                    turn: 3,
+                    state_hash: 0,
+                },
+            })
+            .await
+            .unwrap();
+
+        // Both players send committed actions so collect_actions returns.
+        game_tx
+            .send(SessionMsg::Action {
+                session_id: SessionId(1),
+                player: Player::Player1,
+                direction: WireDirection::Up,
+                turn: current_turn,
+                provisional: false,
+                think_ms: 0,
+            })
+            .await
+            .unwrap();
+        game_tx
+            .send(SessionMsg::Action {
+                session_id: SessionId(2),
+                player: Player::Player2,
+                direction: WireDirection::Down,
+                turn: current_turn,
+                provisional: false,
+                think_ms: 0,
+            })
+            .await
+            .unwrap();
+
+        let mut disconnected = HashSet::new();
+        let config = test_config(Duration::ZERO); // infinite
+        let _actions = collect_actions(
+            &mut game_rx,
+            current_turn,
+            &sessions,
+            &session_players,
+            &mut disconnected,
+            &config,
+            Some(&event_tx),
+        )
+        .await
+        .expect("collect_actions should not fail");
+
+        // BotInfo event must carry turn=3 (from the message), not turn=5 (current).
+        let event = event_rx.try_recv().expect("should have BotInfo event");
+        match event {
+            MatchEvent::BotInfo {
+                sender,
+                turn,
+                state_hash,
+                info,
+            } => {
+                assert_eq!(sender, Player::Player1);
+                assert_eq!(
+                    turn, 3,
+                    "BotInfo should carry the original turn from the Info message"
+                );
+                assert_eq!(
+                    state_hash, 0,
+                    "BotInfo should carry state_hash from the Info message"
+                );
+                assert_eq!(info.message, "late");
+            },
+            other => panic!("expected BotInfo, got {other:?}"),
+        }
+    }
+
+    /// Helper: baseline state for hash distinctness tests.
+    fn baseline_turn_state() -> OwnedTurnState {
+        OwnedTurnState {
+            turn: 5,
+            player1_position: (1, 2),
+            player2_position: (3, 4),
+            player1_score: 2.0,
+            player2_score: 1.5,
+            player1_mud_turns: 0,
+            player2_mud_turns: 0,
+            cheese: vec![(5, 5), (10, 7)],
+            player1_last_move: WireDirection::Up,
+            player2_last_move: WireDirection::Down,
+            state_hash: 0,
+        }
+    }
+
+    /// Changing any single field must produce a different hash.
+    #[test]
+    fn state_hash_distinguishes_all_fields() {
+        let base = baseline_turn_state();
+        let base_hash = compute_state_hash(&base);
+        assert_ne!(base_hash, 0, "hash should not be zero");
+
+        let cases: Vec<(&str, OwnedTurnState)> = vec![
+            (
+                "turn +1",
+                OwnedTurnState {
+                    turn: 6,
+                    ..base.clone()
+                },
+            ),
+            (
+                "p1 position",
+                OwnedTurnState {
+                    player1_position: (2, 2),
+                    ..base.clone()
+                },
+            ),
+            (
+                "p2 position",
+                OwnedTurnState {
+                    player2_position: (3, 5),
+                    ..base.clone()
+                },
+            ),
+            (
+                "p1 score +0.5",
+                OwnedTurnState {
+                    player1_score: 2.5,
+                    ..base.clone()
+                },
+            ),
+            (
+                "p2 score +0.5",
+                OwnedTurnState {
+                    player2_score: 2.0,
+                    ..base.clone()
+                },
+            ),
+            (
+                "p1 mud +1",
+                OwnedTurnState {
+                    player1_mud_turns: 1,
+                    ..base.clone()
+                },
+            ),
+            (
+                "p2 mud +1",
+                OwnedTurnState {
+                    player2_mud_turns: 1,
+                    ..base.clone()
+                },
+            ),
+            (
+                "one less cheese",
+                OwnedTurnState {
+                    cheese: vec![(5, 5)],
+                    ..base.clone()
+                },
+            ),
+            (
+                "cheese offset by 1",
+                OwnedTurnState {
+                    cheese: vec![(5, 6), (10, 7)],
+                    ..base.clone()
+                },
+            ),
+            (
+                "p1 last move",
+                OwnedTurnState {
+                    player1_last_move: WireDirection::Right,
+                    ..base.clone()
+                },
+            ),
+            (
+                "p2 last move",
+                OwnedTurnState {
+                    player2_last_move: WireDirection::Left,
+                    ..base.clone()
+                },
+            ),
+        ];
+
+        for (label, variant) in &cases {
+            let h = compute_state_hash(variant);
+            assert_ne!(h, base_hash, "{label}: hash should differ from baseline");
+        }
+    }
+
+    /// Identical states produce the same hash (determinism).
+    #[test]
+    fn identical_states_produce_same_hash() {
+        let a = baseline_turn_state();
+        let b = baseline_turn_state();
+        assert_eq!(compute_state_hash(&a), compute_state_hash(&b));
+    }
+
+    /// Swapping p1/p2 positions must produce a different hash (not commutative).
+    #[test]
+    fn swapped_players_produce_different_hash() {
+        let base = baseline_turn_state();
+        let swapped = OwnedTurnState {
+            player1_position: base.player2_position,
+            player2_position: base.player1_position,
+            player1_score: base.player2_score,
+            player2_score: base.player1_score,
+            ..base.clone()
+        };
+        assert_ne!(
+            compute_state_hash(&base),
+            compute_state_hash(&swapped),
+            "swapped players must hash differently"
+        );
     }
 }

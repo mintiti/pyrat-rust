@@ -111,6 +111,7 @@ class GameState:
         self._player1_last_move = 4  # STAY
         self._player2_last_move = 4
         self.turn = 0
+        self.state_hash = 0
 
     def update(self, ts: dict[str, Any]) -> None:
         """Apply a TurnState dict (from ``codec.extract_turn_state``)."""
@@ -125,6 +126,7 @@ class GameState:
         self._player2_last_move = ts["player2_last_move"]
         self.cheese = ts["cheese"]
         self.cheese_matrix = _build_cheese_matrix(self.cheese, self.width, self.height)
+        self.state_hash = ts.get("state_hash", 0)
 
     # ── My / opponent perspective ──────────────────────
 

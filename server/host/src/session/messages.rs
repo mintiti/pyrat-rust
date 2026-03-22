@@ -37,6 +37,8 @@ pub struct OwnedInfo {
     pub score: Option<f32>,
     pub pv: Vec<Direction>,
     pub message: String,
+    pub turn: u16,
+    pub state_hash: u64,
 }
 
 /// Mud entry: (pos1, pos2, mud_value).
@@ -72,6 +74,7 @@ pub struct OwnedTurnState {
     pub cheese: Vec<(u8, u8)>,
     pub player1_last_move: Direction,
     pub player2_last_move: Direction,
+    pub state_hash: u64,
 }
 
 // ── Session → Game loop ─────────────────────────────

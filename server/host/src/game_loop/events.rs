@@ -41,6 +41,7 @@ pub enum MatchEvent {
     BotInfo {
         sender: Player,
         turn: u16,
+        state_hash: u64,
         info: OwnedInfo,
     },
     /// A bot timed out on an action this turn.

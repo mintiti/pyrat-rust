@@ -398,7 +398,9 @@ async fn run_analysis_inner(
 
 /// Build an OwnedTurnState from an arbitrary game-tree position (cursor-follows-analysis).
 fn build_turn_state_from_position(pos: AnalysisPosition) -> OwnedTurnState {
-    OwnedTurnState {
+    use pyrat_host::game_loop::compute_state_hash;
+
+    let mut ts = OwnedTurnState {
         turn: pos.turn,
         player1_position: (pos.player1.position.x, pos.player1.position.y),
         player2_position: (pos.player2.position.x, pos.player2.position.y),
@@ -409,7 +411,10 @@ fn build_turn_state_from_position(pos: AnalysisPosition) -> OwnedTurnState {
         cheese: pos.cheese.iter().map(|c| (c.x, c.y)).collect(),
         player1_last_move: specta_to_wire(pos.player1_last_move),
         player2_last_move: specta_to_wire(pos.player2_last_move),
-    }
+        state_hash: 0,
+    };
+    ts.state_hash = compute_state_hash(&ts);
+    ts
 }
 
 /// Send HostCommand::Stop to all connected sessions.
@@ -525,6 +530,7 @@ async fn finish_collecting(
                                 emit_event(event_tx, MatchEvent::BotInfo {
                                     sender,
                                     turn: current_turn,
+                                    state_hash: info.state_hash,
                                     info,
                                 });
                             }
@@ -594,6 +600,7 @@ fn handle_bot_msg(
                         MatchEvent::BotInfo {
                             sender,
                             turn: current_turn,
+                            state_hash: info.state_hash,
                             info,
                         },
                     );
@@ -686,6 +693,7 @@ fn build_bot_info_event(
     match_id: u32,
     sender: Player,
     turn: u16,
+    state_hash: u64,
     info: &OwnedInfo,
 ) -> BotInfoEvent {
     BotInfoEvent {
@@ -693,6 +701,7 @@ fn build_bot_info_event(
         sender: player_side(sender),
         subject: player_side(info.player),
         turn,
+        state_hash: format!("{state_hash:016x}"),
         multipv: info.multipv,
         target: info.target.map(Coord::from),
         depth: info.depth,
@@ -746,6 +755,7 @@ async fn forward_events(
                         let payload = TurnPlayedEvent {
                             match_id,
                             turn: state.turn,
+                            state_hash: format!("{:016x}", state.state_hash),
                             player1: PlayerState {
                                 position: state.player1_position.into(),
                                 score: state.player1_score,
@@ -790,8 +800,8 @@ async fn forward_events(
                         }
                         .emit(&app);
                     },
-                    MatchEvent::BotInfo { sender, turn, info } => {
-                        let payload = build_bot_info_event(match_id, sender, turn, &info);
+                    MatchEvent::BotInfo { sender, turn, state_hash, info } => {
+                        let payload = build_bot_info_event(match_id, sender, turn, state_hash, &info);
                         let key = (payload.sender, payload.subject, payload.multipv);
                         info_buf.insert(key, payload);
                     },

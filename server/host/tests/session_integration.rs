@@ -172,6 +172,7 @@ async fn happy_path_full_lifecycle() {
             cheese: vec![(10, 7)],
             player1_last_move: Direction::Stay,
             player2_last_move: Direction::Stay,
+            state_hash: 0,
         })))
         .await
         .unwrap();
@@ -667,6 +668,7 @@ async fn stop_sends_wire_stop_and_session_stays_alive() {
             cheese: vec![(10, 7)],
             player1_last_move: Direction::Stay,
             player2_last_move: Direction::Stay,
+            state_hash: 0,
         })))
         .await
         .unwrap();
