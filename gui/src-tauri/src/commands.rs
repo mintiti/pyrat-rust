@@ -177,10 +177,14 @@ pub struct MazeState {
     pub player1: PlayerState,
     pub player2: PlayerState,
     pub total_cheese: u16,
+    pub state_hash: String,
 }
 
 /// Convert engine GameState to our serializable MazeState.
 pub fn build_maze_state(game: &GameState) -> MazeState {
+    use pyrat_host::game_loop::{compute_state_hash, OwnedTurnState};
+    use pyrat_host::wire::Direction as WireDirection;
+
     let walls = game
         .wall_entries()
         .into_iter()
@@ -200,11 +204,27 @@ pub fn build_maze_state(game: &GameState) -> MazeState {
         })
         .collect();
 
-    let cheese = game
+    let cheese: Vec<Coord> = game
         .cheese_positions()
         .into_iter()
         .map(Coord::from)
         .collect();
+
+    // Compute state_hash for the initial position (last moves are Stay/Stay).
+    let ts = OwnedTurnState {
+        turn: game.turns(),
+        player1_position: (game.player1_position().x, game.player1_position().y),
+        player2_position: (game.player2_position().x, game.player2_position().y),
+        player1_score: game.player1_score(),
+        player2_score: game.player2_score(),
+        player1_mud_turns: game.player1_mud_turns(),
+        player2_mud_turns: game.player2_mud_turns(),
+        cheese: cheese.iter().map(|c| (c.x, c.y)).collect(),
+        player1_last_move: WireDirection::Stay,
+        player2_last_move: WireDirection::Stay,
+        state_hash: 0,
+    };
+    let state_hash = compute_state_hash(&ts);
 
     MazeState {
         width: game.width(),
@@ -225,6 +245,7 @@ pub fn build_maze_state(game: &GameState) -> MazeState {
             mud_turns: game.player2_mud_turns(),
         },
         total_cheese: game.total_cheese(),
+        state_hash: format!("{state_hash:016x}"),
     }
 }
 

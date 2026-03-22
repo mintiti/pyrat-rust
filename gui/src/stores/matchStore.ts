@@ -279,7 +279,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 	onMatchStarted: (maze, matchId) => {
 		const root: GameNode = {
 			turn: maze.turn,
-			stateHash: "",
+			stateHash: maze.state_hash,
 			player1: maze.player1,
 			player2: maze.player2,
 			cheese: maze.cheese,
@@ -638,6 +638,7 @@ export function useDisplayState(): MazeState | null {
 				player1: node.player1,
 				player2: node.player2,
 				cheese: node.cheese,
+				state_hash: node.stateHash,
 			};
 		}
 		return previewMaze;

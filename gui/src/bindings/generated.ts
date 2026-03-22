@@ -191,7 +191,7 @@ export type MatchOverEvent = { match_id: number; winner: MatchWinner; player1_sc
  */
 export type MatchStartedEvent = { match_id: number; maze: MazeState }
 export type MatchWinner = "Player1" | "Player2" | "Draw"
-export type MazeState = { width: number; height: number; turn: number; max_turns: number; walls: WallEntry[]; mud: MudEntry[]; cheese: Coord[]; player1: PlayerState; player2: PlayerState; total_cheese: number }
+export type MazeState = { width: number; height: number; turn: number; max_turns: number; walls: WallEntry[]; mud: MudEntry[]; cheese: Coord[]; player1: PlayerState; player2: PlayerState; total_cheese: number; state_hash: string }
 export type MudEntry = { from: Coord; to: Coord; cost: number }
 /**
  * Player identity — specta-friendly mirror of pyrat_wire::Player.

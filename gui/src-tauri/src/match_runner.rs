@@ -714,7 +714,7 @@ fn build_bot_info_event(
 
 /// Flush all buffered BotInfo events to the frontend.
 fn flush_bot_info(
-    buf: &mut HashMap<(PlayerSide, PlayerSide, u16), BotInfoEvent>,
+    buf: &mut HashMap<(PlayerSide, PlayerSide, u16, u64), BotInfoEvent>,
     app: &tauri::AppHandle,
 ) {
     for (_, payload) in buf.drain() {
@@ -732,7 +732,7 @@ async fn forward_events(
     app: tauri::AppHandle,
     match_id: u32,
 ) {
-    let mut info_buf: HashMap<(PlayerSide, PlayerSide, u16), BotInfoEvent> = HashMap::new();
+    let mut info_buf: HashMap<(PlayerSide, PlayerSide, u16, u64), BotInfoEvent> = HashMap::new();
     let mut tick = tokio::time::interval(Duration::from_millis(100));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -802,7 +802,7 @@ async fn forward_events(
                     },
                     MatchEvent::BotInfo { sender, turn, state_hash, info } => {
                         let payload = build_bot_info_event(match_id, sender, turn, state_hash, &info);
-                        let key = (payload.sender, payload.subject, payload.multipv);
+                        let key = (payload.sender, payload.subject, payload.multipv, state_hash);
                         info_buf.insert(key, payload);
                     },
                     _ => {},
