@@ -275,12 +275,10 @@ impl GameState {
 
         // Patch dynamic state to match current turn
         game.player1.current_pos = self.player1_position;
-        game.player1.target_pos = self.player1_position;
         game.player1.score = self.player1_score;
         game.player1.mud_timer = self.player1_mud_turns;
 
         game.player2.current_pos = self.player2_position;
-        game.player2.target_pos = self.player2_position;
         game.player2.score = self.player2_score;
         game.player2.mud_timer = self.player2_mud_turns;
 
