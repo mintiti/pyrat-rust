@@ -73,7 +73,16 @@ impl Search {
     ) -> (Direction, f32, Vec<Vec<Direction>>) {
         let mut best_move = Direction::Stay;
         let mut best_score = f32::NEG_INFINITY;
-        let mut tied_pvs: Vec<Vec<Direction>> = Vec::new();
+        let mut best_opp_score = 0.0_f32;
+        // (our_pv, opp_pv) pairs
+        let mut tied_pvs: Vec<(Vec<Direction>, Vec<Direction>)> = Vec::new();
+
+        let my_player = state.my_player();
+        let opp_player = if my_player == Player::Player1 {
+            Player::Player2
+        } else {
+            Player::Player1
+        };
 
         let my_pos = if self.am_player1 {
             sim.player1_position()
@@ -103,7 +112,7 @@ impl Search {
                     .collect()
             };
 
-            let (our_score_vs_opp_best, _, pv_vs_opp_best) = match self
+            let (our_score_vs_opp_best, opp_score, pv_vs_opp_best, opp_pv) = match self
                 .opponent_best_response(sim, *my_dir, &opp_moves, depth, state, ctx, &child_suffixes)
             {
                 Some(result) => result,
@@ -115,36 +124,73 @@ impl Search {
 
             if our_score_vs_opp_best > best_score {
                 best_score = our_score_vs_opp_best;
+                best_opp_score = opp_score;
                 best_move = *my_dir;
+
+                let (my_target, opp_target) =
+                    find_targets(sim, &pv, &opp_pv, self.am_player1);
+
                 ctx.send_info(&InfoParams {
                     multipv: 1,
                     depth: depth as u16,
                     nodes: self.nodes as u32,
                     score: Some(best_score),
                     pv: &pv,
+                    target: my_target,
                     message: &format!("depth {depth}: {best_move:?} ({best_score:.1})"),
-                    ..InfoParams::for_player(state.my_player())
+                    ..InfoParams::for_player(my_player)
                 });
-                tied_pvs = vec![pv];
+                ctx.send_info(&InfoParams {
+                    multipv: 1,
+                    depth: depth as u16,
+                    nodes: self.nodes as u32,
+                    score: Some(opp_score),
+                    pv: &opp_pv,
+                    target: opp_target,
+                    message: &format!("depth {depth}: {:?} ({opp_score:.1})", opp_pv.first().unwrap_or(&Direction::Stay)),
+                    ..InfoParams::for_player(opp_player)
+                });
+
+                tied_pvs = vec![(pv, opp_pv)];
             } else if our_score_vs_opp_best == best_score {
-                tied_pvs.push(pv.clone());
+                let (my_target, opp_target) =
+                    find_targets(sim, &pv, &opp_pv, self.am_player1);
+
+                tied_pvs.push((pv.clone(), opp_pv.clone()));
+
                 ctx.send_info(&InfoParams {
                     multipv: tied_pvs.len() as u16,
                     depth: depth as u16,
                     nodes: self.nodes as u32,
                     score: Some(best_score),
                     pv: &pv,
+                    target: my_target,
                     message: &format!(
                         "depth {depth}: {:?} ({best_score:.1}) [pv {}]",
                         pv[0],
                         tied_pvs.len()
                     ),
-                    ..InfoParams::for_player(state.my_player())
+                    ..InfoParams::for_player(my_player)
+                });
+                ctx.send_info(&InfoParams {
+                    multipv: tied_pvs.len() as u16,
+                    depth: depth as u16,
+                    nodes: self.nodes as u32,
+                    score: Some(best_opp_score),
+                    pv: &opp_pv,
+                    target: opp_target,
+                    message: &format!(
+                        "depth {depth}: {:?} ({best_opp_score:.1}) [pv {}]",
+                        opp_pv.first().unwrap_or(&Direction::Stay),
+                        tied_pvs.len()
+                    ),
+                    ..InfoParams::for_player(opp_player)
                 });
             }
         }
 
-        (best_move, best_score, tied_pvs)
+        let our_pvs = tied_pvs.into_iter().map(|(our, _)| our).collect();
+        (best_move, best_score, our_pvs)
     }
 
     fn search(
@@ -154,10 +200,10 @@ impl Search {
         state: &GameState,
         ctx: &Context,
         pv_suffixes: &[&[Direction]],
-    ) -> Option<(f32, f32, Vec<Direction>)> {
+    ) -> Option<(f32, f32, Vec<Direction>, Vec<Direction>)> {
         if depth == 0 || sim.check_game_over() {
             let (our, opp) = self.evaluate(sim);
-            return Some((our, opp, Vec::new()));
+            return Some((our, opp, Vec::new(), Vec::new()));
         }
 
         if ctx.should_stop() {
@@ -181,6 +227,7 @@ impl Search {
         let mut best_our = f32::NEG_INFINITY;
         let mut best_opp_at_our_best = 0.0_f32;
         let mut best_pv = Vec::new();
+        let mut best_opp_pv = Vec::new();
 
         for my_dir in &my_moves {
             if ctx.should_stop() {
@@ -197,12 +244,8 @@ impl Search {
                     .collect()
             };
 
-            let (our_when_opp_best, best_opp_score, pv_when_opp_best) = match self
-                .opponent_best_response(sim, *my_dir, &opp_moves, depth, state, ctx, &child_suffixes)
-            {
-                Some(result) => result,
-                None => return None,
-            };
+            let (our_when_opp_best, best_opp_score, pv_when_opp_best, opp_pv) = self
+                .opponent_best_response(sim, *my_dir, &opp_moves, depth, state, ctx, &child_suffixes)?;
 
             if our_when_opp_best > best_our {
                 best_our = our_when_opp_best;
@@ -210,12 +253,14 @@ impl Search {
                 let mut pv = vec![*my_dir];
                 pv.extend(pv_when_opp_best);
                 best_pv = pv;
+                best_opp_pv = opp_pv;
             }
         }
 
-        Some((best_our, best_opp_at_our_best, best_pv))
+        Some((best_our, best_opp_at_our_best, best_pv, best_opp_pv))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn opponent_best_response(
         &mut self,
         sim: &mut GameSim,
@@ -225,19 +270,20 @@ impl Search {
         state: &GameState,
         ctx: &Context,
         child_suffixes: &[&[Direction]],
-    ) -> Option<(f32, f32, Vec<Direction>)> {
+    ) -> Option<(f32, f32, Vec<Direction>, Vec<Direction>)> {
         let mut best_opp_score = f32::NEG_INFINITY;
         let mut our_when_opp_best = f32::NEG_INFINITY;
         let mut pv_when_opp_best = Vec::new();
+        let mut opp_pv_when_opp_best = Vec::new();
 
         for opp_dir in opp_moves {
             let (p1_dir, p2_dir) = self.assign_moves(my_dir, *opp_dir);
             let undo = sim.make_move(p1_dir, p2_dir);
             self.nodes += 1;
 
-            let (our, opp, child_pv) = if depth <= 1 || sim.check_game_over() {
+            let (our, opp, child_pv, child_opp_pv) = if depth <= 1 || sim.check_game_over() {
                 let (our, opp) = self.evaluate(sim);
-                (our, opp, Vec::new())
+                (our, opp, Vec::new(), Vec::new())
             } else {
                 match self.search(sim, depth - 1, state, ctx, child_suffixes) {
                     Some(result) => result,
@@ -254,10 +300,13 @@ impl Search {
                 best_opp_score = opp;
                 our_when_opp_best = our;
                 pv_when_opp_best = child_pv;
+                let mut opv = vec![*opp_dir];
+                opv.extend(child_opp_pv);
+                opp_pv_when_opp_best = opv;
             }
         }
 
-        Some((our_when_opp_best, best_opp_score, pv_when_opp_best))
+        Some((our_when_opp_best, best_opp_score, pv_when_opp_best, opp_pv_when_opp_best))
     }
 
     fn evaluate(&self, sim: &GameSim) -> (f32, f32) {
@@ -275,6 +324,59 @@ impl Search {
             (opp_dir, my_dir)
         }
     }
+}
+
+type Target = Option<(u8, u8)>;
+
+fn find_targets(
+    sim: &mut GameSim,
+    our_pv: &[Direction],
+    opp_pv: &[Direction],
+    am_player1: bool,
+) -> (Target, Target) {
+    let mut clone = sim.clone();
+    let len = our_pv.len().max(opp_pv.len());
+
+    let mut our_target = None;
+    let mut opp_target = None;
+
+    let initial_our = if am_player1 { clone.player1_score() } else { clone.player2_score() };
+    let initial_opp = if am_player1 { clone.player2_score() } else { clone.player1_score() };
+    let mut prev_our = initial_our;
+    let mut prev_opp = initial_opp;
+
+    for i in 0..len {
+        let our_dir = our_pv.get(i).copied().unwrap_or(Direction::Stay);
+        let opp_dir = opp_pv.get(i).copied().unwrap_or(Direction::Stay);
+
+        let (p1_dir, p2_dir) = if am_player1 {
+            (our_dir, opp_dir)
+        } else {
+            (opp_dir, our_dir)
+        };
+        clone.make_move(p1_dir, p2_dir);
+
+        let cur_our = if am_player1 { clone.player1_score() } else { clone.player2_score() };
+        let cur_opp = if am_player1 { clone.player2_score() } else { clone.player1_score() };
+
+        if our_target.is_none() && cur_our > prev_our {
+            let pos = if am_player1 { clone.player1_position() } else { clone.player2_position() };
+            our_target = Some((pos.x, pos.y));
+        }
+        if opp_target.is_none() && cur_opp > prev_opp {
+            let pos = if am_player1 { clone.player2_position() } else { clone.player1_position() };
+            opp_target = Some((pos.x, pos.y));
+        }
+
+        if our_target.is_some() && opp_target.is_some() {
+            break;
+        }
+
+        prev_our = cur_our;
+        prev_opp = cur_opp;
+    }
+
+    (our_target, opp_target)
 }
 
 fn order_moves<S: AsRef<[Direction]>>(moves: &[Direction], pv_suffixes: &[S]) -> Vec<Direction> {
