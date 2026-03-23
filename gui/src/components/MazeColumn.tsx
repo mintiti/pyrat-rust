@@ -7,14 +7,14 @@ import EventTimeline, { TIMELINE_HEIGHT } from "./EventTimeline";
 import MazeRenderer from "./MazeRenderer";
 
 type Props = {
-	setupPhase: "connecting" | "preprocessing" | null;
+	connecting: boolean;
 	displayState: DisplayState | null;
 	previewError: string | null;
 	hasMatch: boolean;
 };
 
 export default function MazeColumn({
-	setupPhase,
+	connecting,
 	displayState,
 	previewError,
 	hasMatch,
@@ -40,12 +40,10 @@ export default function MazeColumn({
 			}}
 		>
 			<div style={{ flex: 1, minHeight: 0 }}>
-				{setupPhase ? (
+				{connecting ? (
 					<Center h="100%">
 						<Text c="dimmed" size="sm">
-							{setupPhase === "preprocessing"
-								? "Preprocessing..."
-								: "Connecting bots..."}
+							Connecting bots...
 						</Text>
 					</Center>
 				) : displayState ? (

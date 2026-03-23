@@ -189,9 +189,11 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 						/>
 					)}
 					<Text size="xs" c="dimmed" ml={4}>
-						{mode === "step"
-							? `Turn ${cursorDepth}`
-							: `Turn ${cursorDepth} / ${totalTurns}`}
+						{matchPhase === "preprocessing"
+							? "Preprocessing"
+							: mode === "step"
+								? `Turn ${cursorDepth}`
+								: `Turn ${cursorDepth} / ${totalTurns}`}
 					</Text>
 				</Group>
 			)}
