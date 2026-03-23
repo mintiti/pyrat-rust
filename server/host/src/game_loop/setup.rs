@@ -58,6 +58,7 @@ pub async fn run_setup(
     game_rx: &mut mpsc::Receiver<SessionMsg>,
     event_tx: Option<&mpsc::UnboundedSender<MatchEvent>>,
 ) -> Result<SetupResult, SetupError> {
+    let setup_start = Instant::now();
     let startup_deadline = Instant::now() + setup.timing.startup_timeout;
     let mut slots = PlayerSlots::new(&setup.players);
 
@@ -147,8 +148,13 @@ pub async fn run_setup(
         }
     }
 
-    info!("setup phase A complete — all bots identified");
+    let phase_a_ms = setup_start.elapsed().as_millis();
+    info!(
+        elapsed_ms = phase_a_ms,
+        "setup phase A complete — all bots identified"
+    );
 
+    let phase_b_start = Instant::now();
     // ── Phase B: Send SetOption + MatchConfig, wait for Ready ───
     for handle in handles.values() {
         if let Some(opts) = setup.bot_options.get(&handle.agent_id) {
@@ -228,8 +234,13 @@ pub async fn run_setup(
         }
     }
 
-    info!("setup phase B complete — all bots configured");
+    let phase_b_ms = phase_b_start.elapsed().as_millis();
+    info!(
+        elapsed_ms = phase_b_ms,
+        "setup phase B complete — all bots configured"
+    );
 
+    let phase_c_start = Instant::now();
     // ── Phase C: StartPreprocessing, wait for PreprocessingDone ───
     for handle in handles.values() {
         if handle
@@ -298,7 +309,14 @@ pub async fn run_setup(
         }
     }
 
-    info!("setup phase C complete — preprocessing done");
+    let phase_c_ms = phase_c_start.elapsed().as_millis();
+    info!(
+        elapsed_ms = phase_c_ms,
+        "setup phase C complete — preprocessing done"
+    );
+
+    let total_ms = setup_start.elapsed().as_millis();
+    info!(total_ms, "setup complete");
 
     emit(event_tx, MatchEvent::SetupComplete);
     emit(
