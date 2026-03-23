@@ -23,8 +23,7 @@ use crate::game::types::MudMap;
 /// Stores the state of a player including their movement status
 #[derive(Clone)]
 pub struct PlayerState {
-    pub current_pos: Coordinates, // Position where player is visible/started move
-    pub target_pos: Coordinates,  // Position player is moving to if in mud
+    pub current_pos: Coordinates, // Position where player is (destination on mud entry)
     pub mud_timer: u8,            // Turns remaining in mud, 0 if not in mud
     pub score: f32,
     pub misses: u16, // Counter for missed moves
@@ -41,20 +40,29 @@ impl PlayerState {
     const fn can_collect_cheese(&self) -> bool {
         !self.is_in_mud() // Can collect on last mud turn
     }
+
+    /// Apply a movement: decrement mud timer if stuck, otherwise move and enter mud.
+    #[inline(always)]
+    fn apply_move(&mut self, moved: bool, new_pos: Coordinates, mud: &MudMap) {
+        if self.mud_timer > 0 {
+            self.mud_timer -= 1;
+        } else if moved {
+            self.mud_timer = mud.get(self.current_pos, new_pos).unwrap_or(0);
+            self.current_pos = new_pos;
+        }
+    }
 }
 /// Records what happened in a move for unmake purposes
 #[derive(Clone, Deserialize, Serialize)]
 pub struct MoveUndo {
     // Player 1 state
     pub p1_pos: Coordinates,
-    pub p1_target: Coordinates,
     pub p1_mud: u8,
     pub p1_score: f32,
     pub p1_misses: u16,
 
     // Player 2 state
     pub p2_pos: Coordinates,
-    pub p2_target: Coordinates,
     pub p2_mud: u8,
     pub p2_score: f32,
     pub p2_misses: u16,
@@ -97,7 +105,6 @@ impl GameState {
         // Initialize players at opposite corners
         let player1 = PlayerState {
             current_pos: Coordinates::new(0, 0), // Bottom left
-            target_pos: Coordinates::new(0, 0),
             mud_timer: 0,
             score: 0.0,
             misses: 0,
@@ -105,7 +112,6 @@ impl GameState {
 
         let player2 = PlayerState {
             current_pos: Coordinates::new(width - 1, height - 1), // Top right
-            target_pos: Coordinates::new(width - 1, height - 1),
             mud_timer: 0,
             score: 0.0,
             misses: 0,
@@ -135,9 +141,7 @@ impl GameState {
     ) -> Self {
         let mut game = Self::new(width, height, walls, max_turns);
         game.player1.current_pos = player1_pos;
-        game.player1.target_pos = player1_pos;
         game.player2.current_pos = player2_pos;
-        game.player2.target_pos = player2_pos;
         game
     }
 
@@ -212,13 +216,11 @@ impl GameState {
         // Save initial state
         let undo = MoveUndo {
             p1_pos: self.player1.current_pos,
-            p1_target: self.player1.target_pos,
             p1_mud: self.player1.mud_timer,
             p1_score: self.player1.score,
             p1_misses: self.player1.misses,
 
             p2_pos: self.player2.current_pos,
-            p2_target: self.player2.target_pos,
             p2_mud: self.player2.mud_timer,
             p2_score: self.player2.score,
             p2_misses: self.player2.misses,
@@ -253,13 +255,11 @@ impl GameState {
 
         // Restore player states
         self.player1.current_pos = undo.p1_pos;
-        self.player1.target_pos = undo.p1_target;
         self.player1.mud_timer = undo.p1_mud;
         self.player1.score = undo.p1_score;
         self.player1.misses = undo.p1_misses;
 
         self.player2.current_pos = undo.p2_pos;
-        self.player2.target_pos = undo.p2_target;
         self.player2.mud_timer = undo.p2_mud;
         self.player2.score = undo.p2_score;
         self.player2.misses = undo.p2_misses;
@@ -277,54 +277,8 @@ impl GameState {
         let (p1_moved, p1_new_pos) = self.compute_player_move(&self.player1, p1_move);
         let (p2_moved, p2_new_pos) = self.compute_player_move(&self.player2, p2_move);
 
-        // Update Player 1
-        if self.player1.mud_timer > 0 {
-            // In mud - decrement timer and possibly complete move
-            self.player1.mud_timer -= 1;
-            // Mud just ended - complete the move initiated previously
-            if self.player1.mud_timer == 0 {
-                self.player1.current_pos = self.player1.target_pos;
-            }
-        } else if p1_moved {
-            // Not in mud - check new position
-            let mud_time = self
-                .mud
-                .get(self.player1.current_pos, p1_new_pos)
-                .unwrap_or(0);
-            self.player1.mud_timer = mud_time;
-            if mud_time <= 1 {
-                // Move immediately (no mud or mud=1)
-                self.player1.current_pos = p1_new_pos;
-            }
-            self.player1.target_pos = p1_new_pos;
-        }
-
-        // Update Player 2 (same logic)
-        if self.player2.mud_timer > 0 {
-            self.player2.mud_timer -= 1;
-            if self.player2.mud_timer == 0 {
-                self.player2.current_pos = self.player2.target_pos;
-            }
-        } else if p2_moved {
-            let mud_time = self
-                .mud
-                .get(self.player2.current_pos, p2_new_pos)
-                .unwrap_or(0);
-
-            self.player2.mud_timer = mud_time;
-            if mud_time <= 1 {
-                self.player2.current_pos = p2_new_pos;
-            }
-            self.player2.target_pos = p2_new_pos;
-        }
-
-        // Process any remaining movement
-        if self.player1.mud_timer == 0 && self.player1.current_pos != self.player1.target_pos {
-            self.player1.current_pos = self.player1.target_pos;
-        }
-        if self.player2.mud_timer == 0 && self.player2.current_pos != self.player2.target_pos {
-            self.player2.current_pos = self.player2.target_pos;
-        }
+        self.player1.apply_move(p1_moved, p1_new_pos, &self.mud);
+        self.player2.apply_move(p2_moved, p2_new_pos, &self.mud);
 
         // Increment misses if position didn't change
         let p1_has_moved = self.player1.current_pos != p1_start_pos;
@@ -657,9 +611,7 @@ mod tests {
         let game = config.create(None).unwrap();
 
         assert_eq!(game.player1.current_pos, p1_pos);
-        assert_eq!(game.player1.target_pos, p1_pos);
         assert_eq!(game.player2.current_pos, p2_pos);
-        assert_eq!(game.player2.target_pos, p2_pos);
     }
 
     #[test]
@@ -915,22 +867,21 @@ mod tests {
                 &[((start_pos, target_pos), mud_timer)],
             );
 
-            // Initial move into mud
+            // Initial move into mud — position jumps to destination, mud_timer set
             let result = game.process_turn(Direction::Up, Direction::Stay);
-            assert!(!result.p1_moved);
-            assert_eq!(game.player1.current_pos, start_pos);
-            assert_eq!(game.player1.target_pos, target_pos);
+            assert!(result.p1_moved);
+            assert_eq!(game.player1.current_pos, target_pos);
+            assert_eq!(game.player1.mud_timer, 2);
 
-            // First mud turn
+            // First mud turn — timer decrements, can't collect cheese
             let result = game.process_turn(Direction::Right, Direction::Stay);
             assert!(!result.p1_moved);
             assert_eq!(game.player1.mud_timer, 1);
-            assert_eq!(game.player1.current_pos, start_pos);
-            assert_eq!(game.player1.target_pos, target_pos);
+            assert_eq!(game.player1.current_pos, target_pos);
 
-            // Final mud turn - should complete movement
+            // Final mud turn — timer reaches 0, player is now free
             let result = game.process_turn(Direction::Left, Direction::Stay);
-            assert!(result.p1_moved);
+            assert!(!result.p1_moved);
             assert_eq!(game.player1.mud_timer, 0);
             assert_eq!(game.player1.current_pos, target_pos);
         }
@@ -1232,18 +1183,16 @@ mod make_unmake_tests {
         // Move into mud
         let undo1 = game.make_move(Direction::Up, Direction::Stay);
 
-        // Check mud state
+        // Check mud state — position is now at destination, timer set
         assert_eq!(game.player1.mud_timer, 2);
-        assert_eq!(game.player1.current_pos, initial_state.player1.current_pos);
-        assert_eq!(game.player1.target_pos, Coordinates::new(0, 1));
+        assert_eq!(game.player1.current_pos, Coordinates::new(0, 1));
 
         // Try to move while in mud (should be ignored)
         let undo2 = game.make_move(Direction::Right, Direction::Stay);
 
         // Check still in mud, timer decreased
         assert_eq!(game.player1.mud_timer, 1);
-        assert_eq!(game.player1.current_pos, initial_state.player1.current_pos);
-        assert_eq!(game.player1.target_pos, Coordinates::new(0, 1));
+        assert_eq!(game.player1.current_pos, Coordinates::new(0, 1));
 
         // Unmake moves in reverse order
         game.unmake_move(undo2);
@@ -1252,7 +1201,6 @@ mod make_unmake_tests {
         // Verify back to initial state
         assert_eq!(game.player1.mud_timer, initial_state.player1.mud_timer);
         assert_eq!(game.player1.current_pos, initial_state.player1.current_pos);
-        assert_eq!(game.player1.target_pos, initial_state.player1.target_pos);
     }
 
     #[test]
@@ -1483,7 +1431,6 @@ mod make_unmake_tests {
 
         // Verify complete restoration
         assert_eq!(game.player1.current_pos, initial_state.player1.current_pos);
-        assert_eq!(game.player1.target_pos, initial_state.player1.target_pos);
         assert_eq!(game.player1.mud_timer, initial_state.player1.mud_timer);
         assert_eq!(game.player1.score, initial_state.player1.score);
         assert_eq!(game.player1.misses, initial_state.player1.misses);

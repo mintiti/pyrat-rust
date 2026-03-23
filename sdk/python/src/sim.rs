@@ -26,16 +26,6 @@ impl PyMoveUndo {
     }
 
     #[getter]
-    fn p1_target(&self) -> (u8, u8) {
-        (self.inner.p1_target.x, self.inner.p1_target.y)
-    }
-
-    #[getter]
-    fn p2_target(&self) -> (u8, u8) {
-        (self.inner.p2_target.x, self.inner.p2_target.y)
-    }
-
-    #[getter]
     fn p1_mud(&self) -> u8 {
         self.inner.p1_mud
     }
@@ -121,12 +111,10 @@ impl PyGameSim {
 
         // Patch player state.
         game.player1.current_pos = Coordinates::new(p1_pos.0, p1_pos.1);
-        game.player1.target_pos = Coordinates::new(p1_pos.0, p1_pos.1);
         game.player1.score = p1_score;
         game.player1.mud_timer = p1_mud;
 
         game.player2.current_pos = Coordinates::new(p2_pos.0, p2_pos.1);
-        game.player2.target_pos = Coordinates::new(p2_pos.0, p2_pos.1);
         game.player2.score = p2_score;
         game.player2.mud_timer = p2_mud;
 

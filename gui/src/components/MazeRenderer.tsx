@@ -1,7 +1,7 @@
 import { Center, Loader } from "@mantine/core";
 import { useElementSize } from "@mantine/hooks";
 import { useEffect, useMemo, useState } from "react";
-import type { MazeState, PlayerSide } from "../bindings/generated";
+import type { PlayerSide } from "../bindings/generated";
 import type { AssetMap } from "../renderer/assets";
 import { loadAssets } from "../renderer/assets";
 import {
@@ -11,6 +11,7 @@ import {
 import { type LayoutMetrics, computeLayout } from "../renderer/layout";
 import { buildPvOverlay, buildWallSet } from "../renderer/pvArrows";
 import { generateTileMap } from "../renderer/tileMap";
+import type { DisplayState } from "../stores/matchStore";
 import {
 	useCurrentBotInfo,
 	useIsAtTip,
@@ -21,7 +22,7 @@ import MazeCanvas from "./MazeCanvas";
 import PvOverlay from "./PvOverlay";
 
 type Props = {
-	gameState: MazeState;
+	gameState: DisplayState;
 	layout?: LayoutMetrics | null;
 	showCellIndices?: boolean;
 	hideScoreStrip?: boolean;
@@ -106,8 +107,8 @@ export default function MazeRenderer({
 		if (visibleSenders?.size === 0) return null;
 		return buildPvOverlay(
 			botInfo,
-			gameState.player1.position,
-			gameState.player2.position,
+			gameState.player1Destination,
+			gameState.player2Destination,
 			wallSet,
 			gameState.width,
 			gameState.height,

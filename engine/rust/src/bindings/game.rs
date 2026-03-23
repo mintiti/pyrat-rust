@@ -69,16 +69,6 @@ impl PyMoveUndo {
     }
 
     #[getter]
-    fn p1_target(&self) -> Coordinates {
-        self.inner.p1_target
-    }
-
-    #[getter]
-    fn p2_target(&self) -> Coordinates {
-        self.inner.p2_target
-    }
-
-    #[getter]
     fn p1_mud(&self) -> u8 {
         self.inner.p1_mud
     }
