@@ -1,14 +1,14 @@
 import { Center, Text } from "@mantine/core";
 import { useElementSize } from "@mantine/hooks";
 import { useMemo } from "react";
-import type { MazeState } from "../bindings/generated";
 import { computeLayout } from "../renderer/layout";
+import type { DisplayState } from "../stores/matchStore";
 import EventTimeline, { TIMELINE_HEIGHT } from "./EventTimeline";
 import MazeRenderer from "./MazeRenderer";
 
 type Props = {
 	connecting: boolean;
-	displayState: MazeState | null;
+	displayState: DisplayState | null;
 	previewError: string | null;
 	hasMatch: boolean;
 };

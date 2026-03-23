@@ -44,6 +44,32 @@ export interface GameNode {
 	actions: { player1: Direction; player2: Direction } | null;
 	botInfo: BotInfoMap;
 	children: GameNode[];
+	/** Cell the player was on before entering mud, or null if not in mud. */
+	player1MudOrigin: Coord | null;
+	player2MudOrigin: Coord | null;
+}
+
+/**
+ * Derive the mud origin for a child node.
+ * - Not in mud → null
+ * - Just entered mud (parent wasn't in mud) → parent's position (the cell they left)
+ * - Still in mud → propagate parent's origin
+ */
+function computeMudOrigin(
+	parentPos: Coord,
+	parentMudTurns: number,
+	parentMudOrigin: Coord | null,
+	childMudTurns: number,
+): Coord | null {
+	if (childMudTurns === 0) return null;
+	if (parentMudTurns === 0) return parentPos;
+	return parentMudOrigin;
+}
+
+/** MazeState with visual positions swapped to mud origins + explicit destinations. */
+export interface DisplayState extends MazeState {
+	player1Destination: Coord;
+	player2Destination: Coord;
 }
 
 export type MatchPhase = "idle" | "connecting" | "playing" | "finished";
@@ -286,6 +312,8 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 			actions: null,
 			botInfo: {},
 			children: [],
+			player1MudOrigin: null,
+			player2MudOrigin: null,
 		};
 		const { mode } = get();
 		set({
@@ -311,6 +339,13 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 			produce((state: MatchState) => {
 				if (!state.root) return;
 
+				// Resolve the parent node first — needed for mud origin computation
+				const parent =
+					state.mode === "step"
+						? getNodeAtPath(state.root, state.cursor)
+						: getMainlineEnd(state.root);
+				if (!parent) return;
+
 				const newChild: GameNode = {
 					turn: e.turn,
 					stateHash: e.state_hash,
@@ -323,11 +358,21 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 					},
 					botInfo: {},
 					children: [],
+					player1MudOrigin: computeMudOrigin(
+						parent.player1.position,
+						parent.player1.mud_turns,
+						parent.player1MudOrigin,
+						e.player1.mud_turns,
+					),
+					player2MudOrigin: computeMudOrigin(
+						parent.player2.position,
+						parent.player2.mud_turns,
+						parent.player2MudOrigin,
+						e.player2.mud_turns,
+					),
 				};
 
 				if (state.mode === "step") {
-					const parent = getNodeAtPath(state.root, state.cursor);
-					if (!parent) return;
 					// Dedup by resolved action pair — same inputs from same state produce identical results
 					const existingIdx = parent.children.findIndex(
 						(c) =>
@@ -341,8 +386,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 						state.cursor.push(parent.children.length - 1);
 					}
 				} else {
-					const end = getMainlineEnd(state.root);
-					end.children.push(newChild);
+					parent.children.push(newChild);
 					state.mainlineDepth += 1;
 				}
 			}),
@@ -617,7 +661,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
  * live playback. Cursor changes trigger the memo, and getState() always
  * returns the latest tree.
  */
-export function useDisplayState(): MazeState | null {
+export function useDisplayState(): DisplayState | null {
 	const mazeConfig = useMatchStore((s) => s.mazeConfig);
 	const cursor = useMatchStore((s) => s.cursor);
 	const previewMaze = useMatchStore((s) => s.previewMaze);
@@ -625,7 +669,7 @@ export function useDisplayState(): MazeState | null {
 	return useMemo(() => {
 		if (mazeConfig) {
 			const root = useMatchStore.getState().root;
-			if (!root) return previewMaze;
+			if (!root) return previewMaze ? toDisplayState(previewMaze) : null;
 			const node = getNodeAtPath(root, cursor) ?? root;
 			return {
 				width: mazeConfig.width,
@@ -635,14 +679,31 @@ export function useDisplayState(): MazeState | null {
 				max_turns: mazeConfig.max_turns,
 				total_cheese: mazeConfig.total_cheese,
 				turn: node.turn,
-				player1: node.player1,
-				player2: node.player2,
+				player1: {
+					...node.player1,
+					position: node.player1MudOrigin ?? node.player1.position,
+				},
+				player2: {
+					...node.player2,
+					position: node.player2MudOrigin ?? node.player2.position,
+				},
 				cheese: node.cheese,
 				state_hash: node.stateHash,
+				player1Destination: node.player1.position,
+				player2Destination: node.player2.position,
 			};
 		}
-		return previewMaze;
+		return previewMaze ? toDisplayState(previewMaze) : null;
 	}, [mazeConfig, cursor, previewMaze]);
+}
+
+/** Wrap a plain MazeState as a DisplayState (no mud, so destinations = positions). */
+function toDisplayState(maze: MazeState): DisplayState {
+	return {
+		...maze,
+		player1Destination: maze.player1.position,
+		player2Destination: maze.player2.position,
+	};
 }
 
 /** Current node's bot info, or null if at root with nothing. */

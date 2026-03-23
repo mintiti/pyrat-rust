@@ -1,4 +1,5 @@
-import type { MazeState, WallEntry } from "../bindings/generated";
+import type { WallEntry } from "../bindings/generated";
+import type { DisplayState } from "../stores/matchStore";
 import type { AssetMap } from "./assets";
 import type { LayoutMetrics } from "./layout";
 import { gameToCanvas } from "./layout";
@@ -58,7 +59,7 @@ export function computeStaticGeometry(
 }
 
 export function buildDrawInstructions(
-	state: MazeState,
+	state: DisplayState,
 	layout: LayoutMetrics,
 	assets: AssetMap,
 	tileMap: TileAssignment[][],

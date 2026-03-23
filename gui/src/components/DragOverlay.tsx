@@ -1,10 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from "react";
-import type {
-	Coord,
-	Direction,
-	MazeState,
-	PlayerSide,
-} from "../bindings/generated";
+import type { Coord, Direction, PlayerSide } from "../bindings/generated";
 import { SLOT_PALETTE } from "../lib/botPalette";
 import { directionFromDelta } from "../lib/directions";
 import type { AssetMap } from "../renderer/assets";
@@ -15,12 +10,13 @@ import {
 	isOnPlayer,
 } from "../renderer/layout";
 import { DIRECTION_DELTA, wallKey } from "../renderer/pvArrows";
+import type { DisplayState } from "../stores/matchStore";
 import { useMatchStore } from "../stores/matchStore";
 
 type Props = {
 	layout: LayoutMetrics;
 	wallSet: Set<string>;
-	gameState: MazeState;
+	gameState: DisplayState;
 	assetMap: AssetMap;
 };
 
