@@ -279,7 +279,8 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
 
     // 6. Launch bots
-    let _bot_processes = launch_bots(&bot_configs, port)?;
+    let mut bot_processes = launch_bots(&bot_configs, port)?;
+    let stderr_handles = bot_processes.take_stderr_handles();
 
     // 7. Accept connections
     let (game_tx, mut game_rx) = mpsc::channel::<SessionMsg>(64);
@@ -304,6 +305,33 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         p1 = tracing::field::Empty,
         p2 = tracing::field::Empty,
     );
+
+    // 9a. Start bot process monitoring
+    for (agent_id, stderr) in stderr_handles {
+        let span = match_span.clone();
+        tokio::task::spawn_blocking(move || {
+            use std::io::BufRead;
+            let _guard = span.enter();
+            let reader = std::io::BufReader::new(stderr);
+            let mut count = 0usize;
+            const MAX_LINES: usize = 200;
+            for line in reader.lines() {
+                match line {
+                    Ok(text) if count < MAX_LINES => {
+                        warn!(%agent_id, "{text}");
+                        count += 1;
+                    },
+                    Ok(_) if count == MAX_LINES => {
+                        warn!(%agent_id, "stderr output truncated after {MAX_LINES} lines");
+                        count += 1;
+                    },
+                    Ok(_) => {}, // silent drain to prevent pipe backpressure
+                    Err(_) => break,
+                }
+            }
+        });
+    }
+    bot_processes.start_exit_monitor(match_span.clone());
 
     // 10. Run setup
     let setup_result = run_setup(&setup, &mut game_rx, Some(&event_tx))
@@ -340,6 +368,9 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     )
     .instrument(match_span)
     .await?;
+
+    // 11a. Mark game over for exit monitor
+    bot_processes.mark_game_over();
 
     // 12. Shutdown sessions and drain disconnect messages
     let session_count = setup_result.sessions.len();

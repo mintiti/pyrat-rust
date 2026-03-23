@@ -1,6 +1,10 @@
-use std::process::{Child, Command, Stdio};
+use std::collections::HashSet;
+use std::process::{Child, ChildStderr, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use super::config::BotConfig;
 
@@ -15,17 +19,55 @@ pub enum LaunchError {
     },
 }
 
+/// Exit information for a bot process.
+#[derive(Debug)]
+pub struct BotExitInfo {
+    pub agent_id: String,
+    pub status: Option<ExitStatus>,
+}
+
+/// Format an `ExitStatus` for display, including signal info on Unix.
+fn describe_exit(status: &ExitStatus) -> String {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(signal) = status.signal() {
+            return format!("signal {signal}");
+        }
+    }
+    match status.code() {
+        Some(code) => format!("exit code {code}"),
+        None => "unknown exit status".to_string(),
+    }
+}
+
 /// RAII guard for spawned bot processes. Kills all children on drop.
+///
+/// Supports background exit monitoring (`start_exit_monitor`) and stderr
+/// handle extraction (`take_stderr_handles`) for observability.
 #[derive(Debug)]
 #[must_use = "dropping BotProcesses immediately kills all spawned bots"]
 pub struct BotProcesses {
-    children: Vec<(String, Child)>,
+    children: Arc<Mutex<Vec<(String, Child)>>>,
+    game_over: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
+    monitor_handle: Option<std::thread::JoinHandle<()>>,
 }
 
 impl BotProcesses {
+    fn new(children: Vec<(String, Child)>) -> Self {
+        Self {
+            children: Arc::new(Mutex::new(children)),
+            game_over: Arc::new(AtomicBool::new(false)),
+            stop: Arc::new(AtomicBool::new(false)),
+            monitor_handle: None,
+        }
+    }
+
     /// Kill all child processes. Idempotent — safe to call multiple times.
     pub fn kill_all(&mut self) {
-        for (agent_id, child) in &mut self.children {
+        let mut children = self.children.lock().unwrap();
+        for (agent_id, child) in children.iter_mut() {
             if let Err(e) = child.kill() {
                 debug!(agent_id, error = %e, "kill failed (likely already exited)");
             }
@@ -34,28 +76,118 @@ impl BotProcesses {
     }
 
     pub fn len(&self) -> usize {
-        self.children.len()
+        self.children.lock().unwrap().len()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.children.is_empty()
+        self.children.lock().unwrap().is_empty()
     }
 
-    /// Returns the `agent_id` of the first child that has exited, or `None` if all are still
-    /// running.
-    pub fn try_exited(&mut self) -> Option<&str> {
-        for (agent_id, child) in &mut self.children {
+    /// Returns the PID of the child at the given index.
+    pub fn pid(&self, index: usize) -> Option<u32> {
+        self.children
+            .lock()
+            .unwrap()
+            .get(index)
+            .map(|(_, child)| child.id())
+    }
+
+    /// Returns exit info for the first child that has exited, or `None` if all
+    /// are still running.
+    pub fn try_exited(&self) -> Option<BotExitInfo> {
+        let mut children = self.children.lock().unwrap();
+        for (agent_id, child) in children.iter_mut() {
             match child.try_wait() {
-                Ok(Some(_)) | Err(_) => return Some(agent_id),
+                Ok(Some(status)) => {
+                    return Some(BotExitInfo {
+                        agent_id: agent_id.clone(),
+                        status: Some(status),
+                    });
+                },
+                Err(_) => {
+                    return Some(BotExitInfo {
+                        agent_id: agent_id.clone(),
+                        status: None,
+                    });
+                },
                 Ok(None) => {},
             }
         }
         None
     }
+
+    /// Drain `ChildStderr` handles from each child process.
+    ///
+    /// Returns `(agent_id, stderr)` pairs. Each handle can only be taken once;
+    /// subsequent calls return an empty vec.
+    pub fn take_stderr_handles(&mut self) -> Vec<(String, ChildStderr)> {
+        let mut children = self.children.lock().unwrap();
+        children
+            .iter_mut()
+            .filter_map(|(agent_id, child)| {
+                child.stderr.take().map(|stderr| (agent_id.clone(), stderr))
+            })
+            .collect()
+    }
+
+    /// Start a background thread that polls for bot process exits.
+    ///
+    /// Exits before `mark_game_over()` are logged as warnings (unexpected).
+    /// Exits after are logged as debug (expected shutdown).
+    pub fn start_exit_monitor(&mut self, span: tracing::Span) {
+        let children = Arc::clone(&self.children);
+        let game_over = Arc::clone(&self.game_over);
+        let stop = Arc::clone(&self.stop);
+
+        let handle = std::thread::spawn(move || {
+            let _guard = span.enter();
+            let mut seen: HashSet<String> = HashSet::new();
+
+            while !stop.load(Ordering::Relaxed) {
+                {
+                    let mut lock = children.lock().unwrap();
+                    for (agent_id, child) in lock.iter_mut() {
+                        if seen.contains(agent_id) {
+                            continue;
+                        }
+                        match child.try_wait() {
+                            Ok(Some(status)) => {
+                                let desc = describe_exit(&status);
+                                if game_over.load(Ordering::Relaxed) {
+                                    debug!(agent_id, status = %desc, "bot process exited");
+                                } else {
+                                    warn!(agent_id, status = %desc, "bot process exited unexpectedly");
+                                }
+                                seen.insert(agent_id.clone());
+                            },
+                            Err(e) => {
+                                warn!(agent_id, error = %e, "failed to check bot process status");
+                                seen.insert(agent_id.clone());
+                            },
+                            Ok(None) => {},
+                        }
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(200));
+            }
+        });
+
+        self.monitor_handle = Some(handle);
+    }
+
+    /// Mark the game as finished. Subsequent process exits are logged at debug
+    /// level instead of warn.
+    pub fn mark_game_over(&self) {
+        self.game_over.store(true, Ordering::Relaxed);
+    }
 }
 
 impl Drop for BotProcesses {
     fn drop(&mut self) {
+        self.stop.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.monitor_handle.take() {
+            let _ = handle.join();
+        }
         self.kill_all();
     }
 }
@@ -98,7 +230,7 @@ pub fn launch_bots(bots: &[BotConfig], port: u16) -> Result<BotProcesses, Launch
             Ok(child) => child,
             Err(source) => {
                 // Roll back: kill everything we already spawned.
-                let mut guard = BotProcesses { children };
+                let mut guard = BotProcesses::new(children);
                 guard.kill_all();
                 return Err(LaunchError::SpawnFailed {
                     agent_id: bot.agent_id.clone(),
@@ -112,7 +244,7 @@ pub fn launch_bots(bots: &[BotConfig], port: u16) -> Result<BotProcesses, Launch
         children.push((bot.agent_id.clone(), child));
     }
 
-    Ok(BotProcesses { children })
+    Ok(BotProcesses::new(children))
 }
 
 /// Spawn a single bot process via a platform shell.
@@ -123,7 +255,7 @@ fn spawn_bot(bot: &BotConfig, port: u16) -> std::io::Result<Child> {
         .env("PYRAT_HOST_PORT", port.to_string())
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::inherit());
+        .stderr(Stdio::piped());
     cmd.spawn()
 }
 
@@ -249,7 +381,7 @@ mod tests {
         let procs = launch_bots(&bots, 9999).unwrap();
 
         // Grab the pid before dropping.
-        let pid = procs.children[0].1.id();
+        let pid = procs.pid(0).unwrap();
         drop(procs);
 
         // Give the OS a moment to clean up.

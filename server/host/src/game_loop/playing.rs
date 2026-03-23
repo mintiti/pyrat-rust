@@ -472,12 +472,19 @@ fn handle_action(
     if provisional {
         update_action(slot, direction, true, think_ms);
     } else if !think.infinite && (think_ms == 0 || think_ms > think.threshold_ms) {
-        debug!(
-            player = player.0,
-            think_ms,
-            threshold_ms = think.threshold_ms,
-            "committed action rejected — think_ms out of range"
-        );
+        if think_ms == 0 {
+            warn!(
+                player = player.0,
+                "action rejected: think_ms is 0 (must report actual thinking time), falling back to provisional or STAY"
+            );
+        } else {
+            warn!(
+                player = player.0,
+                think_ms,
+                threshold_ms = think.threshold_ms,
+                "action rejected: think_ms exceeds threshold, falling back to provisional or STAY"
+            );
+        }
     } else {
         update_action(slot, direction, false, think_ms);
         responded.insert(session_id);
