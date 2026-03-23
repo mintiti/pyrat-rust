@@ -290,7 +290,22 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     // 8. Spawn event consumer
     let event_consumer = tokio::spawn(async move {
         let mut events = Vec::new();
+        let mut last_p1_score: f32 = 0.0;
+        let mut last_p2_score: f32 = 0.0;
         while let Some(event) = event_rx.recv().await {
+            if let MatchEvent::TurnPlayed { ref state, .. } = event {
+                if state.player1_score != last_p1_score || state.player2_score != last_p2_score {
+                    last_p1_score = state.player1_score;
+                    last_p2_score = state.player2_score;
+                    info!(
+                        turn = state.turn,
+                        p1_score = state.player1_score,
+                        p2_score = state.player2_score,
+                        cheese = state.cheese.len(),
+                        "score update"
+                    );
+                }
+            }
             events.push(event);
         }
         events
