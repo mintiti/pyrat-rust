@@ -13,7 +13,7 @@ use flatbuffers::FlatBufferBuilder;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 
 use codec::serialize_host_command;
 use pyrat_wire::framing::{FrameError, FrameReader, FrameWriter};
@@ -37,6 +37,19 @@ impl Default for SessionConfig {
             drain_max_frames: 64,
             drain_timeout: Duration::from_secs(2),
         }
+    }
+}
+
+/// Truncate a string for trace logging.
+fn truncate_str(s: &str, max: usize) -> std::borrow::Cow<'_, str> {
+    if s.len() <= max {
+        std::borrow::Cow::Borrowed(s)
+    } else {
+        let mut end = max;
+        while !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        std::borrow::Cow::Owned(format!("{}…", &s[..end]))
     }
 }
 
@@ -161,7 +174,7 @@ pub async fn run_session<R, W>(
                             disconnect_reason = DisconnectReason::FrameError;
                             break;
                         }
-                        debug!(cmd = "Shutdown", "→ sent");
+                        debug!(cmd = "Shutdown", size = bytes.len(), "→ sent");
                     }
                     Some(HostCommand::GameOver { result, player1_score, player2_score }) => {
                         state = SessionState::Done;
@@ -174,7 +187,14 @@ pub async fn run_session<R, W>(
                             disconnect_reason = DisconnectReason::FrameError;
                             break;
                         }
-                        debug!(cmd = "GameOver", "→ sent");
+                        debug!(cmd = "GameOver", size = bytes.len(), "→ sent");
+                        trace!(
+                            cmd = "GameOver",
+                            result = ?result,
+                            player1_score,
+                            player2_score,
+                            "→ payload"
+                        );
                     }
                     Some(ref cmd @ HostCommand::MatchConfig(ref cfg)) => {
                         // Record controlled players for ownership validation.
@@ -187,7 +207,21 @@ pub async fn run_session<R, W>(
                             disconnect_reason = DisconnectReason::FrameError;
                             break;
                         }
-                        debug!(cmd = "MatchConfig", "→ sent");
+                        debug!(cmd = "MatchConfig", size = bytes.len(), "→ sent");
+                        trace!(
+                            cmd = "MatchConfig",
+                            width = cfg.width,
+                            height = cfg.height,
+                            max_turns = cfg.max_turns,
+                            walls = cfg.walls.len(),
+                            mud = cfg.mud.len(),
+                            cheese = cfg.cheese.len(),
+                            controlled_players = ?cfg.controlled_players,
+                            timing = ?cfg.timing,
+                            move_timeout_ms = cfg.move_timeout_ms,
+                            preprocessing_timeout_ms = cfg.preprocessing_timeout_ms,
+                            "→ payload"
+                        );
                     }
                     Some(ref cmd @ HostCommand::TurnState(ref ts)) => {
                         let bytes = serialize_host_command(&mut fbb, cmd);
@@ -195,7 +229,21 @@ pub async fn run_session<R, W>(
                             disconnect_reason = DisconnectReason::FrameError;
                             break;
                         }
-                        debug!(cmd = "TurnState", turn = ts.turn, "→ sent");
+                        debug!(cmd = "TurnState", turn = ts.turn, size = bytes.len(), "→ sent");
+                        trace!(
+                            cmd = "TurnState",
+                            turn = ts.turn,
+                            p1_pos = ?(ts.player1_position),
+                            p2_pos = ?(ts.player2_position),
+                            p1_score = ts.player1_score,
+                            p2_score = ts.player2_score,
+                            p1_mud = ts.player1_mud_turns,
+                            p2_mud = ts.player2_mud_turns,
+                            cheese = ts.cheese.len(),
+                            p1_last = ?ts.player1_last_move,
+                            p2_last = ?ts.player2_last_move,
+                            "→ payload"
+                        );
                     }
                     Some(cmd) => {
                         let label = cmd_label(&cmd);
@@ -204,7 +252,16 @@ pub async fn run_session<R, W>(
                             disconnect_reason = DisconnectReason::FrameError;
                             break;
                         }
-                        debug!(cmd = label, "→ sent");
+                        debug!(cmd = label, size = bytes.len(), "→ sent");
+                        match &cmd {
+                            HostCommand::Timeout { default_move } => {
+                                trace!(cmd = "Timeout", default_move = ?default_move, "→ payload");
+                            }
+                            HostCommand::SetOption { name, value } => {
+                                trace!(cmd = "SetOption", name = %name, value = %value, "→ payload");
+                            }
+                            _ => {}
+                        }
                     }
                     None => {
                         // Game loop dropped the sender — clean exit.
@@ -270,24 +327,68 @@ async fn handle_bot_frame(
     let (msg_type, payload) = extract_bot_packet(buf)?;
     match &payload {
         BotPayload::Action {
+            player,
             direction,
             turn,
             provisional,
-            ..
+            think_ms,
         } => {
             debug!(
                 msg = "Action",
                 dir = direction.variant_name().unwrap_or("?"),
                 turn,
                 provisional,
+                size = buf.len(),
                 "← received"
+            );
+            trace!(
+                msg = "Action",
+                player = ?player,
+                dir = direction.variant_name().unwrap_or("?"),
+                turn,
+                provisional,
+                think_ms,
+                "← payload"
             );
         },
         BotPayload::Info(info) => {
-            debug!(msg = "Info", score = ?info.score, "← received");
+            debug!(msg = "Info", score = ?info.score, size = buf.len(), "← received");
+            trace!(
+                msg = "Info",
+                player = ?info.player,
+                multipv = info.multipv,
+                target = ?info.target,
+                depth = info.depth,
+                nodes = info.nodes,
+                score = ?info.score,
+                pv_len = info.pv.len(),
+                pv_head = ?info.pv.iter().take(5).collect::<Vec<_>>(),
+                message = %truncate_str(&info.message, 120),
+                "← payload"
+            );
+        },
+        BotPayload::Identify {
+            name,
+            author,
+            agent_id,
+            options,
+        } => {
+            debug!(msg = "Identify", size = buf.len(), "← received");
+            trace!(
+                msg = "Identify",
+                name = %name,
+                author = %author,
+                agent_id = %agent_id,
+                options = options.len(),
+                "← payload"
+            );
         },
         _ => {
-            debug!(msg = bot_msg_label(msg_type), "← received");
+            debug!(
+                msg = bot_msg_label(msg_type),
+                size = buf.len(),
+                "← received"
+            );
         },
     }
 
