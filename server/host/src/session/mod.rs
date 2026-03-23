@@ -17,7 +17,7 @@ use tracing::{debug, info, warn};
 
 use codec::serialize_host_command;
 use pyrat_wire::framing::{FrameError, FrameReader, FrameWriter};
-use pyrat_wire::Player;
+use pyrat_wire::{BotMessage, Player};
 
 /// Tunable limits for a session.
 #[derive(Debug, Clone)]
@@ -137,7 +137,11 @@ pub async fn run_session<R, W>(
                         break;
                     }
                     Err(e) => {
-                        warn!(error = %e, "frame read error");
+                        if closing {
+                            debug!(error = %e, "frame read error during shutdown");
+                        } else {
+                            warn!(error = %e, "frame read error");
+                        }
                         disconnect_reason = DisconnectReason::FrameError;
                         break;
                     }
@@ -235,6 +239,26 @@ pub async fn run_session<R, W>(
         .await;
 }
 
+fn bot_msg_label(msg: BotMessage) -> &'static str {
+    if msg == BotMessage::Identify {
+        "Identify"
+    } else if msg == BotMessage::Ready {
+        "Ready"
+    } else if msg == BotMessage::PreprocessingDone {
+        "PreprocessingDone"
+    } else if msg == BotMessage::Action {
+        "Action"
+    } else if msg == BotMessage::Pong {
+        "Pong"
+    } else if msg == BotMessage::Info {
+        "Info"
+    } else if msg == BotMessage::RenderCommands {
+        "RenderCommands"
+    } else {
+        "Unknown"
+    }
+}
+
 /// Process a single bot frame: parse, validate state, forward to game loop.
 async fn handle_bot_frame(
     buf: &[u8],
@@ -244,6 +268,28 @@ async fn handle_bot_frame(
     game_tx: &mpsc::Sender<SessionMsg>,
 ) -> Result<(), String> {
     let (msg_type, payload) = extract_bot_packet(buf)?;
+    match &payload {
+        BotPayload::Action {
+            direction,
+            turn,
+            provisional,
+            ..
+        } => {
+            debug!(
+                msg = "Action",
+                dir = direction.variant_name().unwrap_or("?"),
+                turn,
+                provisional,
+                "← received"
+            );
+        },
+        BotPayload::Info(info) => {
+            debug!(msg = "Info", score = ?info.score, "← received");
+        },
+        _ => {
+            debug!(msg = bot_msg_label(msg_type), "← received");
+        },
+    }
 
     // State validation.
     if !state.accepts(msg_type) {
