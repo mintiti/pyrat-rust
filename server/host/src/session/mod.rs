@@ -333,9 +333,10 @@ async fn handle_bot_frame(
             provisional,
             think_ms,
         } => {
+            let dir = direction.variant_name().unwrap_or("?");
             debug!(
                 msg = "Action",
-                dir = direction.variant_name().unwrap_or("?"),
+                dir,
                 turn,
                 provisional,
                 size = buf.len(),
@@ -344,7 +345,7 @@ async fn handle_bot_frame(
             trace!(
                 msg = "Action",
                 player = ?player,
-                dir = direction.variant_name().unwrap_or("?"),
+                dir,
                 turn,
                 provisional,
                 think_ms,
