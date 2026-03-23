@@ -13,11 +13,11 @@ use flatbuffers::FlatBufferBuilder;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::mpsc;
 use tokio::time::Instant;
-use tracing::{debug, warn};
+use tracing::{debug, info, trace, warn};
 
 use codec::serialize_host_command;
 use pyrat_wire::framing::{FrameError, FrameReader, FrameWriter};
-use pyrat_wire::Player;
+use pyrat_wire::{BotMessage, Player};
 
 /// Tunable limits for a session.
 #[derive(Debug, Clone)]
@@ -37,6 +37,33 @@ impl Default for SessionConfig {
             drain_max_frames: 64,
             drain_timeout: Duration::from_secs(2),
         }
+    }
+}
+
+/// Truncate a string for trace logging.
+fn truncate_str(s: &str, max: usize) -> std::borrow::Cow<'_, str> {
+    if s.len() <= max {
+        std::borrow::Cow::Borrowed(s)
+    } else {
+        let mut end = max;
+        while !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        std::borrow::Cow::Owned(format!("{}…", &s[..end]))
+    }
+}
+
+fn cmd_label(cmd: &HostCommand) -> &'static str {
+    match cmd {
+        HostCommand::SetOption { .. } => "SetOption",
+        HostCommand::MatchConfig(_) => "MatchConfig",
+        HostCommand::StartPreprocessing => "StartPreprocessing",
+        HostCommand::TurnState(_) => "TurnState",
+        HostCommand::Timeout { .. } => "Timeout",
+        HostCommand::GameOver { .. } => "GameOver",
+        HostCommand::Ping => "Ping",
+        HostCommand::Stop => "Stop",
+        HostCommand::Shutdown => "Shutdown",
     }
 }
 
@@ -114,16 +141,20 @@ pub async fn run_session<R, W>(
                             &controlled_players,
                             &game_tx,
                         ).await {
-                            warn!(session = session_id.0, error = %e, "bot frame error");
+                            warn!(error = %e, "bot frame error");
                         }
                     }
                     Err(FrameError::Disconnected) => {
-                        debug!(session = session_id.0, "bot disconnected");
+                        debug!("bot disconnected");
                         disconnect_reason = DisconnectReason::PeerClosed;
                         break;
                     }
                     Err(e) => {
-                        warn!(session = session_id.0, error = %e, "frame read error");
+                        if closing {
+                            debug!(error = %e, "frame read error during shutdown");
+                        } else {
+                            warn!(error = %e, "frame read error");
+                        }
                         disconnect_reason = DisconnectReason::FrameError;
                         break;
                     }
@@ -143,6 +174,7 @@ pub async fn run_session<R, W>(
                             disconnect_reason = DisconnectReason::FrameError;
                             break;
                         }
+                        debug!(cmd = "Shutdown", size = bytes.len(), "→ sent");
                     }
                     Some(HostCommand::GameOver { result, player1_score, player2_score }) => {
                         state = SessionState::Done;
@@ -155,6 +187,14 @@ pub async fn run_session<R, W>(
                             disconnect_reason = DisconnectReason::FrameError;
                             break;
                         }
+                        debug!(cmd = "GameOver", size = bytes.len(), "→ sent");
+                        trace!(
+                            cmd = "GameOver",
+                            result = ?result,
+                            player1_score,
+                            player2_score,
+                            "→ payload"
+                        );
                     }
                     Some(ref cmd @ HostCommand::MatchConfig(ref cfg)) => {
                         // Record controlled players for ownership validation.
@@ -167,24 +207,65 @@ pub async fn run_session<R, W>(
                             disconnect_reason = DisconnectReason::FrameError;
                             break;
                         }
+                        debug!(cmd = "MatchConfig", size = bytes.len(), "→ sent");
+                        trace!(
+                            cmd = "MatchConfig",
+                            width = cfg.width,
+                            height = cfg.height,
+                            max_turns = cfg.max_turns,
+                            walls = cfg.walls.len(),
+                            mud = cfg.mud.len(),
+                            cheese = cfg.cheese.len(),
+                            controlled_players = ?cfg.controlled_players,
+                            timing = ?cfg.timing,
+                            move_timeout_ms = cfg.move_timeout_ms,
+                            preprocessing_timeout_ms = cfg.preprocessing_timeout_ms,
+                            "→ payload"
+                        );
                     }
-                    Some(ref cmd @ HostCommand::TurnState(_)) => {
+                    Some(ref cmd @ HostCommand::TurnState(ref ts)) => {
                         let bytes = serialize_host_command(&mut fbb, cmd);
                         if frame_writer.write_frame(&bytes).await.is_err() {
                             disconnect_reason = DisconnectReason::FrameError;
                             break;
                         }
+                        debug!(cmd = "TurnState", turn = ts.turn, size = bytes.len(), "→ sent");
+                        trace!(
+                            cmd = "TurnState",
+                            turn = ts.turn,
+                            p1_pos = ?(ts.player1_position),
+                            p2_pos = ?(ts.player2_position),
+                            p1_score = ts.player1_score,
+                            p2_score = ts.player2_score,
+                            p1_mud = ts.player1_mud_turns,
+                            p2_mud = ts.player2_mud_turns,
+                            cheese = ts.cheese.len(),
+                            p1_last = ?ts.player1_last_move,
+                            p2_last = ?ts.player2_last_move,
+                            "→ payload"
+                        );
                     }
                     Some(cmd) => {
+                        let label = cmd_label(&cmd);
                         let bytes = serialize_host_command(&mut fbb, &cmd);
                         if frame_writer.write_frame(&bytes).await.is_err() {
                             disconnect_reason = DisconnectReason::FrameError;
                             break;
                         }
+                        debug!(cmd = label, size = bytes.len(), "→ sent");
+                        match &cmd {
+                            HostCommand::Timeout { default_move } => {
+                                trace!(cmd = "Timeout", default_move = ?default_move, "→ payload");
+                            }
+                            HostCommand::SetOption { name, value } => {
+                                trace!(cmd = "SetOption", name = %name, value = %value, "→ payload");
+                            }
+                            _ => {}
+                        }
                     }
                     None => {
                         // Game loop dropped the sender — clean exit.
-                        debug!(session = session_id.0, "command channel closed");
+                        debug!("command channel closed");
                         disconnect_reason = DisconnectReason::ChannelClosed;
                         break;
                     }
@@ -193,14 +274,14 @@ pub async fn run_session<R, W>(
 
             // ── Handshake timeout ───────────────────
             _ = tokio::time::sleep_until(handshake_deadline), if state == SessionState::Connected => {
-                warn!(session = session_id.0, "handshake timeout — no Identify received");
+                warn!("handshake timeout — no Identify received");
                 disconnect_reason = DisconnectReason::HandshakeTimeout;
                 break;
             }
 
             // ── Drain timeout ───────────────────────
             _ = tokio::time::sleep_until(drain_deadline), if closing => {
-                debug!(session = session_id.0, "drain timeout elapsed");
+                debug!("drain timeout elapsed");
                 disconnect_reason = DisconnectReason::DrainComplete;
                 break;
             }
@@ -215,6 +296,26 @@ pub async fn run_session<R, W>(
         .await;
 }
 
+fn bot_msg_label(msg: BotMessage) -> &'static str {
+    if msg == BotMessage::Identify {
+        "Identify"
+    } else if msg == BotMessage::Ready {
+        "Ready"
+    } else if msg == BotMessage::PreprocessingDone {
+        "PreprocessingDone"
+    } else if msg == BotMessage::Action {
+        "Action"
+    } else if msg == BotMessage::Pong {
+        "Pong"
+    } else if msg == BotMessage::Info {
+        "Info"
+    } else if msg == BotMessage::RenderCommands {
+        "RenderCommands"
+    } else {
+        "Unknown"
+    }
+}
+
 /// Process a single bot frame: parse, validate state, forward to game loop.
 async fn handle_bot_frame(
     buf: &[u8],
@@ -224,11 +325,77 @@ async fn handle_bot_frame(
     game_tx: &mpsc::Sender<SessionMsg>,
 ) -> Result<(), String> {
     let (msg_type, payload) = extract_bot_packet(buf)?;
+    match &payload {
+        BotPayload::Action {
+            player,
+            direction,
+            turn,
+            provisional,
+            think_ms,
+        } => {
+            let dir = direction.variant_name().unwrap_or("?");
+            debug!(
+                msg = "Action",
+                dir,
+                turn,
+                provisional,
+                size = buf.len(),
+                "← received"
+            );
+            trace!(
+                msg = "Action",
+                player = ?player,
+                dir,
+                turn,
+                provisional,
+                think_ms,
+                "← payload"
+            );
+        },
+        BotPayload::Info(info) => {
+            debug!(msg = "Info", score = ?info.score, size = buf.len(), "← received");
+            trace!(
+                msg = "Info",
+                player = ?info.player,
+                multipv = info.multipv,
+                target = ?info.target,
+                depth = info.depth,
+                nodes = info.nodes,
+                score = ?info.score,
+                pv_len = info.pv.len(),
+                pv_head = ?info.pv.iter().take(5).collect::<Vec<_>>(),
+                message = %truncate_str(&info.message, 120),
+                "← payload"
+            );
+        },
+        BotPayload::Identify {
+            name,
+            author,
+            agent_id,
+            options,
+        } => {
+            debug!(msg = "Identify", size = buf.len(), "← received");
+            trace!(
+                msg = "Identify",
+                name = %name,
+                author = %author,
+                agent_id = %agent_id,
+                options = options.len(),
+                "← payload"
+            );
+        },
+        _ => {
+            debug!(
+                msg = bot_msg_label(msg_type),
+                size = buf.len(),
+                "← received"
+            );
+        },
+    }
 
     // State validation.
     if !state.accepts(msg_type) {
         warn!(
-            session = session_id.0,
             msg_type = msg_type.0,
             state = ?state,
             "rejected bot message in wrong state"
@@ -239,7 +406,6 @@ async fn handle_bot_frame(
     // Apply transition.
     if let Some(next) = state.transition(msg_type) {
         debug!(
-            session = session_id.0,
             from = ?state,
             to = ?next,
             "state transition"
@@ -254,12 +420,16 @@ async fn handle_bot_frame(
             author,
             options,
             agent_id,
-        } => SessionMsg::Identified {
-            session_id,
-            name,
-            author,
-            options,
-            agent_id,
+        } => {
+            tracing::Span::current().record("agent_id", agent_id.as_str());
+            info!(agent_id = %agent_id, "bot identified");
+            SessionMsg::Identified {
+                session_id,
+                name,
+                author,
+                options,
+                agent_id,
+            }
         },
         BotPayload::Ready => SessionMsg::Ready { session_id },
         BotPayload::PreprocessingDone => SessionMsg::PreprocessingDone { session_id },
@@ -282,11 +452,7 @@ async fn handle_bot_frame(
 
             // Ownership validation.
             if !controlled_players.is_empty() && !controlled_players.contains(&player) {
-                warn!(
-                    session = session_id.0,
-                    player = player.0,
-                    "action for non-controlled player"
-                );
+                warn!(player = player.0, "action for non-controlled player");
                 return Ok(());
             }
 

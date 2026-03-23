@@ -14,7 +14,7 @@ pub use config::{
     SetupTiming,
 };
 pub use events::MatchEvent;
-pub use launch::{launch_bots, BotProcesses, LaunchError};
+pub use launch::{launch_bots, BotExitInfo, BotProcesses, LaunchError};
 pub use playing::{
     determine_result, engine_to_wire, run_one_turn, run_playing, wire_to_engine, MatchResult,
     PlayingError, PlayingState, TurnOutcome,

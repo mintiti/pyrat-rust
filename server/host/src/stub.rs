@@ -154,7 +154,7 @@ async fn run_stub(
                             direction: dir,
                             turn,
                             provisional: false,
-                            think_ms: 0,
+                            think_ms: 1,
                         })
                         .await
                         .is_err()

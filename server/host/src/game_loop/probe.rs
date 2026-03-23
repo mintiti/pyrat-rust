@@ -42,12 +42,12 @@ pub enum ProbeError {
 const IDENTIFY_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Poll `BotProcesses` until a child exits, then return its agent_id.
-async fn poll_process_exit(procs: &mut BotProcesses) -> String {
+async fn poll_process_exit(procs: &BotProcesses) -> String {
     let mut interval = tokio::time::interval(Duration::from_millis(100));
     loop {
         interval.tick().await;
-        if let Some(agent_id) = procs.try_exited() {
-            return agent_id.to_owned();
+        if let Some(info) = procs.try_exited() {
+            return info.agent_id;
         }
     }
 }
@@ -69,7 +69,7 @@ pub async fn probe_bot(
     debug!(port, agent_id, "probe: listening");
 
     // 2. Spawn bot (RAII: killed on drop)
-    let mut procs = launch_bots(
+    let procs = launch_bots(
         &[BotConfig {
             run_command,
             working_dir: PathBuf::from(&working_dir),
@@ -81,7 +81,7 @@ pub async fn probe_bot(
     // 3. Accept one connection — wait as long as the process is alive
     let stream = tokio::select! {
         result = listener.accept() => result?.0,
-        dead = poll_process_exit(&mut procs) => {
+        dead = poll_process_exit(&procs) => {
             return Err(ProbeError::ProcessExited(dead));
         }
     };

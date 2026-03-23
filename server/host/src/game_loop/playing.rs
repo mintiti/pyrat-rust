@@ -104,6 +104,9 @@ struct CollectedActions {
     p2: WireDirection,
     p1_think_ms: u32,
     p2_think_ms: u32,
+    /// Host-measured wall time from TurnState send to committed action receive.
+    p1_wall_ms: u32,
+    p2_wall_ms: u32,
 }
 
 // ── Direction conversion ─────────────────────────────
@@ -131,6 +134,7 @@ pub fn engine_to_wire(d: EngineDirection) -> WireDirection {
 /// With infinite timeout (`move_timeout = Duration::ZERO`), this function
 /// blocks until all actions arrive or sessions disconnect. The caller can
 /// send [`HostCommand::Stop`] to prompt bots to commit their moves.
+#[tracing::instrument(level = "debug", name = "turn", skip_all, fields(turn = game.turn))]
 pub async fn run_one_turn(
     state: &mut PlayingState,
     game: &mut GameState,
@@ -158,6 +162,8 @@ pub async fn run_one_turn(
         }
     }
 
+    let send_time = Instant::now();
+
     // Collect actions.
     let actions = collect_actions(
         game_rx,
@@ -167,8 +173,30 @@ pub async fn run_one_turn(
         &mut state.disconnected,
         config,
         event_tx,
+        send_time,
     )
     .await?;
+
+    // Warn about slow responses (>80% of timeout).
+    if !config.move_timeout.is_zero() {
+        let slow_threshold_ms = config.move_timeout.mul_f32(0.8).as_millis() as u32;
+        if actions.p1_wall_ms > slow_threshold_ms {
+            warn!(
+                player = 1,
+                wall_ms = actions.p1_wall_ms,
+                threshold_ms = slow_threshold_ms,
+                "slow response"
+            );
+        }
+        if actions.p2_wall_ms > slow_threshold_ms {
+            warn!(
+                player = 2,
+                wall_ms = actions.p2_wall_ms,
+                threshold_ms = slow_threshold_ms,
+                "slow response"
+            );
+        }
+    }
 
     // Step the engine.
     let p1_move = wire_to_engine(actions.p1);
@@ -289,6 +317,7 @@ struct ThinkPolicy {
 /// Pre-fills STAY for disconnected players. Supports provisional actions
 /// (best-so-far) and judges committed actions by `think_ms` against the
 /// configured think margin, with a network grace period for packet delivery.
+#[allow(clippy::too_many_arguments)]
 async fn collect_actions(
     game_rx: &mut mpsc::Receiver<SessionMsg>,
     current_turn: u16,
@@ -297,10 +326,13 @@ async fn collect_actions(
     disconnected: &mut HashSet<SessionId>,
     config: &PlayingConfig,
     event_tx: Option<&mpsc::UnboundedSender<MatchEvent>>,
+    send_time: Instant,
 ) -> Result<CollectedActions, PlayingError> {
     let stay = WireDirection::Stay;
     let mut p1_slot: Option<ActionSlot> = None;
     let mut p2_slot: Option<ActionSlot> = None;
+    let mut p1_wall_ms: u32 = 0;
+    let mut p2_wall_ms: u32 = 0;
 
     // Pre-fill committed Stay for disconnected players.
     for sid in disconnected.iter() {
@@ -320,7 +352,9 @@ async fn collect_actions(
     let mut responded: HashSet<SessionId> = HashSet::new();
 
     if both_committed(&p1_slot, &p2_slot) {
-        return Ok(resolve_collected(&p1_slot, &p2_slot));
+        return Ok(resolve_collected(
+            &p1_slot, &p2_slot, p1_wall_ms, p2_wall_ms,
+        ));
     }
 
     // Duration::ZERO = infinite timeout (no deadline, wait for actions or disconnects).
@@ -350,6 +384,7 @@ async fn collect_actions(
                         provisional,
                         think_ms,
                     } => {
+                        let before = responded.len();
                         handle_action(
                             &mut p1_slot,
                             &mut p2_slot,
@@ -363,6 +398,16 @@ async fn collect_actions(
                             think_ms,
                             &think,
                         );
+                        // Track wall time when a committed action was accepted.
+                        if responded.len() > before {
+                            let wall_ms = send_time.elapsed().as_millis() as u32;
+                            match player {
+                                Player::Player1 => p1_wall_ms = wall_ms,
+                                Player::Player2 => p2_wall_ms = wall_ms,
+                                _ => {}
+                            }
+                            debug!(player = player.0, think_ms, wall_ms, "action accepted");
+                        }
                     }
                     SessionMsg::Disconnected { session_id, reason } => {
                         handle_disconnect(
@@ -382,13 +427,13 @@ async fn collect_actions(
                 }
 
                 if both_committed(&p1_slot, &p2_slot) {
-                    return Ok(resolve_collected(&p1_slot, &p2_slot));
+                    return Ok(resolve_collected(&p1_slot, &p2_slot, p1_wall_ms, p2_wall_ms));
                 }
             }
             _ = tokio::time::sleep_until(deadline), if !think.infinite => {
                 debug!(turn = current_turn, "move timeout — using provisional or STAY");
                 handle_timeout(sessions, disconnected, &responded, event_tx, current_turn, stay).await;
-                return Ok(resolve_collected(&p1_slot, &p2_slot));
+                return Ok(resolve_collected(&p1_slot, &p2_slot, p1_wall_ms, p2_wall_ms));
             }
         }
     }
@@ -429,12 +474,19 @@ fn handle_action(
     if provisional {
         update_action(slot, direction, true, think_ms);
     } else if !think.infinite && (think_ms == 0 || think_ms > think.threshold_ms) {
-        debug!(
-            player = player.0,
-            think_ms,
-            threshold_ms = think.threshold_ms,
-            "committed action rejected — think_ms out of range"
-        );
+        if think_ms == 0 {
+            warn!(
+                player = player.0,
+                "action rejected: think_ms is 0 (must report actual thinking time), falling back to provisional or STAY"
+            );
+        } else {
+            warn!(
+                player = player.0,
+                think_ms,
+                threshold_ms = think.threshold_ms,
+                "action rejected: think_ms exceeds threshold, falling back to provisional or STAY"
+            );
+        }
     } else {
         update_action(slot, direction, false, think_ms);
         responded.insert(session_id);
@@ -524,12 +576,16 @@ async fn handle_timeout(
 fn resolve_collected(
     p1_slot: &Option<ActionSlot>,
     p2_slot: &Option<ActionSlot>,
+    p1_wall_ms: u32,
+    p2_wall_ms: u32,
 ) -> CollectedActions {
     CollectedActions {
         p1: resolve_action(p1_slot),
         p2: resolve_action(p2_slot),
         p1_think_ms: resolve_think_ms(p1_slot),
         p2_think_ms: resolve_think_ms(p2_slot),
+        p1_wall_ms,
+        p2_wall_ms,
     }
 }
 
@@ -703,6 +759,7 @@ mod tests {
             &mut disconnected,
             &config,
             None,
+            Instant::now(),
         )
         .await
         .expect("collect_actions should not fail");
@@ -794,6 +851,7 @@ mod tests {
             &mut disconnected,
             &config,
             Some(&event_tx),
+            Instant::now(),
         )
         .await
         .expect("collect_actions should not fail");
@@ -861,6 +919,7 @@ mod tests {
             &mut disconnected,
             &config,
             None,
+            Instant::now(),
         )
         .await
         .expect("collect_actions should not fail");
@@ -931,6 +990,7 @@ mod tests {
             &mut disconnected,
             &config,
             None,
+            Instant::now(),
         )
         .await
         .expect("collect_actions should not fail");
@@ -994,6 +1054,7 @@ mod tests {
             &mut disconnected,
             &config,
             None,
+            Instant::now(),
         )
         .await
         .expect("collect_actions should not fail");
@@ -1072,6 +1133,7 @@ mod tests {
             &mut disconnected,
             &config,
             Some(&event_tx),
+            Instant::now(),
         )
         .await
         .expect("collect_actions should not fail");

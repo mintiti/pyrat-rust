@@ -6,7 +6,7 @@ use clap::Parser;
 use serde::Serialize;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use tracing::{info, info_span, warn, Instrument};
 
 use pyrat::game::builder::GameConfig;
 
@@ -279,7 +279,8 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
 
     // 6. Launch bots
-    let _bot_processes = launch_bots(&bot_configs, port)?;
+    let mut bot_processes = launch_bots(&bot_configs, port)?;
+    let stderr_handles = bot_processes.take_stderr_handles();
 
     // 7. Accept connections
     let (game_tx, mut game_rx) = mpsc::channel::<SessionMsg>(64);
@@ -289,16 +290,85 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     // 8. Spawn event consumer
     let event_consumer = tokio::spawn(async move {
         let mut events = Vec::new();
+        let mut last_p1_score: f32 = 0.0;
+        let mut last_p2_score: f32 = 0.0;
         while let Some(event) = event_rx.recv().await {
+            if let MatchEvent::TurnPlayed { ref state, .. } = event {
+                if state.player1_score != last_p1_score || state.player2_score != last_p2_score {
+                    last_p1_score = state.player1_score;
+                    last_p2_score = state.player2_score;
+                    info!(
+                        turn = state.turn,
+                        p1_score = state.player1_score,
+                        p2_score = state.player2_score,
+                        cheese = state.cheese.len(),
+                        "score update"
+                    );
+                }
+            }
             events.push(event);
         }
         events
     });
 
-    // 9. Run setup
-    let setup_result = run_setup(&setup, &mut game_rx, Some(&event_tx)).await?;
+    // 9. Match span — covers setup + playing
+    let match_span = info_span!(
+        "match",
+        width = game.width(),
+        height = game.height(),
+        cheese = game.total_cheese(),
+        p1 = tracing::field::Empty,
+        p2 = tracing::field::Empty,
+    );
 
-    // 10. Run playing
+    // 9a. Start bot process monitoring
+    for (agent_id, stderr) in stderr_handles {
+        let span = match_span.clone();
+        tokio::task::spawn_blocking(move || {
+            use std::io::BufRead;
+            let _guard = span.enter();
+            let reader = std::io::BufReader::new(stderr);
+            let mut count = 0usize;
+            const MAX_LINES: usize = 200;
+            for line in reader.lines() {
+                match line {
+                    Ok(text) if count < MAX_LINES => {
+                        warn!(%agent_id, "{text}");
+                        count += 1;
+                    },
+                    Ok(_) if count == MAX_LINES => {
+                        warn!(%agent_id, "stderr output truncated after {MAX_LINES} lines");
+                        count += 1;
+                    },
+                    Ok(_) => {}, // silent drain to prevent pipe backpressure
+                    Err(_) => break,
+                }
+            }
+        });
+    }
+    bot_processes.start_exit_monitor(match_span.clone());
+
+    // 10. Run setup
+    let setup_result = run_setup(&setup, &mut game_rx, Some(&event_tx))
+        .instrument(match_span.clone())
+        .await?;
+
+    // Record bot names into the match span.
+    for s in &setup_result.sessions {
+        for &p in &s.controlled_players {
+            match p {
+                Player::Player1 => {
+                    match_span.record("p1", &s.name);
+                },
+                Player::Player2 => {
+                    match_span.record("p2", &s.name);
+                },
+                _ => {},
+            }
+        }
+    }
+
+    // 11. Run playing
     let playing_config = PlayingConfig {
         move_timeout: Duration::from_millis(u64::from(cli.move_timeout_ms)),
         think_margin: cli.think_margin,
@@ -311,9 +381,13 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         &playing_config,
         Some(&event_tx),
     )
+    .instrument(match_span)
     .await?;
 
-    // 11. Shutdown sessions and drain disconnect messages
+    // 11a. Mark game over for exit monitor
+    bot_processes.mark_game_over();
+
+    // 12. Shutdown sessions and drain disconnect messages
     let session_count = setup_result.sessions.len();
     for s in &setup_result.sessions {
         let _ = s
@@ -343,14 +417,14 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // 12. Collect events
+    // 13. Collect events
     drop(event_tx);
     let events = event_consumer.await.expect("event consumer panicked");
 
-    // 13. Print result
+    // 14. Print result
     print_result(&match_result);
 
-    // 14. Write game record
+    // 15. Write game record
     if let Some(ref output_path) = cli.output {
         let record = build_game_record(cli.seed, events, &match_result);
         let json = serde_json::to_string_pretty(&record).expect("JSON serialization failed");

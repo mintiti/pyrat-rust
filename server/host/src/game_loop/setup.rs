@@ -4,7 +4,7 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio::time::Instant;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, info_span, warn, Instrument};
 
 use crate::session::messages::HostCommand;
 use crate::session::{run_session, SessionConfig, SessionId, SessionMsg};
@@ -58,6 +58,7 @@ pub async fn run_setup(
     game_rx: &mut mpsc::Receiver<SessionMsg>,
     event_tx: Option<&mpsc::UnboundedSender<MatchEvent>>,
 ) -> Result<SetupResult, SetupError> {
+    let setup_start = Instant::now();
     let startup_deadline = Instant::now() + setup.timing.startup_timeout;
     let mut slots = PlayerSlots::new(&setup.players);
 
@@ -147,6 +148,13 @@ pub async fn run_setup(
         }
     }
 
+    let phase_a_ms = setup_start.elapsed().as_millis();
+    info!(
+        elapsed_ms = phase_a_ms,
+        "setup phase A complete — all bots identified"
+    );
+
+    let phase_b_start = Instant::now();
     // ── Phase B: Send SetOption + MatchConfig, wait for Ready ───
     for handle in handles.values() {
         if let Some(opts) = setup.bot_options.get(&handle.agent_id) {
@@ -226,6 +234,13 @@ pub async fn run_setup(
         }
     }
 
+    let phase_b_ms = phase_b_start.elapsed().as_millis();
+    info!(
+        elapsed_ms = phase_b_ms,
+        "setup phase B complete — all bots configured"
+    );
+
+    let phase_c_start = Instant::now();
     // ── Phase C: StartPreprocessing, wait for PreprocessingDone ───
     for handle in handles.values() {
         if handle
@@ -294,6 +309,15 @@ pub async fn run_setup(
         }
     }
 
+    let phase_c_ms = phase_c_start.elapsed().as_millis();
+    info!(
+        elapsed_ms = phase_c_ms,
+        "setup phase C complete — preprocessing done"
+    );
+
+    let total_ms = setup_start.elapsed().as_millis();
+    info!(total_ms, "setup complete");
+
     emit(event_tx, MatchEvent::SetupComplete);
     emit(
         event_tx,
@@ -344,9 +368,18 @@ pub async fn accept_connections(
         let tx = game_tx.clone();
         let cfg = session_config.clone();
 
+        let span = info_span!(
+            "session",
+            id = session_id.0,
+            %addr,
+            agent_id = tracing::field::Empty,
+        );
         let (read, write) = tokio::io::split(stream);
-        tokio::spawn(async move {
-            run_session(session_id, read, write, tx, cfg).await;
-        });
+        tokio::spawn(
+            async move {
+                run_session(session_id, read, write, tx, cfg).await;
+            }
+            .instrument(span),
+        );
     }
 }
