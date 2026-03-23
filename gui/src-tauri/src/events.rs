@@ -51,6 +51,12 @@ pub struct MatchOverEvent {
     pub turns_played: u16,
 }
 
+/// Emitted when all bots enter the preprocessing phase.
+#[derive(Serialize, Deserialize, Debug, Clone, Type, Event)]
+pub struct PreprocessingStartedEvent {
+    pub match_id: u32,
+}
+
 /// Emitted on setup failures, bot crashes, etc.
 #[derive(Serialize, Deserialize, Debug, Clone, Type, Event)]
 pub struct MatchErrorEvent {

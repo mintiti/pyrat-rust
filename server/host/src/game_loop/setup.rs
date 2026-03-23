@@ -256,6 +256,8 @@ pub async fn run_setup(
         }
     }
 
+    emit(event_tx, MatchEvent::PreprocessingStarted);
+
     // The bot SDK uses the same timeout value to decide when to stop work.
     // Add 500ms margin so PreprocessingDone has time to arrive over TCP.
     let preprocessing_deadline =
@@ -290,10 +292,22 @@ pub async fn run_setup(
                                 });
                             }
                         }
+                        SessionMsg::Info { session_id, info } => {
+                            if let Some(handle) = handles.get(&session_id) {
+                                if let Some(&sender) = handle.controlled_players.first() {
+                                    emit(event_tx, MatchEvent::BotInfo {
+                                        sender,
+                                        turn: info.turn,
+                                        state_hash: info.state_hash,
+                                        info,
+                                    });
+                                }
+                            }
+                        }
                         SessionMsg::Connected { session_id, .. } => {
                             debug!(session = session_id.0, "late connection during phase C — ignored");
                         }
-                        // Info, Action, etc. — ignored during setup.
+                        // Action, etc. — ignored during setup.
                         _ => {}
                     }
                 }

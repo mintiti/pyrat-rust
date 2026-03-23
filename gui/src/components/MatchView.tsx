@@ -50,6 +50,7 @@ export default function MatchView({ onNewMatch }: Props) {
 
 	const {
 		onMatchStarted,
+		onPreprocessingStarted,
 		onTurnPlayed,
 		onMatchOver,
 		onBotInfo,
@@ -73,6 +74,10 @@ export default function MatchView({ onNewMatch }: Props) {
 			events.matchStartedEvent.listen((e) => {
 				matchIdRef.current = e.payload.match_id;
 				onMatchStarted(e.payload.maze, e.payload.match_id);
+			}),
+			events.preprocessingStartedEvent.listen((e) => {
+				if (e.payload.match_id !== matchIdRef.current) return;
+				onPreprocessingStarted();
 			}),
 			events.turnPlayedEvent.listen((e) => {
 				if (e.payload.match_id !== matchIdRef.current) return;
@@ -138,7 +143,11 @@ export default function MatchView({ onNewMatch }: Props) {
 	useEffect(() => {
 		const handler = (e: KeyboardEvent) => {
 			const state = useMatchStore.getState();
-			if (state.matchPhase === "idle" || state.matchPhase === "connecting")
+			if (
+				state.matchPhase === "idle" ||
+				state.matchPhase === "connecting" ||
+				state.matchPhase === "preprocessing"
+			)
 				return;
 
 			const tag = (e.target as HTMLElement)?.tagName;
@@ -264,7 +273,13 @@ export default function MatchView({ onNewMatch }: Props) {
 			{matchPhase === "finished" && <ResultBanner />}
 			<div style={{ flex: 1, overflow: "hidden", display: "flex" }}>
 				<MazeColumn
-					connecting={matchPhase === "connecting"}
+					setupPhase={
+						matchPhase === "connecting"
+							? "connecting"
+							: matchPhase === "preprocessing"
+								? "preprocessing"
+								: null
+					}
 					displayState={displayState}
 					previewError={previewError}
 					hasMatch={hasMatch}

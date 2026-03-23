@@ -72,7 +72,12 @@ export interface DisplayState extends MazeState {
 	player2Destination: Coord;
 }
 
-export type MatchPhase = "idle" | "connecting" | "playing" | "finished";
+export type MatchPhase =
+	| "idle"
+	| "connecting"
+	| "preprocessing"
+	| "playing"
+	| "finished";
 export type MatchMode = "auto" | "step";
 
 // ── Tree helpers ─────────────────────────────────────────────────
@@ -169,6 +174,7 @@ interface MatchState {
 	onTurnPlayed: (e: TurnPlayedEvent) => void;
 	onMatchOver: (e: MatchOverEvent) => void;
 	onBotInfo: (e: BotInfoEvent) => void;
+	onPreprocessingStarted: () => void;
 	onError: (message: string) => void;
 	onAnalysisError: (message: string) => void;
 	onDisconnect: (e: BotDisconnectedEvent) => void;
@@ -395,6 +401,10 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 
 	onMatchOver: (e) => {
 		set({ result: e, matchPhase: "finished" });
+	},
+
+	onPreprocessingStarted: () => {
+		set({ matchPhase: "preprocessing" });
 	},
 
 	onBotInfo: (e) => {

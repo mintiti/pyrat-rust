@@ -300,7 +300,7 @@ async fn turn_loop<T: bot::Runner>(
             Player::Player1, // doesn't matter for preprocess
             0,
             0,
-            None,
+            Some(info_sender.clone()),
             stopped.clone(),
             game_over.clone(),
         );

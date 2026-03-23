@@ -21,7 +21,7 @@ use tauri_specta::Event;
 use crate::commands::{AnalysisPosition, Coord, PlayerState};
 use crate::events::{
     BotDisconnectedEvent, BotInfoEvent, Direction as SpectaDirection, MatchOverEvent, MatchWinner,
-    PlayerSide, TurnPlayedEvent,
+    PlayerSide, PreprocessingStartedEvent, TurnPlayedEvent,
 };
 use crate::state::AnalysisRx;
 
@@ -794,6 +794,9 @@ async fn forward_events(
                             turns_played: result.turns_played,
                         }
                         .emit(&app);
+                    },
+                    MatchEvent::PreprocessingStarted => {
+                        let _ = PreprocessingStartedEvent { match_id }.emit(&app);
                     },
                     MatchEvent::BotInfo { sender, turn, state_hash, info } => {
                         let payload = build_bot_info_event(match_id, sender, turn, state_hash, &info);
