@@ -4,7 +4,7 @@ This tests the game state implementation including:
 - Game creation via GameConfig and GameBuilder
 - Preset configurations
 - Custom game creation
-- Valid moves and effective actions
+- Effective moves and effective actions
 - Copy protocol
 """
 # ruff: noqa: PLR2004
@@ -329,8 +329,8 @@ class TestResetSymmetry:
         assert len(game.cheese_positions()) > 0
 
 
-class TestGetValidMoves:
-    """Test the get_valid_moves() method.
+class TestEffectiveMoves:
+    """Test the effective_moves() method.
 
     Note: Returns list of integers matching Direction enum values:
     UP=0, RIGHT=1, DOWN=2, LEFT=3
@@ -341,7 +341,7 @@ class TestGetValidMoves:
         from pyrat_engine import Direction
 
         game = GameConfig.preset("open").create(seed=42)
-        valid = game.get_valid_moves((0, 0))
+        valid = game.effective_moves((0, 0))
 
         assert Direction.UP in valid
         assert Direction.RIGHT in valid
@@ -353,7 +353,7 @@ class TestGetValidMoves:
         from pyrat_engine import Direction
 
         game = GameConfig.preset("open").create(seed=42)
-        valid = game.get_valid_moves((game.width - 1, game.height - 1))
+        valid = game.effective_moves((game.width - 1, game.height - 1))
 
         assert Direction.DOWN in valid
         assert Direction.LEFT in valid
@@ -367,7 +367,7 @@ class TestGetValidMoves:
         game = GameConfig.preset("open").create(seed=42)
         center_x = game.width // 2
         center_y = game.height // 2
-        valid = game.get_valid_moves((center_x, center_y))
+        valid = game.effective_moves((center_x, center_y))
 
         assert len(valid) == 4
         assert Direction.UP in valid
@@ -388,7 +388,7 @@ class TestGetValidMoves:
         )
         game = config.create()
 
-        valid = game.get_valid_moves((0, 0))
+        valid = game.effective_moves((0, 0))
 
         assert Direction.UP in valid
         assert Direction.RIGHT not in valid
@@ -400,17 +400,17 @@ class TestGetValidMoves:
         game = GameConfig.preset("tiny").create(seed=42)
 
         with pytest.raises(ValueError, match="outside board bounds"):
-            game.get_valid_moves((100, 100))
+            game.effective_moves((100, 100))
 
     def test_accepts_coordinates_object(self):
-        """Test that get_valid_moves accepts Coordinates objects."""
+        """Test that effective_moves accepts Coordinates objects."""
         from pyrat_engine import Coordinates
 
         game = GameConfig.preset("open").create(seed=42)
         pos = Coordinates(0, 0)
-        valid = game.get_valid_moves(pos)
+        valid = game.effective_moves(pos)
 
-        valid_tuple = game.get_valid_moves((0, 0))
+        valid_tuple = game.effective_moves((0, 0))
         assert set(valid) == set(valid_tuple)
 
     def test_returns_direction_compatible_values(self):
@@ -418,7 +418,7 @@ class TestGetValidMoves:
         from pyrat_engine import Direction
 
         game = GameConfig.preset("open").create(seed=42)
-        valid = game.get_valid_moves((5, 5))
+        valid = game.effective_moves((5, 5))
 
         for v in valid:
             direction = Direction(v)
@@ -580,15 +580,15 @@ class TestEffectiveActions:
         assert all(isinstance(v, int) for v in result)
         assert all(0 <= v <= 4 for v in result)
 
-    def test_consistency_with_get_valid_moves(self):
-        """Test that effective_actions is consistent with get_valid_moves."""
+    def test_consistency_with_effective_moves(self):
+        """Test that effective_actions is consistent with effective_moves."""
         from pyrat_engine import Direction
 
         game = GameConfig.preset("open").create(seed=42)
 
         for x in range(game.width):
             for y in range(game.height):
-                valid_moves = game.get_valid_moves((x, y))
+                valid_moves = game.effective_moves((x, y))
                 effective = game.effective_actions((x, y))
 
                 for move in valid_moves:
