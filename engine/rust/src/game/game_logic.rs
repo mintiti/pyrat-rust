@@ -40,6 +40,17 @@ impl PlayerState {
     const fn can_collect_cheese(&self) -> bool {
         !self.is_in_mud() // Can collect on last mud turn
     }
+
+    /// Apply a movement: decrement mud timer if stuck, otherwise move and enter mud.
+    #[inline(always)]
+    fn apply_move(&mut self, moved: bool, new_pos: Coordinates, mud: &MudMap) {
+        if self.mud_timer > 0 {
+            self.mud_timer -= 1;
+        } else if moved {
+            self.mud_timer = mud.get(self.current_pos, new_pos).unwrap_or(0);
+            self.current_pos = new_pos;
+        }
+    }
 }
 /// Records what happened in a move for unmake purposes
 #[derive(Clone, Deserialize, Serialize)]
@@ -266,29 +277,8 @@ impl GameState {
         let (p1_moved, p1_new_pos) = self.compute_player_move(&self.player1, p1_move);
         let (p2_moved, p2_new_pos) = self.compute_player_move(&self.player2, p2_move);
 
-        // Update Player 1
-        if self.player1.mud_timer > 0 {
-            self.player1.mud_timer -= 1;
-        } else if p1_moved {
-            let mud_time = self
-                .mud
-                .get(self.player1.current_pos, p1_new_pos)
-                .unwrap_or(0);
-            self.player1.mud_timer = mud_time;
-            self.player1.current_pos = p1_new_pos;
-        }
-
-        // Update Player 2
-        if self.player2.mud_timer > 0 {
-            self.player2.mud_timer -= 1;
-        } else if p2_moved {
-            let mud_time = self
-                .mud
-                .get(self.player2.current_pos, p2_new_pos)
-                .unwrap_or(0);
-            self.player2.mud_timer = mud_time;
-            self.player2.current_pos = p2_new_pos;
-        }
+        self.player1.apply_move(p1_moved, p1_new_pos, &self.mud);
+        self.player2.apply_move(p2_moved, p2_new_pos, &self.mud);
 
         // Increment misses if position didn't change
         let p1_has_moved = self.player1.current_pos != p1_start_pos;
