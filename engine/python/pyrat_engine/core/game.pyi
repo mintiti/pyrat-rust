@@ -156,8 +156,8 @@ class PyRat:
         """
         ...
 
-    def get_valid_moves(self, pos: Coordinates | tuple[int, int]) -> list[int]:
-        """Get valid movement directions from a position.
+    def effective_moves(self, pos: Coordinates | tuple[int, int]) -> list[int]:
+        """Get effective movement directions from a position.
 
         Returns direction values where movement is possible (not blocked by
         walls or board boundaries). Does not include STAY. Does not account
@@ -170,7 +170,7 @@ class PyRat:
             pos: Position to check, as Coordinates or (x, y) tuple
 
         Returns:
-            List of direction integers for valid moves
+            List of direction integers for effective moves
 
         Raises:
             ValueError: If position is outside board bounds

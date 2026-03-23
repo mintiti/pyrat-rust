@@ -595,14 +595,14 @@ impl PyRat {
         self.game.cheese_positions()
     }
 
-    /// Get valid movement directions from a position
+    /// Get effective movement directions from a position
     ///
     /// Returns a list of direction values (as integers matching Direction enum)
     /// that would result in actual movement (not blocked by walls or board boundaries).
     /// Does not include STAY.
     ///
     /// Direction values: UP=0, RIGHT=1, DOWN=2, LEFT=3
-    fn get_valid_moves(&self, pos: CoordinatesInput) -> PyResult<Vec<u8>> {
+    fn effective_moves(&self, pos: CoordinatesInput) -> PyResult<Vec<u8>> {
         let coords: Coordinates = PyResult::<Coordinates>::from(pos)?;
 
         // Bounds check
