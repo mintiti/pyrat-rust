@@ -352,7 +352,9 @@ async fn collect_actions(
     let mut responded: HashSet<SessionId> = HashSet::new();
 
     if both_committed(&p1_slot, &p2_slot) {
-        return Ok(resolve_collected(&p1_slot, &p2_slot, p1_wall_ms, p2_wall_ms));
+        return Ok(resolve_collected(
+            &p1_slot, &p2_slot, p1_wall_ms, p2_wall_ms,
+        ));
     }
 
     // Duration::ZERO = infinite timeout (no deadline, wait for actions or disconnects).
@@ -1131,6 +1133,7 @@ mod tests {
             &mut disconnected,
             &config,
             Some(&event_tx),
+            Instant::now(),
         )
         .await
         .expect("collect_actions should not fail");
