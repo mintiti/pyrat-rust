@@ -140,6 +140,8 @@ async fn run_stub(
                             score: Some(0.0),
                             pv: vec![dir],
                             message: "stub".into(),
+                            turn,
+                            state_hash: 0,
                         },
                     })
                     .await;

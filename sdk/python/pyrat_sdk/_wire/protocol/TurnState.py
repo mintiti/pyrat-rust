@@ -119,8 +119,15 @@ class TurnState(object):
             return self._tab.Get(flatbuffers.number_types.Uint8Flags, o + self._tab.Pos)
         return 0
 
+    # TurnState
+    def StateHash(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(24))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Uint64Flags, o + self._tab.Pos)
+        return 0
+
 def TurnStateStart(builder):
-    builder.StartObject(10)
+    builder.StartObject(11)
 
 def Start(builder):
     TurnStateStart(builder)
@@ -190,6 +197,12 @@ def TurnStateAddPlayer2LastMove(builder, player2LastMove):
 
 def AddPlayer2LastMove(builder, player2LastMove):
     TurnStateAddPlayer2LastMove(builder, player2LastMove)
+
+def TurnStateAddStateHash(builder, stateHash):
+    builder.PrependUint64Slot(10, stateHash, 0)
+
+def AddStateHash(builder, stateHash):
+    TurnStateAddStateHash(builder, stateHash)
 
 def TurnStateEnd(builder):
     return builder.EndObject()

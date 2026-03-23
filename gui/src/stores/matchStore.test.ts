@@ -17,6 +17,7 @@ function info(
 	return {
 		match_id: 1,
 		turn: 0,
+		state_hash: "",
 		target: null,
 		nodes: 0,
 		score: 0,

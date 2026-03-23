@@ -311,6 +311,8 @@ async fn info_forwarded_as_event() {
                 score: Some(0.5),
                 pv: None,
                 message: Some(msg),
+                turn: 0,
+                state_hash: 0,
             },
         )
         .as_union_value()

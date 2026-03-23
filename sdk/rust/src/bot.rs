@@ -37,7 +37,7 @@ impl InfoSender {
     }
 
     /// Build and send an Info message from [`InfoParams`].
-    pub fn send_info(&self, params: &InfoParams) {
+    pub fn send_info(&self, params: &InfoParams, turn: u16, state_hash: u64) {
         let frame = crate::wire::build_info(
             params.player,
             params.multipv,
@@ -47,6 +47,8 @@ impl InfoSender {
             params.score,
             params.pv,
             params.message,
+            turn,
+            state_hash,
         );
         self.send(&frame);
     }
@@ -101,6 +103,7 @@ pub struct Context {
     think_start: Instant,
     player: Player,
     turn: u16,
+    state_hash: u64,
     info_sender: Mutex<Option<InfoSender>>,
     stopped: Arc<AtomicBool>,
     game_over: Arc<AtomicBool>,
@@ -108,11 +111,13 @@ pub struct Context {
 
 impl Context {
     /// Create a context with a deadline and optional server-stop flag.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         deadline: Instant,
         think_start: Instant,
         player: Player,
         turn: u16,
+        state_hash: u64,
         info_sender: Option<InfoSender>,
         stopped: Arc<AtomicBool>,
         game_over: Arc<AtomicBool>,
@@ -122,6 +127,7 @@ impl Context {
             think_start,
             player,
             turn,
+            state_hash,
             info_sender: Mutex::new(info_sender),
             stopped,
             game_over,
@@ -161,7 +167,7 @@ impl Context {
     /// Send an Info message to the host (for GUI / debugging).
     pub fn send_info(&self, params: &InfoParams) {
         if let Some(sender) = self.info_sender.lock().unwrap().as_ref() {
-            sender.send_info(params);
+            sender.send_info(params, self.turn, self.state_hash);
         }
     }
 
@@ -310,6 +316,7 @@ mod tests {
             deadline,
             Instant::now(),
             Player::Player1,
+            0,
             0,
             None,
             stopped,

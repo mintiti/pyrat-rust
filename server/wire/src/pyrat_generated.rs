@@ -2015,6 +2015,7 @@ pub mod pyrat {
             pub const VT_CHEESE: ::flatbuffers::VOffsetT = 18;
             pub const VT_PLAYER1_LAST_MOVE: ::flatbuffers::VOffsetT = 20;
             pub const VT_PLAYER2_LAST_MOVE: ::flatbuffers::VOffsetT = 22;
+            pub const VT_STATE_HASH: ::flatbuffers::VOffsetT = 24;
 
             #[inline]
             pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -2031,6 +2032,7 @@ pub mod pyrat {
                 args: &'args TurnStateArgs<'args>,
             ) -> ::flatbuffers::WIPOffset<TurnState<'bldr>> {
                 let mut builder = TurnStateBuilder::new(_fbb);
+                builder.add_state_hash(args.state_hash);
                 if let Some(x) = args.cheese {
                     builder.add_cheese(x);
                 }
@@ -2150,6 +2152,17 @@ pub mod pyrat {
                         .unwrap()
                 }
             }
+            #[inline]
+            pub fn state_hash(&self) -> u64 {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<u64>(TurnState::VT_STATE_HASH, Some(0))
+                        .unwrap()
+                }
+            }
         }
 
         impl ::flatbuffers::Verifiable for TurnState<'_> {
@@ -2181,6 +2194,7 @@ pub mod pyrat {
                         Self::VT_PLAYER2_LAST_MOVE,
                         false,
                     )?
+                    .visit_field::<u64>("state_hash", Self::VT_STATE_HASH, false)?
                     .finish();
                 Ok(())
             }
@@ -2196,6 +2210,7 @@ pub mod pyrat {
             pub cheese: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, Vec2>>>,
             pub player1_last_move: Direction,
             pub player2_last_move: Direction,
+            pub state_hash: u64,
         }
         impl<'a> Default for TurnStateArgs<'a> {
             #[inline]
@@ -2211,6 +2226,7 @@ pub mod pyrat {
                     cheese: None,
                     player1_last_move: Direction::Up,
                     player2_last_move: Direction::Up,
+                    state_hash: 0,
                 }
             }
         }
@@ -2279,6 +2295,11 @@ pub mod pyrat {
                 );
             }
             #[inline]
+            pub fn add_state_hash(&mut self, state_hash: u64) {
+                self.fbb_
+                    .push_slot::<u64>(TurnState::VT_STATE_HASH, state_hash, 0);
+            }
+            #[inline]
             pub fn new(
                 _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
             ) -> TurnStateBuilder<'a, 'b, A> {
@@ -2308,6 +2329,7 @@ pub mod pyrat {
                 ds.field("cheese", &self.cheese());
                 ds.field("player1_last_move", &self.player1_last_move());
                 ds.field("player2_last_move", &self.player2_last_move());
+                ds.field("state_hash", &self.state_hash());
                 ds.finish()
             }
         }
@@ -3775,6 +3797,8 @@ pub mod pyrat {
             pub const VT_SCORE: ::flatbuffers::VOffsetT = 14;
             pub const VT_PV: ::flatbuffers::VOffsetT = 16;
             pub const VT_MESSAGE: ::flatbuffers::VOffsetT = 18;
+            pub const VT_TURN: ::flatbuffers::VOffsetT = 20;
+            pub const VT_STATE_HASH: ::flatbuffers::VOffsetT = 22;
 
             #[inline]
             pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -3791,6 +3815,7 @@ pub mod pyrat {
                 args: &'args InfoArgs<'args>,
             ) -> ::flatbuffers::WIPOffset<Info<'bldr>> {
                 let mut builder = InfoBuilder::new(_fbb);
+                builder.add_state_hash(args.state_hash);
                 if let Some(x) = args.message {
                     builder.add_message(x);
                 }
@@ -3804,6 +3829,7 @@ pub mod pyrat {
                 if let Some(x) = args.target {
                     builder.add_target(x);
                 }
+                builder.add_turn(args.turn);
                 builder.add_depth(args.depth);
                 builder.add_multipv(args.multipv);
                 builder.add_player(args.player);
@@ -3875,6 +3901,20 @@ pub mod pyrat {
                         .get::<::flatbuffers::ForwardsUOffset<&str>>(Info::VT_MESSAGE, None)
                 }
             }
+            #[inline]
+            pub fn turn(&self) -> u16 {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe { self._tab.get::<u16>(Info::VT_TURN, Some(0)).unwrap() }
+            }
+            #[inline]
+            pub fn state_hash(&self) -> u64 {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe { self._tab.get::<u64>(Info::VT_STATE_HASH, Some(0)).unwrap() }
+            }
         }
 
         impl ::flatbuffers::Verifiable for Info<'_> {
@@ -3892,6 +3932,8 @@ pub mod pyrat {
      .visit_field::<f32>("score", Self::VT_SCORE, false)?
      .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, Direction>>>("pv", Self::VT_PV, false)?
      .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("message", Self::VT_MESSAGE, false)?
+     .visit_field::<u16>("turn", Self::VT_TURN, false)?
+     .visit_field::<u64>("state_hash", Self::VT_STATE_HASH, false)?
      .finish();
                 Ok(())
             }
@@ -3905,6 +3947,8 @@ pub mod pyrat {
             pub score: Option<f32>,
             pub pv: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, Direction>>>,
             pub message: Option<::flatbuffers::WIPOffset<&'a str>>,
+            pub turn: u16,
+            pub state_hash: u64,
         }
         impl<'a> Default for InfoArgs<'a> {
             #[inline]
@@ -3918,6 +3962,8 @@ pub mod pyrat {
                     score: None,
                     pv: None,
                     message: None,
+                    turn: 0,
+                    state_hash: 0,
                 }
             }
         }
@@ -3966,6 +4012,15 @@ pub mod pyrat {
                     .push_slot_always::<::flatbuffers::WIPOffset<_>>(Info::VT_MESSAGE, message);
             }
             #[inline]
+            pub fn add_turn(&mut self, turn: u16) {
+                self.fbb_.push_slot::<u16>(Info::VT_TURN, turn, 0);
+            }
+            #[inline]
+            pub fn add_state_hash(&mut self, state_hash: u64) {
+                self.fbb_
+                    .push_slot::<u64>(Info::VT_STATE_HASH, state_hash, 0);
+            }
+            #[inline]
             pub fn new(
                 _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
             ) -> InfoBuilder<'a, 'b, A> {
@@ -3993,6 +4048,8 @@ pub mod pyrat {
                 ds.field("score", &self.score());
                 ds.field("pv", &self.pv());
                 ds.field("message", &self.message());
+                ds.field("turn", &self.turn());
+                ds.field("state_hash", &self.state_hash());
                 ds.finish()
             }
         }

@@ -20,7 +20,7 @@ What's not:
 - No transposition table: same positions re-evaluated when reached via different paths
 - No simultaneous-move equilibrium: sequential best-response, not Nash
 
-SDK features: GameSim, effective_moves, should_stop, send_info.
+SDK features: GameSim, effective_moves, should_stop, send_info, send_provisional.
 """
 
 import itertools
@@ -74,6 +74,7 @@ class Search(Bot):
                 best_score = score
 
             pvs = new_pvs
+            ctx.send_provisional(best_move)
 
         return best_move
 

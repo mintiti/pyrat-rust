@@ -71,6 +71,7 @@ pub struct TurnStateData {
     pub cheese: Vec<Coordinates>,
     pub player1_last_move: pyrat::Direction,
     pub player2_last_move: pyrat::Direction,
+    pub state_hash: u64,
 }
 
 /// Owned game-over data extracted from wire GameOver.
@@ -205,6 +206,7 @@ fn extract_turn_state(ts: &wire::TurnState<'_>) -> TurnStateData {
             .unwrap_or_default(),
         player1_last_move: wire_to_engine_dir(ts.player1_last_move()),
         player2_last_move: wire_to_engine_dir(ts.player2_last_move()),
+        state_hash: ts.state_hash(),
     }
 }
 
@@ -349,6 +351,8 @@ pub fn build_info(
     score: Option<f32>,
     pv: &[pyrat::Direction],
     message: &str,
+    turn: u16,
+    state_hash: u64,
 ) -> Vec<u8> {
     build_bot_frame(BotMessage::Info, |fbb| {
         let msg = if message.is_empty() {
@@ -377,6 +381,8 @@ pub fn build_info(
                 score,
                 pv: pv_off,
                 message: msg,
+                turn,
+                state_hash,
             },
         )
         .as_union_value()
@@ -517,6 +523,7 @@ mod tests {
                     cheese: Some(cheese),
                     player1_last_move: WireDir::Up,
                     player2_last_move: WireDir::Right,
+                    state_hash: 0xFEED_FACE_1234_5678,
                 },
             )
             .as_union_value()
@@ -534,6 +541,7 @@ mod tests {
                 assert_eq!(ts.cheese.len(), 2);
                 assert_eq!(ts.player1_last_move, pyrat::Direction::Up);
                 assert_eq!(ts.player2_last_move, pyrat::Direction::Right);
+                assert_eq!(ts.state_hash, 0xFEED_FACE_1234_5678);
             },
             _ => panic!("expected TurnState"),
         }
@@ -662,6 +670,8 @@ mod tests {
             Some(2.5),
             &[pyrat::Direction::Up, pyrat::Direction::Left],
             "depth 5",
+            7,
+            0xCAFE_BABE,
         );
         let packet = flatbuffers::root::<wire::BotPacket>(&bytes).unwrap();
         assert_eq!(packet.message_type(), BotMessage::Info);
@@ -678,11 +688,13 @@ mod tests {
         assert_eq!(pv.get(0), WireDir::Up);
         assert_eq!(pv.get(1), WireDir::Left);
         assert_eq!(info.message(), Some("depth 5"));
+        assert_eq!(info.turn(), 7);
+        assert_eq!(info.state_hash(), 0xCAFE_BABE);
     }
 
     #[test]
     fn build_info_empty_optional_fields() {
-        let bytes = build_info(Player::Player1, 0, None, 0, 0, None, &[], "");
+        let bytes = build_info(Player::Player1, 0, None, 0, 0, None, &[], "", 0, 0);
         let packet = flatbuffers::root::<wire::BotPacket>(&bytes).unwrap();
         assert_eq!(packet.message_type(), BotMessage::Info);
         let info = packet.message_as_info().unwrap();

@@ -114,6 +114,7 @@ def extract_turn_state(table) -> dict:
         "cheese": cheese,
         "player1_last_move": ts.Player1LastMove(),
         "player2_last_move": ts.Player2LastMove(),
+        "state_hash": ts.StateHash(),
     }
 
 
@@ -276,6 +277,8 @@ def encode_info(
     score: float | None = None,
     pv: Sequence[int] | None = None,
     message: str = "",
+    turn: int = 0,
+    state_hash: int = 0,
 ) -> bytes:
     def build(b):
         # Pre-create strings and vectors before starting the table.
@@ -301,6 +304,8 @@ def encode_info(
             InfoMod.AddPv(b, pv_off)
         if msg_off is not None:
             InfoMod.AddMessage(b, msg_off)
+        InfoMod.AddTurn(b, turn)
+        InfoMod.AddStateHash(b, state_hash)
         return InfoMod.End(b)
 
     return _build_bot_packet(BotMessage.Info, build)

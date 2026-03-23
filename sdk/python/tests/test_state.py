@@ -45,6 +45,7 @@ def _make_turn_state(**overrides) -> dict:
         "cheese": [(1, 1)],
         "player1_last_move": 0,  # UP
         "player2_last_move": 1,  # RIGHT
+        "state_hash": 0,
     }
     ts.update(overrides)
     return ts

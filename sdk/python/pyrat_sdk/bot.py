@@ -45,6 +45,7 @@ class Context:
         stop_event: threading.Event | None = None,
         player: Player = Player.PLAYER1,
         turn: int = 0,
+        state_hash: int = 0,
     ) -> None:
         self._think_start = time.monotonic()
         self._deadline = self._think_start + (
@@ -54,6 +55,7 @@ class Context:
         self._stop_event = stop_event
         self._player = player
         self._turn = turn
+        self._state_hash = state_hash
 
     def time_remaining_ms(self) -> float:
         if self._stop_event is not None and self._stop_event.is_set():
@@ -115,6 +117,8 @@ class Context:
                     score=score,
                     pv=pv,
                     message=message,
+                    turn=self._turn,
+                    state_hash=self._state_hash,
                 )
             )
         except Exception as e:
@@ -423,6 +427,7 @@ def _run_lifecycle(
                 stop_event,
                 player=state.my_player,
                 turn=state.turn,
+                state_hash=state.state_hash,
             )
             turn_fn(state, ctx, conn)
         elif msg_type == HostMessage.GameOver:

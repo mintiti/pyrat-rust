@@ -20,7 +20,7 @@
 //! - No transposition table: same positions re-evaluated when reached via different paths
 //! - No simultaneous-move equilibrium: sequential best-response, not Nash
 //!
-//! SDK features: GameSim, effective_moves, should_stop, send_info.
+//! SDK features: GameSim, effective_moves, should_stop, send_info, send_provisional.
 
 use pyrat_sdk::{Bot, Context, Direction, GameSim, GameState, InfoParams, Options, Player};
 use rand::prelude::SliceRandom;
@@ -55,6 +55,7 @@ impl Bot for Search {
             }
 
             pvs = new_pvs;
+            ctx.send_provisional(best_move);
         }
 
         best_move

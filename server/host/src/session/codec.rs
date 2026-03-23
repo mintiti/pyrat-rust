@@ -104,6 +104,8 @@ pub fn extract_bot_packet(buf: &[u8]) -> Result<(BotMessage, BotPayload), String
             score: info.score(),
             pv: info.pv().map(|p| p.iter().collect()).unwrap_or_default(),
             message: info.message().unwrap_or("").to_owned(),
+            turn: info.turn(),
+            state_hash: info.state_hash(),
         })
     } else if msg_type == BotMessage::RenderCommands {
         BotPayload::RenderCommands
@@ -219,6 +221,7 @@ pub fn serialize_host_command(fbb: &mut FlatBufferBuilder<'_>, cmd: &HostCommand
                     cheese: Some(cheese),
                     player1_last_move: ts.player1_last_move,
                     player2_last_move: ts.player2_last_move,
+                    state_hash: ts.state_hash(),
                 },
             );
             (HostMessage::TurnState, off.as_union_value())
@@ -324,7 +327,7 @@ pub fn extract_match_config(mc: &wire::MatchConfig<'_>) -> OwnedMatchConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::messages::OwnedTurnState;
+    use crate::session::messages::{HashedTurnState, OwnedTurnState};
     use pyrat_wire::{Direction, GameResult, Player, TimingMode};
 
     // Helper: build a BotPacket with Identify
@@ -544,7 +547,7 @@ mod tests {
     #[test]
     fn round_trip_turn_state() {
         let mut fbb = FlatBufferBuilder::new();
-        let ts = OwnedTurnState {
+        let ts = HashedTurnState::new(OwnedTurnState {
             turn: 42,
             player1_position: (10, 7),
             player2_position: (0, 0),
@@ -555,7 +558,8 @@ mod tests {
             cheese: vec![(5, 5), (15, 10)],
             player1_last_move: Direction::Up,
             player2_last_move: Direction::Right,
-        };
+        });
+        let expected_hash = ts.state_hash();
         let cmd = HostCommand::TurnState(Box::new(ts));
         let bytes = serialize_host_command(&mut fbb, &cmd);
 
@@ -566,6 +570,7 @@ mod tests {
         assert_eq!(ts.player1_position().unwrap().x(), 10);
         assert_eq!(ts.player2_score(), 2.5);
         assert_eq!(ts.cheese().unwrap().len(), 2);
+        assert_eq!(ts.state_hash(), expected_hash);
     }
 
     #[test]
@@ -633,6 +638,8 @@ mod tests {
         score: Option<f32>,
         pv: &[Direction],
         message: &str,
+        turn: u16,
+        state_hash: u64,
     ) -> Vec<u8> {
         let mut fbb = FlatBufferBuilder::new();
 
@@ -659,6 +666,8 @@ mod tests {
                 score,
                 pv: pv_off,
                 message: msg,
+                turn,
+                state_hash,
             },
         );
         let packet = wire::BotPacket::create(
@@ -683,6 +692,8 @@ mod tests {
             Some(2.5),
             &[Direction::Up, Direction::Left],
             "depth 5",
+            7,
+            0xDEAD_BEEF_CAFE_BABE,
         );
         let (msg_type, payload) = extract_bot_packet(&buf).unwrap();
         assert_eq!(msg_type, BotMessage::Info);
@@ -696,6 +707,8 @@ mod tests {
                 assert!((info.score.unwrap() - 2.5).abs() < f32::EPSILON);
                 assert_eq!(info.pv, vec![Direction::Up, Direction::Left]);
                 assert_eq!(info.message, "depth 5");
+                assert_eq!(info.turn, 7);
+                assert_eq!(info.state_hash, 0xDEAD_BEEF_CAFE_BABE);
             },
             _ => panic!("expected Info"),
         }
@@ -703,7 +716,7 @@ mod tests {
 
     #[test]
     fn extract_info_empty_optional_fields() {
-        let buf = build_info(Player::Player1, 0, None, 0, 0, None, &[], "");
+        let buf = build_info(Player::Player1, 0, None, 0, 0, None, &[], "", 0, 0);
         let (_, payload) = extract_bot_packet(&buf).unwrap();
         match payload {
             BotPayload::Info(info) => {

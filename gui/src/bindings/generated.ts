@@ -139,7 +139,7 @@ export type BotDisconnectedEvent = { match_id: number; player: PlayerSide; reaso
 /**
  * Bot debug/analysis info forwarded from the host event stream.
  */
-export type BotInfoEvent = { match_id: number; sender: PlayerSide; subject: PlayerSide; turn: number; multipv: number; target: Coord | null; depth: number; nodes: number; score: number | null; pv: Direction[]; message: string }
+export type BotInfoEvent = { match_id: number; sender: PlayerSide; subject: PlayerSide; turn: number; state_hash: string; multipv: number; target: Coord | null; depth: number; nodes: number; score: number | null; pv: Direction[]; message: string }
 export type BotOptionDef = { name: string; option_type: BotOptionType; default_value: string; min: number; max: number; choices: string[] }
 export type BotOptionType = "Check" | "Spin" | "Combo" | "String" | "Button"
 /**
@@ -191,7 +191,7 @@ export type MatchOverEvent = { match_id: number; winner: MatchWinner; player1_sc
  */
 export type MatchStartedEvent = { match_id: number; maze: MazeState }
 export type MatchWinner = "Player1" | "Player2" | "Draw"
-export type MazeState = { width: number; height: number; turn: number; max_turns: number; walls: WallEntry[]; mud: MudEntry[]; cheese: Coord[]; player1: PlayerState; player2: PlayerState; total_cheese: number }
+export type MazeState = { width: number; height: number; turn: number; max_turns: number; walls: WallEntry[]; mud: MudEntry[]; cheese: Coord[]; player1: PlayerState; player2: PlayerState; total_cheese: number; state_hash: string }
 export type MudEntry = { from: Coord; to: Coord; cost: number }
 /**
  * Player identity — specta-friendly mirror of pyrat_wire::Player.
@@ -202,7 +202,7 @@ export type StopAnalysisTurnResult = { player1_action: Direction; player2_action
 /**
  * Per-turn delta. Walls/mud never change, so we only send positions + cheese.
  */
-export type TurnPlayedEvent = { match_id: number; turn: number; player1: PlayerState; player2: PlayerState; cheese: Coord[]; player1_action: Direction; player2_action: Direction }
+export type TurnPlayedEvent = { match_id: number; turn: number; state_hash: string; player1: PlayerState; player2: PlayerState; cheese: Coord[]; player1_action: Direction; player2_action: Direction }
 export type WallEntry = { from: Coord; to: Coord }
 
 /** tauri-specta globals **/

@@ -98,6 +98,7 @@ table TurnState {
   cheese: [Vec2];
   player1_last_move: Direction;
   player2_last_move: Direction;
+  state_hash: uint64;
 }
 
 table Stop {}
@@ -161,6 +162,8 @@ table Info {
   score: float32 = null;
   pv: [Direction];
   message: string;
+  turn: uint16;
+  state_hash: uint64;
 }
 
 table RenderCommands {

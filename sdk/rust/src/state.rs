@@ -31,6 +31,7 @@ pub struct GameState {
     player1_last_move: Direction,
     player2_last_move: Direction,
     cheese: Vec<Coordinates>,
+    state_hash: u64,
 
     // Static config
     max_turns: u16,
@@ -75,6 +76,7 @@ impl GameState {
             player1_last_move: Direction::Stay,
             player2_last_move: Direction::Stay,
             cheese: cfg.cheese.clone(),
+            state_hash: 0,
             max_turns: cfg.max_turns,
             move_timeout_ms: cfg.move_timeout_ms,
             preprocessing_timeout_ms: cfg.preprocessing_timeout_ms,
@@ -93,6 +95,7 @@ impl GameState {
         self.player1_last_move = ts.player1_last_move;
         self.player2_last_move = ts.player2_last_move;
         self.cheese = ts.cheese;
+        self.state_hash = ts.state_hash;
     }
 
     // ── Perspective helpers ─────────────────────────
@@ -207,6 +210,10 @@ impl GameState {
 
     pub fn preprocessing_timeout_ms(&self) -> u32 {
         self.preprocessing_timeout_ms
+    }
+
+    pub fn state_hash(&self) -> u64 {
+        self.state_hash
     }
 
     // ── Convenience (delegate to GameView/pathfinding) ──
@@ -329,6 +336,7 @@ mod tests {
             cheese: vec![Coordinates::new(4, 4)],
             player1_last_move: Direction::Right,
             player2_last_move: Direction::Left,
+            state_hash: 0xABCD,
         }
     }
 
@@ -355,6 +363,7 @@ mod tests {
         assert_eq!(state.my_last_move(), Direction::Right);
         assert_eq!(state.opponent_last_move(), Direction::Left);
         assert_eq!(state.cheese().len(), 1);
+        assert_eq!(state.state_hash(), 0xABCD);
     }
 
     #[test]
@@ -454,6 +463,7 @@ mod tests {
             cheese: vec![Coordinates::new(4, 4)], // one cheese collected
             player1_last_move: Direction::Stay,
             player2_last_move: Direction::Stay,
+            state_hash: 0,
         });
 
         let sim = state.to_sim();

@@ -7,7 +7,7 @@ mod setup;
 mod slots;
 
 pub use crate::session::messages::{
-    DisconnectReason, OwnedInfo, OwnedMatchConfig, OwnedOptionDef, OwnedTurnState,
+    DisconnectReason, HashedTurnState, OwnedInfo, OwnedMatchConfig, OwnedOptionDef, OwnedTurnState,
 };
 pub use config::{
     build_owned_match_config, BotConfig, MatchSetup, PlayerEntry, PlayingConfig, SessionHandle,

@@ -33,6 +33,7 @@ pub struct MatchStartedEvent {
 pub struct TurnPlayedEvent {
     pub match_id: u32,
     pub turn: u16,
+    pub state_hash: String,
     pub player1: PlayerState,
     pub player2: PlayerState,
     pub cheese: Vec<Coord>,
@@ -72,6 +73,7 @@ pub struct BotInfoEvent {
     pub sender: PlayerSide,
     pub subject: PlayerSide,
     pub turn: u16,
+    pub state_hash: String,
     pub multipv: u16,
     pub target: Option<Coord>,
     pub depth: u16,
