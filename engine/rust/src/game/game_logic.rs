@@ -16,11 +16,10 @@
 
 use crate::{CheeseBoard, Coordinates, Direction, MoveTable, Wall};
 use serde::{Deserialize, Serialize};
-use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
-use std::hash::{Hash, Hasher};
 
 use crate::game::types::MudMap;
+use crate::game::zobrist;
 
 /// Stores the state of a player including their movement status
 #[derive(Clone)]
@@ -73,6 +72,7 @@ pub struct MoveUndo {
     pub collected_cheese: Vec<Coordinates>,
 
     pub turn: u16,
+    state_hash: u64,
 }
 
 #[derive(Clone)]
@@ -86,6 +86,7 @@ pub struct GameState {
     pub cheese: CheeseBoard,
     pub turn: u16,
     pub max_turns: u16,
+    state_hash: u64,
 }
 
 impl GameState {
@@ -129,6 +130,7 @@ impl GameState {
             cheese: CheeseBoard::new(width, height),
             turn: 0,
             max_turns,
+            state_hash: 0, // Computed after full init in new_with_config
         }
     }
 
@@ -169,6 +171,10 @@ impl GameState {
             game.cheese.place_cheese(pos);
         }
 
+        // Compute initial Zobrist hash: maze topology (static) XOR dynamic state
+        game.state_hash = zobrist::maze_hash(&game.move_table, &game.mud, width, height)
+            ^ zobrist::compute_from_scratch(&game);
+
         game
     }
 
@@ -182,11 +188,61 @@ impl GameState {
     /// [`make_move`](Self::make_move) / [`unmake_move`](Self::unmake_move)
     /// instead.
     pub fn process_turn(&mut self, p1_move: Direction, p2_move: Direction) -> TurnResult {
+        // Snapshot pre-move state for Zobrist deltas
+        let old_p1_x = self.player1.current_pos.x;
+        let old_p1_y = self.player1.current_pos.y;
+        let old_p1_mud = self.player1.mud_timer;
+        let old_p2_x = self.player2.current_pos.x;
+        let old_p2_y = self.player2.current_pos.y;
+        let old_p2_mud = self.player2.mud_timer;
+
         // Process player movements
         let (p1_moved, p2_moved) = self.process_moves(p1_move, p2_move);
 
+        // Position + mud deltas
+        self.state_hash ^= zobrist::player_delta(
+            0,
+            old_p1_x,
+            old_p1_y,
+            old_p1_mud,
+            self.player1.current_pos.x,
+            self.player1.current_pos.y,
+            self.player1.mud_timer,
+        );
+        self.state_hash ^= zobrist::player_delta(
+            1,
+            old_p2_x,
+            old_p2_y,
+            old_p2_mud,
+            self.player2.current_pos.x,
+            self.player2.current_pos.y,
+            self.player2.mud_timer,
+        );
+
+        // Snapshot scores before cheese collection
+        let old_p1_score_x2 = (self.player1.score * 2.0) as u16;
+        let old_p2_score_x2 = (self.player2.score * 2.0) as u16;
+
         // Process cheese collection
         let collected_cheese = self.process_cheese_collection();
+
+        // Score deltas
+        let new_p1_score_x2 = (self.player1.score * 2.0) as u16;
+        let new_p2_score_x2 = (self.player2.score * 2.0) as u16;
+        if old_p1_score_x2 != new_p1_score_x2 {
+            self.state_hash ^= zobrist::score_delta(0, old_p1_score_x2, new_p1_score_x2);
+        }
+        if old_p2_score_x2 != new_p2_score_x2 {
+            self.state_hash ^= zobrist::score_delta(1, old_p2_score_x2, new_p2_score_x2);
+        }
+
+        // Cheese toggles
+        for &pos in &collected_cheese {
+            self.state_hash ^= zobrist::cheese_hash(pos.x, pos.y);
+        }
+
+        // Turn delta
+        self.state_hash ^= zobrist::turn_delta(self.turn, self.turn + 1);
 
         // Update turn counter
         self.turn += 1;
@@ -229,6 +285,7 @@ impl GameState {
 
             collected_cheese: Vec::with_capacity(2),
             turn: self.turn,
+            state_hash: self.state_hash,
         };
 
         // Process turn and save collected cheese
@@ -267,6 +324,7 @@ impl GameState {
         self.player2.misses = undo.p2_misses;
 
         self.turn = undo.turn;
+        self.state_hash = undo.state_hash;
     }
 
     #[inline]
@@ -479,23 +537,16 @@ impl GameState {
         walls
     }
 
-    /// Content-addressable hash of the game position.
+    /// Content-addressable hash of the game position (Zobrist, O(1) read).
     ///
-    /// Two states that would play out identically from this point produce the
-    /// same hash. Static topology (walls, mud layout, dimensions) is excluded
-    /// because it never changes within a game.
+    /// Includes both static topology (maze) and dynamic state (positions,
+    /// scores, mud, turn, cheese). Two states on the same maze that would play
+    /// out identically produce the same hash. States on different mazes differ
+    /// even if the dynamic fields match.
     #[must_use]
-    pub fn state_hash(&self) -> u64 {
-        let mut h = DefaultHasher::new();
-        self.turn.hash(&mut h);
-        self.player1.current_pos.hash(&mut h);
-        self.player2.current_pos.hash(&mut h);
-        self.player1.mud_timer.hash(&mut h);
-        self.player2.mud_timer.hash(&mut h);
-        ((self.player1.score * 2.0) as u16).hash(&mut h);
-        ((self.player2.score * 2.0) as u16).hash(&mut h);
-        self.cheese.bits().hash(&mut h);
-        h.finish()
+    #[inline(always)]
+    pub const fn state_hash(&self) -> u64 {
+        self.state_hash
     }
 
     /// Get the mud timer for player 1
@@ -1095,16 +1146,23 @@ mod tests {
 
         #[test]
         fn sensitive_to_score() {
-            let mut a = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
+            let a = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
             let mut b = a.clone();
             b.player1.score = 1.0;
-            assert_ne!(a.state_hash(), b.state_hash());
+            // Direct field mutation bypasses incremental updates, so use compute_from_scratch
+            assert_ne!(
+                zobrist::compute_from_scratch(&a),
+                zobrist::compute_from_scratch(&b)
+            );
 
             // Half-point difference also detected
-            a.player2.score = 0.5;
-            b.player1.score = 0.0;
-            b.player2.score = 0.0;
-            assert_ne!(a.state_hash(), b.state_hash());
+            let mut c = a.clone();
+            c.player2.score = 0.5;
+            let d = a.clone();
+            assert_ne!(
+                zobrist::compute_from_scratch(&c),
+                zobrist::compute_from_scratch(&d)
+            );
         }
 
         #[test]
@@ -1112,7 +1170,10 @@ mod tests {
             let mut a = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
             let b = a.clone();
             a.turn = 1;
-            assert_ne!(a.state_hash(), b.state_hash());
+            assert_ne!(
+                zobrist::compute_from_scratch(&a),
+                zobrist::compute_from_scratch(&b)
+            );
         }
 
         #[test]
@@ -1120,7 +1181,42 @@ mod tests {
             let mut a = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
             let b = a.clone();
             a.player1.mud_timer = 3;
-            assert_ne!(a.state_hash(), b.state_hash());
+            assert_ne!(
+                zobrist::compute_from_scratch(&a),
+                zobrist::compute_from_scratch(&b)
+            );
+        }
+
+        #[test]
+        fn incremental_matches_from_scratch() {
+            use rand::rngs::StdRng;
+            use rand::{RngExt, SeedableRng};
+
+            let config = GameBuilder::new(8, 8)
+                .with_classic_maze()
+                .with_corner_positions()
+                .with_random_cheese(16, true)
+                .build();
+            let mut game = config.create(Some(12345)).unwrap();
+
+            let maze_h = zobrist::maze_hash(&game.move_table, &game.mud, game.width, game.height);
+            let mut rng = StdRng::seed_from_u64(99);
+
+            for turn in 0..50 {
+                let p1 = Direction::try_from(rng.random_range(0u8..5)).unwrap();
+                let p2 = Direction::try_from(rng.random_range(0u8..5)).unwrap();
+                let result = game.process_turn(p1, p2);
+
+                assert_eq!(
+                    game.state_hash() ^ maze_h,
+                    zobrist::compute_from_scratch(&game),
+                    "hash mismatch at turn {turn}"
+                );
+
+                if result.game_over {
+                    break;
+                }
+            }
         }
 
         #[test]
