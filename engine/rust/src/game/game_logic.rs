@@ -16,7 +16,9 @@
 
 use crate::{CheeseBoard, Coordinates, Direction, MoveTable, Wall};
 use serde::{Deserialize, Serialize};
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 
 use crate::game::types::MudMap;
 
@@ -475,6 +477,25 @@ impl GameState {
             }
         }
         walls
+    }
+
+    /// Content-addressable hash of the game position.
+    ///
+    /// Two states that would play out identically from this point produce the
+    /// same hash. Static topology (walls, mud layout, dimensions) is excluded
+    /// because it never changes within a game.
+    #[must_use]
+    pub fn state_hash(&self) -> u64 {
+        let mut h = DefaultHasher::new();
+        self.turn.hash(&mut h);
+        self.player1.current_pos.hash(&mut h);
+        self.player2.current_pos.hash(&mut h);
+        self.player1.mud_timer.hash(&mut h);
+        self.player2.mud_timer.hash(&mut h);
+        ((self.player1.score * 2.0) as u16).hash(&mut h);
+        ((self.player2.score * 2.0) as u16).hash(&mut h);
+        self.cheese.bits().hash(&mut h);
+        h.finish()
     }
 
     /// Get the mud timer for player 1
@@ -1028,6 +1049,110 @@ mod tests {
             assert_eq!(result_p2[1], 4); // RIGHT → STAY
             assert_eq!(result_p2[2], 2); // DOWN valid
             assert_eq!(result_p2[3], 3); // LEFT valid
+        }
+    }
+
+    mod state_hash {
+        use super::*;
+
+        #[test]
+        fn deterministic() {
+            let game = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
+            assert_eq!(game.state_hash(), game.state_hash());
+        }
+
+        #[test]
+        fn make_unmake_round_trip() {
+            let mut game = GameBuilder::new(5, 5)
+                .with_custom_maze(HashMap::new(), MudMap::new())
+                .with_corner_positions()
+                .with_custom_cheese(vec![Coordinates::new(1, 0), Coordinates::new(3, 4)])
+                .build()
+                .create(None)
+                .unwrap();
+
+            let hash_before = game.state_hash();
+            let undo = game.make_move(Direction::Right, Direction::Left);
+            assert_ne!(
+                game.state_hash(),
+                hash_before,
+                "hash should change after move"
+            );
+            game.unmake_move(undo);
+            assert_eq!(
+                game.state_hash(),
+                hash_before,
+                "hash should restore after unmake"
+            );
+        }
+
+        #[test]
+        fn sensitive_to_position() {
+            let a = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
+            let b = create_test_game(Coordinates::new(1, 0), Coordinates::new(2, 2));
+            assert_ne!(a.state_hash(), b.state_hash());
+        }
+
+        #[test]
+        fn sensitive_to_score() {
+            let mut a = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
+            let mut b = a.clone();
+            b.player1.score = 1.0;
+            assert_ne!(a.state_hash(), b.state_hash());
+
+            // Half-point difference also detected
+            a.player2.score = 0.5;
+            b.player1.score = 0.0;
+            b.player2.score = 0.0;
+            assert_ne!(a.state_hash(), b.state_hash());
+        }
+
+        #[test]
+        fn sensitive_to_turn() {
+            let mut a = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
+            let b = a.clone();
+            a.turn = 1;
+            assert_ne!(a.state_hash(), b.state_hash());
+        }
+
+        #[test]
+        fn sensitive_to_mud() {
+            let mut a = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
+            let b = a.clone();
+            a.player1.mud_timer = 3;
+            assert_ne!(a.state_hash(), b.state_hash());
+        }
+
+        #[test]
+        fn sensitive_to_cheese() {
+            let a = GameBuilder::new(3, 3)
+                .with_custom_maze(HashMap::new(), MudMap::new())
+                .with_corner_positions()
+                .with_custom_cheese(vec![Coordinates::new(1, 1), Coordinates::new(2, 1)])
+                .build()
+                .create(None)
+                .unwrap();
+
+            let b = GameBuilder::new(3, 3)
+                .with_custom_maze(HashMap::new(), MudMap::new())
+                .with_corner_positions()
+                .with_custom_cheese(vec![Coordinates::new(1, 1)])
+                .build()
+                .create(None)
+                .unwrap();
+
+            assert_ne!(
+                a.state_hash(),
+                b.state_hash(),
+                "removing one cheese should change hash"
+            );
+        }
+
+        #[test]
+        fn swapped_players_differ() {
+            let a = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
+            let b = create_test_game(Coordinates::new(2, 2), Coordinates::new(0, 0));
+            assert_ne!(a.state_hash(), b.state_hash());
         }
     }
 

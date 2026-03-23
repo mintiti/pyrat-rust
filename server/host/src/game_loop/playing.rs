@@ -257,23 +257,27 @@ fn build_turn_state(
 ) -> HashedTurnState {
     let p1 = &game.player1;
     let p2 = &game.player2;
-    HashedTurnState::new(OwnedTurnState {
-        turn: game.turn,
-        player1_position: (p1.current_pos.x, p1.current_pos.y),
-        player2_position: (p2.current_pos.x, p2.current_pos.y),
-        player1_score: p1.score,
-        player2_score: p2.score,
-        player1_mud_turns: p1.mud_timer,
-        player2_mud_turns: p2.mud_timer,
-        cheese: game
-            .cheese
-            .get_all_cheese_positions()
-            .into_iter()
-            .map(|c: Coordinates| (c.x, c.y))
-            .collect(),
-        player1_last_move: last_p1,
-        player2_last_move: last_p2,
-    })
+    let hash = game.state_hash();
+    HashedTurnState::with_hash(
+        OwnedTurnState {
+            turn: game.turn,
+            player1_position: (p1.current_pos.x, p1.current_pos.y),
+            player2_position: (p2.current_pos.x, p2.current_pos.y),
+            player1_score: p1.score,
+            player2_score: p2.score,
+            player1_mud_turns: p1.mud_timer,
+            player2_mud_turns: p2.mud_timer,
+            cheese: game
+                .cheese
+                .get_all_cheese_positions()
+                .into_iter()
+                .map(|c: Coordinates| (c.x, c.y))
+                .collect(),
+            player1_last_move: last_p1,
+            player2_last_move: last_p2,
+        },
+        hash,
+    )
 }
 
 /// Timing policy for evaluating committed actions.

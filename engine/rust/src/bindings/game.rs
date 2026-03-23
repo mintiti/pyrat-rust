@@ -584,6 +584,12 @@ impl PyRat {
         self.game.player2_mud_turns()
     }
 
+    /// Content-addressable hash of the current game position.
+    #[getter]
+    fn state_hash(&self) -> u64 {
+        self.game.state_hash()
+    }
+
     // Game elements
     fn cheese_positions(&self) -> Vec<Coordinates> {
         self.game.cheese_positions()

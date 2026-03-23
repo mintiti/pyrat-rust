@@ -100,6 +100,13 @@ impl CheeseBoard {
         self.remaining_cheese_count
     }
 
+    /// Raw bitboard words for hashing. Avoids allocating a `Vec<Coordinates>`.
+    #[must_use]
+    #[inline(always)]
+    pub fn bits(&self) -> &[u64] {
+        &self.bits
+    }
+
     /// Returns a vector of all cheese positions.
     ///
     /// # Panics
