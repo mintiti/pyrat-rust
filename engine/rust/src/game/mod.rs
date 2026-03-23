@@ -8,3 +8,4 @@ pub mod maze_generation;
 #[cfg(feature = "python")]
 pub mod observations;
 pub mod types;
+pub mod zobrist;

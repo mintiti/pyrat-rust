@@ -107,6 +107,14 @@ impl HashedTurnState {
         }
     }
 
+    /// Wrap a turn state with a pre-computed hash (from `GameState::state_hash()`).
+    pub fn with_hash(ts: OwnedTurnState, state_hash: u64) -> Self {
+        Self {
+            inner: ts,
+            state_hash,
+        }
+    }
+
     /// The content-addressable hash for this turn state.
     pub fn state_hash(&self) -> u64 {
         self.state_hash

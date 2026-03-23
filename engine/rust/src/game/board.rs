@@ -73,6 +73,13 @@ impl MoveTable {
         position_moves & (1 << direction as u8) != 0
     }
 
+    /// Raw byte slice of the packed move table, for hashing.
+    #[must_use]
+    #[inline(always)]
+    pub fn bytes(&self) -> &[u8] {
+        &self.valid_moves
+    }
+
     /// Iterator of valid cardinal directions from a position.
     pub fn valid_directions(&self, pos: Coordinates) -> impl Iterator<Item = Direction> + '_ {
         let mask = self.get_valid_moves(pos);
