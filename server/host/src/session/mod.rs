@@ -57,7 +57,7 @@ fn cmd_label(cmd: &HostCommand) -> &'static str {
     match cmd {
         HostCommand::SetOption { .. } => "SetOption",
         HostCommand::MatchConfig(_) => "MatchConfig",
-        HostCommand::StartPreprocessing => "StartPreprocessing",
+        HostCommand::StartPreprocessing { .. } => "StartPreprocessing",
         HostCommand::TurnState(_) => "TurnState",
         HostCommand::Timeout { .. } => "Timeout",
         HostCommand::GameOver { .. } => "GameOver",

@@ -97,7 +97,7 @@ async fn run_stub(
     // Phase C: Wait for StartPreprocessing, then send PreprocessingDone
     loop {
         match cmd_rx.recv().await {
-            Some(HostCommand::StartPreprocessing) => break,
+            Some(HostCommand::StartPreprocessing { .. }) => break,
             Some(HostCommand::Shutdown | HostCommand::GameOver { .. }) => {
                 send_disconnected(session_id, &game_tx).await;
                 return;

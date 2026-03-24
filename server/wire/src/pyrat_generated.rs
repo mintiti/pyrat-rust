@@ -1922,6 +1922,8 @@ pub mod pyrat {
         }
 
         impl<'a> StartPreprocessing<'a> {
+            pub const VT_STATE_HASH: ::flatbuffers::VOffsetT = 4;
+
             #[inline]
             pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
                 StartPreprocessing { _tab: table }
@@ -1934,10 +1936,23 @@ pub mod pyrat {
                 A: ::flatbuffers::Allocator + 'bldr,
             >(
                 _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-                _args: &'args StartPreprocessingArgs,
+                args: &'args StartPreprocessingArgs,
             ) -> ::flatbuffers::WIPOffset<StartPreprocessing<'bldr>> {
                 let mut builder = StartPreprocessingBuilder::new(_fbb);
+                builder.add_state_hash(args.state_hash);
                 builder.finish()
+            }
+
+            #[inline]
+            pub fn state_hash(&self) -> u64 {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<u64>(StartPreprocessing::VT_STATE_HASH, Some(0))
+                        .unwrap()
+                }
             }
         }
 
@@ -1947,15 +1962,19 @@ pub mod pyrat {
                 v: &mut ::flatbuffers::Verifier,
                 pos: usize,
             ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-                v.visit_table(pos)?.finish();
+                v.visit_table(pos)?
+                    .visit_field::<u64>("state_hash", Self::VT_STATE_HASH, false)?
+                    .finish();
                 Ok(())
             }
         }
-        pub struct StartPreprocessingArgs {}
+        pub struct StartPreprocessingArgs {
+            pub state_hash: u64,
+        }
         impl<'a> Default for StartPreprocessingArgs {
             #[inline]
             fn default() -> Self {
-                StartPreprocessingArgs {}
+                StartPreprocessingArgs { state_hash: 0 }
             }
         }
 
@@ -1964,6 +1983,11 @@ pub mod pyrat {
             start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
         }
         impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> StartPreprocessingBuilder<'a, 'b, A> {
+            #[inline]
+            pub fn add_state_hash(&mut self, state_hash: u64) {
+                self.fbb_
+                    .push_slot::<u64>(StartPreprocessing::VT_STATE_HASH, state_hash, 0);
+            }
             #[inline]
             pub fn new(
                 _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
@@ -1984,6 +2008,7 @@ pub mod pyrat {
         impl ::core::fmt::Debug for StartPreprocessing<'_> {
             fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                 let mut ds = f.debug_struct("StartPreprocessing");
+                ds.field("state_hash", &self.state_hash());
                 ds.finish()
             }
         }

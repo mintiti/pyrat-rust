@@ -6,10 +6,10 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tracing::{debug, info, info_span, warn, Instrument};
 
-use crate::session::messages::HostCommand;
+use crate::session::messages::{HashedTurnState, HostCommand, OwnedTurnState};
 use crate::session::{run_session, SessionConfig, SessionId, SessionMsg};
 
-use pyrat_wire::Player;
+use pyrat_wire::{Direction as WireDirection, Player};
 
 use super::config::{MatchSetup, SessionHandle};
 use super::events::{emit, MatchEvent};
@@ -242,10 +242,30 @@ pub async fn run_setup(
 
     let phase_c_start = Instant::now();
     // ── Phase C: StartPreprocessing, wait for PreprocessingDone ───
+
+    // Compute the initial state hash from match_config. Sent to bots via
+    // StartPreprocessing so they can use it on preprocessing Info frames.
+    // Must match the hash the GUI stores on the root node.
+    let initial_state_hash = HashedTurnState::new(OwnedTurnState {
+        turn: 0,
+        player1_position: setup.match_config.player1_start,
+        player2_position: setup.match_config.player2_start,
+        player1_score: 0.0,
+        player2_score: 0.0,
+        player1_mud_turns: 0,
+        player2_mud_turns: 0,
+        cheese: setup.match_config.cheese.clone(),
+        player1_last_move: WireDirection::Stay,
+        player2_last_move: WireDirection::Stay,
+    })
+    .state_hash();
+
     for handle in handles.values() {
         if handle
             .cmd_tx
-            .send(HostCommand::StartPreprocessing)
+            .send(HostCommand::StartPreprocessing {
+                state_hash: initial_state_hash,
+            })
             .await
             .is_err()
         {

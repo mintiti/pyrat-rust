@@ -26,6 +26,9 @@ from pyrat_sdk._wire.protocol.GameOver import GameOver as FBGameOver
 from pyrat_sdk._wire.protocol.HostPacket import HostPacket
 from pyrat_sdk._wire.protocol.MatchConfig import MatchConfig as FBMatchConfig
 from pyrat_sdk._wire.protocol.SetOption import SetOption as FBSetOption
+from pyrat_sdk._wire.protocol.StartPreprocessing import (
+    StartPreprocessing as FBStartPreprocessing,
+)
 from pyrat_sdk._wire.protocol.Timeout import Timeout as FBTimeout
 from pyrat_sdk._wire.protocol.TurnState import TurnState as FBTurnState
 from pyrat_sdk._wire.protocol.Vec2 import CreateVec2
@@ -88,6 +91,13 @@ def extract_match_config(table) -> dict:
         "move_timeout_ms": mc.MoveTimeoutMs(),
         "preprocessing_timeout_ms": mc.PreprocessingTimeoutMs(),
     }
+
+
+def extract_start_preprocessing(table) -> int:
+    """Extract state_hash from a StartPreprocessing table."""
+    sp = FBStartPreprocessing()
+    sp.Init(table.Bytes, table.Pos)
+    return sp.StateHash()
 
 
 def extract_turn_state(table) -> dict:

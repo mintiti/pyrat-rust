@@ -372,6 +372,7 @@ def _run_lifecycle(
             except Exception as e:
                 raise ConnectionError(f"Failed to decode MatchConfig: {e}") from e
         elif msg_type == HostMessage.StartPreprocessing:
+            initial_state_hash = codec.extract_start_preprocessing(table)
             break
         else:
             print(
@@ -398,7 +399,13 @@ def _run_lifecycle(
     reader_thread.start()
 
     # 3. Preprocessing.
-    ctx = Context(config["preprocessing_timeout_ms"], conn, stop_event)
+    state.state_hash = initial_state_hash
+    ctx = Context(
+        config["preprocessing_timeout_ms"],
+        conn,
+        stop_event,
+        state_hash=initial_state_hash,
+    )
     try:
         preprocess_fn(state, ctx)
     except Exception:

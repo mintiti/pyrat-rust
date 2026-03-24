@@ -194,8 +194,13 @@ pub fn serialize_host_command(fbb: &mut FlatBufferBuilder<'_>, cmd: &HostCommand
             );
             (HostMessage::MatchConfig, off.as_union_value())
         },
-        HostCommand::StartPreprocessing => {
-            let off = wire::StartPreprocessing::create(fbb, &wire::StartPreprocessingArgs {});
+        HostCommand::StartPreprocessing { state_hash } => {
+            let off = wire::StartPreprocessing::create(
+                fbb,
+                &wire::StartPreprocessingArgs {
+                    state_hash: *state_hash,
+                },
+            );
             (HostMessage::StartPreprocessing, off.as_union_value())
         },
         HostCommand::TurnState(ts) => {

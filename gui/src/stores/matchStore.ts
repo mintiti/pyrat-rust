@@ -413,6 +413,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 
 	onPreprocessingStarted: (matchId) => {
 		if (matchId !== get().matchId) return;
+		if (get().matchPhase !== "connecting") return;
 		set({ matchPhase: "preprocessing" });
 	},
 
