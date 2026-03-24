@@ -28,26 +28,80 @@ use rand::prelude::SliceRandom;
 struct Search {
     am_player1: bool,
     nodes: u64,
+    /// Saved from preprocess(), consumed on first think().
+    prep: Option<PrepState>,
+}
+
+struct PrepState {
+    best_move: Direction,
+    best_score: f32,
+    pvs: Vec<Vec<Direction>>,
+    depth: i32,
 }
 
 impl Options for Search {}
 
 impl Bot for Search {
+    fn preprocess(&mut self, state: &GameState, ctx: &Context) {
+        self.am_player1 = state.my_player() == Player::Player1;
+        self.nodes = 0;
+        let mut sim = state.to_sim();
+
+        let (best_move, best_score, pvs, depth) = self.iterative_deepen(
+            &mut sim,
+            state,
+            ctx,
+            1,
+            Direction::Stay,
+            f32::NEG_INFINITY,
+            Vec::new(),
+        );
+
+        self.prep = Some(PrepState {
+            best_move,
+            best_score,
+            pvs,
+            depth,
+        });
+    }
+
     fn think(&mut self, state: &GameState, ctx: &Context) -> Direction {
         self.am_player1 = state.my_player() == Player::Player1;
         self.nodes = 0;
         let mut sim = state.to_sim();
 
-        let mut best_move = Direction::Stay;
-        let mut best_score = f32::NEG_INFINITY;
-        let mut pvs: Vec<Vec<Direction>> = Vec::new();
+        let (start_depth, best_move, best_score, pvs) = match self.prep.take() {
+            Some(p) => (p.depth + 1, p.best_move, p.best_score, p.pvs),
+            None => (1, Direction::Stay, f32::NEG_INFINITY, Vec::new()),
+        };
 
-        for depth in 1.. {
+        let (best_move, _, _, _) =
+            self.iterative_deepen(&mut sim, state, ctx, start_depth, best_move, best_score, pvs);
+
+        best_move
+    }
+}
+
+impl Search {
+    #[allow(clippy::too_many_arguments)]
+    fn iterative_deepen(
+        &mut self,
+        sim: &mut GameSim,
+        state: &GameState,
+        ctx: &Context,
+        start_depth: i32,
+        mut best_move: Direction,
+        mut best_score: f32,
+        mut pvs: Vec<Vec<Direction>>,
+    ) -> (Direction, f32, Vec<Vec<Direction>>, i32) {
+        let mut last_depth = start_depth.saturating_sub(1);
+
+        for depth in start_depth.. {
             if ctx.should_stop() {
                 break;
             }
 
-            let (dir, score, new_pvs) = self.search_root(&mut sim, depth, state, ctx, &pvs);
+            let (dir, score, new_pvs) = self.search_root(sim, depth, state, ctx, &pvs);
 
             if score > best_score {
                 best_move = dir;
@@ -55,14 +109,13 @@ impl Bot for Search {
             }
 
             pvs = new_pvs;
+            last_depth = depth;
             ctx.send_provisional(best_move);
         }
 
-        best_move
+        (best_move, best_score, pvs, last_depth)
     }
-}
 
-impl Search {
     fn search_root(
         &mut self,
         sim: &mut GameSim,
@@ -418,6 +471,7 @@ fn main() {
         Search {
             am_player1: false,
             nodes: 0,
+            prep: None,
         },
         "Search.rs",
         "mintiti",
