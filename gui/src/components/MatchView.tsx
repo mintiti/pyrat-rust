@@ -51,6 +51,7 @@ export default function MatchView({ onNewMatch }: Props) {
 	const {
 		onMatchStarted,
 		onPreprocessingStarted,
+		onSetupComplete,
 		onTurnPlayed,
 		onMatchOver,
 		onBotInfo,
@@ -78,6 +79,10 @@ export default function MatchView({ onNewMatch }: Props) {
 			events.preprocessingStartedEvent.listen((e) => {
 				if (e.payload.match_id !== matchIdRef.current) return;
 				onPreprocessingStarted(e.payload.match_id);
+			}),
+			events.setupCompleteEvent.listen((e) => {
+				if (e.payload.match_id !== matchIdRef.current) return;
+				onSetupComplete(e.payload.match_id);
 			}),
 			events.turnPlayedEvent.listen((e) => {
 				if (e.payload.match_id !== matchIdRef.current) return;

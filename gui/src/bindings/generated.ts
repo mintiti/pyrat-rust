@@ -108,6 +108,7 @@ matchErrorEvent: MatchErrorEvent,
 matchOverEvent: MatchOverEvent,
 matchStartedEvent: MatchStartedEvent,
 preprocessingStartedEvent: PreprocessingStartedEvent,
+setupCompleteEvent: SetupCompleteEvent,
 turnPlayedEvent: TurnPlayedEvent
 }>({
 botDisconnectedEvent: "bot-disconnected-event",
@@ -116,6 +117,7 @@ matchErrorEvent: "match-error-event",
 matchOverEvent: "match-over-event",
 matchStartedEvent: "match-started-event",
 preprocessingStartedEvent: "preprocessing-started-event",
+setupCompleteEvent: "setup-complete-event",
 turnPlayedEvent: "turn-played-event"
 })
 
@@ -193,10 +195,6 @@ export type MatchOverEvent = { match_id: number; winner: MatchWinner; player1_sc
  */
 export type MatchStartedEvent = { match_id: number; maze: MazeState }
 export type MatchWinner = "Player1" | "Player2" | "Draw"
-/**
- * Emitted when all bots enter the preprocessing phase.
- */
-export type PreprocessingStartedEvent = { match_id: number }
 export type MazeState = { width: number; height: number; turn: number; max_turns: number; walls: WallEntry[]; mud: MudEntry[]; cheese: Coord[]; player1: PlayerState; player2: PlayerState; total_cheese: number; state_hash: string }
 export type MudEntry = { from: Coord; to: Coord; cost: number }
 /**
@@ -204,6 +202,14 @@ export type MudEntry = { from: Coord; to: Coord; cost: number }
  */
 export type PlayerSide = "Player1" | "Player2"
 export type PlayerState = { position: Coord; score: number; mud_turns: number }
+/**
+ * Emitted when all bots enter the preprocessing phase.
+ */
+export type PreprocessingStartedEvent = { match_id: number }
+/**
+ * Emitted when setup is fully complete (bots connected, configured, preprocessed).
+ */
+export type SetupCompleteEvent = { match_id: number }
 export type StopAnalysisTurnResult = { player1_action: Direction; player2_action: Direction }
 /**
  * Per-turn delta. Walls/mud never change, so we only send positions + cheese.

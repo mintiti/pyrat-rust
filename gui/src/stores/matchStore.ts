@@ -175,6 +175,7 @@ interface MatchState {
 	onMatchOver: (e: MatchOverEvent) => void;
 	onBotInfo: (e: BotInfoEvent) => void;
 	onPreprocessingStarted: (matchId: number) => void;
+	onSetupComplete: (matchId: number) => void;
 	onError: (message: string) => void;
 	onAnalysisError: (message: string) => void;
 	onDisconnect: (e: BotDisconnectedEvent) => void;
@@ -246,14 +247,8 @@ function flushBotInfo() {
 				if (!state.root) return;
 				for (const e of batch) {
 					if (state.pausedSenders[e.sender]) continue;
-					if (state.mode === "step") {
-						const node = getNodeAtPath(state.root, state.cursor);
-						if (!node || node.stateHash !== e.state_hash) continue;
-						accumulateBotInfo(node.botInfo, e);
-					} else {
-						const node = getNodeAtPath(state.root, mainlinePath(e.turn));
-						if (node) accumulateBotInfo(node.botInfo, e);
-					}
+					const node = getNodeAtPath(state.root, mainlinePath(e.turn));
+					if (node) accumulateBotInfo(node.botInfo, e);
 				}
 			}),
 		);
@@ -415,6 +410,13 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		if (matchId !== get().matchId) return;
 		if (get().matchPhase !== "connecting") return;
 		set({ matchPhase: "preprocessing" });
+	},
+
+	onSetupComplete: (matchId) => {
+		if (matchId !== get().matchId) return;
+		const { matchPhase } = get();
+		if (matchPhase !== "preprocessing" && matchPhase !== "connecting") return;
+		set({ matchPhase: "playing" });
 	},
 
 	onBotInfo: (e) => {

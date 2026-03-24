@@ -18,7 +18,7 @@ use commands::{
 };
 use events::{
     BotDisconnectedEvent, BotInfoEvent, MatchErrorEvent, MatchOverEvent, MatchStartedEvent,
-    PreprocessingStartedEvent, TurnPlayedEvent,
+    PreprocessingStartedEvent, SetupCompleteEvent, TurnPlayedEvent,
 };
 use match_config::{load_match_config, save_match_config};
 use tauri_specta::{collect_commands, collect_events, Builder};
@@ -49,6 +49,7 @@ fn main() {
         .events(collect_events![
             MatchStartedEvent,
             PreprocessingStartedEvent,
+            SetupCompleteEvent,
             TurnPlayedEvent,
             MatchOverEvent,
             MatchErrorEvent,
