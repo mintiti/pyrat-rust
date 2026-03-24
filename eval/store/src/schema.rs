@@ -29,6 +29,11 @@ CREATE TABLE IF NOT EXISTS game_results (
     turns           INTEGER NOT NULL,
     played_at       TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+CREATE INDEX IF NOT EXISTS idx_results_player1 ON game_results(player1_id);
+CREATE INDEX IF NOT EXISTS idx_results_player2 ON game_results(player2_id);
+CREATE INDEX IF NOT EXISTS idx_results_config  ON game_results(game_config_id);
+CREATE INDEX IF NOT EXISTS idx_results_played  ON game_results(played_at);
 ";
 
 pub fn initialize(conn: &Connection) -> Result<(), EvalError> {

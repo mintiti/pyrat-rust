@@ -12,18 +12,19 @@ pub struct EvalStore {
 }
 
 impl EvalStore {
-    /// Open (or create) a store at the given path.
-    pub fn open(path: impl AsRef<Path>) -> Result<Self, EvalError> {
-        let conn = Connection::open(path)?;
+    fn from_connection(conn: Connection) -> Result<Self, EvalError> {
         schema::initialize(&conn)?;
         Ok(Self { conn })
     }
 
+    /// Open (or create) a store at the given path.
+    pub fn open(path: impl AsRef<Path>) -> Result<Self, EvalError> {
+        Self::from_connection(Connection::open(path)?)
+    }
+
     /// In-memory store for tests.
     pub fn open_in_memory() -> Result<Self, EvalError> {
-        let conn = Connection::open_in_memory()?;
-        schema::initialize(&conn)?;
-        Ok(Self { conn })
+        Self::from_connection(Connection::open_in_memory()?)
     }
 
     /// Insert a player if it doesn't already exist.
@@ -38,8 +39,7 @@ impl EvalStore {
     /// Insert a game config (keyed by content hash) if it doesn't already exist.
     /// Returns the content hash used as the ID.
     pub fn ensure_game_config(&self, config: &GameConfigRecord) -> Result<String, EvalError> {
-        let id = config.content_hash();
-        let json = serde_json::to_string(config)?;
+        let (id, json) = config.content_hash_with_json();
         self.conn.execute(
             "INSERT OR IGNORE INTO game_configs (id, config_json) VALUES (?1, ?2)",
             params![id, json],
@@ -113,11 +113,7 @@ impl EvalStore {
             })
         })?;
 
-        let mut results = Vec::new();
-        for row in rows {
-            results.push(row?);
-        }
-        Ok(results)
+        rows.collect::<Result<Vec<_>, _>>().map_err(EvalError::from)
     }
 
     /// List all players.
@@ -133,11 +129,7 @@ impl EvalStore {
             })
         })?;
 
-        let mut players = Vec::new();
-        for row in rows {
-            players.push(row?);
-        }
-        Ok(players)
+        rows.collect::<Result<Vec<_>, _>>().map_err(EvalError::from)
     }
 
     /// List all game configs with their IDs.
@@ -151,14 +143,13 @@ impl EvalStore {
             Ok((id, json))
         })?;
 
-        let mut configs = Vec::new();
-        for row in rows {
-            let (id, json) = row?;
-            let config: GameConfigRecord = serde_json::from_str(&json)
-                .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-            configs.push((id, config));
-        }
-        Ok(configs)
+        rows.collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .map(|(id, json)| {
+                let config: GameConfigRecord = serde_json::from_str(&json)?;
+                Ok((id, config))
+            })
+            .collect()
     }
 
     /// Delete a player and cascade to their game results.

@@ -16,11 +16,20 @@ pub struct GameConfigRecord {
 }
 
 impl GameConfigRecord {
-    /// SHA-256 of the canonical (sorted-key) JSON representation.
+    /// SHA-256 of the JSON representation (field declaration order).
+    ///
+    /// Deterministic for a given struct definition. Reordering fields is a
+    /// breaking change — existing hashes would no longer match.
     pub fn content_hash(&self) -> String {
+        let (hash, _) = self.content_hash_with_json();
+        hash
+    }
+
+    /// Returns `(sha256_hex, json_string)` to avoid double-serializing.
+    pub(crate) fn content_hash_with_json(&self) -> (String, String) {
         let json = serde_json::to_string(self).expect("GameConfigRecord is always serializable");
         let hash = Sha256::digest(json.as_bytes());
-        format!("{hash:x}")
+        (format!("{hash:x}"), json)
     }
 }
 
