@@ -174,6 +174,7 @@ interface MatchState {
 	onTurnPlayed: (e: TurnPlayedEvent) => void;
 	onMatchOver: (e: MatchOverEvent) => void;
 	onBotInfo: (e: BotInfoEvent) => void;
+	onPreprocessingStarted: (matchId: number) => void;
 	onError: (message: string) => void;
 	onAnalysisError: (message: string) => void;
 	onDisconnect: (e: BotDisconnectedEvent) => void;
@@ -333,7 +334,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 				total_cheese: maze.total_cheese,
 			},
 			root,
-			matchPhase: "preprocessing",
+			matchPhase: "connecting",
 			autoplay: mode === "auto",
 			analyzing: mode === "step",
 		});
@@ -345,7 +346,10 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 				if (!state.root) return;
 
 				// First turn arrival marks the end of preprocessing
-				if (state.matchPhase === "preprocessing") {
+				if (
+					state.matchPhase === "preprocessing" ||
+					state.matchPhase === "connecting"
+				) {
 					state.matchPhase = "playing";
 				}
 
@@ -405,6 +409,11 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 
 	onMatchOver: (e) => {
 		set({ result: e, matchPhase: "finished" });
+	},
+
+	onPreprocessingStarted: (matchId) => {
+		if (matchId !== get().matchId) return;
+		set({ matchPhase: "preprocessing" });
 	},
 
 	onBotInfo: (e) => {

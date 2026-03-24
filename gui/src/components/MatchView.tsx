@@ -50,6 +50,7 @@ export default function MatchView({ onNewMatch }: Props) {
 
 	const {
 		onMatchStarted,
+		onPreprocessingStarted,
 		onTurnPlayed,
 		onMatchOver,
 		onBotInfo,
@@ -73,6 +74,10 @@ export default function MatchView({ onNewMatch }: Props) {
 			events.matchStartedEvent.listen((e) => {
 				matchIdRef.current = e.payload.match_id;
 				onMatchStarted(e.payload.maze, e.payload.match_id);
+			}),
+			events.preprocessingStartedEvent.listen((e) => {
+				if (e.payload.match_id !== matchIdRef.current) return;
+				onPreprocessingStarted(e.payload.match_id);
 			}),
 			events.turnPlayedEvent.listen((e) => {
 				if (e.payload.match_id !== matchIdRef.current) return;
@@ -264,7 +269,6 @@ export default function MatchView({ onNewMatch }: Props) {
 			{matchPhase === "finished" && <ResultBanner />}
 			<div style={{ flex: 1, overflow: "hidden", display: "flex" }}>
 				<MazeColumn
-					connecting={matchPhase === "connecting"}
 					displayState={displayState}
 					previewError={previewError}
 					hasMatch={hasMatch}

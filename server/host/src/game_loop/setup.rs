@@ -257,6 +257,7 @@ pub async fn run_setup(
     }
 
     emit(event_tx, MatchEvent::PreprocessingStarted);
+    info!("preprocessing started");
 
     // The bot SDK uses the same timeout value to decide when to stop work.
     // Add 500ms margin so PreprocessingDone has time to arrive over TCP.
