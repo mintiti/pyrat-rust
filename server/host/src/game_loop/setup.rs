@@ -6,10 +6,10 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tracing::{debug, info, info_span, warn, Instrument};
 
-use crate::session::messages::HostCommand;
+use crate::session::messages::{HashedTurnState, HostCommand, OwnedTurnState};
 use crate::session::{run_session, SessionConfig, SessionId, SessionMsg};
 
-use pyrat_wire::Player;
+use pyrat_wire::{Direction as WireDirection, Player};
 
 use super::config::{MatchSetup, SessionHandle};
 use super::events::{emit, MatchEvent};
@@ -242,10 +242,30 @@ pub async fn run_setup(
 
     let phase_c_start = Instant::now();
     // ── Phase C: StartPreprocessing, wait for PreprocessingDone ───
+
+    // Compute the initial state hash from match_config. Sent to bots via
+    // StartPreprocessing so they can use it on preprocessing Info frames.
+    // Must match the hash the GUI stores on the root node.
+    let initial_state_hash = HashedTurnState::new(OwnedTurnState {
+        turn: 0,
+        player1_position: setup.match_config.player1_start,
+        player2_position: setup.match_config.player2_start,
+        player1_score: 0.0,
+        player2_score: 0.0,
+        player1_mud_turns: 0,
+        player2_mud_turns: 0,
+        cheese: setup.match_config.cheese.clone(),
+        player1_last_move: WireDirection::Stay,
+        player2_last_move: WireDirection::Stay,
+    })
+    .state_hash();
+
     for handle in handles.values() {
         if handle
             .cmd_tx
-            .send(HostCommand::StartPreprocessing)
+            .send(HostCommand::StartPreprocessing {
+                state_hash: initial_state_hash,
+            })
             .await
             .is_err()
         {
@@ -255,6 +275,9 @@ pub async fn run_setup(
             );
         }
     }
+
+    emit(event_tx, MatchEvent::PreprocessingStarted);
+    info!("preprocessing started");
 
     // The bot SDK uses the same timeout value to decide when to stop work.
     // Add 500ms margin so PreprocessingDone has time to arrive over TCP.
@@ -290,10 +313,22 @@ pub async fn run_setup(
                                 });
                             }
                         }
+                        SessionMsg::Info { session_id, info } => {
+                            if let Some(handle) = handles.get(&session_id) {
+                                if let Some(&sender) = handle.controlled_players.first() {
+                                    emit(event_tx, MatchEvent::BotInfo {
+                                        sender,
+                                        turn: info.turn,
+                                        state_hash: info.state_hash,
+                                        info,
+                                    });
+                                }
+                            }
+                        }
                         SessionMsg::Connected { session_id, .. } => {
                             debug!(session = session_id.0, "late connection during phase C — ignored");
                         }
-                        // Info, Action, etc. — ignored during setup.
+                        // Action, etc. — ignored during setup.
                         _ => {}
                     }
                 }

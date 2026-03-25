@@ -107,6 +107,8 @@ botInfoEvent: BotInfoEvent,
 matchErrorEvent: MatchErrorEvent,
 matchOverEvent: MatchOverEvent,
 matchStartedEvent: MatchStartedEvent,
+preprocessingStartedEvent: PreprocessingStartedEvent,
+setupCompleteEvent: SetupCompleteEvent,
 turnPlayedEvent: TurnPlayedEvent
 }>({
 botDisconnectedEvent: "bot-disconnected-event",
@@ -114,6 +116,8 @@ botInfoEvent: "bot-info-event",
 matchErrorEvent: "match-error-event",
 matchOverEvent: "match-over-event",
 matchStartedEvent: "match-started-event",
+preprocessingStartedEvent: "preprocessing-started-event",
+setupCompleteEvent: "setup-complete-event",
 turnPlayedEvent: "turn-played-event"
 })
 
@@ -198,6 +202,14 @@ export type MudEntry = { from: Coord; to: Coord; cost: number }
  */
 export type PlayerSide = "Player1" | "Player2"
 export type PlayerState = { position: Coord; score: number; mud_turns: number }
+/**
+ * Emitted when all bots enter the preprocessing phase.
+ */
+export type PreprocessingStartedEvent = { match_id: number }
+/**
+ * Emitted when setup is fully complete (bots connected, configured, preprocessed).
+ */
+export type SetupCompleteEvent = { match_id: number }
 export type StopAnalysisTurnResult = { player1_action: Direction; player2_action: Direction }
 /**
  * Per-turn delta. Walls/mud never change, so we only send positions + cheese.

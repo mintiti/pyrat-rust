@@ -23,6 +23,8 @@ pub enum MatchEvent {
         name: String,
         author: String,
     },
+    /// All bots have been sent StartPreprocessing — preprocessing is underway.
+    PreprocessingStarted,
     /// All bots connected, identified, configured, and preprocessed.
     SetupComplete,
     /// The match is starting — includes the resolved match configuration.

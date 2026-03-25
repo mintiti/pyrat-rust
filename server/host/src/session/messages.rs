@@ -221,7 +221,9 @@ pub enum HostCommand {
         value: String,
     },
     MatchConfig(Box<OwnedMatchConfig>),
-    StartPreprocessing,
+    StartPreprocessing {
+        state_hash: u64,
+    },
     TurnState(Box<HashedTurnState>),
     Timeout {
         default_move: Direction,

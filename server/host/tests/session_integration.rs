@@ -146,7 +146,10 @@ async fn happy_path_full_lifecycle() {
     assert_eq!(packet.message_type(), HostMessage::MatchConfig);
 
     // 5. Host sends StartPreprocessing
-    cmd_tx.send(HostCommand::StartPreprocessing).await.unwrap();
+    cmd_tx
+        .send(HostCommand::StartPreprocessing { state_hash: 0 })
+        .await
+        .unwrap();
     let frame = bot_reader.read_frame().await.unwrap();
     let packet = flatbuffers::root::<HostPacket>(frame).unwrap();
     assert_eq!(packet.message_type(), HostMessage::StartPreprocessing);
@@ -317,7 +320,10 @@ async fn ownership_validation_rejects_non_controlled_player() {
         .unwrap();
     let _ = bot_reader.read_frame().await.unwrap(); // MatchConfig
 
-    cmd_tx.send(HostCommand::StartPreprocessing).await.unwrap();
+    cmd_tx
+        .send(HostCommand::StartPreprocessing { state_hash: 0 })
+        .await
+        .unwrap();
     let _ = bot_reader.read_frame().await.unwrap(); // StartPreprocessing
 
     bot_writer
@@ -565,7 +571,10 @@ async fn default_player_inference_single_bot() {
         .unwrap();
     let _ = bot_reader.read_frame().await.unwrap();
 
-    cmd_tx.send(HostCommand::StartPreprocessing).await.unwrap();
+    cmd_tx
+        .send(HostCommand::StartPreprocessing { state_hash: 0 })
+        .await
+        .unwrap();
     let _ = bot_reader.read_frame().await.unwrap();
 
     bot_writer
@@ -641,7 +650,10 @@ async fn stop_sends_wire_stop_and_session_stays_alive() {
         .unwrap();
     let _ = bot_reader.read_frame().await.unwrap(); // MatchConfig
 
-    cmd_tx.send(HostCommand::StartPreprocessing).await.unwrap();
+    cmd_tx
+        .send(HostCommand::StartPreprocessing { state_hash: 0 })
+        .await
+        .unwrap();
     let _ = bot_reader.read_frame().await.unwrap(); // StartPreprocessing
 
     bot_writer
@@ -745,7 +757,10 @@ async fn game_over_then_bot_message_rejected() {
         .unwrap();
     let _ = bot_reader.read_frame().await.unwrap();
 
-    cmd_tx.send(HostCommand::StartPreprocessing).await.unwrap();
+    cmd_tx
+        .send(HostCommand::StartPreprocessing { state_hash: 0 })
+        .await
+        .unwrap();
     let _ = bot_reader.read_frame().await.unwrap();
 
     bot_writer
@@ -828,7 +843,10 @@ async fn multiple_controlled_players_no_inference() {
         .unwrap();
     let _ = bot_reader.read_frame().await.unwrap();
 
-    cmd_tx.send(HostCommand::StartPreprocessing).await.unwrap();
+    cmd_tx
+        .send(HostCommand::StartPreprocessing { state_hash: 0 })
+        .await
+        .unwrap();
     let _ = bot_reader.read_frame().await.unwrap();
 
     bot_writer
@@ -953,7 +971,10 @@ async fn empty_controlled_players_skips_ownership_check() {
         .unwrap();
     let _ = bot_reader.read_frame().await.unwrap();
 
-    cmd_tx.send(HostCommand::StartPreprocessing).await.unwrap();
+    cmd_tx
+        .send(HostCommand::StartPreprocessing { state_hash: 0 })
+        .await
+        .unwrap();
     let _ = bot_reader.read_frame().await.unwrap();
 
     bot_writer

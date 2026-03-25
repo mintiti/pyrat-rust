@@ -216,6 +216,33 @@ impl GameState {
         self.state_hash
     }
 
+    /// Set the state hash (used after verification in setup phase).
+    pub(crate) fn set_state_hash(&mut self, hash: u64) {
+        self.state_hash = hash;
+    }
+
+    /// Compute the initial state hash from turn-0 fields.
+    ///
+    /// Uses the same algorithm as `HashedTurnState::compute_hash` in the host,
+    /// so the SDK can verify that host and bot agree on the initial game state.
+    pub fn compute_initial_hash(&self) -> u64 {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut h = DefaultHasher::new();
+        0u16.hash(&mut h); // turn = 0
+        self.player1_position.hash(&mut h);
+        self.player2_position.hash(&mut h);
+        0u16.hash(&mut h); // scores: (0.0 * 2.0) as u16
+        0u16.hash(&mut h);
+        0u8.hash(&mut h); // mud turns
+        0u8.hash(&mut h);
+        self.cheese.hash(&mut h);
+        pyrat_wire::Direction::Stay.0.hash(&mut h);
+        pyrat_wire::Direction::Stay.0.hash(&mut h);
+        h.finish()
+    }
+
     // ── Convenience (delegate to GameView/pathfinding) ──
 
     pub fn width(&self) -> u8 {

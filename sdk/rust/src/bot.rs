@@ -159,7 +159,6 @@ impl Context {
     /// Clone the inner [`InfoSender`], if available.
     ///
     /// Use this to get an owned sender you can move into `std::thread::spawn`.
-    /// Returns `None` when no sender is available (e.g. during preprocess).
     pub fn info_sender(&self) -> Option<InfoSender> {
         self.info_sender.lock().unwrap().clone()
     }

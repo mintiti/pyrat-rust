@@ -21,7 +21,7 @@ use tauri_specta::Event;
 use crate::commands::{AnalysisPosition, Coord, PlayerState};
 use crate::events::{
     BotDisconnectedEvent, BotInfoEvent, Direction as SpectaDirection, MatchOverEvent, MatchWinner,
-    PlayerSide, TurnPlayedEvent,
+    PlayerSide, PreprocessingStartedEvent, SetupCompleteEvent, TurnPlayedEvent,
 };
 use crate::state::AnalysisRx;
 
@@ -707,105 +707,87 @@ fn build_bot_info_event(
     }
 }
 
-/// Flush all buffered BotInfo events to the frontend.
-fn flush_bot_info(
-    buf: &mut HashMap<(PlayerSide, PlayerSide, u16, u64), BotInfoEvent>,
-    app: &tauri::AppHandle,
-) {
-    for (_, payload) in buf.drain() {
-        let _ = payload.emit(app);
-    }
-}
-
 /// Receives MatchEvents from the host and emits them as Tauri events.
 ///
-/// BotInfo events are throttled to 10 Hz (latest-wins per sender+subject+multipv key)
-/// to avoid overwhelming the frontend with dozens of updates per turn.
-/// All other events are emitted immediately.
+/// All events are forwarded immediately. The frontend handles batching
+/// via rAF + startTransition.
 async fn forward_events(
     mut event_rx: mpsc::UnboundedReceiver<MatchEvent>,
     app: tauri::AppHandle,
     match_id: u32,
 ) {
-    let mut info_buf: HashMap<(PlayerSide, PlayerSide, u16, u64), BotInfoEvent> = HashMap::new();
-    let mut tick = tokio::time::interval(Duration::from_millis(100));
-    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-    loop {
-        tokio::select! {
-            biased;
-            event = event_rx.recv() => {
-                let Some(event) = event else {
-                    // Channel closed — flush remaining buffer
-                    flush_bot_info(&mut info_buf, &app);
-                    break;
+    while let Some(event) = event_rx.recv().await {
+        match event {
+            MatchEvent::TurnPlayed {
+                state,
+                p1_action,
+                p2_action,
+                ..
+            } => {
+                let payload = TurnPlayedEvent {
+                    match_id,
+                    turn: state.turn,
+                    state_hash: format!("{:016x}", state.state_hash()),
+                    player1: PlayerState {
+                        position: state.player1_position.into(),
+                        score: state.player1_score,
+                        mud_turns: state.player1_mud_turns,
+                    },
+                    player2: PlayerState {
+                        position: state.player2_position.into(),
+                        score: state.player2_score,
+                        mud_turns: state.player2_mud_turns,
+                    },
+                    cheese: state.cheese.iter().copied().map(Coord::from).collect(),
+                    player1_action: wire_to_specta(p1_action),
+                    player2_action: wire_to_specta(p2_action),
                 };
-                match event {
-                    MatchEvent::TurnPlayed {
-                        state,
-                        p1_action,
-                        p2_action,
-                        ..
-                    } => {
-                        let payload = TurnPlayedEvent {
-                            match_id,
-                            turn: state.turn,
-                            state_hash: format!("{:016x}", state.state_hash()),
-                            player1: PlayerState {
-                                position: state.player1_position.into(),
-                                score: state.player1_score,
-                                mud_turns: state.player1_mud_turns,
-                            },
-                            player2: PlayerState {
-                                position: state.player2_position.into(),
-                                score: state.player2_score,
-                                mud_turns: state.player2_mud_turns,
-                            },
-                            cheese: state.cheese.iter().copied().map(Coord::from).collect(),
-                            player1_action: wire_to_specta(p1_action),
-                            player2_action: wire_to_specta(p2_action),
-                        };
-                        let _ = payload.emit(&app);
-                    },
-                    MatchEvent::BotDisconnected { player, reason } => {
-                        let _ = BotDisconnectedEvent {
-                            match_id,
-                            player: player_side(player),
-                            reason: format!("{reason:?}"),
-                        }
-                        .emit(&app);
-                    },
-                    MatchEvent::MatchOver { result } => {
-                        let winner = if result.result == GameResult::Player1 {
-                            MatchWinner::Player1
-                        } else if result.result == GameResult::Player2 {
-                            MatchWinner::Player2
-                        } else if result.result == GameResult::Draw {
-                            MatchWinner::Draw
-                        } else {
-                            warn!(result = ?result.result, "unexpected GameResult variant");
-                            MatchWinner::Draw
-                        };
-                        let _ = MatchOverEvent {
-                            match_id,
-                            winner,
-                            player1_score: result.player1_score,
-                            player2_score: result.player2_score,
-                            turns_played: result.turns_played,
-                        }
-                        .emit(&app);
-                    },
-                    MatchEvent::BotInfo { sender, turn, state_hash, info } => {
-                        let payload = build_bot_info_event(match_id, sender, turn, state_hash, &info);
-                        let key = (payload.sender, payload.subject, payload.multipv, state_hash);
-                        info_buf.insert(key, payload);
-                    },
-                    _ => {},
+                let _ = payload.emit(&app);
+            },
+            MatchEvent::BotDisconnected { player, reason } => {
+                let _ = BotDisconnectedEvent {
+                    match_id,
+                    player: player_side(player),
+                    reason: format!("{reason:?}"),
                 }
-            }
-            _ = tick.tick() => {
-                flush_bot_info(&mut info_buf, &app);
-            }
+                .emit(&app);
+            },
+            MatchEvent::MatchOver { result } => {
+                let winner = if result.result == GameResult::Player1 {
+                    MatchWinner::Player1
+                } else if result.result == GameResult::Player2 {
+                    MatchWinner::Player2
+                } else if result.result == GameResult::Draw {
+                    MatchWinner::Draw
+                } else {
+                    warn!(result = ?result.result, "unexpected GameResult variant");
+                    MatchWinner::Draw
+                };
+                let _ = MatchOverEvent {
+                    match_id,
+                    winner,
+                    player1_score: result.player1_score,
+                    player2_score: result.player2_score,
+                    turns_played: result.turns_played,
+                }
+                .emit(&app);
+            },
+            MatchEvent::PreprocessingStarted => {
+                let _ = PreprocessingStartedEvent { match_id }.emit(&app);
+            },
+            MatchEvent::SetupComplete => {
+                let _ = SetupCompleteEvent { match_id }.emit(&app);
+            },
+            MatchEvent::BotInfo {
+                sender,
+                turn,
+                state_hash,
+                info,
+            } => {
+                let payload = build_bot_info_event(match_id, sender, turn, state_hash, &info);
+                let _ = payload.emit(&app);
+            },
+            _ => {},
         }
     }
 }

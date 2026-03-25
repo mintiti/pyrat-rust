@@ -186,6 +186,7 @@ async fn setup_phase<O: options::Options, R: AsyncRead + Unpin>(
     reader: &mut FrameReader<R>,
 ) -> state::GameState {
     let mut game_state: Option<state::GameState> = None;
+    let host_hash;
 
     loop {
         let frame = match reader.read_frame().await {
@@ -209,7 +210,8 @@ async fn setup_phase<O: options::Options, R: AsyncRead + Unpin>(
                     std::process::exit(1);
                 },
             },
-            Ok(HostMsg::StartPreprocessing) => {
+            Ok(HostMsg::StartPreprocessing { state_hash }) => {
+                host_hash = state_hash;
                 break;
             },
             Ok(other) => {
@@ -224,10 +226,22 @@ async fn setup_phase<O: options::Options, R: AsyncRead + Unpin>(
         }
     }
 
-    let Some(state) = game_state else {
+    let Some(mut state) = game_state else {
         eprintln!("[sdk] MatchConfig never received before StartPreprocessing");
         std::process::exit(1);
     };
+
+    // Verify initial state hash: host and SDK must agree on the game state.
+    let sdk_hash = state.compute_initial_hash();
+    if host_hash != sdk_hash {
+        panic!(
+            "[sdk] host and SDK disagree on initial game state hash \
+             (host={host_hash:#018x}, sdk={sdk_hash:#018x})"
+        );
+    }
+    // Set the verified hash so preprocessing Context carries the correct value.
+    state.set_state_hash(host_hash);
+
     state
 }
 
@@ -299,8 +313,8 @@ async fn turn_loop<T: bot::Runner>(
             Instant::now(),
             Player::Player1, // doesn't matter for preprocess
             0,
-            0,
-            None,
+            state.state_hash(),
+            Some(info_sender.clone()),
             stopped.clone(),
             game_over.clone(),
         );
@@ -386,7 +400,7 @@ fn msg_name(msg: &HostMsg) -> &'static str {
     match msg {
         HostMsg::SetOption { .. } => "SetOption",
         HostMsg::MatchConfig(_) => "MatchConfig",
-        HostMsg::StartPreprocessing => "StartPreprocessing",
+        HostMsg::StartPreprocessing { .. } => "StartPreprocessing",
         HostMsg::TurnState(_) => "TurnState",
         HostMsg::Timeout { .. } => "Timeout",
         HostMsg::GameOver(_) => "GameOver",

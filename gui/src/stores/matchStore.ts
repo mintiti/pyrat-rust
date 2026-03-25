@@ -72,7 +72,12 @@ export interface DisplayState extends MazeState {
 	player2Destination: Coord;
 }
 
-export type MatchPhase = "idle" | "connecting" | "playing" | "finished";
+export type MatchPhase =
+	| "idle"
+	| "connecting"
+	| "preprocessing"
+	| "playing"
+	| "finished";
 export type MatchMode = "auto" | "step";
 
 // ── Tree helpers ─────────────────────────────────────────────────
@@ -169,6 +174,8 @@ interface MatchState {
 	onTurnPlayed: (e: TurnPlayedEvent) => void;
 	onMatchOver: (e: MatchOverEvent) => void;
 	onBotInfo: (e: BotInfoEvent) => void;
+	onPreprocessingStarted: (matchId: number) => void;
+	onSetupComplete: (matchId: number) => void;
 	onError: (message: string) => void;
 	onAnalysisError: (message: string) => void;
 	onDisconnect: (e: BotDisconnectedEvent) => void;
@@ -240,14 +247,8 @@ function flushBotInfo() {
 				if (!state.root) return;
 				for (const e of batch) {
 					if (state.pausedSenders[e.sender]) continue;
-					if (state.mode === "step") {
-						const node = getNodeAtPath(state.root, state.cursor);
-						if (!node || node.stateHash !== e.state_hash) continue;
-						accumulateBotInfo(node.botInfo, e);
-					} else {
-						const node = getNodeAtPath(state.root, mainlinePath(e.turn));
-						if (node) accumulateBotInfo(node.botInfo, e);
-					}
+					const node = getNodeAtPath(state.root, mainlinePath(e.turn));
+					if (node) accumulateBotInfo(node.botInfo, e);
 				}
 			}),
 		);
@@ -328,7 +329,7 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 				total_cheese: maze.total_cheese,
 			},
 			root,
-			matchPhase: "playing",
+			matchPhase: "connecting",
 			autoplay: mode === "auto",
 			analyzing: mode === "step",
 		});
@@ -338,6 +339,14 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		set(
 			produce((state: MatchState) => {
 				if (!state.root) return;
+
+				// First turn arrival marks the end of preprocessing
+				if (
+					state.matchPhase === "preprocessing" ||
+					state.matchPhase === "connecting"
+				) {
+					state.matchPhase = "playing";
+				}
 
 				// Resolve the parent node first — needed for mud origin computation
 				const parent =
@@ -395,6 +404,19 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 
 	onMatchOver: (e) => {
 		set({ result: e, matchPhase: "finished" });
+	},
+
+	onPreprocessingStarted: (matchId) => {
+		if (matchId !== get().matchId) return;
+		if (get().matchPhase !== "connecting") return;
+		set({ matchPhase: "preprocessing" });
+	},
+
+	onSetupComplete: (matchId) => {
+		if (matchId !== get().matchId) return;
+		const { matchPhase } = get();
+		if (matchPhase !== "preprocessing" && matchPhase !== "connecting") return;
+		set({ matchPhase: "playing" });
 	},
 
 	onBotInfo: (e) => {

@@ -88,7 +88,7 @@ pub struct GameOverData {
 pub enum HostMsg {
     SetOption { name: String, value: String },
     MatchConfig(MatchConfigData),
-    StartPreprocessing,
+    StartPreprocessing { state_hash: u64 },
     TurnState(TurnStateData),
     Timeout { default_move: pyrat::Direction },
     GameOver(GameOverData),
@@ -119,7 +119,14 @@ pub fn extract_host_msg(buf: &[u8]) -> Result<HostMsg, String> {
                 .ok_or("missing MatchConfig body")?;
             Ok(HostMsg::MatchConfig(extract_match_config(&mc)))
         },
-        HostMessage::StartPreprocessing => Ok(HostMsg::StartPreprocessing),
+        HostMessage::StartPreprocessing => {
+            let sp = packet
+                .message_as_start_preprocessing()
+                .ok_or("missing StartPreprocessing body")?;
+            Ok(HostMsg::StartPreprocessing {
+                state_hash: sp.state_hash(),
+            })
+        },
         HostMessage::TurnState => {
             let ts = packet
                 .message_as_turn_state()
@@ -589,12 +596,20 @@ mod tests {
     #[test]
     fn extract_start_preprocessing() {
         let buf = build_host_packet(HostMessage::StartPreprocessing, |fbb| {
-            wire::StartPreprocessing::create(fbb, &wire::StartPreprocessingArgs {}).as_union_value()
+            wire::StartPreprocessing::create(
+                fbb,
+                &wire::StartPreprocessingArgs {
+                    state_hash: 0xDEAD_BEEF,
+                },
+            )
+            .as_union_value()
         });
-        assert!(matches!(
-            extract_host_msg(&buf).unwrap(),
-            HostMsg::StartPreprocessing
-        ));
+        match extract_host_msg(&buf).unwrap() {
+            HostMsg::StartPreprocessing { state_hash } => {
+                assert_eq!(state_hash, 0xDEAD_BEEF);
+            },
+            _ => panic!("expected StartPreprocessing"),
+        }
     }
 
     #[test]

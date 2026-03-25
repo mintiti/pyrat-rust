@@ -87,6 +87,12 @@ def build_empty(builder, mod):
     return mod.End(builder)
 
 
+def build_start_preprocessing(builder, state_hash: int = 0):
+    StartPreprocessingMod.Start(builder)
+    StartPreprocessingMod.AddStateHash(builder, state_hash)
+    return StartPreprocessingMod.End(builder)
+
+
 def build_game_over(builder, result: int = 0, p1: float = 0.0, p2: float = 0.0):
     GameOverMod.Start(builder)
     GameOverMod.AddResult(builder, result)
@@ -180,7 +186,7 @@ def make_lifecycle_frames(
     frames.append(
         build_host_packet(
             HostMessage.StartPreprocessing,
-            lambda b: build_empty(b, StartPreprocessingMod),
+            lambda b: build_start_preprocessing(b),
         )
     )
 

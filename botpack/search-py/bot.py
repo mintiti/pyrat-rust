@@ -54,16 +54,53 @@ class Search(Bot):
     name = "Search.py"
     author = "mintiti"
 
+    def __init__(self) -> None:
+        self._prep: tuple[Direction, float, list[list[Direction]], int] | None = None
+
+    def preprocess(self, state: GameState, ctx: Context) -> None:
+        self._am_player1 = state.my_player == Player.PLAYER1
+        self._nodes = 0
+        sim = state.to_sim()
+
+        self._prep = self._iterative_deepen(
+            sim, state, ctx, 1, Direction.STAY, -float("inf"), []
+        )
+
     def think(self, state: GameState, ctx: Context) -> Direction:
         self._am_player1 = state.my_player == Player.PLAYER1
         self._nodes = 0
         sim = state.to_sim()
 
-        best_move = Direction.STAY
-        best_score = -float("inf")
-        pvs: list[list[Direction]] = []
+        if self._prep is not None:
+            best_move, best_score, pvs, depth = self._prep
+            self._prep = None
+            start_depth = depth + 1
+        else:
+            best_move, best_score, pvs, start_depth = (
+                Direction.STAY,
+                -float("inf"),
+                [],
+                1,
+            )
 
-        for depth in itertools.count(1):
+        best_move, _, _, _ = self._iterative_deepen(
+            sim, state, ctx, start_depth, best_move, best_score, pvs
+        )
+        return best_move
+
+    def _iterative_deepen(
+        self,
+        sim: GameSim,
+        state: GameState,
+        ctx: Context,
+        start_depth: int,
+        best_move: Direction,
+        best_score: float,
+        pvs: list[list[Direction]],
+    ) -> tuple[Direction, float, list[list[Direction]], int]:
+        last_depth = start_depth - 1
+
+        for depth in itertools.count(start_depth):
             if ctx.should_stop():
                 break
 
@@ -74,9 +111,10 @@ class Search(Bot):
                 best_score = score
 
             pvs = new_pvs
+            last_depth = depth
             ctx.send_provisional(best_move)
 
-        return best_move
+        return best_move, best_score, pvs, last_depth
 
     def _search_root(
         self,

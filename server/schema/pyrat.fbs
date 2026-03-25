@@ -85,7 +85,9 @@ table MatchConfig {
   preprocessing_timeout_ms: uint32;
 }
 
-table StartPreprocessing {}
+table StartPreprocessing {
+  state_hash: uint64;
+}
 
 table TurnState {
   turn: uint16;
