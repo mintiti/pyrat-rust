@@ -45,11 +45,13 @@ pub struct EloResult {
     pub ratings: Vec<EloRating>,
     pub anchor: String,
     pub anchor_elo: f64,
-    // Private: flat n×n covariance in Elo space, player index map
+    // Private: flat n×n covariance in Elo space.
+    // `player_index` maps names to the *original* computation order (used for
+    // covariance and effective_game_counts indexing). This is NOT the same as
+    // the `ratings` vec order, which is sorted by Elo descending.
     elo_covariance: Option<Vec<f64>>,
     effective_game_counts: Option<Vec<f64>>,
     player_index: HashMap<String, usize>,
-    n: usize,
 }
 
 impl EloResult {
@@ -65,7 +67,7 @@ impl EloResult {
         let cov = self.elo_covariance.as_ref()?;
         let &ia = self.player_index.get(a)?;
         let &ib = self.player_index.get(b)?;
-        let n = self.n;
+        let n = self.player_index.len();
         let var = cov[ia * n + ia] - cov[ia * n + ib] - cov[ib * n + ia] + cov[ib * n + ib];
         Some(var.max(0.0).sqrt())
     }
@@ -101,11 +103,12 @@ impl EloResult {
         Some(win_expectancy(ea, eb))
     }
 
+    pub fn get_rating(&self, name: &str) -> Option<&EloRating> {
+        self.ratings.iter().find(|r| r.player_id == name)
+    }
+
     pub fn get_elo(&self, name: &str) -> Option<f64> {
-        self.ratings
-            .iter()
-            .find(|r| r.player_id == name)
-            .map(|r| r.elo)
+        self.get_rating(name).map(|r| r.elo)
     }
 }
 
@@ -200,8 +203,8 @@ pub fn compute_elo(records: &[HeadToHead], options: &EloOptions) -> Result<EloRe
         let w_a = r.wins_a as f64 + options.draw_weight * r.draws as f64;
         if w_a > 0.0 {
             terms.push(SigmoidTerm {
-                pos: ia,
-                neg: ib,
+                pos: Some(ia),
+                neg: Some(ib),
                 weight: w_a,
                 gamecount: w_a,
             });
@@ -209,8 +212,8 @@ pub fn compute_elo(records: &[HeadToHead], options: &EloOptions) -> Result<EloRe
         let w_b = r.wins_b as f64 + (1.0 - options.draw_weight) * r.draws as f64;
         if w_b > 0.0 {
             terms.push(SigmoidTerm {
-                pos: ib,
-                neg: ia,
+                pos: Some(ib),
+                neg: Some(ia),
                 weight: w_b,
                 gamecount: w_b,
             });
@@ -235,14 +238,14 @@ pub fn compute_elo(records: &[HeadToHead], options: &EloOptions) -> Result<EloRe
             }
             let half = 0.5 * options.prior_games;
             terms.push(SigmoidTerm {
-                pos: i,
-                neg: usize::MAX,
+                pos: Some(i),
+                neg: None,
                 weight: half,
                 gamecount: half,
             });
             terms.push(SigmoidTerm {
-                pos: usize::MAX,
-                neg: i,
+                pos: None,
+                neg: Some(i),
                 weight: half,
                 gamecount: half,
             });
@@ -317,7 +320,6 @@ pub fn compute_elo(records: &[HeadToHead], options: &EloOptions) -> Result<EloRe
         elo_covariance,
         effective_game_counts,
         player_index: player_idx,
-        n,
     })
 }
 
@@ -387,11 +389,14 @@ pub fn elo_from_winrate(winrate: f64, opponent_elo: f64) -> Result<f64, EloError
 
 /// A single sigmoid likelihood term.
 /// Represents: weight * log(σ(strength[pos] - strength[neg]))
-/// Use usize::MAX as sentinel for "no player" (prior terms).
+/// `None` means "anchor side" in prior terms (strength implicitly 0).
 struct SigmoidTerm {
-    pos: usize,
-    neg: usize,
+    pos: Option<usize>,
+    neg: Option<usize>,
     weight: f64,
+    /// Separate from `weight` for ESS computation (following KataGo).
+    /// Currently always equal to `weight`, but would diverge with
+    /// time-decay or other weighting schemes.
     gamecount: f64,
 }
 
@@ -537,11 +542,11 @@ fn constrain_anchor_hessian(h: &mut [f64], n: usize, anchor_idx: usize) {
 
 fn term_strength(t: &SigmoidTerm, strengths: &[f64]) -> f64 {
     let mut s = 0.0;
-    if t.pos < strengths.len() {
-        s += strengths[t.pos];
+    if let Some(p) = t.pos {
+        s += strengths[p];
     }
-    if t.neg < strengths.len() {
-        s -= strengths[t.neg];
+    if let Some(n) = t.neg {
+        s -= strengths[n];
     }
     s
 }
@@ -551,12 +556,12 @@ fn term_strength(t: &SigmoidTerm, strengths: &[f64]) -> f64 {
 fn term_player_indices(t: &SigmoidTerm) -> ([(usize, f64); 2], usize) {
     let mut buf = [(0, 0.0); 2];
     let mut len = 0;
-    if t.pos != usize::MAX {
-        buf[len] = (t.pos, 1.0);
+    if let Some(p) = t.pos {
+        buf[len] = (p, 1.0);
         len += 1;
     }
-    if t.neg != usize::MAX {
-        buf[len] = (t.neg, -1.0);
+    if let Some(n) = t.neg {
+        buf[len] = (n, -1.0);
         len += 1;
     }
     (buf, len)
@@ -740,6 +745,29 @@ mod tests {
             compute_uncertainty: true,
             prior_games: 0.0,
             ..EloOptions::new(anchor)
+        }
+    }
+
+    fn h2h(a: &str, b: &str, wins_a: u32, wins_b: u32) -> HeadToHead {
+        HeadToHead {
+            player_a: a.into(),
+            player_b: b.into(),
+            wins_a,
+            wins_b,
+            draws: 0,
+        }
+    }
+
+    fn game(id: i64, p1: &str, p2: &str, s1: f64, s2: f64) -> GameResultRecord {
+        GameResultRecord {
+            id,
+            game_config_id: "c".into(),
+            player1_id: p1.into(),
+            player2_id: p2.into(),
+            player1_score: s1,
+            player2_score: s2,
+            turns: 100,
+            played_at: "t".into(),
         }
     }
 
@@ -935,13 +963,7 @@ mod tests {
 
     #[test]
     fn two_player_50_50_diff_is_zero() {
-        let records = vec![HeadToHead {
-            player_a: "A".into(),
-            player_b: "B".into(),
-            wins_a: 1000,
-            wins_b: 1000,
-            draws: 0,
-        }];
+        let records = vec![h2h("A", "B", 1000, 1000)];
         let result = compute_elo(&records, &opts_no_prior("B")).unwrap();
         let diff = result.elo_difference("A", "B").unwrap();
         assert!(diff.abs() < 0.1, "50-50 should give diff ≈ 0, got {diff}");
@@ -950,13 +972,7 @@ mod tests {
     #[test]
     fn two_player_75_25() {
         // diff = 400 * log10(3) ≈ 190.85
-        let records = vec![HeadToHead {
-            player_a: "A".into(),
-            player_b: "B".into(),
-            wins_a: 750,
-            wins_b: 250,
-            draws: 0,
-        }];
+        let records = vec![h2h("A", "B", 750, 250)];
         let result = compute_elo(&records, &opts_no_prior("B")).unwrap();
         let diff = result.elo_difference("A", "B").unwrap();
         let expected = two_player_expected_diff(750, 250);
@@ -969,13 +985,7 @@ mod tests {
     #[test]
     fn two_player_90_10() {
         // diff = 400 * log10(9) ≈ 381.76
-        let records = vec![HeadToHead {
-            player_a: "A".into(),
-            player_b: "B".into(),
-            wins_a: 900,
-            wins_b: 100,
-            draws: 0,
-        }];
+        let records = vec![h2h("A", "B", 900, 100)];
         let result = compute_elo(&records, &opts_no_prior("B")).unwrap();
         let diff = result.elo_difference("A", "B").unwrap();
         let expected = two_player_expected_diff(900, 100);
@@ -987,13 +997,7 @@ mod tests {
 
     #[test]
     fn two_player_70_30() {
-        let records = vec![HeadToHead {
-            player_a: "A".into(),
-            player_b: "B".into(),
-            wins_a: 700,
-            wins_b: 300,
-            draws: 0,
-        }];
+        let records = vec![h2h("A", "B", 700, 300)];
         let result = compute_elo(&records, &opts_no_prior("B")).unwrap();
         let diff = result.elo_difference("A", "B").unwrap();
         let expected = two_player_expected_diff(700, 300);
@@ -1005,13 +1009,7 @@ mod tests {
 
     #[test]
     fn anchor_is_exact() {
-        let records = vec![HeadToHead {
-            player_a: "A".into(),
-            player_b: "B".into(),
-            wins_a: 7,
-            wins_b: 3,
-            draws: 0,
-        }];
+        let records = vec![h2h("A", "B", 7, 3)];
         for &anchor_elo in &[0.0, 500.0, 1000.0, 1500.0] {
             let opts = EloOptions {
                 anchor_elo,
@@ -1028,20 +1026,8 @@ mod tests {
 
     #[test]
     fn symmetry_of_player_order() {
-        let r1 = vec![HeadToHead {
-            player_a: "A".into(),
-            player_b: "B".into(),
-            wins_a: 7,
-            wins_b: 3,
-            draws: 0,
-        }];
-        let r2 = vec![HeadToHead {
-            player_a: "B".into(),
-            player_b: "A".into(),
-            wins_a: 3,
-            wins_b: 7,
-            draws: 0,
-        }];
+        let r1 = vec![h2h("A", "B", 7, 3)];
+        let r2 = vec![h2h("B", "A", 3, 7)];
         let d1 = compute_elo(&r1, &opts("B"))
             .unwrap()
             .elo_difference("A", "B")
@@ -1070,13 +1056,7 @@ mod tests {
     #[test]
     fn expected_score_roundtrips_with_data() {
         // If A beats B at 70%, the fitted expected_score should be ≈ 0.7.
-        let records = vec![HeadToHead {
-            player_a: "A".into(),
-            player_b: "B".into(),
-            wins_a: 700,
-            wins_b: 300,
-            draws: 0,
-        }];
+        let records = vec![h2h("A", "B", 700, 300)];
         let result = compute_elo(&records, &opts_no_prior("B")).unwrap();
         let es = result.expected_score("A", "B").unwrap();
         assert!(
@@ -1087,22 +1067,7 @@ mod tests {
 
     #[test]
     fn three_players_transitive_ordering() {
-        let records = vec![
-            HeadToHead {
-                player_a: "A".into(),
-                player_b: "B".into(),
-                wins_a: 70,
-                wins_b: 30,
-                draws: 0,
-            },
-            HeadToHead {
-                player_a: "B".into(),
-                player_b: "C".into(),
-                wins_a: 60,
-                wins_b: 40,
-                draws: 0,
-            },
-        ];
+        let records = vec![h2h("A", "B", 70, 30), h2h("B", "C", 60, 40)];
         let result = compute_elo(&records, &opts("C")).unwrap();
         let elo_a = result.get_elo("A").unwrap();
         let elo_b = result.get_elo("B").unwrap();
@@ -1118,27 +1083,9 @@ mod tests {
         // In Bradley-Terry, Elo differences are additive:
         // diff(A,C) ≈ diff(A,B) + diff(B,C)
         let records = vec![
-            HeadToHead {
-                player_a: "A".into(),
-                player_b: "B".into(),
-                wins_a: 700,
-                wins_b: 300,
-                draws: 0,
-            },
-            HeadToHead {
-                player_a: "B".into(),
-                player_b: "C".into(),
-                wins_a: 600,
-                wins_b: 400,
-                draws: 0,
-            },
-            HeadToHead {
-                player_a: "A".into(),
-                player_b: "C".into(),
-                wins_a: 800,
-                wins_b: 200,
-                draws: 0,
-            },
+            h2h("A", "B", 700, 300),
+            h2h("B", "C", 600, 400),
+            h2h("A", "C", 800, 200),
         ];
         let result = compute_elo(&records, &opts_no_prior("C")).unwrap();
         let ab = result.elo_difference("A", "B").unwrap();
@@ -1159,13 +1106,7 @@ mod tests {
     fn prior_shrinks_ratings_toward_anchor() {
         // 1 win, 0 losses. Without prior → extreme rating.
         // With strong prior → pulled back toward anchor.
-        let records = vec![HeadToHead {
-            player_a: "A".into(),
-            player_b: "B".into(),
-            wins_a: 1,
-            wins_b: 0,
-            draws: 0,
-        }];
+        let records = vec![h2h("A", "B", 1, 0)];
         let strong = EloOptions {
             prior_games: 100.0,
             ..opts("B")
@@ -1192,13 +1133,7 @@ mod tests {
     #[test]
     fn prior_vanishes_with_many_games() {
         // With 10000 games, prior_games=2 should barely matter.
-        let records = vec![HeadToHead {
-            player_a: "A".into(),
-            player_b: "B".into(),
-            wins_a: 7000,
-            wins_b: 3000,
-            draws: 0,
-        }];
+        let records = vec![h2h("A", "B", 7000, 3000)];
         let with_prior = compute_elo(&records, &opts("B")).unwrap();
         let without = compute_elo(&records, &opts_no_prior("B")).unwrap();
         let d1 = with_prior.elo_difference("A", "B").unwrap();
@@ -1216,21 +1151,9 @@ mod tests {
     #[test]
     fn stderr_decreases_with_more_games() {
         let mk = |n: u32| -> f64 {
-            let records = vec![HeadToHead {
-                player_a: "A".into(),
-                player_b: "B".into(),
-                wins_a: n,
-                wins_b: n,
-                draws: 0,
-            }];
+            let records = vec![h2h("A", "B", n, n)];
             let result = compute_elo(&records, &opts("B")).unwrap();
-            result
-                .ratings
-                .iter()
-                .find(|r| r.player_id == "A")
-                .unwrap()
-                .stderr
-                .unwrap()
+            result.get_rating("A").unwrap().stderr.unwrap()
         };
         let se50 = mk(50);
         let se200 = mk(200);
@@ -1244,18 +1167,10 @@ mod tests {
         // For 50-50 games, Fisher info per game is constant, so
         // stderr ∝ 1/√n. Doubling games should halve stderr (×√2 ratio).
         let mk = |n: u32| -> f64 {
-            let records = vec![HeadToHead {
-                player_a: "A".into(),
-                player_b: "B".into(),
-                wins_a: n,
-                wins_b: n,
-                draws: 0,
-            }];
+            let records = vec![h2h("A", "B", n, n)];
             compute_elo(&records, &opts_no_prior("B"))
                 .unwrap()
-                .ratings
-                .iter()
-                .find(|r| r.player_id == "A")
+                .get_rating("A")
                 .unwrap()
                 .stderr
                 .unwrap()
@@ -1272,36 +1187,18 @@ mod tests {
 
     #[test]
     fn anchor_stderr_is_zero() {
-        let records = vec![HeadToHead {
-            player_a: "A".into(),
-            player_b: "B".into(),
-            wins_a: 50,
-            wins_b: 50,
-            draws: 0,
-        }];
+        let records = vec![h2h("A", "B", 50, 50)];
         let result = compute_elo(&records, &opts("B")).unwrap();
-        let b = result.ratings.iter().find(|r| r.player_id == "B").unwrap();
+        let b = result.get_rating("B").unwrap();
         assert!(b.stderr.unwrap() < 0.01, "anchor stderr should be ≈ 0");
     }
 
     #[test]
     fn diff_stderr_equals_individual_in_two_player() {
         // When B is the anchor (stderr=0, cov=0), diff_stderr(A,B) = stderr(A).
-        let records = vec![HeadToHead {
-            player_a: "A".into(),
-            player_b: "B".into(),
-            wins_a: 50,
-            wins_b: 50,
-            draws: 0,
-        }];
+        let records = vec![h2h("A", "B", 50, 50)];
         let result = compute_elo(&records, &opts("B")).unwrap();
-        let a_stderr = result
-            .ratings
-            .iter()
-            .find(|r| r.player_id == "A")
-            .unwrap()
-            .stderr
-            .unwrap();
+        let a_stderr = result.get_rating("A").unwrap().stderr.unwrap();
         let diff_stderr = result.elo_difference_stderr("A", "B").unwrap();
         assert!(
             (diff_stderr - a_stderr).abs() < 0.1,
@@ -1313,37 +1210,10 @@ mod tests {
     fn diff_stderr_benefits_from_covariance_in_three_player() {
         // With 3 players, diff_stderr(A,C) should be smaller than
         // sqrt(stderr(A)² + stderr(C)²) because covariance helps.
-        let records = vec![
-            HeadToHead {
-                player_a: "A".into(),
-                player_b: "B".into(),
-                wins_a: 500,
-                wins_b: 500,
-                draws: 0,
-            },
-            HeadToHead {
-                player_a: "B".into(),
-                player_b: "C".into(),
-                wins_a: 500,
-                wins_b: 500,
-                draws: 0,
-            },
-        ];
+        let records = vec![h2h("A", "B", 500, 500), h2h("B", "C", 500, 500)];
         let result = compute_elo(&records, &opts("B")).unwrap();
-        let se_a = result
-            .ratings
-            .iter()
-            .find(|r| r.player_id == "A")
-            .unwrap()
-            .stderr
-            .unwrap();
-        let se_c = result
-            .ratings
-            .iter()
-            .find(|r| r.player_id == "C")
-            .unwrap()
-            .stderr
-            .unwrap();
+        let se_a = result.get_rating("A").unwrap().stderr.unwrap();
+        let se_c = result.get_rating("C").unwrap().stderr.unwrap();
         let naive = (se_a * se_a + se_c * se_c).sqrt();
         let actual = result.elo_difference_stderr("A", "C").unwrap();
         assert!(
@@ -1358,13 +1228,7 @@ mod tests {
 
     #[test]
     fn los_equal_players_is_half() {
-        let records = vec![HeadToHead {
-            player_a: "A".into(),
-            player_b: "B".into(),
-            wins_a: 500,
-            wins_b: 500,
-            draws: 0,
-        }];
+        let records = vec![h2h("A", "B", 500, 500)];
         let result = compute_elo(&records, &opts("B")).unwrap();
         let los = result.likelihood_of_superiority("A", "B").unwrap();
         assert!(
@@ -1375,13 +1239,7 @@ mod tests {
 
     #[test]
     fn los_dominant_player_near_one() {
-        let records = vec![HeadToHead {
-            player_a: "A".into(),
-            player_b: "B".into(),
-            wins_a: 900,
-            wins_b: 100,
-            draws: 0,
-        }];
+        let records = vec![h2h("A", "B", 900, 100)];
         let result = compute_elo(&records, &opts("B")).unwrap();
         let los = result.likelihood_of_superiority("A", "B").unwrap();
         assert!(
@@ -1393,13 +1251,7 @@ mod tests {
     #[test]
     fn los_symmetry() {
         // LOS(A,B) + LOS(B,A) = 1
-        let records = vec![HeadToHead {
-            player_a: "A".into(),
-            player_b: "B".into(),
-            wins_a: 60,
-            wins_b: 40,
-            draws: 0,
-        }];
+        let records = vec![h2h("A", "B", 60, 40)];
         let result = compute_elo(&records, &opts("B")).unwrap();
         let los_ab = result.likelihood_of_superiority("A", "B").unwrap();
         let los_ba = result.likelihood_of_superiority("B", "A").unwrap();
@@ -1412,13 +1264,7 @@ mod tests {
 
     #[test]
     fn los_self_is_half() {
-        let records = vec![HeadToHead {
-            player_a: "A".into(),
-            player_b: "B".into(),
-            wins_a: 60,
-            wins_b: 40,
-            draws: 0,
-        }];
+        let records = vec![h2h("A", "B", 60, 40)];
         let result = compute_elo(&records, &opts("B")).unwrap();
         assert_eq!(result.likelihood_of_superiority("A", "A").unwrap(), 0.5);
     }
@@ -1437,13 +1283,7 @@ mod tests {
 
     #[test]
     fn error_anchor_not_found() {
-        let records = vec![HeadToHead {
-            player_a: "A".into(),
-            player_b: "B".into(),
-            wins_a: 5,
-            wins_b: 5,
-            draws: 0,
-        }];
+        let records = vec![h2h("A", "B", 5, 5)];
         assert!(matches!(
             compute_elo(&records, &opts("Z")),
             Err(EloError::AnchorNotFound(_))
@@ -1452,22 +1292,7 @@ mod tests {
 
     #[test]
     fn error_disconnected_graph() {
-        let records = vec![
-            HeadToHead {
-                player_a: "A".into(),
-                player_b: "B".into(),
-                wins_a: 5,
-                wins_b: 5,
-                draws: 0,
-            },
-            HeadToHead {
-                player_a: "C".into(),
-                player_b: "D".into(),
-                wins_a: 5,
-                wins_b: 5,
-                draws: 0,
-            },
-        ];
+        let records = vec![h2h("A", "B", 5, 5), h2h("C", "D", 5, 5)];
         assert!(matches!(
             compute_elo(&records, &opts("A")),
             Err(EloError::DisconnectedGraph)
@@ -1481,72 +1306,24 @@ mod tests {
     #[test]
     fn h2h_classifies_wins_losses_draws() {
         let results = vec![
-            GameResultRecord {
-                id: 1,
-                game_config_id: "c".into(),
-                player1_id: "A".into(),
-                player2_id: "B".into(),
-                player1_score: 5.0,
-                player2_score: 3.0,
-                turns: 100,
-                played_at: "2024-01-01".into(),
-            },
-            GameResultRecord {
-                id: 2,
-                game_config_id: "c".into(),
-                player1_id: "B".into(),
-                player2_id: "A".into(),
-                player1_score: 4.0,
-                player2_score: 4.0,
-                turns: 100,
-                played_at: "2024-01-02".into(),
-            },
-            GameResultRecord {
-                id: 3,
-                game_config_id: "c".into(),
-                player1_id: "A".into(),
-                player2_id: "B".into(),
-                player1_score: 2.0,
-                player2_score: 6.0,
-                turns: 100,
-                played_at: "2024-01-03".into(),
-            },
+            game(1, "A", "B", 5.0, 3.0),
+            game(2, "B", "A", 4.0, 4.0),
+            game(3, "A", "B", 2.0, 6.0),
         ];
-        let h2h = head_to_head_from_results(&results);
-        assert_eq!(h2h.len(), 1);
-        assert_eq!(h2h[0].player_a, "A");
-        assert_eq!(h2h[0].player_b, "B");
-        assert_eq!(h2h[0].wins_a, 1);
-        assert_eq!(h2h[0].wins_b, 1);
-        assert_eq!(h2h[0].draws, 1);
+        let h = head_to_head_from_results(&results);
+        assert_eq!(h.len(), 1);
+        assert_eq!(h[0].player_a, "A");
+        assert_eq!(h[0].player_b, "B");
+        assert_eq!(h[0].wins_a, 1);
+        assert_eq!(h[0].wins_b, 1);
+        assert_eq!(h[0].draws, 1);
     }
 
     #[test]
     fn h2h_groups_by_pair() {
-        let results = vec![
-            GameResultRecord {
-                id: 1,
-                game_config_id: "c".into(),
-                player1_id: "A".into(),
-                player2_id: "B".into(),
-                player1_score: 5.0,
-                player2_score: 3.0,
-                turns: 100,
-                played_at: "t".into(),
-            },
-            GameResultRecord {
-                id: 2,
-                game_config_id: "c".into(),
-                player1_id: "A".into(),
-                player2_id: "C".into(),
-                player1_score: 4.0,
-                player2_score: 4.0,
-                turns: 100,
-                played_at: "t".into(),
-            },
-        ];
-        let h2h = head_to_head_from_results(&results);
-        assert_eq!(h2h.len(), 2);
+        let results = vec![game(1, "A", "B", 5.0, 3.0), game(2, "A", "C", 4.0, 4.0)];
+        let h = head_to_head_from_results(&results);
+        assert_eq!(h.len(), 2);
     }
 
     // ---------------------------------------------------------------
@@ -1556,39 +1333,12 @@ mod tests {
     #[test]
     fn full_pipeline_results_to_elo() {
         let results = vec![
-            GameResultRecord {
-                id: 1,
-                game_config_id: "c".into(),
-                player1_id: "greedy".into(),
-                player2_id: "random".into(),
-                player1_score: 8.0,
-                player2_score: 2.0,
-                turns: 100,
-                played_at: "2024-01-01".into(),
-            },
-            GameResultRecord {
-                id: 2,
-                game_config_id: "c".into(),
-                player1_id: "greedy".into(),
-                player2_id: "random".into(),
-                player1_score: 7.0,
-                player2_score: 3.0,
-                turns: 100,
-                played_at: "2024-01-02".into(),
-            },
-            GameResultRecord {
-                id: 3,
-                game_config_id: "c".into(),
-                player1_id: "random".into(),
-                player2_id: "greedy".into(),
-                player1_score: 4.0,
-                player2_score: 6.0,
-                turns: 100,
-                played_at: "2024-01-03".into(),
-            },
+            game(1, "greedy", "random", 8.0, 2.0),
+            game(2, "greedy", "random", 7.0, 3.0),
+            game(3, "random", "greedy", 4.0, 6.0),
         ];
-        let h2h = head_to_head_from_results(&results);
-        let result = compute_elo(&h2h, &opts("random")).unwrap();
+        let h = head_to_head_from_results(&results);
+        let result = compute_elo(&h, &opts("random")).unwrap();
         let greedy_elo = result.get_elo("greedy").unwrap();
         let random_elo = result.get_elo("random").unwrap();
         assert!(greedy_elo > random_elo, "greedy should be rated higher");
