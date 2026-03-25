@@ -63,6 +63,9 @@ jobs:
     - name: Run headless tests
       run: cargo test -p pyrat-headless --verbose
 
+    - name: Run eval store tests
+      run: cargo test -p pyrat-eval-store --verbose
+
     - name: Run SDK Rust tests
       run: cargo test -p pyrat-sdk --verbose
 
