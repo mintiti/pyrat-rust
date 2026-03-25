@@ -1,7 +1,9 @@
+use std::collections::HashMap;
 use std::path::Path;
 
 use rusqlite::{params, Connection};
 
+use crate::elo::HeadToHead;
 use crate::schema;
 use crate::types::{
     EvalError, GameConfigRecord, GameResultRecord, NewGameResult, PlayerRecord, ResultFilter,
@@ -162,9 +164,51 @@ impl EvalStore {
     }
 }
 
+/// Aggregate game results into head-to-head records.
+/// Groups by (player1, player2) pair, classifies win/loss/draw from scores.
+pub fn head_to_head_from_results(results: &[GameResultRecord]) -> Vec<HeadToHead> {
+    let mut map: HashMap<(String, String), (u32, u32, u32)> = HashMap::new();
+
+    for r in results {
+        // Canonical ordering: smaller ID first
+        let (a, b, a_score, b_score) = if r.player1_id <= r.player2_id {
+            (
+                &r.player1_id,
+                &r.player2_id,
+                r.player1_score,
+                r.player2_score,
+            )
+        } else {
+            (
+                &r.player2_id,
+                &r.player1_id,
+                r.player2_score,
+                r.player1_score,
+            )
+        };
+
+        let entry = map.entry((a.clone(), b.clone())).or_insert((0, 0, 0));
+        if (a_score - b_score).abs() < 1e-9 {
+            entry.2 += 1; // draw
+        } else if a_score > b_score {
+            entry.0 += 1; // a wins
+        } else {
+            entry.1 += 1; // b wins
+        }
+    }
+
+    let mut records: Vec<HeadToHead> = map
+        .into_iter()
+        .map(|((a, b), (wa, wb, d))| HeadToHead::with_draws(a, b, wa, wb, d))
+        .collect();
+    records.sort_by(|a, b| (&a.player_a, &a.player_b).cmp(&(&b.player_a, &b.player_b)));
+    records
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::elo::compute_elo;
 
     fn sample_config() -> GameConfigRecord {
         GameConfigRecord {
@@ -468,5 +512,62 @@ mod tests {
             assert_eq!(players.len(), 1);
             assert_eq!(players[0].id, "alice");
         }
+    }
+
+    // ---------------------------------------------------------------
+    // head_to_head_from_results
+    // ---------------------------------------------------------------
+
+    fn game(id: i64, p1: &str, p2: &str, s1: f64, s2: f64) -> GameResultRecord {
+        GameResultRecord {
+            id,
+            game_config_id: "c".into(),
+            player1_id: p1.into(),
+            player2_id: p2.into(),
+            player1_score: s1,
+            player2_score: s2,
+            turns: 100,
+            played_at: "t".into(),
+        }
+    }
+
+    #[test]
+    fn h2h_classifies_wins_losses_draws() {
+        let results = vec![
+            game(1, "A", "B", 5.0, 3.0),
+            game(2, "B", "A", 4.0, 4.0),
+            game(3, "A", "B", 2.0, 6.0),
+        ];
+        let h = head_to_head_from_results(&results);
+        assert_eq!(h.len(), 1);
+        assert_eq!(h[0].player_a, "A");
+        assert_eq!(h[0].player_b, "B");
+        assert_eq!(h[0].wins_a, 1);
+        assert_eq!(h[0].wins_b, 1);
+        assert_eq!(h[0].draws, 1);
+    }
+
+    #[test]
+    fn h2h_groups_by_pair() {
+        let results = vec![game(1, "A", "B", 5.0, 3.0), game(2, "A", "C", 4.0, 4.0)];
+        let h = head_to_head_from_results(&results);
+        assert_eq!(h.len(), 2);
+    }
+
+    #[test]
+    fn full_pipeline_results_to_elo() {
+        use crate::elo::EloOptions;
+
+        let results = vec![
+            game(1, "greedy", "random", 8.0, 2.0),
+            game(2, "greedy", "random", 7.0, 3.0),
+            game(3, "random", "greedy", 4.0, 6.0),
+        ];
+        let h = head_to_head_from_results(&results);
+        let result = compute_elo(&h, &EloOptions::new("random")).unwrap();
+        let greedy_elo = result.get_elo("greedy").unwrap();
+        let random_elo = result.get_elo("random").unwrap();
+        assert!(greedy_elo > random_elo, "greedy should be rated higher");
+        assert!((random_elo - 1000.0).abs() < 0.01, "anchor should be exact");
     }
 }

@@ -6,9 +6,8 @@
 
 use std::collections::HashMap;
 
+use serde::Serialize;
 use statrs::distribution::{ContinuousCDF, StudentsT};
-
-use crate::GameResultRecord;
 
 /// 400 * log10(e) — converts strength units to Elo points.
 const ELO_PER_STRENGTH: f64 = 173.717_792_761_245_88;
@@ -18,7 +17,7 @@ const ELO_PER_STRENGTH: f64 = 173.717_792_761_245_88;
 // ---------------------------------------------------------------------------
 
 /// Win/loss/draw record between two players.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct HeadToHead {
     pub player_a: String,
     pub player_b: String,
@@ -27,31 +26,56 @@ pub struct HeadToHead {
     pub draws: u32,
 }
 
+impl HeadToHead {
+    /// Create a record with no draws.
+    pub fn new(a: impl Into<String>, b: impl Into<String>, wins_a: u32, wins_b: u32) -> Self {
+        Self {
+            player_a: a.into(),
+            player_b: b.into(),
+            wins_a,
+            wins_b,
+            draws: 0,
+        }
+    }
+
+    /// Create a record with explicit draws.
+    pub fn with_draws(
+        a: impl Into<String>,
+        b: impl Into<String>,
+        wins_a: u32,
+        wins_b: u32,
+        draws: u32,
+    ) -> Self {
+        Self {
+            player_a: a.into(),
+            player_b: b.into(),
+            wins_a,
+            wins_b,
+            draws,
+        }
+    }
+
+    /// Total games in this record.
+    pub fn total(&self) -> u32 {
+        self.wins_a + self.wins_b + self.draws
+    }
+}
+
 /// Single player's computed rating.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct EloRating {
     pub player_id: String,
     pub elo: f64,
-    pub stderr: Option<f64>,
-    pub effective_game_count: Option<f64>,
 }
 
 /// Full result of an Elo computation.
 ///
-/// Stores the covariance matrix internally for pairwise queries (LOS,
-/// difference stderr) without exposing it.
-#[derive(Debug, Clone)]
+/// Methods on this type are always available (no uncertainty needed).
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct EloResult {
     pub ratings: Vec<EloRating>,
     pub anchor: String,
     pub anchor_elo: f64,
-    // Private: flat n×n covariance in Elo space.
-    // `player_index` maps names to the *original* computation order (used for
-    // covariance and effective_game_counts indexing). This is NOT the same as
-    // the `ratings` vec order, which is sorted by Elo descending.
-    elo_covariance: Option<Vec<f64>>,
-    effective_game_counts: Option<Vec<f64>>,
-    player_index: HashMap<String, usize>,
 }
 
 impl EloResult {
@@ -62,42 +86,8 @@ impl EloResult {
         Some(ea - eb)
     }
 
-    /// Approximate stderr on the Elo difference (A - B), from covariance.
-    pub fn elo_difference_stderr(&self, a: &str, b: &str) -> Option<f64> {
-        let cov = self.elo_covariance.as_ref()?;
-        let &ia = self.player_index.get(a)?;
-        let &ib = self.player_index.get(b)?;
-        let n = self.player_index.len();
-        let var = cov[ia * n + ia] - cov[ia * n + ib] - cov[ib * n + ia] + cov[ib * n + ib];
-        Some(var.max(0.0).sqrt())
-    }
-
-    /// Probability that A is stronger than B (Student's t approximation).
-    /// Returns None if uncertainty wasn't computed.
-    pub fn likelihood_of_superiority(&self, a: &str, b: &str) -> Option<f64> {
-        if a == b {
-            return Some(0.5);
-        }
-        let diff = self.elo_difference(a, b)?;
-        let stderr = self.elo_difference_stderr(a, b)?;
-        if stderr <= 0.0 {
-            return if diff > 0.0 {
-                Some(1.0)
-            } else if diff < 0.0 {
-                Some(0.0)
-            } else {
-                Some(0.5)
-            };
-        }
-        let counts = self.effective_game_counts.as_ref()?;
-        let &ia = self.player_index.get(a)?;
-        let df = (counts[ia] - 1.0).max(1.0);
-        let t = StudentsT::new(0.0, 1.0, df).ok()?;
-        Some(t.cdf(diff / stderr))
-    }
-
     /// Expected win probability for A against B based on their Elo ratings.
-    pub fn expected_score(&self, a: &str, b: &str) -> Option<f64> {
+    pub fn win_expectancy(&self, a: &str, b: &str) -> Option<f64> {
         let ea = self.get_elo(a)?;
         let eb = self.get_elo(b)?;
         Some(win_expectancy(ea, eb))
@@ -112,22 +102,83 @@ impl EloResult {
     }
 }
 
+/// Uncertainty data from the Hessian at the MLE.
+///
+/// Only returned by `compute_elo_with_uncertainty`. Owns the covariance matrix
+/// and player index needed for pairwise queries.
+#[derive(Debug, Clone)]
+pub struct EloUncertainty {
+    stderrs: Vec<f64>,
+    elo_covariance: Vec<f64>,
+    effective_game_counts: Vec<f64>,
+    player_index: HashMap<String, usize>,
+}
+
+impl EloUncertainty {
+    /// Standard error on a player's Elo (conditional on the anchor).
+    pub fn stderr(&self, name: &str) -> Option<f64> {
+        let &i = self.player_index.get(name)?;
+        Some(self.stderrs[i])
+    }
+
+    /// Effective number of games contributing to a player's rating.
+    pub fn effective_game_count(&self, name: &str) -> Option<f64> {
+        let &i = self.player_index.get(name)?;
+        Some(self.effective_game_counts[i])
+    }
+
+    /// Approximate stderr on the Elo difference (A - B), from covariance.
+    pub fn elo_difference_stderr(&self, a: &str, b: &str) -> Option<f64> {
+        let &ia = self.player_index.get(a)?;
+        let &ib = self.player_index.get(b)?;
+        let n = self.player_index.len();
+        let cov = &self.elo_covariance;
+        let var = cov[ia * n + ia] - cov[ia * n + ib] - cov[ib * n + ia] + cov[ib * n + ib];
+        Some(var.max(0.0).sqrt())
+    }
+
+    /// Probability that A is stronger than B (Student's t approximation).
+    ///
+    /// Takes `&EloResult` to get the Elo difference between A and B.
+    ///
+    /// The degrees of freedom use player A's effective game count only.
+    /// This follows KataGo's implementation: since we're testing
+    /// "is A stronger than B?", the df reflects the uncertainty in A's
+    /// rating estimate. This creates a subtle asymmetry — LOS(A,B) and
+    /// 1 - LOS(B,A) may differ slightly when effective game counts differ.
+    /// In practice, the difference is negligible for reasonable sample sizes.
+    pub fn likelihood_of_superiority(&self, result: &EloResult, a: &str, b: &str) -> Option<f64> {
+        if a == b {
+            return Some(0.5);
+        }
+        let diff = result.elo_difference(a, b)?;
+        let stderr = self.elo_difference_stderr(a, b)?;
+        if stderr <= 0.0 {
+            return if diff > 0.0 {
+                Some(1.0)
+            } else if diff < 0.0 {
+                Some(0.0)
+            } else {
+                Some(0.5)
+            };
+        }
+        let &ia = self.player_index.get(a)?;
+        let df = (self.effective_game_counts[ia] - 1.0).max(1.0);
+        let t = StudentsT::new(0.0, 1.0, df).ok()?;
+        Some(t.cdf(diff / stderr))
+    }
+}
+
 /// Configuration for Elo computation.
+#[non_exhaustive]
+#[derive(Debug, Clone)]
 pub struct EloOptions {
-    /// Player to fix at `anchor_elo`.
-    pub anchor: String,
-    /// Elo value for the anchor (default 1000.0).
-    pub anchor_elo: f64,
-    /// Whether to compute stderr / covariance.
-    pub compute_uncertainty: bool,
-    /// How to count draws: 0.5 means half-win each side (default).
-    pub draw_weight: f64,
-    /// Bayesian prior strength: virtual games at 50% vs anchor (default 2.0).
-    pub prior_games: f64,
-    /// Maximum optimizer iterations (default 1000).
-    pub max_iterations: u32,
-    /// Convergence tolerance in Elo units (default 0.001).
-    pub tolerance: f64,
+    anchor: String,
+    anchor_elo: f64,
+    draw_weight: f64,
+    prior_games: f64,
+    max_iterations: u32,
+    tolerance: f64,
 }
 
 impl EloOptions {
@@ -135,16 +186,40 @@ impl EloOptions {
         Self {
             anchor: anchor.into(),
             anchor_elo: 1000.0,
-            compute_uncertainty: false,
             draw_weight: 0.5,
             prior_games: 2.0,
             max_iterations: 1000,
             tolerance: 0.001,
         }
     }
+
+    pub fn anchor_elo(mut self, v: f64) -> Self {
+        self.anchor_elo = v;
+        self
+    }
+
+    pub fn draw_weight(mut self, v: f64) -> Self {
+        self.draw_weight = v;
+        self
+    }
+
+    pub fn prior_games(mut self, v: f64) -> Self {
+        self.prior_games = v;
+        self
+    }
+
+    pub fn max_iterations(mut self, v: u32) -> Self {
+        self.max_iterations = v;
+        self
+    }
+
+    pub fn tolerance(mut self, v: f64) -> Self {
+        self.tolerance = v;
+        self
+    }
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
 pub enum EloError {
     #[error("no game records provided")]
     NoRecords,
@@ -164,8 +239,27 @@ pub enum EloError {
 // Public functions
 // ---------------------------------------------------------------------------
 
-/// Compute Elo ratings from head-to-head records.
+/// Compute Elo ratings from head-to-head records (no uncertainty).
 pub fn compute_elo(records: &[HeadToHead], options: &EloOptions) -> Result<EloResult, EloError> {
+    let (result, _) = compute_elo_inner(records, options, false)?;
+    Ok(result)
+}
+
+/// Compute Elo ratings with uncertainty (stderr, covariance, ESS).
+pub fn compute_elo_with_uncertainty(
+    records: &[HeadToHead],
+    options: &EloOptions,
+) -> Result<(EloResult, EloUncertainty), EloError> {
+    let (result, uncertainty) = compute_elo_inner(records, options, true)?;
+    Ok((result, uncertainty.expect("requested uncertainty")))
+}
+
+/// Shared implementation. When `with_uncertainty` is true, returns Some(EloUncertainty).
+fn compute_elo_inner(
+    records: &[HeadToHead],
+    options: &EloOptions,
+    with_uncertainty: bool,
+) -> Result<(EloResult, Option<EloUncertainty>), EloError> {
     if records.is_empty() {
         return Err(EloError::NoRecords);
     }
@@ -196,8 +290,7 @@ pub fn compute_elo(records: &[HeadToHead], options: &EloOptions) -> Result<EloRe
     for r in records {
         let ia = player_idx[&r.player_a];
         let ib = player_idx[&r.player_b];
-        let total = r.wins_a + r.wins_b + r.draws;
-        if total == 0 {
+        if r.total() == 0 {
             continue;
         }
         let w_a = r.wins_a as f64 + options.draw_weight * r.draws as f64;
@@ -223,7 +316,7 @@ pub fn compute_elo(records: &[HeadToHead], options: &EloOptions) -> Result<EloRe
     // Check connectivity before adding priors
     let pairs: Vec<(usize, usize)> = records
         .iter()
-        .filter(|r| r.wins_a + r.wins_b + r.draws > 0)
+        .filter(|r| r.total() > 0)
         .map(|r| (player_idx[&r.player_a], player_idx[&r.player_b]))
         .collect();
     if !check_connected(n, &pairs) {
@@ -285,8 +378,14 @@ pub fn compute_elo(records: &[HeadToHead], options: &EloOptions) -> Result<EloRe
         .collect();
 
     // Uncertainty
-    let uncertainty = if options.compute_uncertainty {
-        Some(compute_uncertainty(&terms, &strengths, anchor_idx, n)?)
+    let uncertainty = if with_uncertainty {
+        Some(compute_uncertainty_data(
+            &terms,
+            &strengths,
+            anchor_idx,
+            n,
+            &player_idx,
+        )?)
     } else {
         None
     };
@@ -298,8 +397,6 @@ pub fn compute_elo(records: &[HeadToHead], options: &EloOptions) -> Result<EloRe
         .map(|(i, p)| EloRating {
             player_id: p.clone(),
             elo: elos[i],
-            stderr: uncertainty.as_ref().map(|u| u.stderrs[i]),
-            effective_game_count: uncertainty.as_ref().map(|u| u.effective_counts[i]),
         })
         .collect();
     ratings.sort_by(|a, b| {
@@ -308,66 +405,13 @@ pub fn compute_elo(records: &[HeadToHead], options: &EloOptions) -> Result<EloRe
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
-    let (elo_covariance, effective_game_counts) = match uncertainty {
-        Some(u) => (Some(u.elo_covariance), Some(u.effective_counts)),
-        None => (None, None),
-    };
-
-    Ok(EloResult {
+    let result = EloResult {
         ratings,
         anchor: options.anchor.clone(),
         anchor_elo: options.anchor_elo,
-        elo_covariance,
-        effective_game_counts,
-        player_index: player_idx,
-    })
-}
+    };
 
-/// Aggregate game results into head-to-head records.
-/// Groups by (player1, player2) pair, classifies win/loss/draw from scores.
-pub fn head_to_head_from_results(results: &[GameResultRecord]) -> Vec<HeadToHead> {
-    let mut map: HashMap<(String, String), (u32, u32, u32)> = HashMap::new();
-
-    for r in results {
-        // Canonical ordering: smaller ID first
-        let (a, b, a_score, b_score) = if r.player1_id <= r.player2_id {
-            (
-                &r.player1_id,
-                &r.player2_id,
-                r.player1_score,
-                r.player2_score,
-            )
-        } else {
-            (
-                &r.player2_id,
-                &r.player1_id,
-                r.player2_score,
-                r.player1_score,
-            )
-        };
-
-        let entry = map.entry((a.clone(), b.clone())).or_insert((0, 0, 0));
-        if (a_score - b_score).abs() < 1e-9 {
-            entry.2 += 1; // draw
-        } else if a_score > b_score {
-            entry.0 += 1; // a wins
-        } else {
-            entry.1 += 1; // b wins
-        }
-    }
-
-    let mut records: Vec<HeadToHead> = map
-        .into_iter()
-        .map(|((a, b), (wa, wb, d))| HeadToHead {
-            player_a: a,
-            player_b: b,
-            wins_a: wa,
-            wins_b: wb,
-            draws: d,
-        })
-        .collect();
-    records.sort_by(|a, b| (&a.player_a, &a.player_b).cmp(&(&b.player_a, &b.player_b)));
-    records
+    Ok((result, uncertainty))
 }
 
 /// Expected win probability given two Elo ratings.
@@ -400,13 +444,6 @@ struct SigmoidTerm {
     gamecount: f64,
 }
 
-/// Uncertainty data computed from the Hessian at the MLE.
-struct UncertaintyData {
-    stderrs: Vec<f64>,
-    elo_covariance: Vec<f64>,
-    effective_counts: Vec<f64>,
-}
-
 // ---------------------------------------------------------------------------
 // Gauss-Newton sub-routines (matches KataGo decomposition)
 // ---------------------------------------------------------------------------
@@ -419,17 +456,18 @@ fn find_ascent_vector(
     n: usize,
 ) -> Result<Vec<f64>, EloError> {
     let mut g = vec![0.0_f64; n];
-    let mut h = vec![0.0_f64; n * n];
-    accum_gradient_hessian(terms, strengths, &mut g, &mut h);
+    let mut hessian = vec![0.0_f64; n * n];
+    accum_gradient_hessian(terms, strengths, &mut g, &mut hessian);
 
     g[anchor_idx] = 0.0;
-    constrain_anchor_hessian(&mut h, n, anchor_idx);
+    constrain_anchor_hessian(&mut hessian, n, anchor_idx);
 
     // Newton step: solve (-H) * ascent = g
-    for v in h.iter_mut() {
+    let mut precision = hessian;
+    for v in precision.iter_mut() {
         *v = -*v;
     }
-    solve_lu(&mut h, &g, n).ok_or(EloError::SingularMatrix)
+    solve_lu(&mut precision, &g, n).ok_or(EloError::SingularMatrix)
 }
 
 /// Line search: try full Newton step, damp by 0.6 up to 30 times.
@@ -456,27 +494,29 @@ fn line_search_ascend(
 }
 
 /// Hessian at final point → precision → stderrs + covariance + ESS.
-fn compute_uncertainty(
+fn compute_uncertainty_data(
     terms: &[SigmoidTerm],
     strengths: &[f64],
     anchor_idx: usize,
     n: usize,
-) -> Result<UncertaintyData, EloError> {
+    player_idx: &HashMap<String, usize>,
+) -> Result<EloUncertainty, EloError> {
     let mut g = vec![0.0_f64; n];
-    let mut h = vec![0.0_f64; n * n];
-    accum_gradient_hessian(terms, strengths, &mut g, &mut h);
-    constrain_anchor_hessian(&mut h, n, anchor_idx);
+    let mut hessian = vec![0.0_f64; n * n];
+    accum_gradient_hessian(terms, strengths, &mut g, &mut hessian);
+    constrain_anchor_hessian(&mut hessian, n, anchor_idx);
 
     // Precision = -H in Elo space
     let scale = ELO_PER_STRENGTH * ELO_PER_STRENGTH;
-    for v in h.iter_mut() {
+    let mut precision = hessian;
+    for v in precision.iter_mut() {
         *v = -*v / scale;
     }
 
     // Stderrs from precision diagonal (conditional, matches KataGo)
     let stderrs: Vec<f64> = (0..n)
         .map(|i| {
-            let p = h[i * n + i];
+            let p = precision[i * n + i];
             if p > 0.0 {
                 (1.0 / p).sqrt()
             } else {
@@ -486,14 +526,15 @@ fn compute_uncertainty(
         .collect();
 
     // Invert for covariance (needed for diff_stderr / LOS)
-    let elo_covariance = invert_matrix(&h, n).ok_or(EloError::SingularMatrix)?;
+    let elo_covariance = invert_matrix(&precision, n).ok_or(EloError::SingularMatrix)?;
 
-    let effective_counts = compute_effective_game_counts(terms, strengths, n);
+    let effective_game_counts = compute_effective_game_counts(terms, strengths, n);
 
-    Ok(UncertaintyData {
+    Ok(EloUncertainty {
         stderrs,
         elo_covariance,
-        effective_counts,
+        effective_game_counts,
+        player_index: player_idx.clone(),
     })
 }
 
@@ -734,41 +775,11 @@ mod tests {
     use super::*;
 
     fn opts(anchor: &str) -> EloOptions {
-        EloOptions {
-            compute_uncertainty: true,
-            ..EloOptions::new(anchor)
-        }
+        EloOptions::new(anchor)
     }
 
     fn opts_no_prior(anchor: &str) -> EloOptions {
-        EloOptions {
-            compute_uncertainty: true,
-            prior_games: 0.0,
-            ..EloOptions::new(anchor)
-        }
-    }
-
-    fn h2h(a: &str, b: &str, wins_a: u32, wins_b: u32) -> HeadToHead {
-        HeadToHead {
-            player_a: a.into(),
-            player_b: b.into(),
-            wins_a,
-            wins_b,
-            draws: 0,
-        }
-    }
-
-    fn game(id: i64, p1: &str, p2: &str, s1: f64, s2: f64) -> GameResultRecord {
-        GameResultRecord {
-            id,
-            game_config_id: "c".into(),
-            player1_id: p1.into(),
-            player2_id: p2.into(),
-            player1_score: s1,
-            player2_score: s2,
-            turns: 100,
-            played_at: "t".into(),
-        }
+        EloOptions::new(anchor).prior_games(0.0)
     }
 
     // ---------------------------------------------------------------
@@ -803,6 +814,25 @@ mod tests {
             // log_sigmoid is always ≤ 0
             assert!(ls <= 0.0, "x={x}");
         }
+    }
+
+    #[test]
+    fn log_sigmoid_extreme_negative() {
+        // For very negative x, log_sigmoid(x) ≈ x.
+        // The stable branch (x < -40) returns x directly.
+        let x = -1000.0;
+        let ls = log_sigmoid(x);
+        assert!(
+            (ls - x).abs() < 1e-10,
+            "log_sigmoid({x}) should ≈ {x}, got {ls}"
+        );
+        // Near the branch point
+        let x = -50.0;
+        let ls = log_sigmoid(x);
+        assert!(
+            (ls - x).abs() < 1e-10,
+            "log_sigmoid({x}) should ≈ {x}, got {ls}"
+        );
     }
 
     #[test]
@@ -866,6 +896,23 @@ mod tests {
         assert!(check_connected(3, &[(0, 1), (1, 2)]));
         assert!(!check_connected(3, &[(0, 1)])); // node 2 isolated
         assert!(check_connected(1, &[]));
+    }
+
+    // ---------------------------------------------------------------
+    // HeadToHead constructors
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn head_to_head_new_no_draws() {
+        let h = HeadToHead::new("A", "B", 7, 3);
+        assert_eq!(h.draws, 0);
+        assert_eq!(h.total(), 10);
+    }
+
+    #[test]
+    fn head_to_head_with_draws() {
+        let h = HeadToHead::with_draws("A", "B", 5, 3, 2);
+        assert_eq!(h.total(), 10);
     }
 
     // ---------------------------------------------------------------
@@ -952,6 +999,18 @@ mod tests {
     }
 
     // ---------------------------------------------------------------
+    // compute_elo (no uncertainty) — the default path
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn compute_elo_without_uncertainty() {
+        let records = vec![HeadToHead::new("A", "B", 7, 3)];
+        let result = compute_elo(&records, &opts("B")).unwrap();
+        assert!(result.get_elo("A").unwrap() > result.get_elo("B").unwrap());
+        assert!((result.get_elo("B").unwrap() - 1000.0).abs() < 0.01);
+    }
+
+    // ---------------------------------------------------------------
     // compute_elo — quantitative properties
     // ---------------------------------------------------------------
 
@@ -963,7 +1022,7 @@ mod tests {
 
     #[test]
     fn two_player_50_50_diff_is_zero() {
-        let records = vec![h2h("A", "B", 1000, 1000)];
+        let records = vec![HeadToHead::new("A", "B", 1000, 1000)];
         let result = compute_elo(&records, &opts_no_prior("B")).unwrap();
         let diff = result.elo_difference("A", "B").unwrap();
         assert!(diff.abs() < 0.1, "50-50 should give diff ≈ 0, got {diff}");
@@ -972,7 +1031,7 @@ mod tests {
     #[test]
     fn two_player_75_25() {
         // diff = 400 * log10(3) ≈ 190.85
-        let records = vec![h2h("A", "B", 750, 250)];
+        let records = vec![HeadToHead::new("A", "B", 750, 250)];
         let result = compute_elo(&records, &opts_no_prior("B")).unwrap();
         let diff = result.elo_difference("A", "B").unwrap();
         let expected = two_player_expected_diff(750, 250);
@@ -985,7 +1044,7 @@ mod tests {
     #[test]
     fn two_player_90_10() {
         // diff = 400 * log10(9) ≈ 381.76
-        let records = vec![h2h("A", "B", 900, 100)];
+        let records = vec![HeadToHead::new("A", "B", 900, 100)];
         let result = compute_elo(&records, &opts_no_prior("B")).unwrap();
         let diff = result.elo_difference("A", "B").unwrap();
         let expected = two_player_expected_diff(900, 100);
@@ -997,7 +1056,7 @@ mod tests {
 
     #[test]
     fn two_player_70_30() {
-        let records = vec![h2h("A", "B", 700, 300)];
+        let records = vec![HeadToHead::new("A", "B", 700, 300)];
         let result = compute_elo(&records, &opts_no_prior("B")).unwrap();
         let diff = result.elo_difference("A", "B").unwrap();
         let expected = two_player_expected_diff(700, 300);
@@ -1009,12 +1068,9 @@ mod tests {
 
     #[test]
     fn anchor_is_exact() {
-        let records = vec![h2h("A", "B", 7, 3)];
+        let records = vec![HeadToHead::new("A", "B", 7, 3)];
         for &anchor_elo in &[0.0, 500.0, 1000.0, 1500.0] {
-            let opts = EloOptions {
-                anchor_elo,
-                ..opts("B")
-            };
+            let opts = EloOptions::new("B").anchor_elo(anchor_elo);
             let result = compute_elo(&records, &opts).unwrap();
             let actual = result.get_elo("B").unwrap();
             assert!(
@@ -1026,8 +1082,8 @@ mod tests {
 
     #[test]
     fn symmetry_of_player_order() {
-        let r1 = vec![h2h("A", "B", 7, 3)];
-        let r2 = vec![h2h("B", "A", 3, 7)];
+        let r1 = vec![HeadToHead::new("A", "B", 7, 3)];
+        let r2 = vec![HeadToHead::new("B", "A", 3, 7)];
         let d1 = compute_elo(&r1, &opts("B"))
             .unwrap()
             .elo_difference("A", "B")
@@ -1041,33 +1097,30 @@ mod tests {
 
     #[test]
     fn all_draws_gives_equal_ratings() {
-        let records = vec![HeadToHead {
-            player_a: "A".into(),
-            player_b: "B".into(),
-            wins_a: 0,
-            wins_b: 0,
-            draws: 1000,
-        }];
+        let records = vec![HeadToHead::with_draws("A", "B", 0, 0, 1000)];
         let result = compute_elo(&records, &opts("B")).unwrap();
         let diff = result.elo_difference("A", "B").unwrap().abs();
         assert!(diff < 0.1, "all draws → diff ≈ 0, got {diff}");
     }
 
     #[test]
-    fn expected_score_roundtrips_with_data() {
-        // If A beats B at 70%, the fitted expected_score should be ≈ 0.7.
-        let records = vec![h2h("A", "B", 700, 300)];
+    fn win_expectancy_roundtrips_with_data() {
+        // If A beats B at 70%, the fitted win_expectancy should be ≈ 0.7.
+        let records = vec![HeadToHead::new("A", "B", 700, 300)];
         let result = compute_elo(&records, &opts_no_prior("B")).unwrap();
-        let es = result.expected_score("A", "B").unwrap();
+        let es = result.win_expectancy("A", "B").unwrap();
         assert!(
             (es - 0.7).abs() < 0.01,
-            "expected_score should ≈ 0.7, got {es}"
+            "win_expectancy should ≈ 0.7, got {es}"
         );
     }
 
     #[test]
     fn three_players_transitive_ordering() {
-        let records = vec![h2h("A", "B", 70, 30), h2h("B", "C", 60, 40)];
+        let records = vec![
+            HeadToHead::new("A", "B", 70, 30),
+            HeadToHead::new("B", "C", 60, 40),
+        ];
         let result = compute_elo(&records, &opts("C")).unwrap();
         let elo_a = result.get_elo("A").unwrap();
         let elo_b = result.get_elo("B").unwrap();
@@ -1083,9 +1136,9 @@ mod tests {
         // In Bradley-Terry, Elo differences are additive:
         // diff(A,C) ≈ diff(A,B) + diff(B,C)
         let records = vec![
-            h2h("A", "B", 700, 300),
-            h2h("B", "C", 600, 400),
-            h2h("A", "C", 800, 200),
+            HeadToHead::new("A", "B", 700, 300),
+            HeadToHead::new("B", "C", 600, 400),
+            HeadToHead::new("A", "C", 800, 200),
         ];
         let result = compute_elo(&records, &opts_no_prior("C")).unwrap();
         let ab = result.elo_difference("A", "B").unwrap();
@@ -1098,6 +1151,61 @@ mod tests {
         );
     }
 
+    #[test]
+    fn ratings_sorted_descending() {
+        let records = vec![
+            HeadToHead::new("A", "B", 70, 30),
+            HeadToHead::new("B", "C", 60, 40),
+        ];
+        let result = compute_elo(&records, &opts("C")).unwrap();
+        for w in result.ratings.windows(2) {
+            assert!(
+                w[0].elo >= w[1].elo,
+                "ratings not sorted: {} ({}) before {} ({})",
+                w[0].player_id,
+                w[0].elo,
+                w[1].player_id,
+                w[1].elo
+            );
+        }
+    }
+
+    #[test]
+    fn missing_player_lookups_return_none() {
+        let records = vec![HeadToHead::new("A", "B", 7, 3)];
+        let result = compute_elo(&records, &opts("B")).unwrap();
+        assert!(result.get_elo("Z").is_none());
+        assert!(result.get_rating("Z").is_none());
+        assert!(result.elo_difference("A", "Z").is_none());
+        assert!(result.win_expectancy("Z", "A").is_none());
+    }
+
+    // ---------------------------------------------------------------
+    // Draw weight
+    // ---------------------------------------------------------------
+
+    #[test]
+    fn draw_weight_behavior() {
+        // All draws. With draw_weight=0.5 (default), equal ratings.
+        // With draw_weight=0.7, A gets more credit → A rated higher.
+        let records = vec![HeadToHead::with_draws("A", "B", 0, 0, 1000)];
+
+        let equal = compute_elo(&records, &opts_no_prior("B")).unwrap();
+        let diff_equal = equal.elo_difference("A", "B").unwrap();
+        assert!(diff_equal.abs() < 0.1, "draw_weight=0.5 → diff ≈ 0");
+
+        let biased = compute_elo(
+            &records,
+            &EloOptions::new("B").prior_games(0.0).draw_weight(0.7),
+        )
+        .unwrap();
+        let diff_biased = biased.elo_difference("A", "B").unwrap();
+        assert!(
+            diff_biased > 10.0,
+            "draw_weight=0.7 should give A higher rating, got diff={diff_biased}"
+        );
+    }
+
     // ---------------------------------------------------------------
     // Prior effects
     // ---------------------------------------------------------------
@@ -1106,15 +1214,9 @@ mod tests {
     fn prior_shrinks_ratings_toward_anchor() {
         // 1 win, 0 losses. Without prior → extreme rating.
         // With strong prior → pulled back toward anchor.
-        let records = vec![h2h("A", "B", 1, 0)];
-        let strong = EloOptions {
-            prior_games: 100.0,
-            ..opts("B")
-        };
-        let weak = EloOptions {
-            prior_games: 1.0,
-            ..opts("B")
-        };
+        let records = vec![HeadToHead::new("A", "B", 1, 0)];
+        let strong = EloOptions::new("B").prior_games(100.0);
+        let weak = EloOptions::new("B").prior_games(1.0);
         let d_strong = compute_elo(&records, &strong)
             .unwrap()
             .elo_difference("A", "B")
@@ -1133,7 +1235,7 @@ mod tests {
     #[test]
     fn prior_vanishes_with_many_games() {
         // With 10000 games, prior_games=2 should barely matter.
-        let records = vec![h2h("A", "B", 7000, 3000)];
+        let records = vec![HeadToHead::new("A", "B", 7000, 3000)];
         let with_prior = compute_elo(&records, &opts("B")).unwrap();
         let without = compute_elo(&records, &opts_no_prior("B")).unwrap();
         let d1 = with_prior.elo_difference("A", "B").unwrap();
@@ -1151,9 +1253,9 @@ mod tests {
     #[test]
     fn stderr_decreases_with_more_games() {
         let mk = |n: u32| -> f64 {
-            let records = vec![h2h("A", "B", n, n)];
-            let result = compute_elo(&records, &opts("B")).unwrap();
-            result.get_rating("A").unwrap().stderr.unwrap()
+            let records = vec![HeadToHead::new("A", "B", n, n)];
+            let (_, unc) = compute_elo_with_uncertainty(&records, &opts("B")).unwrap();
+            unc.stderr("A").unwrap()
         };
         let se50 = mk(50);
         let se200 = mk(200);
@@ -1167,13 +1269,9 @@ mod tests {
         // For 50-50 games, Fisher info per game is constant, so
         // stderr ∝ 1/√n. Doubling games should halve stderr (×√2 ratio).
         let mk = |n: u32| -> f64 {
-            let records = vec![h2h("A", "B", n, n)];
-            compute_elo(&records, &opts_no_prior("B"))
-                .unwrap()
-                .get_rating("A")
-                .unwrap()
-                .stderr
-                .unwrap()
+            let records = vec![HeadToHead::new("A", "B", n, n)];
+            let (_, unc) = compute_elo_with_uncertainty(&records, &opts_no_prior("B")).unwrap();
+            unc.stderr("A").unwrap()
         };
         let se100 = mk(500);
         let se400 = mk(2000);
@@ -1187,19 +1285,21 @@ mod tests {
 
     #[test]
     fn anchor_stderr_is_zero() {
-        let records = vec![h2h("A", "B", 50, 50)];
-        let result = compute_elo(&records, &opts("B")).unwrap();
-        let b = result.get_rating("B").unwrap();
-        assert!(b.stderr.unwrap() < 0.01, "anchor stderr should be ≈ 0");
+        let records = vec![HeadToHead::new("A", "B", 50, 50)];
+        let (_, unc) = compute_elo_with_uncertainty(&records, &opts("B")).unwrap();
+        assert!(
+            unc.stderr("B").unwrap() < 0.01,
+            "anchor stderr should be ≈ 0"
+        );
     }
 
     #[test]
     fn diff_stderr_equals_individual_in_two_player() {
         // When B is the anchor (stderr=0, cov=0), diff_stderr(A,B) = stderr(A).
-        let records = vec![h2h("A", "B", 50, 50)];
-        let result = compute_elo(&records, &opts("B")).unwrap();
-        let a_stderr = result.get_rating("A").unwrap().stderr.unwrap();
-        let diff_stderr = result.elo_difference_stderr("A", "B").unwrap();
+        let records = vec![HeadToHead::new("A", "B", 50, 50)];
+        let (_, unc) = compute_elo_with_uncertainty(&records, &opts("B")).unwrap();
+        let a_stderr = unc.stderr("A").unwrap();
+        let diff_stderr = unc.elo_difference_stderr("A", "B").unwrap();
         assert!(
             (diff_stderr - a_stderr).abs() < 0.1,
             "diff_stderr={diff_stderr}, a_stderr={a_stderr}"
@@ -1208,18 +1308,50 @@ mod tests {
 
     #[test]
     fn diff_stderr_benefits_from_covariance_in_three_player() {
-        // With 3 players, diff_stderr(A,C) should be smaller than
+        // With 3 players, diff_stderr(A,C) should be strictly smaller than
         // sqrt(stderr(A)² + stderr(C)²) because covariance helps.
-        let records = vec![h2h("A", "B", 500, 500), h2h("B", "C", 500, 500)];
-        let result = compute_elo(&records, &opts("B")).unwrap();
-        let se_a = result.get_rating("A").unwrap().stderr.unwrap();
-        let se_c = result.get_rating("C").unwrap().stderr.unwrap();
+        let records = vec![
+            HeadToHead::new("A", "B", 500, 500),
+            HeadToHead::new("B", "C", 500, 500),
+        ];
+        let (_, unc) = compute_elo_with_uncertainty(&records, &opts("B")).unwrap();
+        let se_a = unc.stderr("A").unwrap();
+        let se_c = unc.stderr("C").unwrap();
         let naive = (se_a * se_a + se_c * se_c).sqrt();
-        let actual = result.elo_difference_stderr("A", "C").unwrap();
+        let actual = unc.elo_difference_stderr("A", "C").unwrap();
         assert!(
-            actual <= naive + 0.1,
-            "diff_stderr should benefit from covariance: actual={actual}, naive={naive}"
+            actual < naive,
+            "diff_stderr should strictly benefit from covariance: actual={actual}, naive={naive}"
         );
+    }
+
+    #[test]
+    fn effective_game_count_scales_with_games() {
+        let mk = |n: u32| -> f64 {
+            let records = vec![HeadToHead::new("A", "B", n, n)];
+            let (_, unc) = compute_elo_with_uncertainty(&records, &opts("B")).unwrap();
+            unc.effective_game_count("A").unwrap()
+        };
+        let ess_100 = mk(50);
+        let ess_1000 = mk(500);
+        assert!(
+            ess_1000 > ess_100,
+            "more games → more effective games: ess_100={ess_100}, ess_1000={ess_1000}"
+        );
+        // Rough sanity: ESS should be in the same ballpark as actual games
+        assert!(
+            ess_100 > 10.0,
+            "ESS for 100 games should be > 10, got {ess_100}"
+        );
+    }
+
+    #[test]
+    fn uncertainty_missing_player_returns_none() {
+        let records = vec![HeadToHead::new("A", "B", 7, 3)];
+        let (_, unc) = compute_elo_with_uncertainty(&records, &opts("B")).unwrap();
+        assert!(unc.stderr("Z").is_none());
+        assert!(unc.effective_game_count("Z").is_none());
+        assert!(unc.elo_difference_stderr("A", "Z").is_none());
     }
 
     // ---------------------------------------------------------------
@@ -1228,9 +1360,9 @@ mod tests {
 
     #[test]
     fn los_equal_players_is_half() {
-        let records = vec![h2h("A", "B", 500, 500)];
-        let result = compute_elo(&records, &opts("B")).unwrap();
-        let los = result.likelihood_of_superiority("A", "B").unwrap();
+        let records = vec![HeadToHead::new("A", "B", 500, 500)];
+        let (result, unc) = compute_elo_with_uncertainty(&records, &opts("B")).unwrap();
+        let los = unc.likelihood_of_superiority(&result, "A", "B").unwrap();
         assert!(
             (los - 0.5).abs() < 0.05,
             "LOS for equal players ≈ 0.5, got {los}"
@@ -1239,9 +1371,9 @@ mod tests {
 
     #[test]
     fn los_dominant_player_near_one() {
-        let records = vec![h2h("A", "B", 900, 100)];
-        let result = compute_elo(&records, &opts("B")).unwrap();
-        let los = result.likelihood_of_superiority("A", "B").unwrap();
+        let records = vec![HeadToHead::new("A", "B", 900, 100)];
+        let (result, unc) = compute_elo_with_uncertainty(&records, &opts("B")).unwrap();
+        let los = unc.likelihood_of_superiority(&result, "A", "B").unwrap();
         assert!(
             los > 0.99,
             "dominant player LOS should be near 1.0, got {los}"
@@ -1250,11 +1382,11 @@ mod tests {
 
     #[test]
     fn los_symmetry() {
-        // LOS(A,B) + LOS(B,A) = 1
-        let records = vec![h2h("A", "B", 60, 40)];
-        let result = compute_elo(&records, &opts("B")).unwrap();
-        let los_ab = result.likelihood_of_superiority("A", "B").unwrap();
-        let los_ba = result.likelihood_of_superiority("B", "A").unwrap();
+        // LOS(A,B) + LOS(B,A) ≈ 1
+        let records = vec![HeadToHead::new("A", "B", 60, 40)];
+        let (result, unc) = compute_elo_with_uncertainty(&records, &opts("B")).unwrap();
+        let los_ab = unc.likelihood_of_superiority(&result, "A", "B").unwrap();
+        let los_ba = unc.likelihood_of_superiority(&result, "B", "A").unwrap();
         assert!(
             (los_ab + los_ba - 1.0).abs() < 0.01,
             "LOS(A,B) + LOS(B,A) should = 1.0, got {}",
@@ -1264,9 +1396,29 @@ mod tests {
 
     #[test]
     fn los_self_is_half() {
-        let records = vec![h2h("A", "B", 60, 40)];
-        let result = compute_elo(&records, &opts("B")).unwrap();
-        assert_eq!(result.likelihood_of_superiority("A", "A").unwrap(), 0.5);
+        let records = vec![HeadToHead::new("A", "B", 60, 40)];
+        let (result, unc) = compute_elo_with_uncertainty(&records, &opts("B")).unwrap();
+        assert_eq!(
+            unc.likelihood_of_superiority(&result, "A", "A").unwrap(),
+            0.5
+        );
+    }
+
+    #[test]
+    fn los_monotonicity() {
+        // Stronger win records → higher LOS
+        let scenarios = [(60, 40), (70, 30), (90, 10)];
+        let mut prev_los = 0.0;
+        for (wa, wb) in scenarios {
+            let records = vec![HeadToHead::new("A", "B", wa, wb)];
+            let (result, unc) = compute_elo_with_uncertainty(&records, &opts("B")).unwrap();
+            let los = unc.likelihood_of_superiority(&result, "A", "B").unwrap();
+            assert!(
+                los > prev_los,
+                "LOS should increase: {wa}/{wb} gave {los}, prev was {prev_los}"
+            );
+            prev_los = los;
+        }
     }
 
     // ---------------------------------------------------------------
@@ -1282,8 +1434,18 @@ mod tests {
     }
 
     #[test]
+    fn error_too_few_players() {
+        // Self-play record: only one unique player
+        let records = vec![HeadToHead::new("A", "A", 5, 5)];
+        assert!(matches!(
+            compute_elo(&records, &opts("A")),
+            Err(EloError::TooFewPlayers)
+        ));
+    }
+
+    #[test]
     fn error_anchor_not_found() {
-        let records = vec![h2h("A", "B", 5, 5)];
+        let records = vec![HeadToHead::new("A", "B", 5, 5)];
         assert!(matches!(
             compute_elo(&records, &opts("Z")),
             Err(EloError::AnchorNotFound(_))
@@ -1292,56 +1454,32 @@ mod tests {
 
     #[test]
     fn error_disconnected_graph() {
-        let records = vec![h2h("A", "B", 5, 5), h2h("C", "D", 5, 5)];
+        let records = vec![
+            HeadToHead::new("A", "B", 5, 5),
+            HeadToHead::new("C", "D", 5, 5),
+        ];
         assert!(matches!(
             compute_elo(&records, &opts("A")),
             Err(EloError::DisconnectedGraph)
         ));
     }
 
-    // ---------------------------------------------------------------
-    // head_to_head_from_results
-    // ---------------------------------------------------------------
-
     #[test]
-    fn h2h_classifies_wins_losses_draws() {
-        let results = vec![
-            game(1, "A", "B", 5.0, 3.0),
-            game(2, "B", "A", 4.0, 4.0),
-            game(3, "A", "B", 2.0, 6.0),
+    fn zero_total_games_skipped() {
+        // A record with 0 wins, 0 losses, 0 draws should be ignored.
+        // If it's the only record for some players, they won't appear.
+        let records = vec![
+            HeadToHead::new("A", "B", 7, 3),
+            HeadToHead::new("A", "B", 0, 0), // zero-total, should be skipped
         ];
-        let h = head_to_head_from_results(&results);
-        assert_eq!(h.len(), 1);
-        assert_eq!(h[0].player_a, "A");
-        assert_eq!(h[0].player_b, "B");
-        assert_eq!(h[0].wins_a, 1);
-        assert_eq!(h[0].wins_b, 1);
-        assert_eq!(h[0].draws, 1);
-    }
-
-    #[test]
-    fn h2h_groups_by_pair() {
-        let results = vec![game(1, "A", "B", 5.0, 3.0), game(2, "A", "C", 4.0, 4.0)];
-        let h = head_to_head_from_results(&results);
-        assert_eq!(h.len(), 2);
-    }
-
-    // ---------------------------------------------------------------
-    // Integration
-    // ---------------------------------------------------------------
-
-    #[test]
-    fn full_pipeline_results_to_elo() {
-        let results = vec![
-            game(1, "greedy", "random", 8.0, 2.0),
-            game(2, "greedy", "random", 7.0, 3.0),
-            game(3, "random", "greedy", 4.0, 6.0),
-        ];
-        let h = head_to_head_from_results(&results);
-        let result = compute_elo(&h, &opts("random")).unwrap();
-        let greedy_elo = result.get_elo("greedy").unwrap();
-        let random_elo = result.get_elo("random").unwrap();
-        assert!(greedy_elo > random_elo, "greedy should be rated higher");
-        assert!((random_elo - 1000.0).abs() < 0.01, "anchor should be exact");
+        let result = compute_elo(&records, &opts("B")).unwrap();
+        let diff = result.elo_difference("A", "B").unwrap();
+        // Should match the 7-3 result only
+        let single = compute_elo(&[HeadToHead::new("A", "B", 7, 3)], &opts("B")).unwrap();
+        let diff_single = single.elo_difference("A", "B").unwrap();
+        assert!(
+            (diff - diff_single).abs() < 0.01,
+            "zero-total record should have no effect"
+        );
     }
 }
