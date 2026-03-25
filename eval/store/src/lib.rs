@@ -4,8 +4,8 @@ mod store;
 mod types;
 
 pub use elo::{
-    compute_elo, head_to_head_from_results, win_expectancy, EloError, EloOptions, EloRating,
-    EloResult, HeadToHead,
+    compute_elo, elo_from_winrate, head_to_head_from_results, win_expectancy, EloError, EloOptions,
+    EloRating, EloResult, HeadToHead,
 };
 pub use store::EvalStore;
 pub use types::{

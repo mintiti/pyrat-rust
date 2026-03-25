@@ -6,6 +6,8 @@
 
 use std::collections::HashMap;
 
+use statrs::distribution::{ContinuousCDF, StudentsT};
+
 use crate::GameResultRecord;
 
 /// 400 * log10(e) — converts strength units to Elo points.
@@ -45,6 +47,7 @@ pub struct EloResult {
     pub anchor_elo: f64,
     // Private: flat n×n covariance in Elo space, player index map
     elo_covariance: Option<Vec<f64>>,
+    effective_game_counts: Option<Vec<f64>>,
     player_index: HashMap<String, usize>,
     n: usize,
 }
@@ -67,7 +70,7 @@ impl EloResult {
         Some(var.max(0.0).sqrt())
     }
 
-    /// Probability that A is stronger than B (normal approximation).
+    /// Probability that A is stronger than B (Student's t approximation).
     /// Returns None if uncertainty wasn't computed.
     pub fn likelihood_of_superiority(&self, a: &str, b: &str) -> Option<f64> {
         if a == b {
@@ -84,7 +87,11 @@ impl EloResult {
                 Some(0.5)
             };
         }
-        Some(normal_cdf(diff / stderr))
+        let counts = self.effective_game_counts.as_ref()?;
+        let &ia = self.player_index.get(a)?;
+        let df = (counts[ia] - 1.0).max(1.0);
+        let t = StudentsT::new(0.0, 1.0, df).ok()?;
+        Some(t.cdf(diff / stderr))
     }
 
     /// Expected win probability for A against B based on their Elo ratings.
@@ -94,7 +101,7 @@ impl EloResult {
         Some(win_expectancy(ea, eb))
     }
 
-    fn get_elo(&self, name: &str) -> Option<f64> {
+    pub fn get_elo(&self, name: &str) -> Option<f64> {
         self.ratings
             .iter()
             .find(|r| r.player_id == name)
@@ -120,10 +127,10 @@ pub struct EloOptions {
     pub tolerance: f64,
 }
 
-impl Default for EloOptions {
-    fn default() -> Self {
+impl EloOptions {
+    pub fn new(anchor: impl Into<String>) -> Self {
         Self {
-            anchor: String::new(),
+            anchor: anchor.into(),
             anchor_elo: 1000.0,
             compute_uncertainty: false,
             draw_weight: 0.5,
@@ -146,6 +153,8 @@ pub enum EloError {
     DisconnectedGraph,
     #[error("singular matrix in linear solve")]
     SingularMatrix,
+    #[error("winrate must be in (0, 1), got {0}")]
+    InvalidWinrate(f64),
 }
 
 // ---------------------------------------------------------------------------
@@ -178,8 +187,7 @@ pub fn compute_elo(records: &[HeadToHead], options: &EloOptions) -> Result<EloRe
         .get(&options.anchor)
         .ok_or_else(|| EloError::AnchorNotFound(options.anchor.clone()))?;
 
-    // Build likelihood data: each HeadToHead becomes up to 2 sigmoid terms,
-    // plus prior terms for non-anchor players.
+    // Build likelihood terms
     let mut terms: Vec<SigmoidTerm> = Vec::new();
 
     for r in records {
@@ -189,24 +197,20 @@ pub fn compute_elo(records: &[HeadToHead], options: &EloOptions) -> Result<EloRe
         if total == 0 {
             continue;
         }
-        // A's effective wins (winner side = A)
         let w_a = r.wins_a as f64 + options.draw_weight * r.draws as f64;
         if w_a > 0.0 {
             terms.push(SigmoidTerm {
                 pos: ia,
                 neg: ib,
-
                 weight: w_a,
                 gamecount: w_a,
             });
         }
-        // B's effective wins (winner side = B)
         let w_b = r.wins_b as f64 + (1.0 - options.draw_weight) * r.draws as f64;
         if w_b > 0.0 {
             terms.push(SigmoidTerm {
                 pos: ib,
                 neg: ia,
-
                 weight: w_b,
                 gamecount: w_b,
             });
@@ -223,101 +227,54 @@ pub fn compute_elo(records: &[HeadToHead], options: &EloOptions) -> Result<EloRe
         return Err(EloError::DisconnectedGraph);
     }
 
-    // Per-player prior: virtual 50% games vs anchor (at strength 0).
-    // This regularizes non-anchor players toward the anchor's strength.
+    // Prior: virtual 50% games vs anchor
     if options.prior_games > 0.0 {
         for i in 0..n {
             if i == anchor_idx {
                 continue;
             }
             let half = 0.5 * options.prior_games;
-            // "player i wins" half the virtual games
             terms.push(SigmoidTerm {
                 pos: i,
                 neg: usize::MAX,
-
                 weight: half,
                 gamecount: half,
             });
-            // "player i loses" the other half
             terms.push(SigmoidTerm {
                 pos: usize::MAX,
                 neg: i,
-
                 weight: half,
                 gamecount: half,
             });
         }
     }
 
-    // --- Gauss-Newton optimization in strength space ---
+    // --- Gauss-Newton optimization ---
     let mut strengths = vec![0.0_f64; n];
     let mut loglikelihood = compute_loglikelihood(&terms, &strengths);
-
-    // Pre-allocate buffers reused across iterations
-    let mut g = vec![0.0_f64; n];
-    let mut h = vec![0.0_f64; n * n];
-    let mut new_strengths = vec![0.0_f64; n];
-
     let mut iters_since_big_change = 0u32;
+
     for _ in 0..options.max_iterations {
-        // Reset and accumulate gradient and Hessian
-        g.fill(0.0);
-        h.fill(0.0);
-        accum_gradient_hessian(&terms, &strengths, &mut g, &mut h);
+        let (new_strengths, new_ll) =
+            line_search_ascend(&terms, &strengths, loglikelihood, anchor_idx, n)?;
+        let elo_change = new_strengths
+            .iter()
+            .zip(&strengths)
+            .map(|(ns, s)| ((ns - s) * ELO_PER_STRENGTH).abs())
+            .fold(0.0_f64, f64::max);
+        strengths = new_strengths;
+        loglikelihood = new_ll;
 
-        // Constrain anchor: zero gradient, identity row in Hessian.
-        // This fixes the anchor at strength 0 throughout optimization.
-        g[anchor_idx] = 0.0;
-        constrain_anchor_hessian(&mut h, n, anchor_idx);
-
-        // Newton step: solve (-H) * ascent = g
-        // (H is negative semi-definite, -H is positive definite)
-        for v in h.iter_mut() {
-            *v = -*v;
-        }
-        let ascent = match solve_lu(&mut h, &g, n) {
-            Some(x) => x,
-            None => return Err(EloError::SingularMatrix),
-        };
-
-        // Line search
-        let mut step = ascent;
-        let mut improved = false;
-        for _ in 0..30 {
-            for (ns, (s, d)) in new_strengths.iter_mut().zip(strengths.iter().zip(&step)) {
-                *ns = s + d;
-            }
-            let new_ll = compute_loglikelihood(&terms, &new_strengths);
-            if new_ll > loglikelihood {
-                let elo_change = step
-                    .iter()
-                    .map(|d| (d * ELO_PER_STRENGTH).abs())
-                    .fold(0.0_f64, f64::max);
-                std::mem::swap(&mut strengths, &mut new_strengths);
-                loglikelihood = new_ll;
-                improved = true;
-
-                if elo_change > options.tolerance {
-                    iters_since_big_change = 0;
-                } else {
-                    iters_since_big_change += 1;
-                }
-                break;
-            }
-            for v in step.iter_mut() {
-                *v *= 0.6;
-            }
-        }
-        if !improved {
-            iters_since_big_change += 1;
+        iters_since_big_change += 1;
+        if elo_change > options.tolerance {
+            iters_since_big_change = 0;
         }
         if iters_since_big_change > 3 {
             break;
         }
     }
 
-    // Convert to Elo: shift so anchor lands at anchor_elo
+    // Convert to Elo
     let anchor_shift = options.anchor_elo - strengths[anchor_idx] * ELO_PER_STRENGTH;
     let elos: Vec<f64> = strengths
         .iter()
@@ -325,61 +282,11 @@ pub fn compute_elo(records: &[HeadToHead], options: &EloOptions) -> Result<EloRe
         .collect();
 
     // Uncertainty
-    let mut covariance: Option<Vec<f64>> = None;
-    let mut stderrs: Vec<Option<f64>> = vec![None; n];
-    let mut effective_counts: Vec<Option<f64>> = vec![None; n];
-
-    if options.compute_uncertainty {
-        // Recompute Hessian at final strengths (reuse buffers)
-        g.fill(0.0);
-        h.fill(0.0);
-        accum_gradient_hessian(&terms, &strengths, &mut g, &mut h);
-
-        // Constrain anchor: replace its row/col with identity so the
-        // precision matrix is invertible and anchor gets zero variance.
-        constrain_anchor_hessian(&mut h, n, anchor_idx);
-
-        // Precision = -H (in strength space), convert to Elo space in-place
-        let scale = ELO_PER_STRENGTH * ELO_PER_STRENGTH;
-        for v in h.iter_mut() {
-            *v = -*v / scale;
-        }
-
-        if let Some(cov) = invert_matrix(&h, n) {
-            for i in 0..n {
-                stderrs[i] = Some(cov[i * n + i].max(0.0).sqrt());
-            }
-            covariance = Some(cov);
-        }
-
-        // Effective game count per player (diagonal only)
-        // ESS = (sum of |info_ii|)^2 / (sum of info_ii^2 / gamecount)
-        let mut ess_num = vec![0.0_f64; n];
-        let mut ess_den = vec![0.0_f64; n];
-        for t in &terms {
-            if t.gamecount <= 0.0 {
-                continue;
-            }
-            let s_total = term_strength(t, &strengths);
-            let cosh = (0.5 * s_total).cosh();
-            let d2 = -t.weight / (4.0 * cosh * cosh);
-
-            let (indices, len) = term_player_indices(t);
-            for &(pi, ci) in &indices[..len] {
-                // Only diagonal: pi == pj
-                let x = ci * ci * d2;
-                ess_num[pi] += x;
-                ess_den[pi] += x * x / t.gamecount;
-            }
-        }
-        for i in 0..n {
-            effective_counts[i] = if ess_den[i].abs() > 1e-30 {
-                Some(ess_num[i] * ess_num[i] / ess_den[i])
-            } else {
-                Some(0.0)
-            };
-        }
-    }
+    let uncertainty = if options.compute_uncertainty {
+        Some(compute_uncertainty(&terms, &strengths, anchor_idx, n)?)
+    } else {
+        None
+    };
 
     // Build ratings sorted by Elo descending
     let mut ratings: Vec<EloRating> = players
@@ -388,8 +295,8 @@ pub fn compute_elo(records: &[HeadToHead], options: &EloOptions) -> Result<EloRe
         .map(|(i, p)| EloRating {
             player_id: p.clone(),
             elo: elos[i],
-            stderr: stderrs[i],
-            effective_game_count: effective_counts[i],
+            stderr: uncertainty.as_ref().map(|u| u.stderrs[i]),
+            effective_game_count: uncertainty.as_ref().map(|u| u.effective_counts[i]),
         })
         .collect();
     ratings.sort_by(|a, b| {
@@ -398,11 +305,17 @@ pub fn compute_elo(records: &[HeadToHead], options: &EloOptions) -> Result<EloRe
             .unwrap_or(std::cmp::Ordering::Equal)
     });
 
+    let (elo_covariance, effective_game_counts) = match uncertainty {
+        Some(u) => (Some(u.elo_covariance), Some(u.effective_counts)),
+        None => (None, None),
+    };
+
     Ok(EloResult {
         ratings,
         anchor: options.anchor.clone(),
         anchor_elo: options.anchor_elo,
-        elo_covariance: covariance,
+        elo_covariance,
+        effective_game_counts,
         player_index: player_idx,
         n,
     })
@@ -463,7 +376,7 @@ pub fn win_expectancy(elo_a: f64, elo_b: f64) -> f64 {
 /// Infer Elo from observed winrate against a known opponent.
 pub fn elo_from_winrate(winrate: f64, opponent_elo: f64) -> Result<f64, EloError> {
     if winrate <= 0.0 || winrate >= 1.0 {
-        return Err(EloError::NoRecords); // reuse error; winrate out of range
+        return Err(EloError::InvalidWinrate(winrate));
     }
     Ok(opponent_elo - 400.0 * (1.0 / winrate - 1.0).log10())
 }
@@ -481,6 +394,137 @@ struct SigmoidTerm {
     weight: f64,
     gamecount: f64,
 }
+
+/// Uncertainty data computed from the Hessian at the MLE.
+struct UncertaintyData {
+    stderrs: Vec<f64>,
+    elo_covariance: Vec<f64>,
+    effective_counts: Vec<f64>,
+}
+
+// ---------------------------------------------------------------------------
+// Gauss-Newton sub-routines (matches KataGo decomposition)
+// ---------------------------------------------------------------------------
+
+/// Gradient + Hessian + anchor constraint + Newton solve.
+fn find_ascent_vector(
+    terms: &[SigmoidTerm],
+    strengths: &[f64],
+    anchor_idx: usize,
+    n: usize,
+) -> Result<Vec<f64>, EloError> {
+    let mut g = vec![0.0_f64; n];
+    let mut h = vec![0.0_f64; n * n];
+    accum_gradient_hessian(terms, strengths, &mut g, &mut h);
+
+    g[anchor_idx] = 0.0;
+    constrain_anchor_hessian(&mut h, n, anchor_idx);
+
+    // Newton step: solve (-H) * ascent = g
+    for v in h.iter_mut() {
+        *v = -*v;
+    }
+    solve_lu(&mut h, &g, n).ok_or(EloError::SingularMatrix)
+}
+
+/// Line search: try full Newton step, damp by 0.6 up to 30 times.
+/// Returns (new_strengths, new_loglikelihood).
+fn line_search_ascend(
+    terms: &[SigmoidTerm],
+    strengths: &[f64],
+    cur_ll: f64,
+    anchor_idx: usize,
+    n: usize,
+) -> Result<(Vec<f64>, f64), EloError> {
+    let mut ascent = find_ascent_vector(terms, strengths, anchor_idx, n)?;
+    for _ in 0..30 {
+        let new_strengths: Vec<f64> = strengths.iter().zip(&ascent).map(|(s, d)| s + d).collect();
+        let new_ll = compute_loglikelihood(terms, &new_strengths);
+        if new_ll > cur_ll {
+            return Ok((new_strengths, new_ll));
+        }
+        for v in ascent.iter_mut() {
+            *v *= 0.6;
+        }
+    }
+    Ok((strengths.to_vec(), cur_ll))
+}
+
+/// Hessian at final point → precision → stderrs + covariance + ESS.
+fn compute_uncertainty(
+    terms: &[SigmoidTerm],
+    strengths: &[f64],
+    anchor_idx: usize,
+    n: usize,
+) -> Result<UncertaintyData, EloError> {
+    let mut g = vec![0.0_f64; n];
+    let mut h = vec![0.0_f64; n * n];
+    accum_gradient_hessian(terms, strengths, &mut g, &mut h);
+    constrain_anchor_hessian(&mut h, n, anchor_idx);
+
+    // Precision = -H in Elo space
+    let scale = ELO_PER_STRENGTH * ELO_PER_STRENGTH;
+    for v in h.iter_mut() {
+        *v = -*v / scale;
+    }
+
+    // Stderrs from precision diagonal (conditional, matches KataGo)
+    let stderrs: Vec<f64> = (0..n)
+        .map(|i| {
+            let p = h[i * n + i];
+            if p > 0.0 {
+                (1.0 / p).sqrt()
+            } else {
+                0.0
+            }
+        })
+        .collect();
+
+    // Invert for covariance (needed for diff_stderr / LOS)
+    let elo_covariance = invert_matrix(&h, n).ok_or(EloError::SingularMatrix)?;
+
+    let effective_counts = compute_effective_game_counts(terms, strengths, n);
+
+    Ok(UncertaintyData {
+        stderrs,
+        elo_covariance,
+        effective_counts,
+    })
+}
+
+/// Effective sample size per player (diagonal only).
+fn compute_effective_game_counts(terms: &[SigmoidTerm], strengths: &[f64], n: usize) -> Vec<f64> {
+    let mut ess_num = vec![0.0_f64; n];
+    let mut ess_den = vec![0.0_f64; n];
+    for t in terms {
+        if t.gamecount <= 0.0 {
+            continue;
+        }
+        let s_total = term_strength(t, strengths);
+        let cosh = (0.5 * s_total).cosh();
+        let d2 = -t.weight / (4.0 * cosh * cosh);
+
+        let (indices, len) = term_player_indices(t);
+        for &(pi, ci) in &indices[..len] {
+            let x = ci * ci * d2;
+            ess_num[pi] += x;
+            ess_den[pi] += x * x / t.gamecount;
+        }
+    }
+    (0..n)
+        .map(|i| {
+            if ess_den[i].abs() > 1e-30 {
+                ess_num[i] * ess_num[i] / ess_den[i]
+            } else {
+                0.0
+            }
+        })
+        .collect()
+}
+
+// ---------------------------------------------------------------------------
+// Low-level helpers
+// ---------------------------------------------------------------------------
 
 /// Zero anchor's row/col in the Hessian and set diagonal to large negative.
 fn constrain_anchor_hessian(h: &mut [f64], n: usize, anchor_idx: usize) {
@@ -676,25 +720,6 @@ fn invert_matrix(a: &[f64], n: usize) -> Option<Vec<f64>> {
     Some(inv)
 }
 
-/// Normal CDF via rational approximation of erf.
-fn normal_cdf(x: f64) -> f64 {
-    0.5 * (1.0 + erf(x / std::f64::consts::SQRT_2))
-}
-
-/// Approximation of the error function (Abramowitz & Stegun 7.1.26).
-fn erf(x: f64) -> f64 {
-    let sign = if x >= 0.0 { 1.0 } else { -1.0 };
-    let x = x.abs();
-    let t = 1.0 / (1.0 + 0.327_591_1 * x);
-    let t2 = t * t;
-    let t3 = t2 * t;
-    let t4 = t3 * t;
-    let t5 = t4 * t;
-    let poly = 0.254_829_592 * t - 0.284_496_736 * t2 + 1.421_413_741 * t3 - 1.453_152_027 * t4
-        + 1.061_405_429 * t5;
-    sign * (1.0 - poly * (-x * x).exp())
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -705,21 +730,16 @@ mod tests {
 
     fn opts(anchor: &str) -> EloOptions {
         EloOptions {
-            anchor: anchor.to_string(),
-            anchor_elo: 1000.0,
             compute_uncertainty: true,
-            prior_games: 2.0,
-            ..EloOptions::default()
+            ..EloOptions::new(anchor)
         }
     }
 
     fn opts_no_prior(anchor: &str) -> EloOptions {
         EloOptions {
-            anchor: anchor.to_string(),
-            anchor_elo: 1000.0,
             compute_uncertainty: true,
             prior_games: 0.0,
-            ..EloOptions::default()
+            ..EloOptions::new(anchor)
         }
     }
 
@@ -814,52 +834,6 @@ mod tests {
     }
 
     #[test]
-    fn erf_known_values() {
-        // erf(0) ≈ 0
-        assert!(erf(0.0).abs() < 1e-6);
-        // erf is odd
-        for &x in &[0.5, 1.0, 2.0] {
-            assert!((erf(x) + erf(-x)).abs() < 1e-6, "erf should be odd, x={x}");
-        }
-        // Known values (NIST)
-        assert!(
-            (erf(0.5) - 0.520_500).abs() < 0.001,
-            "erf(0.5)={}",
-            erf(0.5)
-        );
-        assert!(
-            (erf(1.0) - 0.842_701).abs() < 0.001,
-            "erf(1.0)={}",
-            erf(1.0)
-        );
-        assert!(
-            (erf(2.0) - 0.995_322).abs() < 0.001,
-            "erf(2.0)={}",
-            erf(2.0)
-        );
-        // erf(∞) → 1
-        assert!((erf(6.0) - 1.0).abs() < 1e-6);
-    }
-
-    #[test]
-    fn normal_cdf_known_values() {
-        assert!((normal_cdf(0.0) - 0.5).abs() < 1e-6);
-        // Φ(1) ≈ 0.8413, Φ(-1) ≈ 0.1587
-        assert!((normal_cdf(1.0) - 0.8413).abs() < 0.001);
-        assert!((normal_cdf(-1.0) - 0.1587).abs() < 0.001);
-        // Φ(x) + Φ(-x) = 1
-        for &x in &[0.5, 1.0, 2.0, 3.0] {
-            assert!(
-                (normal_cdf(x) + normal_cdf(-x) - 1.0).abs() < 1e-6,
-                "symmetry at x={x}"
-            );
-        }
-        // Tails
-        assert!(normal_cdf(3.0) > 0.9986);
-        assert!(normal_cdf(-3.0) < 0.0014);
-    }
-
-    #[test]
     fn check_connected_basic() {
         assert!(check_connected(3, &[(0, 1), (1, 2)]));
         assert!(!check_connected(3, &[(0, 1)])); // node 2 isolated
@@ -939,8 +913,14 @@ mod tests {
 
     #[test]
     fn elo_from_winrate_rejects_boundary() {
-        assert!(elo_from_winrate(0.0, 1000.0).is_err());
-        assert!(elo_from_winrate(1.0, 1000.0).is_err());
+        assert!(matches!(
+            elo_from_winrate(0.0, 1000.0),
+            Err(EloError::InvalidWinrate(_))
+        ));
+        assert!(matches!(
+            elo_from_winrate(1.0, 1000.0),
+            Err(EloError::InvalidWinrate(_))
+        ));
     }
 
     // ---------------------------------------------------------------
@@ -1034,7 +1014,6 @@ mod tests {
         }];
         for &anchor_elo in &[0.0, 500.0, 1000.0, 1500.0] {
             let opts = EloOptions {
-                anchor: "B".into(),
                 anchor_elo,
                 ..opts("B")
             };
@@ -1188,12 +1167,10 @@ mod tests {
             draws: 0,
         }];
         let strong = EloOptions {
-            anchor: "B".into(),
             prior_games: 100.0,
             ..opts("B")
         };
         let weak = EloOptions {
-            anchor: "B".into(),
             prior_games: 1.0,
             ..opts("B")
         };
