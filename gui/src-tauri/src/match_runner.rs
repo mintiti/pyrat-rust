@@ -498,13 +498,16 @@ async fn finish_collecting(
         }
     }
 
+    // Always send Stop so bots terminate their search loops — even when both
+    // provisional actions are already present.  Without this, a bot blocked in
+    // block_in_place(think()) never sees `should_stop() == true` and can't
+    // process the next TurnState.
+    send_stop(sessions, playing).await;
+
     if let (Some(a1), Some(a2)) = (p1, p2) {
         *phase = AnalysisPhase::Idle;
         return (a1, a2);
     }
-
-    // Send Stop to prompt bots to commit
-    send_stop(sessions, playing).await;
 
     // Drain until both actions arrive (2s safety timeout)
     let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
