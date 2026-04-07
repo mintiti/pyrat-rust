@@ -8,6 +8,7 @@ use tracing::{debug, warn};
 
 use pyrat::game::game_logic::GameState;
 use pyrat::Direction as EngineDirection;
+use pyrat_protocol::wire_to_engine_direction;
 
 use crate::session::messages::{
     HashedTurnState, HostCommand, OwnedTurnState, SessionId, SessionMsg,
@@ -109,19 +110,6 @@ struct CollectedActions {
     p2_wall_ms: u32,
 }
 
-// ── Direction conversion ─────────────────────────────
-
-/// Convert a wire Direction (u8 newtype) to an engine Direction enum.
-///
-/// Same discriminant values: Up=0, Right=1, Down=2, Left=3, Stay=4.
-pub fn wire_to_engine(d: WireDirection) -> EngineDirection {
-    EngineDirection::try_from(d.0).unwrap_or(EngineDirection::Stay)
-}
-
-pub fn engine_to_wire(d: EngineDirection) -> WireDirection {
-    WireDirection(d as u8)
-}
-
 // ── Turn loop ────────────────────────────────────────
 
 /// Execute one turn of the playing phase: send turn state, collect actions,
@@ -199,8 +187,8 @@ pub async fn run_one_turn(
     }
 
     // Step the engine.
-    let p1_move = wire_to_engine(actions.p1);
-    let p2_move = wire_to_engine(actions.p2);
+    let p1_move = wire_to_engine_direction(actions.p1);
+    let p2_move = wire_to_engine_direction(actions.p2);
     let result = game.process_turn(p1_move, p2_move);
 
     state.last_p1 = p1_move;
@@ -557,7 +545,7 @@ async fn handle_timeout(
             let _ = s
                 .cmd_tx
                 .send(HostCommand::Timeout {
-                    default_move: wire_to_engine(stay),
+                    default_move: wire_to_engine_direction(stay),
                 })
                 .await;
             for &p in &s.controlled_players {

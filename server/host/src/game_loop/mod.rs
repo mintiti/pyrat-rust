@@ -14,11 +14,12 @@ pub use config::{
 pub use events::MatchEvent;
 pub use launch::{launch_bots, BotExitInfo, BotProcesses, LaunchError};
 pub use playing::{
-    determine_result, engine_to_wire, run_one_turn, run_playing, wire_to_engine, MatchResult,
-    PlayingError, PlayingState, TurnOutcome,
+    determine_result, run_one_turn, run_playing, MatchResult, PlayingError, PlayingState,
+    TurnOutcome,
 };
 pub use probe::{probe_bot, ProbeError, ProbeResult};
 pub use pyrat_protocol::{
-    HashedTurnState, OwnedInfo, OwnedMatchConfig, OwnedOptionDef, OwnedTurnState,
+    wire_to_engine_direction as wire_to_engine, HashedTurnState, OwnedInfo, OwnedMatchConfig,
+    OwnedOptionDef, OwnedTurnState,
 };
 pub use setup::{accept_connections, run_setup, SetupError, SetupResult};
