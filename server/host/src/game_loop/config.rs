@@ -110,26 +110,22 @@ pub fn build_owned_match_config(
     let walls = game
         .wall_entries()
         .into_iter()
-        .map(|w| ((w.pos1.x, w.pos1.y), (w.pos2.x, w.pos2.y)))
+        .map(|w| (w.pos1, w.pos2))
         .collect();
 
     let mud = game
         .mud_positions()
         .iter()
         .map(|((from, to), value)| {
-            let (p1, p2) = if from < to { (from, to) } else { (to, from) };
-            ((p1.x, p1.y), (p2.x, p2.y), value)
+            if from < to {
+                (from, to, value)
+            } else {
+                (to, from, value)
+            }
         })
         .collect();
 
-    let cheese = game
-        .cheese_positions()
-        .into_iter()
-        .map(|c| (c.x, c.y))
-        .collect();
-
-    let p1 = game.player1_position();
-    let p2 = game.player2_position();
+    let cheese = game.cheese_positions();
 
     OwnedMatchConfig {
         width: game.width(),
@@ -138,8 +134,8 @@ pub fn build_owned_match_config(
         walls,
         mud,
         cheese,
-        player1_start: (p1.x, p1.y),
-        player2_start: (p2.x, p2.y),
+        player1_start: game.player1_position(),
+        player2_start: game.player2_position(),
         controlled_players: vec![],
         timing,
         move_timeout_ms,
@@ -168,9 +164,9 @@ mod tests {
         assert_eq!(cfg.width, 3);
         assert_eq!(cfg.height, 3);
         assert_eq!(cfg.max_turns, game.max_turns());
-        assert_eq!(cfg.player1_start, (0, 0));
-        assert_eq!(cfg.player2_start, (2, 2));
-        assert_eq!(cfg.cheese, vec![(1, 1)]);
+        assert_eq!(cfg.player1_start, Coordinates::new(0, 0));
+        assert_eq!(cfg.player2_start, Coordinates::new(2, 2));
+        assert_eq!(cfg.cheese, vec![Coordinates::new(1, 1)]);
         assert!(cfg.walls.is_empty(), "open maze should have no walls");
         assert!(
             cfg.controlled_players.is_empty(),

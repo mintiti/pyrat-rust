@@ -1,5 +1,5 @@
 [workspace]
-members = ["engine", "engine/extension", "server/headless", "server/host", "server/wire", "interface", "sdk/python", "sdk/rust", "sdk/rust/derive", "gui/src-tauri", "tools/bot-check", "eval/store"]
+members = ["engine", "engine/extension", "server/headless", "server/host", "server/protocol", "server/wire", "interface", "sdk/python", "sdk/rust", "sdk/rust/derive", "gui/src-tauri", "tools/bot-check", "eval/store"]
 resolver = "2"
 
 [workspace.lints.clippy]

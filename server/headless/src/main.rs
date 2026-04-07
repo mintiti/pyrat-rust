@@ -165,10 +165,10 @@ fn build_game_record(
             } => {
                 turns.push(TurnRecord {
                     turn: state.turn,
-                    p1_action: p1_action.0,
-                    p2_action: p2_action.0,
-                    p1_position: state.player1_position,
-                    p2_position: state.player2_position,
+                    p1_action: p1_action as u8,
+                    p2_action: p2_action as u8,
+                    p1_position: (state.player1_position.x, state.player1_position.y),
+                    p2_position: (state.player2_position.x, state.player2_position.y),
                     p1_score: state.player1_score,
                     p2_score: state.player2_score,
                     cheese_remaining: state.cheese.len(),

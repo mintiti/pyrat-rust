@@ -7,6 +7,7 @@ publish = false
 [dependencies]
 fastrand = "2"
 flatbuffers = "25.2.10"
+pyrat-protocol = { path = "../protocol" }
 pyrat-rust = { path = "../../engine", default-features = false }
 pyrat-wire = { path = "../wire" }
 tokio = { version = "1", features = ["sync", "macros", "io-util", "time", "net", "rt"] }

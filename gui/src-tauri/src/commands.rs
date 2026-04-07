@@ -8,7 +8,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::bot_probe::MatchBotOptions;
 use crate::events::{Direction as SpectaDirection, MatchErrorEvent, MatchStartedEvent};
-use crate::match_runner::{run_match, specta_to_wire, wire_to_specta, PlayerSetup};
+use crate::match_runner::{engine_to_specta, run_match, specta_to_engine, PlayerSetup};
 use crate::state::{AnalysisCmd, AnalysisResp, AnalysisTx, AppState, MatchPhase};
 
 /// Pair of player actions for `advance_analysis`. Both must be provided together.
@@ -182,8 +182,8 @@ pub struct MazeState {
 
 /// Convert engine GameState to our serializable MazeState.
 pub fn build_maze_state(game: &GameState) -> MazeState {
+    use pyrat::{Coordinates, Direction as EngineDirection};
     use pyrat_host::game_loop::{HashedTurnState, OwnedTurnState};
-    use pyrat_host::wire::Direction as WireDirection;
 
     let walls = game
         .wall_entries()
@@ -213,15 +213,15 @@ pub fn build_maze_state(game: &GameState) -> MazeState {
     // Compute state_hash for the initial position (last moves are Stay/Stay).
     let hts = HashedTurnState::new(OwnedTurnState {
         turn: game.turns(),
-        player1_position: (game.player1_position().x, game.player1_position().y),
-        player2_position: (game.player2_position().x, game.player2_position().y),
+        player1_position: game.player1_position(),
+        player2_position: game.player2_position(),
         player1_score: game.player1_score(),
         player2_score: game.player2_score(),
         player1_mud_turns: game.player1_mud_turns(),
         player2_mud_turns: game.player2_mud_turns(),
-        cheese: cheese.iter().map(|c| (c.x, c.y)).collect(),
-        player1_last_move: WireDirection::Stay,
-        player2_last_move: WireDirection::Stay,
+        cheese: cheese.iter().map(|c| Coordinates::new(c.x, c.y)).collect(),
+        player1_last_move: EngineDirection::Stay,
+        player2_last_move: EngineDirection::Stay,
     });
 
     MazeState {
@@ -472,8 +472,8 @@ pub async fn stop_analysis_turn(
     let resp = send_analysis_cmd(&tx, AnalysisCmd::StopTurn).await?;
     match resp {
         AnalysisResp::Actions { p1, p2 } => Ok(StopAnalysisTurnResult {
-            player1_action: wire_to_specta(p1),
-            player2_action: wire_to_specta(p2),
+            player1_action: engine_to_specta(p1),
+            player2_action: engine_to_specta(p2),
         }),
         _ => Err("unexpected response".into()),
     }
@@ -486,12 +486,12 @@ pub async fn advance_analysis(
     actions: Option<AnalysisActions>,
 ) -> Result<AdvanceAnalysisResult, String> {
     let tx = get_cmd_tx(&state.match_phase).await?;
-    let actions = actions.map(|a| [specta_to_wire(a.player1), specta_to_wire(a.player2)]);
+    let actions = actions.map(|a| [specta_to_engine(a.player1), specta_to_engine(a.player2)]);
     let resp = send_analysis_cmd(&tx, AnalysisCmd::Advance { actions }).await?;
     match resp {
         AnalysisResp::Advanced { p1, p2, game_over } => Ok(AdvanceAnalysisResult {
-            player1_action: wire_to_specta(p1),
-            player2_action: wire_to_specta(p2),
+            player1_action: engine_to_specta(p1),
+            player2_action: engine_to_specta(p2),
             game_over,
         }),
         _ => Err("unexpected response".into()),

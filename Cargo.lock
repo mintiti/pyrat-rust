@@ -3053,11 +3053,20 @@ version = "0.1.0"
 dependencies = [
  "fastrand",
  "flatbuffers",
+ "pyrat-protocol",
  "pyrat-rust",
  "pyrat-wire",
  "thiserror 2.0.18",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "pyrat-protocol"
+version = "0.1.0"
+dependencies = [
+ "pyrat-rust",
+ "pyrat-wire",
 ]
 
 [[package]]

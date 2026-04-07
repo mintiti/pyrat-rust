@@ -138,7 +138,7 @@ async fn run_stub(
                             depth: 1,
                             nodes: 1,
                             score: Some(0.0),
-                            pv: vec![dir],
+                            pv: vec![pyrat_protocol::wire_to_engine_direction(dir)],
                             message: "stub".into(),
                             turn,
                             state_hash: 0,

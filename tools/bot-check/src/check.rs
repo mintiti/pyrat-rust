@@ -299,7 +299,7 @@ pub async fn run_check(bot_dir: &Path) -> CheckReport {
                         timed_out = true;
                     },
                     MatchEvent::TurnPlayed { p1_action, .. } => {
-                        action_name = Some(p1_action.variant_name().unwrap_or("?"));
+                        action_name = Some(format!("{p1_action:?}"));
                     },
                     _ => {},
                 }
@@ -312,7 +312,7 @@ pub async fn run_check(bot_dir: &Path) -> CheckReport {
                     t.elapsed(),
                 ));
             } else {
-                let action = action_name.unwrap_or("?");
+                let action = action_name.as_deref().unwrap_or("?");
                 let outcome_str = match outcome {
                     TurnOutcome::Continue => "",
                     TurnOutcome::GameOver(_) => " (game over)",

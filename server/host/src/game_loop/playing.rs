@@ -7,7 +7,7 @@ use tokio::time::Instant;
 use tracing::{debug, warn};
 
 use pyrat::game::game_logic::GameState;
-use pyrat::{Coordinates, Direction as EngineDirection};
+use pyrat::Direction as EngineDirection;
 
 use crate::session::messages::{
     HashedTurnState, HostCommand, OwnedTurnState, SessionId, SessionMsg,
@@ -32,8 +32,8 @@ pub struct MatchResult {
 pub struct PlayingState {
     session_players: HashMap<SessionId, Vec<Player>>,
     disconnected: HashSet<SessionId>,
-    last_p1: WireDirection,
-    last_p2: WireDirection,
+    last_p1: EngineDirection,
+    last_p2: EngineDirection,
 }
 
 impl PlayingState {
@@ -50,8 +50,8 @@ impl PlayingState {
         Self {
             session_players,
             disconnected: HashSet::new(),
-            last_p1: WireDirection::Stay,
-            last_p2: WireDirection::Stay,
+            last_p1: EngineDirection::Stay,
+            last_p2: EngineDirection::Stay,
         }
     }
 
@@ -61,7 +61,7 @@ impl PlayingState {
     }
 
     /// Record the actions taken this turn (updates last moves for next turn state).
-    pub fn record_actions(&mut self, p1: WireDirection, p2: WireDirection) {
+    pub fn record_actions(&mut self, p1: EngineDirection, p2: EngineDirection) {
         self.last_p1 = p1;
         self.last_p2 = p2;
     }
@@ -203,16 +203,16 @@ pub async fn run_one_turn(
     let p2_move = wire_to_engine(actions.p2);
     let result = game.process_turn(p1_move, p2_move);
 
-    state.last_p1 = engine_to_wire(p1_move);
-    state.last_p2 = engine_to_wire(p2_move);
+    state.last_p1 = p1_move;
+    state.last_p2 = p2_move;
 
     // Emit TurnPlayed event.
     emit(
         event_tx,
         MatchEvent::TurnPlayed {
             state: build_turn_state(game, state.last_p1, state.last_p2),
-            p1_action: actions.p1,
-            p2_action: actions.p2,
+            p1_action: p1_move,
+            p2_action: p2_move,
             p1_think_ms: actions.p1_think_ms,
             p2_think_ms: actions.p2_think_ms,
         },
@@ -280,8 +280,8 @@ pub async fn run_playing(
 
 fn build_turn_state(
     game: &GameState,
-    last_p1: WireDirection,
-    last_p2: WireDirection,
+    last_p1: EngineDirection,
+    last_p2: EngineDirection,
 ) -> HashedTurnState {
     let p1 = &game.player1;
     let p2 = &game.player2;
@@ -289,18 +289,13 @@ fn build_turn_state(
     HashedTurnState::with_hash(
         OwnedTurnState {
             turn: game.turn,
-            player1_position: (p1.current_pos.x, p1.current_pos.y),
-            player2_position: (p2.current_pos.x, p2.current_pos.y),
+            player1_position: p1.current_pos,
+            player2_position: p2.current_pos,
             player1_score: p1.score,
             player2_score: p2.score,
             player1_mud_turns: p1.mud_timer,
             player2_mud_turns: p2.mud_timer,
-            cheese: game
-                .cheese
-                .get_all_cheese_positions()
-                .into_iter()
-                .map(|c: Coordinates| (c.x, c.y))
-                .collect(),
+            cheese: game.cheese.get_all_cheese_positions(),
             player1_last_move: last_p1,
             player2_last_move: last_p2,
         },
@@ -561,7 +556,9 @@ async fn handle_timeout(
         if !disconnected.contains(&s.session_id) && !responded.contains(&s.session_id) {
             let _ = s
                 .cmd_tx
-                .send(HostCommand::Timeout { default_move: stay })
+                .send(HostCommand::Timeout {
+                    default_move: wire_to_engine(stay),
+                })
                 .await;
             for &p in &s.controlled_players {
                 emit(
@@ -673,6 +670,7 @@ pub fn determine_result(game: &GameState) -> MatchResult {
 mod tests {
     use super::*;
     use crate::session::messages::{HostCommand, SessionId, SessionMsg};
+    use pyrat::Coordinates;
     use pyrat_wire::{Direction as WireDirection, Player};
     use std::collections::{HashMap, HashSet};
     use std::time::Duration;
@@ -775,7 +773,7 @@ mod tests {
         // Session 2 should have received a Timeout command.
         let cmd = cmd_rx2.try_recv().expect("session 2 should get Timeout");
         assert!(
-            matches!(cmd, HostCommand::Timeout { default_move } if default_move == WireDirection::Stay),
+            matches!(cmd, HostCommand::Timeout { default_move } if default_move == EngineDirection::Stay),
             "expected Timeout with Stay, got {cmd:?}"
         );
 
@@ -1172,15 +1170,15 @@ mod tests {
     fn baseline_turn_state() -> OwnedTurnState {
         OwnedTurnState {
             turn: 5,
-            player1_position: (1, 2),
-            player2_position: (3, 4),
+            player1_position: Coordinates::new(1, 2),
+            player2_position: Coordinates::new(3, 4),
             player1_score: 2.0,
             player2_score: 1.5,
             player1_mud_turns: 0,
             player2_mud_turns: 0,
-            cheese: vec![(5, 5), (10, 7)],
-            player1_last_move: WireDirection::Up,
-            player2_last_move: WireDirection::Down,
+            cheese: vec![Coordinates::new(5, 5), Coordinates::new(10, 7)],
+            player1_last_move: EngineDirection::Up,
+            player2_last_move: EngineDirection::Down,
         }
     }
 
@@ -1202,14 +1200,14 @@ mod tests {
             (
                 "p1 position",
                 OwnedTurnState {
-                    player1_position: (2, 2),
+                    player1_position: Coordinates::new(2, 2),
                     ..base.clone()
                 },
             ),
             (
                 "p2 position",
                 OwnedTurnState {
-                    player2_position: (3, 5),
+                    player2_position: Coordinates::new(3, 5),
                     ..base.clone()
                 },
             ),
@@ -1244,28 +1242,28 @@ mod tests {
             (
                 "one less cheese",
                 OwnedTurnState {
-                    cheese: vec![(5, 5)],
+                    cheese: vec![Coordinates::new(5, 5)],
                     ..base.clone()
                 },
             ),
             (
                 "cheese offset by 1",
                 OwnedTurnState {
-                    cheese: vec![(5, 6), (10, 7)],
+                    cheese: vec![Coordinates::new(5, 6), Coordinates::new(10, 7)],
                     ..base.clone()
                 },
             ),
             (
                 "p1 last move",
                 OwnedTurnState {
-                    player1_last_move: WireDirection::Right,
+                    player1_last_move: EngineDirection::Right,
                     ..base.clone()
                 },
             ),
             (
                 "p2 last move",
                 OwnedTurnState {
-                    player2_last_move: WireDirection::Left,
+                    player2_last_move: EngineDirection::Left,
                     ..base.clone()
                 },
             ),
