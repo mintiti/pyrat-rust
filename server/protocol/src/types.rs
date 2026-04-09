@@ -11,13 +11,20 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 
 use pyrat::{Coordinates, Direction};
-use pyrat_wire::{GameResult, OptionType, Player, TimingMode};
+use pyrat_wire::{OptionType, Player, TimingMode};
 
 // ── Direction conversion ────────────────────────────
 
 /// Convert a wire Direction to an engine Direction.
 pub fn wire_to_engine_direction(d: pyrat_wire::Direction) -> Direction {
-    Direction::try_from(d.0).unwrap_or(Direction::Stay)
+    match d {
+        pyrat_wire::Direction::Up => Direction::Up,
+        pyrat_wire::Direction::Right => Direction::Right,
+        pyrat_wire::Direction::Down => Direction::Down,
+        pyrat_wire::Direction::Left => Direction::Left,
+        pyrat_wire::Direction::Stay => Direction::Stay,
+        _ => Direction::Stay,
+    }
 }
 
 /// Convert an engine Direction to a wire Direction.
@@ -171,16 +178,6 @@ impl Deref for HashedTurnState {
     fn deref(&self) -> &OwnedTurnState {
         &self.inner
     }
-}
-
-// ── Game over ───────────────────────────────────────
-
-/// Game result data extracted from a GameOver message.
-#[derive(Debug, Clone)]
-pub struct GameOverData {
-    pub result: GameResult,
-    pub player1_score: f32,
-    pub player2_score: f32,
 }
 
 #[cfg(test)]

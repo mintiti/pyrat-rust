@@ -19,7 +19,6 @@ pub use playing::{
 };
 pub use probe::{probe_bot, ProbeError, ProbeResult};
 pub use pyrat_protocol::{
-    wire_to_engine_direction as wire_to_engine, HashedTurnState, OwnedInfo, OwnedMatchConfig,
-    OwnedOptionDef, OwnedTurnState,
+    HashedTurnState, OwnedInfo, OwnedMatchConfig, OwnedOptionDef, OwnedTurnState,
 };
 pub use setup::{accept_connections, run_setup, SetupError, SetupResult};

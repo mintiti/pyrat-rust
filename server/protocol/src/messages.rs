@@ -7,6 +7,10 @@
 //! These enums define the *new* protocol from the protocol spec. They are
 //! distinct from the host-internal `HostCommand`/`SessionMsg` channel types,
 //! which will eventually be replaced.
+//!
+//! **Status: spec-only.** Not yet consumed by host or SDK. The current host
+//! uses `HostCommand`/`SessionMsg` internally. These enums will be wired in
+//! when the Player trait is implemented.
 
 use pyrat::Direction;
 use pyrat_wire::{GameResult, Player};

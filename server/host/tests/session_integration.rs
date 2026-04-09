@@ -201,7 +201,7 @@ async fn happy_path_full_lifecycle() {
             ..
         } => {
             assert_eq!(player, Player::Player1);
-            assert_eq!(direction, Direction::Left);
+            assert_eq!(direction, EngineDirection::Left);
             assert_eq!(turn, 1);
         },
         other => panic!("expected Action, got {other:?}"),
@@ -359,7 +359,7 @@ async fn ownership_validation_rejects_non_controlled_player() {
             player, direction, ..
         } => {
             assert_eq!(player, Player::Player1);
-            assert_eq!(direction, Direction::Down);
+            assert_eq!(direction, EngineDirection::Down);
         },
         other => panic!("expected Action, got {other:?}"),
     }
@@ -597,7 +597,7 @@ async fn default_player_inference_single_bot() {
             player, direction, ..
         } => {
             assert_eq!(player, Player::Player2, "should be inferred as Python");
-            assert_eq!(direction, Direction::Up);
+            assert_eq!(direction, EngineDirection::Up);
         },
         other => panic!("expected Action, got {other:?}"),
     }

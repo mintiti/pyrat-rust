@@ -9,9 +9,8 @@ use tracing::{debug, info, warn};
 use pyrat::game::game_logic::GameState;
 use pyrat::{Coordinates, Direction as EngineDirection};
 use pyrat_host::game_loop::{
-    build_owned_match_config, determine_result, run_playing, run_setup, wire_to_engine,
-    HashedTurnState, MatchEvent, MatchSetup, OwnedTurnState, PlayerEntry, PlayingConfig,
-    PlayingState, SetupTiming,
+    build_owned_match_config, determine_result, run_playing, run_setup, HashedTurnState,
+    MatchEvent, MatchSetup, OwnedTurnState, PlayerEntry, PlayingConfig, PlayingState, SetupTiming,
 };
 use pyrat_host::session::messages::{HostCommand, OwnedInfo, SessionId, SessionMsg};
 use pyrat_host::stub::spawn_stub_bot;
@@ -525,7 +524,7 @@ async fn finish_collecting(
                 let Some(msg) = msg else { break; };
                 match msg {
                     SessionMsg::Action { player, direction, .. } => {
-                        fill_action(player, wire_to_engine(direction), &mut p1, &mut p2);
+                        fill_action(player, direction, &mut p1, &mut p2);
                     }
                     SessionMsg::Info { session_id, info } => {
                         if let Some(players) = playing.session_players().get(&session_id) {
@@ -593,7 +592,7 @@ fn handle_bot_msg(
                 debug!(turn, current_turn, "stale action ignored in analysis");
                 return;
             }
-            fill_action(player, wire_to_engine(direction), p1_action, p2_action);
+            fill_action(player, direction, p1_action, p2_action);
         },
         SessionMsg::Info { session_id, info } => {
             if let Some(players) = playing.session_players().get(&session_id) {

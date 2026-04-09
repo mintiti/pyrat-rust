@@ -48,7 +48,7 @@ pub enum SessionMsg {
     Action {
         session_id: SessionId,
         player: Player,
-        direction: pyrat_wire::Direction,
+        direction: pyrat::Direction,
         turn: u16,
         provisional: bool,
         think_ms: u32,
