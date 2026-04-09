@@ -5,7 +5,7 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
-use pyrat_host::wire::Direction as WireDirection;
+use pyrat::Direction;
 
 use crate::commands::AnalysisPosition;
 
@@ -14,18 +14,18 @@ use crate::commands::AnalysisPosition;
 pub enum AnalysisCmd {
     StartTurn { position: Option<AnalysisPosition> },
     StopTurn,
-    Advance { actions: Option<[WireDirection; 2]> },
+    Advance { actions: Option<[Direction; 2]> },
 }
 
 pub enum AnalysisResp {
     TurnStarted,
     Actions {
-        p1: WireDirection,
-        p2: WireDirection,
+        p1: Direction,
+        p2: Direction,
     },
     Advanced {
-        p1: WireDirection,
-        p2: WireDirection,
+        p1: Direction,
+        p2: Direction,
         game_over: bool,
     },
 }

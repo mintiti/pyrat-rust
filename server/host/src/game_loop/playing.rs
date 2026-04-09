@@ -7,12 +7,12 @@ use tokio::time::Instant;
 use tracing::{debug, warn};
 
 use pyrat::game::game_logic::GameState;
-use pyrat::{Coordinates, Direction as EngineDirection};
+use pyrat::Direction;
 
 use crate::session::messages::{
     HashedTurnState, HostCommand, OwnedTurnState, SessionId, SessionMsg,
 };
-use pyrat_wire::{Direction as WireDirection, GameResult, Player};
+use pyrat_wire::{GameResult, Player};
 
 use super::config::{PlayingConfig, SessionHandle};
 use super::events::{emit, MatchEvent};
@@ -32,8 +32,8 @@ pub struct MatchResult {
 pub struct PlayingState {
     session_players: HashMap<SessionId, Vec<Player>>,
     disconnected: HashSet<SessionId>,
-    last_p1: WireDirection,
-    last_p2: WireDirection,
+    last_p1: Direction,
+    last_p2: Direction,
 }
 
 impl PlayingState {
@@ -50,8 +50,8 @@ impl PlayingState {
         Self {
             session_players,
             disconnected: HashSet::new(),
-            last_p1: WireDirection::Stay,
-            last_p2: WireDirection::Stay,
+            last_p1: Direction::Stay,
+            last_p2: Direction::Stay,
         }
     }
 
@@ -61,7 +61,7 @@ impl PlayingState {
     }
 
     /// Record the actions taken this turn (updates last moves for next turn state).
-    pub fn record_actions(&mut self, p1: WireDirection, p2: WireDirection) {
+    pub fn record_actions(&mut self, p1: Direction, p2: Direction) {
         self.last_p1 = p1;
         self.last_p2 = p2;
     }
@@ -100,26 +100,13 @@ pub enum PlayingError {
 
 /// Actions collected for a single turn, including timing metadata.
 struct CollectedActions {
-    p1: WireDirection,
-    p2: WireDirection,
+    p1: Direction,
+    p2: Direction,
     p1_think_ms: u32,
     p2_think_ms: u32,
     /// Host-measured wall time from TurnState send to committed action receive.
     p1_wall_ms: u32,
     p2_wall_ms: u32,
-}
-
-// ── Direction conversion ─────────────────────────────
-
-/// Convert a wire Direction (u8 newtype) to an engine Direction enum.
-///
-/// Same discriminant values: Up=0, Right=1, Down=2, Left=3, Stay=4.
-pub fn wire_to_engine(d: WireDirection) -> EngineDirection {
-    EngineDirection::try_from(d.0).unwrap_or(EngineDirection::Stay)
-}
-
-pub fn engine_to_wire(d: EngineDirection) -> WireDirection {
-    WireDirection(d as u8)
 }
 
 // ── Turn loop ────────────────────────────────────────
@@ -199,12 +186,10 @@ pub async fn run_one_turn(
     }
 
     // Step the engine.
-    let p1_move = wire_to_engine(actions.p1);
-    let p2_move = wire_to_engine(actions.p2);
-    let result = game.process_turn(p1_move, p2_move);
+    let result = game.process_turn(actions.p1, actions.p2);
 
-    state.last_p1 = engine_to_wire(p1_move);
-    state.last_p2 = engine_to_wire(p2_move);
+    state.last_p1 = actions.p1;
+    state.last_p2 = actions.p2;
 
     // Emit TurnPlayed event.
     emit(
@@ -278,29 +263,20 @@ pub async fn run_playing(
 
 // ── Helpers ──────────────────────────────────────────
 
-fn build_turn_state(
-    game: &GameState,
-    last_p1: WireDirection,
-    last_p2: WireDirection,
-) -> HashedTurnState {
+fn build_turn_state(game: &GameState, last_p1: Direction, last_p2: Direction) -> HashedTurnState {
     let p1 = &game.player1;
     let p2 = &game.player2;
     let hash = game.state_hash();
     HashedTurnState::with_hash(
         OwnedTurnState {
             turn: game.turn,
-            player1_position: (p1.current_pos.x, p1.current_pos.y),
-            player2_position: (p2.current_pos.x, p2.current_pos.y),
+            player1_position: p1.current_pos,
+            player2_position: p2.current_pos,
             player1_score: p1.score,
             player2_score: p2.score,
             player1_mud_turns: p1.mud_timer,
             player2_mud_turns: p2.mud_timer,
-            cheese: game
-                .cheese
-                .get_all_cheese_positions()
-                .into_iter()
-                .map(|c: Coordinates| (c.x, c.y))
-                .collect(),
+            cheese: game.cheese.get_all_cheese_positions(),
             player1_last_move: last_p1,
             player2_last_move: last_p2,
         },
@@ -332,7 +308,7 @@ async fn collect_actions(
     event_tx: Option<&mpsc::UnboundedSender<MatchEvent>>,
     send_time: Instant,
 ) -> Result<CollectedActions, PlayingError> {
-    let stay = WireDirection::Stay;
+    let stay = Direction::Stay;
     let mut p1_slot: Option<ActionSlot> = None;
     let mut p2_slot: Option<ActionSlot> = None;
     let mut p1_wall_ms: u32 = 0;
@@ -454,7 +430,7 @@ fn handle_action(
     responded: &mut HashSet<SessionId>,
     session_id: SessionId,
     player: Player,
-    direction: WireDirection,
+    direction: Direction,
     turn: u16,
     current_turn: u16,
     provisional: bool,
@@ -520,7 +496,7 @@ fn handle_disconnect(
                 Player::Player2 => &mut *p2_slot,
                 _ => continue,
             };
-            update_action(slot, WireDirection::Stay, false, 0);
+            update_action(slot, Direction::Stay, false, 0);
             emit(event_tx, MatchEvent::BotDisconnected { player: p, reason });
         }
     }
@@ -555,7 +531,7 @@ async fn handle_timeout(
     responded: &HashSet<SessionId>,
     event_tx: Option<&mpsc::UnboundedSender<MatchEvent>>,
     current_turn: u16,
-    stay: WireDirection,
+    stay: Direction,
 ) {
     for s in sessions {
         if !disconnected.contains(&s.session_id) && !responded.contains(&s.session_id) {
@@ -595,7 +571,7 @@ fn resolve_collected(
 
 /// Per-player action state during action collection.
 struct ActionSlot {
-    direction: WireDirection,
+    direction: Direction,
     committed: bool,
     think_ms: u32,
 }
@@ -604,7 +580,7 @@ struct ActionSlot {
 /// committed actions lock the slot.
 fn update_action(
     slot: &mut Option<ActionSlot>,
-    direction: WireDirection,
+    direction: Direction,
     provisional: bool,
     think_ms: u32,
 ) {
@@ -640,10 +616,10 @@ fn both_committed(p1: &Option<ActionSlot>, p2: &Option<ActionSlot>) -> bool {
 }
 
 /// Resolve a slot to a direction: committed > provisional > Stay.
-fn resolve_action(slot: &Option<ActionSlot>) -> WireDirection {
+fn resolve_action(slot: &Option<ActionSlot>) -> Direction {
     slot.as_ref()
         .map(|s| s.direction)
-        .unwrap_or(WireDirection::Stay)
+        .unwrap_or(Direction::Stay)
 }
 
 /// Extract think_ms from a slot (0 if absent).
@@ -673,7 +649,8 @@ pub fn determine_result(game: &GameState) -> MatchResult {
 mod tests {
     use super::*;
     use crate::session::messages::{HostCommand, SessionId, SessionMsg};
-    use pyrat_wire::{Direction as WireDirection, Player};
+    use pyrat::Coordinates;
+    use pyrat_wire::Player;
     use std::collections::{HashMap, HashSet};
     use std::time::Duration;
     use tokio::sync::mpsc;
@@ -732,7 +709,7 @@ mod tests {
             .send(SessionMsg::Action {
                 session_id: SessionId(1),
                 player: Player::Player1,
-                direction: WireDirection::Right,
+                direction: Direction::Right,
                 turn: current_turn,
                 provisional: false,
                 think_ms: 50,
@@ -745,7 +722,7 @@ mod tests {
             .send(SessionMsg::Action {
                 session_id: SessionId(2),
                 player: Player::Player2,
-                direction: WireDirection::Right,
+                direction: Direction::Right,
                 turn: 3,
                 provisional: false,
                 think_ms: 50,
@@ -769,13 +746,13 @@ mod tests {
         .expect("collect_actions should not fail");
 
         // P1 got Right (accepted), P2 got Stay (stale → timeout default).
-        assert_eq!(actions.p1, WireDirection::Right);
-        assert_eq!(actions.p2, WireDirection::Stay);
+        assert_eq!(actions.p1, Direction::Right);
+        assert_eq!(actions.p2, Direction::Stay);
 
         // Session 2 should have received a Timeout command.
         let cmd = cmd_rx2.try_recv().expect("session 2 should get Timeout");
         assert!(
-            matches!(cmd, HostCommand::Timeout { default_move } if default_move == WireDirection::Stay),
+            matches!(cmd, HostCommand::Timeout { default_move } if default_move == Direction::Stay),
             "expected Timeout with Stay, got {cmd:?}"
         );
 
@@ -826,7 +803,7 @@ mod tests {
             .send(SessionMsg::Action {
                 session_id: SessionId(1),
                 player: Player::Player1,
-                direction: WireDirection::Up,
+                direction: Direction::Up,
                 turn: current_turn,
                 provisional: false,
                 think_ms: 0,
@@ -837,7 +814,7 @@ mod tests {
             .send(SessionMsg::Action {
                 session_id: SessionId(2),
                 player: Player::Player2,
-                direction: WireDirection::Down,
+                direction: Direction::Down,
                 turn: current_turn,
                 provisional: false,
                 think_ms: 0,
@@ -860,8 +837,8 @@ mod tests {
         .await
         .expect("collect_actions should not fail");
 
-        assert_eq!(actions.p1, WireDirection::Up);
-        assert_eq!(actions.p2, WireDirection::Down);
+        assert_eq!(actions.p1, Direction::Up);
+        assert_eq!(actions.p2, Direction::Down);
 
         // Info should have been relayed as BotInfo event.
         let event = event_rx.try_recv().expect("should have BotInfo event");
@@ -905,7 +882,7 @@ mod tests {
             .send(SessionMsg::Action {
                 session_id: SessionId(2),
                 player: Player::Player2,
-                direction: WireDirection::Down,
+                direction: Direction::Down,
                 turn: current_turn,
                 provisional: false,
                 think_ms: 0,
@@ -929,8 +906,8 @@ mod tests {
         .expect("collect_actions should not fail");
 
         // Disconnected player gets STAY, other player's action is used.
-        assert_eq!(actions.p1, WireDirection::Stay);
-        assert_eq!(actions.p2, WireDirection::Down);
+        assert_eq!(actions.p1, Direction::Stay);
+        assert_eq!(actions.p2, Direction::Down);
         assert!(disconnected.contains(&SessionId(1)));
     }
 
@@ -952,7 +929,7 @@ mod tests {
             .send(SessionMsg::Action {
                 session_id: SessionId(1),
                 player: Player::Player1,
-                direction: WireDirection::Left,
+                direction: Direction::Left,
                 turn: current_turn,
                 provisional: true,
                 think_ms: 0,
@@ -963,7 +940,7 @@ mod tests {
             .send(SessionMsg::Action {
                 session_id: SessionId(1),
                 player: Player::Player1,
-                direction: WireDirection::Up,
+                direction: Direction::Up,
                 turn: current_turn,
                 provisional: false,
                 think_ms: 0, // rejected — missing think_ms
@@ -976,7 +953,7 @@ mod tests {
             .send(SessionMsg::Action {
                 session_id: SessionId(2),
                 player: Player::Player2,
-                direction: WireDirection::Down,
+                direction: Direction::Down,
                 turn: current_turn,
                 provisional: false,
                 think_ms: 50,
@@ -1000,8 +977,8 @@ mod tests {
         .expect("collect_actions should not fail");
 
         // P1 gets provisional Left (committed was rejected), P2 gets committed Down.
-        assert_eq!(actions.p1, WireDirection::Left);
-        assert_eq!(actions.p2, WireDirection::Down);
+        assert_eq!(actions.p1, Direction::Left);
+        assert_eq!(actions.p2, Direction::Down);
     }
 
     /// Committed action within think margin is accepted.
@@ -1028,7 +1005,7 @@ mod tests {
             .send(SessionMsg::Action {
                 session_id: SessionId(1),
                 player: Player::Player1,
-                direction: WireDirection::Right,
+                direction: Direction::Right,
                 turn: current_turn,
                 provisional: false,
                 think_ms: 1050,
@@ -1041,7 +1018,7 @@ mod tests {
             .send(SessionMsg::Action {
                 session_id: SessionId(2),
                 player: Player::Player2,
-                direction: WireDirection::Left,
+                direction: Direction::Left,
                 turn: current_turn,
                 provisional: false,
                 think_ms: 1200,
@@ -1063,9 +1040,9 @@ mod tests {
         .await
         .expect("collect_actions should not fail");
 
-        assert_eq!(actions.p1, WireDirection::Right);
+        assert_eq!(actions.p1, Direction::Right);
         // P2's committed was rejected, no provisional → Stay at timeout
-        assert_eq!(actions.p2, WireDirection::Stay);
+        assert_eq!(actions.p2, Direction::Stay);
     }
 
     /// Late Info (sent for a previous turn) is forwarded with the turn
@@ -1108,7 +1085,7 @@ mod tests {
             .send(SessionMsg::Action {
                 session_id: SessionId(1),
                 player: Player::Player1,
-                direction: WireDirection::Up,
+                direction: Direction::Up,
                 turn: current_turn,
                 provisional: false,
                 think_ms: 0,
@@ -1119,7 +1096,7 @@ mod tests {
             .send(SessionMsg::Action {
                 session_id: SessionId(2),
                 player: Player::Player2,
-                direction: WireDirection::Down,
+                direction: Direction::Down,
                 turn: current_turn,
                 provisional: false,
                 think_ms: 0,
@@ -1172,15 +1149,15 @@ mod tests {
     fn baseline_turn_state() -> OwnedTurnState {
         OwnedTurnState {
             turn: 5,
-            player1_position: (1, 2),
-            player2_position: (3, 4),
+            player1_position: Coordinates::new(1, 2),
+            player2_position: Coordinates::new(3, 4),
             player1_score: 2.0,
             player2_score: 1.5,
             player1_mud_turns: 0,
             player2_mud_turns: 0,
-            cheese: vec![(5, 5), (10, 7)],
-            player1_last_move: WireDirection::Up,
-            player2_last_move: WireDirection::Down,
+            cheese: vec![Coordinates::new(5, 5), Coordinates::new(10, 7)],
+            player1_last_move: Direction::Up,
+            player2_last_move: Direction::Down,
         }
     }
 
@@ -1202,14 +1179,14 @@ mod tests {
             (
                 "p1 position",
                 OwnedTurnState {
-                    player1_position: (2, 2),
+                    player1_position: Coordinates::new(2, 2),
                     ..base.clone()
                 },
             ),
             (
                 "p2 position",
                 OwnedTurnState {
-                    player2_position: (3, 5),
+                    player2_position: Coordinates::new(3, 5),
                     ..base.clone()
                 },
             ),
@@ -1244,28 +1221,28 @@ mod tests {
             (
                 "one less cheese",
                 OwnedTurnState {
-                    cheese: vec![(5, 5)],
+                    cheese: vec![Coordinates::new(5, 5)],
                     ..base.clone()
                 },
             ),
             (
                 "cheese offset by 1",
                 OwnedTurnState {
-                    cheese: vec![(5, 6), (10, 7)],
+                    cheese: vec![Coordinates::new(5, 6), Coordinates::new(10, 7)],
                     ..base.clone()
                 },
             ),
             (
                 "p1 last move",
                 OwnedTurnState {
-                    player1_last_move: WireDirection::Right,
+                    player1_last_move: Direction::Right,
                     ..base.clone()
                 },
             ),
             (
                 "p2 last move",
                 OwnedTurnState {
-                    player2_last_move: WireDirection::Left,
+                    player2_last_move: Direction::Left,
                     ..base.clone()
                 },
             ),

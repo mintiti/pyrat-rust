@@ -97,9 +97,9 @@ pub fn simple_match_config() -> OwnedMatchConfig {
         max_turns: 300,
         walls: vec![],
         mud: vec![],
-        cheese: vec![(10, 7)],
-        player1_start: (20, 14),
-        player2_start: (0, 0),
+        cheese: vec![Coordinates::new(10, 7)],
+        player1_start: Coordinates::new(20, 14),
+        player2_start: Coordinates::new(0, 0),
         controlled_players: vec![], // setup phase fills this
         timing: TimingMode::Wait,
         move_timeout_ms: 1000,

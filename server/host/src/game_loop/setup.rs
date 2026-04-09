@@ -9,7 +9,7 @@ use tracing::{debug, info, info_span, warn, Instrument};
 use crate::session::messages::{HashedTurnState, HostCommand, OwnedTurnState};
 use crate::session::{run_session, SessionConfig, SessionId, SessionMsg};
 
-use pyrat_wire::{Direction as WireDirection, Player};
+use pyrat_wire::Player;
 
 use super::config::{MatchSetup, SessionHandle};
 use super::events::{emit, MatchEvent};
@@ -255,8 +255,8 @@ pub async fn run_setup(
         player1_mud_turns: 0,
         player2_mud_turns: 0,
         cheese: setup.match_config.cheese.clone(),
-        player1_last_move: WireDirection::Stay,
-        player2_last_move: WireDirection::Stay,
+        player1_last_move: pyrat::Direction::Stay,
+        player2_last_move: pyrat::Direction::Stay,
     })
     .state_hash();
 

@@ -7,6 +7,9 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::time::timeout;
 
+use pyrat::Coordinates;
+use pyrat::Direction as EngineDirection;
+
 use pyrat_host::session::messages::*;
 use pyrat_host::session::{run_session, SessionConfig};
 use pyrat_host::wire::framing::{FrameReader, FrameWriter};
@@ -167,15 +170,15 @@ async fn happy_path_full_lifecycle() {
         .send(HostCommand::TurnState(Box::new(HashedTurnState::new(
             OwnedTurnState {
                 turn: 1,
-                player1_position: (20, 14),
-                player2_position: (0, 0),
+                player1_position: Coordinates::new(20, 14),
+                player2_position: Coordinates::new(0, 0),
                 player1_score: 0.0,
                 player2_score: 0.0,
                 player1_mud_turns: 0,
                 player2_mud_turns: 0,
-                cheese: vec![(10, 7)],
-                player1_last_move: Direction::Stay,
-                player2_last_move: Direction::Stay,
+                cheese: vec![Coordinates::new(10, 7)],
+                player1_last_move: EngineDirection::Stay,
+                player2_last_move: EngineDirection::Stay,
             },
         ))))
         .await
@@ -198,7 +201,7 @@ async fn happy_path_full_lifecycle() {
             ..
         } => {
             assert_eq!(player, Player::Player1);
-            assert_eq!(direction, Direction::Left);
+            assert_eq!(direction, EngineDirection::Left);
             assert_eq!(turn, 1);
         },
         other => panic!("expected Action, got {other:?}"),
@@ -356,7 +359,7 @@ async fn ownership_validation_rejects_non_controlled_player() {
             player, direction, ..
         } => {
             assert_eq!(player, Player::Player1);
-            assert_eq!(direction, Direction::Down);
+            assert_eq!(direction, EngineDirection::Down);
         },
         other => panic!("expected Action, got {other:?}"),
     }
@@ -594,7 +597,7 @@ async fn default_player_inference_single_bot() {
             player, direction, ..
         } => {
             assert_eq!(player, Player::Player2, "should be inferred as Python");
-            assert_eq!(direction, Direction::Up);
+            assert_eq!(direction, EngineDirection::Up);
         },
         other => panic!("expected Action, got {other:?}"),
     }
@@ -673,15 +676,15 @@ async fn stop_sends_wire_stop_and_session_stays_alive() {
         .send(HostCommand::TurnState(Box::new(HashedTurnState::new(
             OwnedTurnState {
                 turn: 1,
-                player1_position: (20, 14),
-                player2_position: (0, 0),
+                player1_position: Coordinates::new(20, 14),
+                player2_position: Coordinates::new(0, 0),
                 player1_score: 0.0,
                 player2_score: 0.0,
                 player1_mud_turns: 0,
                 player2_mud_turns: 0,
-                cheese: vec![(10, 7)],
-                player1_last_move: Direction::Stay,
-                player2_last_move: Direction::Stay,
+                cheese: vec![Coordinates::new(10, 7)],
+                player1_last_move: EngineDirection::Stay,
+                player2_last_move: EngineDirection::Stay,
             },
         ))))
         .await

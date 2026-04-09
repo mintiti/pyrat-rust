@@ -7,14 +7,14 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, info, warn};
 
 use pyrat::game::game_logic::GameState;
+use pyrat::{Coordinates, Direction as EngineDirection};
 use pyrat_host::game_loop::{
-    build_owned_match_config, determine_result, run_playing, run_setup, wire_to_engine,
-    HashedTurnState, MatchEvent, MatchSetup, OwnedTurnState, PlayerEntry, PlayingConfig,
-    PlayingState, SetupTiming,
+    build_owned_match_config, determine_result, run_playing, run_setup, HashedTurnState,
+    MatchEvent, MatchSetup, OwnedTurnState, PlayerEntry, PlayingConfig, PlayingState, SetupTiming,
 };
 use pyrat_host::session::messages::{HostCommand, OwnedInfo, SessionId, SessionMsg};
 use pyrat_host::stub::spawn_stub_bot;
-use pyrat_host::wire::{Direction as WireDirection, GameResult, Player, TimingMode};
+use pyrat_host::wire::{GameResult, Player, TimingMode};
 
 use tauri_specta::Event;
 
@@ -25,23 +25,23 @@ use crate::events::{
 };
 use crate::state::AnalysisRx;
 
-pub fn wire_to_specta(d: WireDirection) -> SpectaDirection {
+pub fn engine_to_specta(d: EngineDirection) -> SpectaDirection {
     match d {
-        WireDirection::Up => SpectaDirection::Up,
-        WireDirection::Right => SpectaDirection::Right,
-        WireDirection::Down => SpectaDirection::Down,
-        WireDirection::Left => SpectaDirection::Left,
-        _ => SpectaDirection::Stay,
+        EngineDirection::Up => SpectaDirection::Up,
+        EngineDirection::Right => SpectaDirection::Right,
+        EngineDirection::Down => SpectaDirection::Down,
+        EngineDirection::Left => SpectaDirection::Left,
+        EngineDirection::Stay => SpectaDirection::Stay,
     }
 }
 
-pub fn specta_to_wire(d: SpectaDirection) -> WireDirection {
+pub fn specta_to_engine(d: SpectaDirection) -> EngineDirection {
     match d {
-        SpectaDirection::Up => WireDirection::Up,
-        SpectaDirection::Right => WireDirection::Right,
-        SpectaDirection::Down => WireDirection::Down,
-        SpectaDirection::Left => WireDirection::Left,
-        SpectaDirection::Stay => WireDirection::Stay,
+        SpectaDirection::Up => EngineDirection::Up,
+        SpectaDirection::Right => EngineDirection::Right,
+        SpectaDirection::Down => EngineDirection::Down,
+        SpectaDirection::Left => EngineDirection::Left,
+        SpectaDirection::Stay => EngineDirection::Stay,
     }
 }
 
@@ -260,8 +260,8 @@ enum AnalysisPhase {
     Idle,
     Collecting {
         turn: u16,
-        p1_action: Option<WireDirection>,
-        p2_action: Option<WireDirection>,
+        p1_action: Option<EngineDirection>,
+        p2_action: Option<EngineDirection>,
         deadline: Option<tokio::time::Instant>,
     },
 }
@@ -334,7 +334,7 @@ async fn run_analysis_inner(
                                 sessions, &mut playing, game_rx, &mut phase, event_tx,
                             ).await
                         } else {
-                            (WireDirection::Stay, WireDirection::Stay)
+                            (EngineDirection::Stay, EngineDirection::Stay)
                         };
 
                         // Provided actions override collected ones
@@ -345,7 +345,7 @@ async fn run_analysis_inner(
                         };
 
                         // Step the engine
-                        let result = game.process_turn(wire_to_engine(p1), wire_to_engine(p2));
+                        let result = game.process_turn(p1, p2);
                         playing.record_actions(p1, p2);
 
                         // Emit TurnPlayed
@@ -401,15 +401,19 @@ async fn run_analysis_inner(
 fn build_turn_state_from_position(pos: AnalysisPosition) -> HashedTurnState {
     HashedTurnState::new(OwnedTurnState {
         turn: pos.turn,
-        player1_position: (pos.player1.position.x, pos.player1.position.y),
-        player2_position: (pos.player2.position.x, pos.player2.position.y),
+        player1_position: Coordinates::new(pos.player1.position.x, pos.player1.position.y),
+        player2_position: Coordinates::new(pos.player2.position.x, pos.player2.position.y),
         player1_score: pos.player1.score,
         player2_score: pos.player2.score,
         player1_mud_turns: pos.player1.mud_turns,
         player2_mud_turns: pos.player2.mud_turns,
-        cheese: pos.cheese.iter().map(|c| (c.x, c.y)).collect(),
-        player1_last_move: specta_to_wire(pos.player1_last_move),
-        player2_last_move: specta_to_wire(pos.player2_last_move),
+        cheese: pos
+            .cheese
+            .iter()
+            .map(|c| Coordinates::new(c.x, c.y))
+            .collect(),
+        player1_last_move: specta_to_engine(pos.player1_last_move),
+        player2_last_move: specta_to_engine(pos.player2_last_move),
     })
 }
 
@@ -476,7 +480,7 @@ async fn finish_collecting(
     game_rx: &mut mpsc::Receiver<SessionMsg>,
     phase: &mut AnalysisPhase,
     event_tx: &mpsc::UnboundedSender<MatchEvent>,
-) -> (WireDirection, WireDirection) {
+) -> (EngineDirection, EngineDirection) {
     // Extract current action slots
     let (mut p1, mut p2) = match phase {
         AnalysisPhase::Collecting {
@@ -485,7 +489,7 @@ async fn finish_collecting(
             ..
         } => (*p1_action, *p2_action),
         AnalysisPhase::Idle => {
-            return (WireDirection::Stay, WireDirection::Stay);
+            return (EngineDirection::Stay, EngineDirection::Stay);
         },
     };
 
@@ -493,7 +497,7 @@ async fn finish_collecting(
     for sid in playing.disconnected().clone() {
         if let Some(players) = playing.session_players().get(&sid) {
             for &player in players {
-                fill_action(player, WireDirection::Stay, &mut p1, &mut p2);
+                fill_action(player, EngineDirection::Stay, &mut p1, &mut p2);
             }
         }
     }
@@ -538,7 +542,7 @@ async fn finish_collecting(
                         playing.disconnected_mut().insert(session_id);
                         if let Some(players) = playing.session_players().get(&session_id) {
                             for &player in players {
-                                fill_action(player, WireDirection::Stay, &mut p1, &mut p2);
+                                fill_action(player, EngineDirection::Stay, &mut p1, &mut p2);
                                 emit_event(event_tx, MatchEvent::BotDisconnected { player, reason });
                             }
                         }
@@ -555,8 +559,8 @@ async fn finish_collecting(
 
     *phase = AnalysisPhase::Idle;
     (
-        p1.unwrap_or(WireDirection::Stay),
-        p2.unwrap_or(WireDirection::Stay),
+        p1.unwrap_or(EngineDirection::Stay),
+        p2.unwrap_or(EngineDirection::Stay),
     )
 }
 
@@ -616,7 +620,7 @@ fn handle_bot_msg(
             playing.disconnected_mut().insert(session_id);
             if let Some(players) = playing.session_players().get(&session_id) {
                 for &player in players {
-                    fill_action(player, WireDirection::Stay, p1_action, p2_action);
+                    fill_action(player, EngineDirection::Stay, p1_action, p2_action);
                     emit_event(event_tx, MatchEvent::BotDisconnected { player, reason });
                 }
             }
@@ -628,9 +632,9 @@ fn handle_bot_msg(
 /// Insert a direction for the given player, first-wins.
 fn fill_action(
     player: Player,
-    direction: WireDirection,
-    p1: &mut Option<WireDirection>,
-    p2: &mut Option<WireDirection>,
+    direction: EngineDirection,
+    p1: &mut Option<EngineDirection>,
+    p2: &mut Option<EngineDirection>,
 ) {
     match player {
         Player::Player1 => {
@@ -705,7 +709,7 @@ fn build_bot_info_event(
         depth: info.depth,
         nodes: info.nodes,
         score: info.score,
-        pv: info.pv.iter().map(|&d| wire_to_specta(d)).collect(),
+        pv: info.pv.iter().map(|&d| engine_to_specta(d)).collect(),
         message: info.message.clone(),
     }
 }
@@ -742,8 +746,8 @@ async fn forward_events(
                         mud_turns: state.player2_mud_turns,
                     },
                     cheese: state.cheese.iter().copied().map(Coord::from).collect(),
-                    player1_action: wire_to_specta(p1_action),
-                    player2_action: wire_to_specta(p2_action),
+                    player1_action: engine_to_specta(p1_action),
+                    player2_action: engine_to_specta(p2_action),
                 };
                 let _ = payload.emit(&app);
             },

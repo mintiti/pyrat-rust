@@ -16,6 +16,7 @@ use tokio::time::Instant;
 use tracing::{debug, info, trace, warn};
 
 use codec::serialize_host_command;
+use pyrat_protocol::wire_to_engine_direction;
 use pyrat_wire::framing::{FrameError, FrameReader, FrameWriter};
 use pyrat_wire::{BotMessage, Player};
 
@@ -459,7 +460,7 @@ async fn handle_bot_frame(
             SessionMsg::Action {
                 session_id,
                 player,
-                direction,
+                direction: wire_to_engine_direction(direction),
                 turn,
                 provisional,
                 think_ms,

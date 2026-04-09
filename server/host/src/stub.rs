@@ -10,7 +10,8 @@ use tracing::debug;
 
 use crate::session::messages::{HostCommand, OwnedInfo, SessionMsg};
 use crate::session::SessionId;
-use pyrat_wire::{Direction, Player};
+use pyrat::Direction;
+use pyrat_wire::Player;
 
 /// The four movement directions (excludes Stay).
 const MOVES: [Direction; 4] = [
