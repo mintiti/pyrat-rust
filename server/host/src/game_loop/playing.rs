@@ -263,11 +263,7 @@ pub async fn run_playing(
 
 // ── Helpers ──────────────────────────────────────────
 
-fn build_turn_state(
-    game: &GameState,
-    last_p1: Direction,
-    last_p2: Direction,
-) -> HashedTurnState {
+fn build_turn_state(game: &GameState, last_p1: Direction, last_p2: Direction) -> HashedTurnState {
     let p1 = &game.player1;
     let p2 = &game.player2;
     let hash = game.state_hash();
@@ -541,9 +537,7 @@ async fn handle_timeout(
         if !disconnected.contains(&s.session_id) && !responded.contains(&s.session_id) {
             let _ = s
                 .cmd_tx
-                .send(HostCommand::Timeout {
-                    default_move: stay,
-                })
+                .send(HostCommand::Timeout { default_move: stay })
                 .await;
             for &p in &s.controlled_players {
                 emit(
