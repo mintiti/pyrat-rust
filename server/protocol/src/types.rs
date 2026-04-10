@@ -11,7 +11,7 @@ use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 
 use pyrat::{Coordinates, Direction};
-use pyrat_wire::{OptionType, Player, TimingMode};
+use pyrat_wire::{GameResult, OptionType, Player, TimingMode};
 
 // ── Direction conversion ────────────────────────────
 
@@ -93,6 +93,16 @@ pub struct OwnedMatchConfig {
     pub preprocessing_timeout_ms: u32,
 }
 
+// ── Game over ──────────────────────────────────────
+
+/// Game-over result data sent to bots at the end of a match.
+#[derive(Debug, Clone)]
+pub struct OwnedGameOver {
+    pub result: GameResult,
+    pub player1_score: f32,
+    pub player2_score: f32,
+}
+
 // ── Turn state ──────────────────────────────────────
 
 /// Game position state sent to bots each turn.
@@ -149,6 +159,13 @@ impl HashedTurnState {
     /// The content-addressable hash for this turn state.
     pub fn state_hash(&self) -> u64 {
         self.state_hash
+    }
+
+    /// Consume the wrapper and return the inner turn state.
+    ///
+    /// Use `state_hash()` before calling this if you need the hash.
+    pub fn into_inner(self) -> OwnedTurnState {
+        self.inner
     }
 
     /// Deterministic hash of all game-position fields.

@@ -1,97 +1,27 @@
 //! Wire codec: extract HostPackets to owned types, build BotPackets.
 //!
-//! Mirror of `server/host/src/session/codec.rs` but in the opposite direction —
-//! we extract `HostPacket`s and build `BotPacket`s.
+//! Extraction of per-table data is delegated to `pyrat_protocol::codec`.
+//! This module handles packet dispatch and bot packet builders.
 
 use flatbuffers::FlatBufferBuilder;
-use pyrat::Coordinates;
+use pyrat_protocol::{
+    engine_to_wire_direction, extract_game_over, extract_match_config, extract_turn_state,
+    wire_to_engine_direction, HashedTurnState, OwnedGameOver, OwnedMatchConfig,
+};
 use pyrat_wire::{self as wire, BotMessage, HostMessage, Vec2};
 
-// ── Direction conversion ─────────────────────────────
-
-/// Convert a wire Direction to an engine Direction.
-fn wire_to_engine_dir(d: wire::Direction) -> pyrat::Direction {
-    match d {
-        wire::Direction::Up => pyrat::Direction::Up,
-        wire::Direction::Right => pyrat::Direction::Right,
-        wire::Direction::Down => pyrat::Direction::Down,
-        wire::Direction::Left => pyrat::Direction::Left,
-        _ => pyrat::Direction::Stay,
-    }
-}
-
-/// Convert an engine Direction to a wire Direction.
-fn engine_to_wire_dir(d: pyrat::Direction) -> wire::Direction {
-    match d {
-        pyrat::Direction::Up => wire::Direction::Up,
-        pyrat::Direction::Right => wire::Direction::Right,
-        pyrat::Direction::Down => wire::Direction::Down,
-        pyrat::Direction::Left => wire::Direction::Left,
-        pyrat::Direction::Stay => wire::Direction::Stay,
-    }
-}
-
-fn vec2_to_coords(v: &Vec2) -> Coordinates {
-    Coordinates::new(v.x(), v.y())
-}
-
-fn vec2_opt(v: Option<&Vec2>) -> Coordinates {
-    v.map_or(Coordinates::new(0, 0), vec2_to_coords)
-}
-
 // ── Owned extraction types ───────────────────────────
-
-/// Owned match configuration extracted from wire MatchConfig.
-#[derive(Debug, Clone)]
-pub struct MatchConfigData {
-    pub width: u8,
-    pub height: u8,
-    pub max_turns: u16,
-    pub walls: Vec<(Coordinates, Coordinates)>,
-    pub mud: Vec<(Coordinates, Coordinates, u8)>,
-    pub cheese: Vec<Coordinates>,
-    pub player1_start: Coordinates,
-    pub player2_start: Coordinates,
-    pub controlled_players: Vec<wire::Player>,
-    pub timing: wire::TimingMode,
-    pub move_timeout_ms: u32,
-    pub preprocessing_timeout_ms: u32,
-}
-
-/// Owned turn state extracted from wire TurnState.
-#[derive(Debug, Clone)]
-pub struct TurnStateData {
-    pub turn: u16,
-    pub player1_position: Coordinates,
-    pub player2_position: Coordinates,
-    pub player1_score: f32,
-    pub player2_score: f32,
-    pub player1_mud_turns: u8,
-    pub player2_mud_turns: u8,
-    pub cheese: Vec<Coordinates>,
-    pub player1_last_move: pyrat::Direction,
-    pub player2_last_move: pyrat::Direction,
-    pub state_hash: u64,
-}
-
-/// Owned game-over data extracted from wire GameOver.
-#[derive(Debug, Clone)]
-pub struct GameOverData {
-    pub result: wire::GameResult,
-    pub player1_score: f32,
-    pub player2_score: f32,
-}
 
 /// Parsed host message.
 #[derive(Debug)]
 #[allow(dead_code)] // Fields are extracted for completeness; not all are consumed.
 pub enum HostMsg {
     SetOption { name: String, value: String },
-    MatchConfig(MatchConfigData),
+    MatchConfig(OwnedMatchConfig),
     StartPreprocessing { state_hash: u64 },
-    TurnState(TurnStateData),
+    TurnState(HashedTurnState),
     Timeout { default_move: pyrat::Direction },
-    GameOver(GameOverData),
+    GameOver(OwnedGameOver),
     Ping,
     Stop,
 }
@@ -136,84 +66,18 @@ pub fn extract_host_msg(buf: &[u8]) -> Result<HostMsg, String> {
         HostMessage::Timeout => {
             let t = packet.message_as_timeout().ok_or("missing Timeout body")?;
             Ok(HostMsg::Timeout {
-                default_move: wire_to_engine_dir(t.default_move()),
+                default_move: wire_to_engine_direction(t.default_move()),
             })
         },
         HostMessage::GameOver => {
             let go = packet
                 .message_as_game_over()
                 .ok_or("missing GameOver body")?;
-            Ok(HostMsg::GameOver(GameOverData {
-                result: go.result(),
-                player1_score: go.player1_score(),
-                player2_score: go.player2_score(),
-            }))
+            Ok(HostMsg::GameOver(extract_game_over(&go)))
         },
         HostMessage::Ping => Ok(HostMsg::Ping),
         HostMessage::Stop => Ok(HostMsg::Stop),
         _ => Err(format!("unknown HostMessage type: {}", msg_type.0)),
-    }
-}
-
-fn extract_match_config(mc: &wire::MatchConfig<'_>) -> MatchConfigData {
-    MatchConfigData {
-        width: mc.width(),
-        height: mc.height(),
-        max_turns: mc.max_turns(),
-        walls: mc
-            .walls()
-            .map(|ws| {
-                (0..ws.len())
-                    .map(|i| {
-                        let w = ws.get(i);
-                        (vec2_opt(w.pos1()), vec2_opt(w.pos2()))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default(),
-        mud: mc
-            .mud()
-            .map(|ms| {
-                (0..ms.len())
-                    .map(|i| {
-                        let m = ms.get(i);
-                        (vec2_opt(m.pos1()), vec2_opt(m.pos2()), m.value())
-                    })
-                    .collect()
-            })
-            .unwrap_or_default(),
-        cheese: mc
-            .cheese()
-            .map(|cs| (0..cs.len()).map(|i| vec2_to_coords(cs.get(i))).collect())
-            .unwrap_or_default(),
-        player1_start: vec2_opt(mc.player1_start()),
-        player2_start: vec2_opt(mc.player2_start()),
-        controlled_players: mc
-            .controlled_players()
-            .map(|ps| ps.iter().collect())
-            .unwrap_or_default(),
-        timing: mc.timing(),
-        move_timeout_ms: mc.move_timeout_ms(),
-        preprocessing_timeout_ms: mc.preprocessing_timeout_ms(),
-    }
-}
-
-fn extract_turn_state(ts: &wire::TurnState<'_>) -> TurnStateData {
-    TurnStateData {
-        turn: ts.turn(),
-        player1_position: vec2_opt(ts.player1_position()),
-        player2_position: vec2_opt(ts.player2_position()),
-        player1_score: ts.player1_score(),
-        player2_score: ts.player2_score(),
-        player1_mud_turns: ts.player1_mud_turns(),
-        player2_mud_turns: ts.player2_mud_turns(),
-        cheese: ts
-            .cheese()
-            .map(|cs| (0..cs.len()).map(|i| vec2_to_coords(cs.get(i))).collect())
-            .unwrap_or_default(),
-        player1_last_move: wire_to_engine_dir(ts.player1_last_move()),
-        player2_last_move: wire_to_engine_dir(ts.player2_last_move()),
-        state_hash: ts.state_hash(),
     }
 }
 
@@ -331,7 +195,7 @@ pub fn build_action_full(
     provisional: bool,
     think_ms: u32,
 ) -> Vec<u8> {
-    let wire_dir = engine_to_wire_dir(direction);
+    let wire_dir = engine_to_wire_direction(direction);
     build_bot_frame(BotMessage::Action, move |fbb| {
         wire::Action::create(
             fbb,
@@ -368,7 +232,8 @@ pub fn build_info(
             Some(fbb.create_string(message))
         };
 
-        let pv_vec: Vec<wire::Direction> = pv.iter().map(|&d| engine_to_wire_dir(d)).collect();
+        let pv_vec: Vec<wire::Direction> =
+            pv.iter().map(|&d| engine_to_wire_direction(d)).collect();
         let pv_off = if pv_vec.is_empty() {
             None
         } else {
@@ -399,10 +264,8 @@ pub fn build_info(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pyrat::Coordinates;
     use pyrat_wire::{Direction as WireDir, GameResult, Player, TimingMode};
-
-    // Use host codec's serialize_host_command to build HostPackets for extraction tests.
-    // We inline minimal builders here instead, since we don't depend on pyrat-host.
 
     fn build_host_packet<F>(msg_type: HostMessage, build_msg: F) -> Vec<u8>
     where
@@ -537,25 +400,25 @@ mod tests {
         });
 
         match extract_host_msg(&buf).unwrap() {
-            HostMsg::TurnState(ts) => {
-                assert_eq!(ts.turn, 42);
-                assert_eq!(ts.player1_position, Coordinates::new(10, 7));
-                assert_eq!(ts.player2_position, Coordinates::new(0, 0));
-                assert!((ts.player1_score - 3.0).abs() < f32::EPSILON);
-                assert!((ts.player2_score - 2.5).abs() < f32::EPSILON);
-                assert_eq!(ts.player1_mud_turns, 0);
-                assert_eq!(ts.player2_mud_turns, 2);
-                assert_eq!(ts.cheese.len(), 2);
-                assert_eq!(ts.player1_last_move, pyrat::Direction::Up);
-                assert_eq!(ts.player2_last_move, pyrat::Direction::Right);
-                assert_eq!(ts.state_hash, 0xFEED_FACE_1234_5678);
+            HostMsg::TurnState(hts) => {
+                assert_eq!(hts.turn, 42);
+                assert_eq!(hts.player1_position, Coordinates::new(10, 7));
+                assert_eq!(hts.player2_position, Coordinates::new(0, 0));
+                assert!((hts.player1_score - 3.0).abs() < f32::EPSILON);
+                assert!((hts.player2_score - 2.5).abs() < f32::EPSILON);
+                assert_eq!(hts.player1_mud_turns, 0);
+                assert_eq!(hts.player2_mud_turns, 2);
+                assert_eq!(hts.cheese.len(), 2);
+                assert_eq!(hts.player1_last_move, pyrat::Direction::Up);
+                assert_eq!(hts.player2_last_move, pyrat::Direction::Right);
+                assert_eq!(hts.state_hash(), 0xFEED_FACE_1234_5678);
             },
             _ => panic!("expected TurnState"),
         }
     }
 
     #[test]
-    fn extract_game_over() {
+    fn extract_game_over_test() {
         let buf = build_host_packet(HostMessage::GameOver, |fbb| {
             wire::GameOver::create(
                 fbb,
@@ -718,19 +581,5 @@ mod tests {
         assert!(info.target().is_none());
         assert!(info.pv().is_none());
         assert!(info.message().is_none());
-    }
-
-    #[test]
-    fn direction_conversion_roundtrip() {
-        for (w, e) in [
-            (WireDir::Up, pyrat::Direction::Up),
-            (WireDir::Right, pyrat::Direction::Right),
-            (WireDir::Down, pyrat::Direction::Down),
-            (WireDir::Left, pyrat::Direction::Left),
-            (WireDir::Stay, pyrat::Direction::Stay),
-        ] {
-            assert_eq!(wire_to_engine_dir(w), e);
-            assert_eq!(engine_to_wire_dir(e), w);
-        }
     }
 }

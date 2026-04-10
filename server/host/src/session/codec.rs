@@ -2,21 +2,10 @@
 
 use flatbuffers::FlatBufferBuilder;
 
-use pyrat::Coordinates;
-use pyrat_protocol::{engine_to_wire_direction, wire_to_engine_direction};
+use pyrat_protocol::{engine_to_wire_direction, extract_info, extract_option_defs};
 
-use crate::session::messages::{HostCommand, OwnedInfo, OwnedMatchConfig, OwnedOptionDef};
+use crate::session::messages::{HostCommand, OwnedInfo, OwnedOptionDef};
 use pyrat_wire::{self as wire, BotMessage, HostMessage, HostPacket, HostPacketArgs, Vec2};
-
-// ── Helpers ─────────────────────────────────────────
-
-fn vec2_to_coords(v: &Vec2) -> Coordinates {
-    Coordinates::new(v.x(), v.y())
-}
-
-fn vec2_opt(v: Option<&Vec2>) -> Coordinates {
-    v.map_or(Coordinates::new(0, 0), vec2_to_coords)
-}
 
 // ── Extraction: borrowed FlatBuffers → owned types ──
 
@@ -55,24 +44,7 @@ pub fn extract_bot_packet(buf: &[u8]) -> Result<(BotMessage, BotPayload), String
             .ok_or("missing Identify body")?;
         let options = id
             .options()
-            .map(|opts| {
-                (0..opts.len())
-                    .map(|i| {
-                        let o = opts.get(i);
-                        OwnedOptionDef {
-                            name: o.name().unwrap_or("").to_owned(),
-                            option_type: o.type_(),
-                            default_value: o.default_value().unwrap_or("").to_owned(),
-                            min: o.min(),
-                            max: o.max(),
-                            choices: o
-                                .choices()
-                                .map(|c| (0..c.len()).map(|j| c.get(j).to_owned()).collect())
-                                .unwrap_or_default(),
-                        }
-                    })
-                    .collect()
-            })
+            .map(extract_option_defs)
             .unwrap_or_default();
         BotPayload::Identify {
             name: id.name().unwrap_or("").to_owned(),
@@ -97,21 +69,7 @@ pub fn extract_bot_packet(buf: &[u8]) -> Result<(BotMessage, BotPayload), String
         BotPayload::Pong
     } else if msg_type == BotMessage::Info {
         let info = packet.message_as_info().ok_or("missing Info body")?;
-        BotPayload::Info(OwnedInfo {
-            player: info.player(),
-            multipv: info.multipv(),
-            target: info.target().map(vec2_to_coords),
-            depth: info.depth(),
-            nodes: info.nodes(),
-            score: info.score(),
-            pv: info
-                .pv()
-                .map(|p| p.iter().map(wire_to_engine_direction).collect())
-                .unwrap_or_default(),
-            message: info.message().unwrap_or("").to_owned(),
-            turn: info.turn(),
-            state_hash: info.state_hash(),
-        })
+        BotPayload::Info(extract_info(&info))
     } else if msg_type == BotMessage::RenderCommands {
         BotPayload::RenderCommands
     } else {
@@ -287,57 +245,15 @@ pub fn serialize_host_command(fbb: &mut FlatBufferBuilder<'_>, cmd: &HostCommand
     fbb.finished_data().to_vec()
 }
 
-// ── Round-trip helper for MatchConfig extraction ────
-
-/// Extract an `OwnedMatchConfig` from a wire `MatchConfig` table.
-#[allow(dead_code)] // Will be consumed by game loop; currently tested only.
-pub fn extract_match_config(mc: &wire::MatchConfig<'_>) -> OwnedMatchConfig {
-    OwnedMatchConfig {
-        width: mc.width(),
-        height: mc.height(),
-        max_turns: mc.max_turns(),
-        walls: mc
-            .walls()
-            .map(|ws| {
-                (0..ws.len())
-                    .map(|i| {
-                        let w = ws.get(i);
-                        (vec2_opt(w.pos1()), vec2_opt(w.pos2()))
-                    })
-                    .collect()
-            })
-            .unwrap_or_default(),
-        mud: mc
-            .mud()
-            .map(|ms| {
-                (0..ms.len())
-                    .map(|i| {
-                        let m = ms.get(i);
-                        (vec2_opt(m.pos1()), vec2_opt(m.pos2()), m.value())
-                    })
-                    .collect()
-            })
-            .unwrap_or_default(),
-        cheese: mc
-            .cheese()
-            .map(|cs| (0..cs.len()).map(|i| vec2_to_coords(cs.get(i))).collect())
-            .unwrap_or_default(),
-        player1_start: vec2_opt(mc.player1_start()),
-        player2_start: vec2_opt(mc.player2_start()),
-        controlled_players: mc
-            .controlled_players()
-            .map(|ps| ps.iter().collect())
-            .unwrap_or_default(),
-        timing: mc.timing(),
-        move_timeout_ms: mc.move_timeout_ms(),
-        preprocessing_timeout_ms: mc.preprocessing_timeout_ms(),
-    }
-}
+// Re-export from protocol crate. Currently used in tests; will be consumed
+// by the game loop once it needs to extract config from wire directly.
+#[allow(unused_imports)]
+pub use pyrat_protocol::extract_match_config;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::messages::{HashedTurnState, OwnedTurnState};
+    use crate::session::messages::{HashedTurnState, OwnedMatchConfig, OwnedTurnState};
     use pyrat::Coordinates;
     use pyrat_wire::{Direction, GameResult, Player, TimingMode};
 

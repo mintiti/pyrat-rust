@@ -7,9 +7,11 @@
 //! The [`HostMsg`] and [`BotMsg`] enums define the Player trait pipe vocabulary:
 //! what the Match sends and receives through `Player::send()`/`Player::recv()`.
 
+mod codec;
 mod messages;
 mod types;
 
+pub use codec::*;
 pub use messages::*;
 pub use types::*;
 

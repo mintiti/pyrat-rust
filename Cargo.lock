@@ -3065,6 +3065,7 @@ dependencies = [
 name = "pyrat-protocol"
 version = "0.1.0"
 dependencies = [
+ "flatbuffers",
  "pyrat-rust",
  "pyrat-wire",
 ]
@@ -3088,6 +3089,7 @@ version = "0.1.0"
 dependencies = [
  "flatbuffers",
  "pyrat-engine-interface",
+ "pyrat-protocol",
  "pyrat-rust",
  "pyrat-sdk-derive",
  "pyrat-wire",

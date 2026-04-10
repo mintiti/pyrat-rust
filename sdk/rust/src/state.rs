@@ -11,10 +11,10 @@ use pyrat_engine_interface::pathfinding::FullPathResult;
 use pyrat_engine_interface::GameView;
 use pyrat_wire::Player;
 
-use crate::wire::{MatchConfigData, TurnStateData};
+use pyrat_protocol::{HashedTurnState, OwnedMatchConfig};
 use crate::GameSim;
 
-/// SDK-facing game state. Built once from `MatchConfigData`, updated each turn.
+/// SDK-facing game state. Built once from `OwnedMatchConfig`, updated each turn.
 pub struct GameState {
     view: GameView,
     my_player: Player,
@@ -41,7 +41,7 @@ pub struct GameState {
 
 impl GameState {
     /// Build from match configuration received during setup.
-    pub fn from_config(cfg: &MatchConfigData) -> Result<Self, String> {
+    pub fn from_config(cfg: &OwnedMatchConfig) -> Result<Self, String> {
         let walls: Vec<(Coordinates, Coordinates)> = cfg.walls.clone();
         let mud: Vec<(Coordinates, Coordinates, u8)> = cfg.mud.clone();
 
@@ -84,7 +84,9 @@ impl GameState {
     }
 
     /// Update dynamic state from a TurnState message.
-    pub fn update(&mut self, ts: TurnStateData) {
+    pub fn update(&mut self, hts: HashedTurnState) {
+        let hash = hts.state_hash();
+        let ts = hts.into_inner();
         self.turn = ts.turn;
         self.player1_position = ts.player1_position;
         self.player2_position = ts.player2_position;
@@ -95,7 +97,7 @@ impl GameState {
         self.player1_last_move = ts.player1_last_move;
         self.player2_last_move = ts.player2_last_move;
         self.cheese = ts.cheese;
-        self.state_hash = ts.state_hash;
+        self.state_hash = hash;
     }
 
     // ── Perspective helpers ─────────────────────────
@@ -330,10 +332,11 @@ impl GameState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pyrat_protocol::OwnedTurnState;
     use pyrat_wire::TimingMode;
 
-    fn test_config() -> MatchConfigData {
-        MatchConfigData {
+    fn test_config() -> OwnedMatchConfig {
+        OwnedMatchConfig {
             width: 5,
             height: 5,
             max_turns: 300,
@@ -349,20 +352,22 @@ mod tests {
         }
     }
 
-    fn test_turn_state() -> TurnStateData {
-        TurnStateData {
-            turn: 5,
-            player1_position: Coordinates::new(1, 1),
-            player2_position: Coordinates::new(3, 3),
-            player1_score: 1.0,
-            player2_score: 0.5,
-            player1_mud_turns: 0,
-            player2_mud_turns: 2,
-            cheese: vec![Coordinates::new(4, 4)],
-            player1_last_move: Direction::Right,
-            player2_last_move: Direction::Left,
-            state_hash: 0xABCD,
-        }
+    fn test_turn_state() -> HashedTurnState {
+        HashedTurnState::with_hash(
+            OwnedTurnState {
+                turn: 5,
+                player1_position: Coordinates::new(1, 1),
+                player2_position: Coordinates::new(3, 3),
+                player1_score: 1.0,
+                player2_score: 0.5,
+                player1_mud_turns: 0,
+                player2_mud_turns: 2,
+                cheese: vec![Coordinates::new(4, 4)],
+                player1_last_move: Direction::Right,
+                player2_last_move: Direction::Left,
+            },
+            0xABCD,
+        )
     }
 
     #[test]
@@ -477,19 +482,21 @@ mod tests {
         let original_cheese_count = cfg.cheese.len();
 
         // Simulate mid-game: one cheese collected, player has some score
-        state.update(TurnStateData {
-            turn: 10,
-            player1_position: Coordinates::new(2, 2),
-            player2_position: Coordinates::new(0, 0),
-            player1_score: 1.0,
-            player2_score: 0.0,
-            player1_mud_turns: 0,
-            player2_mud_turns: 0,
-            cheese: vec![Coordinates::new(4, 4)], // one cheese collected
-            player1_last_move: Direction::Stay,
-            player2_last_move: Direction::Stay,
-            state_hash: 0,
-        });
+        state.update(HashedTurnState::with_hash(
+            OwnedTurnState {
+                turn: 10,
+                player1_position: Coordinates::new(2, 2),
+                player2_position: Coordinates::new(0, 0),
+                player1_score: 1.0,
+                player2_score: 0.0,
+                player1_mud_turns: 0,
+                player2_mud_turns: 0,
+                cheese: vec![Coordinates::new(4, 4)], // one cheese collected
+                player1_last_move: Direction::Stay,
+                player2_last_move: Direction::Stay,
+            },
+            0,
+        ));
 
         let sim = state.to_sim();
 
