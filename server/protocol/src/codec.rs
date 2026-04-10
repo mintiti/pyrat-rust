@@ -25,6 +25,7 @@ pub(crate) fn vec2_to_coords(v: &Vec2) -> Coordinates {
 
 /// Convert an optional wire `Vec2` to engine `Coordinates`, defaulting to (0,0).
 pub(crate) fn vec2_opt(v: Option<&Vec2>) -> Coordinates {
+    debug_assert!(v.is_some(), "expected required Vec2 field, got None");
     v.map_or(Coordinates::new(0, 0), vec2_to_coords)
 }
 

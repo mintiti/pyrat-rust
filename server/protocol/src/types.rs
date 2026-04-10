@@ -23,11 +23,17 @@ pub fn wire_to_engine_direction(d: pyrat_wire::Direction) -> Direction {
         pyrat_wire::Direction::Down => Direction::Down,
         pyrat_wire::Direction::Left => Direction::Left,
         pyrat_wire::Direction::Stay => Direction::Stay,
-        _ => Direction::Stay,
+        _ => {
+            debug_assert!(false, "unknown wire Direction discriminant: {}", d.0);
+            Direction::Stay
+        }
     }
 }
 
 /// Convert an engine Direction to a wire Direction.
+///
+/// Relies on engine `Direction` discriminants (0–4) matching wire `Direction`
+/// constants. The `direction_conversion_roundtrip` test verifies this.
 pub fn engine_to_wire_direction(d: Direction) -> pyrat_wire::Direction {
     pyrat_wire::Direction(d as u8)
 }
@@ -246,6 +252,22 @@ mod tests {
         let hts = HashedTurnState::new(sample_turn_state());
         assert_eq!(hts.turn, 42);
         assert_eq!(hts.player1_position, Coordinates::new(10, 7));
+    }
+
+    #[test]
+    fn direction_conversion_roundtrip() {
+        use pyrat_wire::Direction as WireDir;
+
+        for (w, e) in [
+            (WireDir::Up, Direction::Up),
+            (WireDir::Right, Direction::Right),
+            (WireDir::Down, Direction::Down),
+            (WireDir::Left, Direction::Left),
+            (WireDir::Stay, Direction::Stay),
+        ] {
+            assert_eq!(wire_to_engine_direction(w), e);
+            assert_eq!(engine_to_wire_direction(e), w);
+        }
     }
 
     /// Verify that `Coordinates` hashes identically to the `(u8, u8)` tuple
