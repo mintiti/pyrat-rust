@@ -245,15 +245,11 @@ pub fn serialize_host_command(fbb: &mut FlatBufferBuilder<'_>, cmd: &HostCommand
     fbb.finished_data().to_vec()
 }
 
-// Re-export from protocol crate. Currently used in tests; will be consumed
-// by the game loop once it needs to extract config from wire directly.
-#[allow(unused_imports)]
-pub use pyrat_protocol::extract_match_config;
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::session::messages::{HashedTurnState, OwnedMatchConfig, OwnedTurnState};
+    use pyrat_protocol::extract_match_config;
     use pyrat::Coordinates;
     use pyrat_wire::{Direction, GameResult, Player, TimingMode};
 
