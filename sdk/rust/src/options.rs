@@ -1,17 +1,7 @@
 //! Options trait and option definition types.
 
-use pyrat_wire::OptionType;
-
 /// Owned option definition sent during Identify.
-#[derive(Debug, Clone)]
-pub struct SdkOptionDef {
-    pub name: String,
-    pub option_type: OptionType,
-    pub default_value: String,
-    pub min: i32,
-    pub max: i32,
-    pub choices: Vec<String>,
-}
+pub type SdkOptionDef = pyrat_protocol::OwnedOptionDef;
 
 /// Trait for bot option declaration and application.
 ///

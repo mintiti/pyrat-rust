@@ -4,8 +4,8 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tracing::debug;
 
-use crate::session::messages::OwnedOptionDef;
 use crate::session::{extract_bot_packet, BotPayload};
+use pyrat_protocol::OwnedOptionDef;
 use pyrat_wire::framing::FrameReader;
 
 use super::config::BotConfig;

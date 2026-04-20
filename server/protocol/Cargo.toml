@@ -7,6 +7,7 @@ publish = false
 [dependencies]
 pyrat-rust = { path = "../../engine", default-features = false }
 pyrat-wire = { path = "../wire" }
+flatbuffers = "25.2.10"
 
 [lints]
 workspace = true

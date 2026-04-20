@@ -7,8 +7,9 @@
 use tokio::sync::mpsc;
 use tracing::warn;
 
-use crate::session::messages::{DisconnectReason, HashedTurnState, OwnedInfo, OwnedMatchConfig};
+use crate::session::messages::DisconnectReason;
 use pyrat::Direction;
+use pyrat_protocol::{HashedTurnState, OwnedInfo, OwnedMatchConfig};
 use pyrat_wire::Player;
 
 use super::playing::MatchResult;

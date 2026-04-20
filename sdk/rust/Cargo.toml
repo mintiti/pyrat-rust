@@ -6,6 +6,7 @@ publish = false
 
 [dependencies]
 pyrat-wire = { path = "../../server/wire" }
+pyrat-protocol = { path = "../../server/protocol" }
 pyrat-engine-interface = { path = "../../interface" }
 pyrat = { package = "pyrat-rust", path = "../../engine", default-features = false }
 pyrat-sdk-derive = { path = "derive" }

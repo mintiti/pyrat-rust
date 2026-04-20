@@ -4,8 +4,9 @@ use std::time::Duration;
 use pyrat::game::game_logic::GameState;
 use tokio::sync::mpsc;
 
-use crate::session::messages::{HostCommand, OwnedMatchConfig};
+use crate::session::messages::HostCommand;
 use crate::session::SessionId;
+use pyrat_protocol::{MudEntry, OwnedMatchConfig};
 use pyrat_wire::{Player, TimingMode};
 
 /// Which player a bot controls, identified by agent_id.
@@ -116,12 +117,9 @@ pub fn build_owned_match_config(
     let mud = game
         .mud_positions()
         .iter()
-        .map(|((from, to), value)| {
-            if from < to {
-                (from, to, value)
-            } else {
-                (to, from, value)
-            }
+        .map(|((from, to), turns)| {
+            let (pos1, pos2) = if from < to { (from, to) } else { (to, from) };
+            MudEntry { pos1, pos2, turns }
         })
         .collect();
 
@@ -188,9 +186,14 @@ mod tests {
         assert!(!cfg.walls.is_empty(), "classic 7×5 maze should have walls");
 
         // Mud entries should be normalized: pos1 <= pos2.
-        for &(p1, p2, value) in &cfg.mud {
-            assert!(p1 <= p2, "mud entry not normalized: {p1:?} > {p2:?}");
-            assert!(value >= 2, "mud value should be >= 2, got {value}");
+        for m in &cfg.mud {
+            assert!(
+                m.pos1 <= m.pos2,
+                "mud entry not normalized: {:?} > {:?}",
+                m.pos1,
+                m.pos2
+            );
+            assert!(m.turns >= 2, "mud value should be >= 2, got {}", m.turns);
         }
     }
 }

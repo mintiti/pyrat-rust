@@ -10,9 +10,10 @@ use pyrat::game::game_logic::GameState;
 use pyrat::{Coordinates, Direction as EngineDirection};
 use pyrat_host::game_loop::{
     build_owned_match_config, determine_result, run_playing, run_setup, HashedTurnState,
-    MatchEvent, MatchSetup, OwnedTurnState, PlayerEntry, PlayingConfig, PlayingState, SetupTiming,
+    MatchEvent, MatchSetup, OwnedInfo, OwnedTurnState, PlayerEntry, PlayingConfig, PlayingState,
+    SetupTiming,
 };
-use pyrat_host::session::messages::{HostCommand, OwnedInfo, SessionId, SessionMsg};
+use pyrat_host::session::messages::{HostCommand, SessionId, SessionMsg};
 use pyrat_host::stub::spawn_stub_bot;
 use pyrat_host::wire::{GameResult, Player, TimingMode};
 

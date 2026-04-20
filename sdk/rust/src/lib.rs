@@ -650,7 +650,7 @@ mod tests {
     /// With the fix: think() sees the game is over and exits immediately.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn turn_state_does_not_clobber_game_over_stopped_flag() {
-        use crate::wire::{GameOverData, MatchConfigData, TurnStateData};
+        use pyrat_protocol::{HashedTurnState, OwnedGameOver, OwnedMatchConfig, OwnedTurnState};
         use std::sync::atomic::AtomicU32;
 
         // Bot that spins in think(), counting iterations until should_stop().
@@ -671,7 +671,7 @@ mod tests {
         }
 
         // Minimal game state with a short move timeout.
-        let cfg = MatchConfigData {
+        let cfg = OwnedMatchConfig {
             width: 3,
             height: 3,
             max_turns: 10,
@@ -701,23 +701,25 @@ mod tests {
         // out, and by the time the turn_loop drains the queue it finds a new
         // TurnState followed immediately by GameOver.
         msg_tx
-            .send(HostMsg::TurnState(TurnStateData {
-                turn: 2,
-                player1_position: pyrat::Coordinates::new(0, 0),
-                player2_position: pyrat::Coordinates::new(2, 2),
-                player1_score: 0.0,
-                player2_score: 0.0,
-                player1_mud_turns: 0,
-                player2_mud_turns: 0,
-                cheese: vec![pyrat::Coordinates::new(1, 1)],
-                player1_last_move: pyrat::Direction::Stay,
-                player2_last_move: pyrat::Direction::Stay,
-                state_hash: 0,
-            }))
+            .send(HostMsg::TurnState(HashedTurnState::with_unverified_hash(
+                OwnedTurnState {
+                    turn: 2,
+                    player1_position: pyrat::Coordinates::new(0, 0),
+                    player2_position: pyrat::Coordinates::new(2, 2),
+                    player1_score: 0.0,
+                    player2_score: 0.0,
+                    player1_mud_turns: 0,
+                    player2_mud_turns: 0,
+                    cheese: vec![pyrat::Coordinates::new(1, 1)],
+                    player1_last_move: pyrat::Direction::Stay,
+                    player2_last_move: pyrat::Direction::Stay,
+                },
+                0,
+            )))
             .unwrap();
 
         msg_tx
-            .send(HostMsg::GameOver(GameOverData {
+            .send(HostMsg::GameOver(OwnedGameOver {
                 result: GameResult::Draw,
                 player1_score: 0.0,
                 player2_score: 0.0,

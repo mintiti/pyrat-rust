@@ -6,8 +6,9 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tracing::{debug, info, info_span, warn, Instrument};
 
-use crate::session::messages::{HashedTurnState, HostCommand, OwnedTurnState};
+use crate::session::messages::HostCommand;
 use crate::session::{run_session, SessionConfig, SessionId, SessionMsg};
+use pyrat_protocol::{HashedTurnState, OwnedTurnState};
 
 use pyrat_wire::Player;
 
@@ -193,12 +194,12 @@ pub async fn run_setup(
                         return Err(SetupError::AllDisconnected);
                     };
                     match msg {
-                        SessionMsg::Ready { session_id } => {
-                            if handles.contains_key(&session_id) {
-                                ready_set.insert(session_id);
-                                if all_keys_in(&handles, &ready_set) {
-                                    break;
-                                }
+                        SessionMsg::Ready { session_id }
+                            if handles.contains_key(&session_id) =>
+                        {
+                            ready_set.insert(session_id);
+                            if all_keys_in(&handles, &ready_set) {
+                                break;
                             }
                         }
                         SessionMsg::PreprocessingDone { session_id } => {
@@ -292,12 +293,12 @@ pub async fn run_setup(
                         return Err(SetupError::AllDisconnected);
                     };
                     match msg {
-                        SessionMsg::PreprocessingDone { session_id } => {
-                            if handles.contains_key(&session_id) {
-                                done_set.insert(session_id);
-                                if all_keys_in(&handles, &done_set) {
-                                    break;
-                                }
+                        SessionMsg::PreprocessingDone { session_id }
+                            if handles.contains_key(&session_id) =>
+                        {
+                            done_set.insert(session_id);
+                            if all_keys_in(&handles, &done_set) {
+                                break;
                             }
                         }
                         SessionMsg::Disconnected { session_id, reason } => {

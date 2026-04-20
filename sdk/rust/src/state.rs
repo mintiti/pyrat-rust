@@ -11,10 +11,10 @@ use pyrat_engine_interface::pathfinding::FullPathResult;
 use pyrat_engine_interface::GameView;
 use pyrat_wire::Player;
 
-use crate::wire::{MatchConfigData, TurnStateData};
 use crate::GameSim;
+use pyrat_protocol::{HashedTurnState, OwnedMatchConfig, OwnedTurnState};
 
-/// SDK-facing game state. Built once from `MatchConfigData`, updated each turn.
+/// SDK-facing game state. Built once from `OwnedMatchConfig`, updated each turn.
 pub struct GameState {
     view: GameView,
     my_player: Player,
@@ -41,9 +41,10 @@ pub struct GameState {
 
 impl GameState {
     /// Build from match configuration received during setup.
-    pub fn from_config(cfg: &MatchConfigData) -> Result<Self, String> {
+    pub fn from_config(cfg: &OwnedMatchConfig) -> Result<Self, String> {
         let walls: Vec<(Coordinates, Coordinates)> = cfg.walls.clone();
-        let mud: Vec<(Coordinates, Coordinates, u8)> = cfg.mud.clone();
+        let mud: Vec<(Coordinates, Coordinates, u8)> =
+            cfg.mud.iter().map(|m| (m.pos1, m.pos2, m.turns)).collect();
 
         let view = GameView::from_config(
             cfg.width,
@@ -84,7 +85,9 @@ impl GameState {
     }
 
     /// Update dynamic state from a TurnState message.
-    pub fn update(&mut self, ts: TurnStateData) {
+    pub fn update(&mut self, hts: HashedTurnState) {
+        let hash = hts.state_hash();
+        let ts = hts.into_inner();
         self.turn = ts.turn;
         self.player1_position = ts.player1_position;
         self.player2_position = ts.player2_position;
@@ -95,7 +98,7 @@ impl GameState {
         self.player1_last_move = ts.player1_last_move;
         self.player2_last_move = ts.player2_last_move;
         self.cheese = ts.cheese;
-        self.state_hash = ts.state_hash;
+        self.state_hash = hash;
     }
 
     // ── Perspective helpers ─────────────────────────
@@ -223,24 +226,22 @@ impl GameState {
 
     /// Compute the initial state hash from turn-0 fields.
     ///
-    /// Uses the same algorithm as `HashedTurnState::compute_hash` in the host,
-    /// so the SDK can verify that host and bot agree on the initial game state.
+    /// Delegates to `HashedTurnState::new` so the hash algorithm is defined in
+    /// one place. The SDK uses this to verify agreement with the host.
     pub fn compute_initial_hash(&self) -> u64 {
-        use std::collections::hash_map::DefaultHasher;
-        use std::hash::{Hash, Hasher};
-
-        let mut h = DefaultHasher::new();
-        0u16.hash(&mut h); // turn = 0
-        self.player1_position.hash(&mut h);
-        self.player2_position.hash(&mut h);
-        0u16.hash(&mut h); // scores: (0.0 * 2.0) as u16
-        0u16.hash(&mut h);
-        0u8.hash(&mut h); // mud turns
-        0u8.hash(&mut h);
-        self.cheese.hash(&mut h);
-        pyrat_wire::Direction::Stay.0.hash(&mut h);
-        pyrat_wire::Direction::Stay.0.hash(&mut h);
-        h.finish()
+        let ts = OwnedTurnState {
+            turn: 0,
+            player1_position: self.player1_position,
+            player2_position: self.player2_position,
+            player1_score: 0.0,
+            player2_score: 0.0,
+            player1_mud_turns: 0,
+            player2_mud_turns: 0,
+            cheese: self.cheese.clone(),
+            player1_last_move: Direction::Stay,
+            player2_last_move: Direction::Stay,
+        };
+        HashedTurnState::new(ts).state_hash()
     }
 
     // ── Convenience (delegate to GameView/pathfinding) ──
@@ -330,10 +331,11 @@ impl GameState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pyrat_protocol::OwnedTurnState;
     use pyrat_wire::TimingMode;
 
-    fn test_config() -> MatchConfigData {
-        MatchConfigData {
+    fn test_config() -> OwnedMatchConfig {
+        OwnedMatchConfig {
             width: 5,
             height: 5,
             max_turns: 300,
@@ -349,20 +351,44 @@ mod tests {
         }
     }
 
-    fn test_turn_state() -> TurnStateData {
-        TurnStateData {
-            turn: 5,
-            player1_position: Coordinates::new(1, 1),
-            player2_position: Coordinates::new(3, 3),
-            player1_score: 1.0,
-            player2_score: 0.5,
+    fn test_turn_state() -> HashedTurnState {
+        HashedTurnState::with_unverified_hash(
+            OwnedTurnState {
+                turn: 5,
+                player1_position: Coordinates::new(1, 1),
+                player2_position: Coordinates::new(3, 3),
+                player1_score: 1.0,
+                player2_score: 0.5,
+                player1_mud_turns: 0,
+                player2_mud_turns: 2,
+                cheese: vec![Coordinates::new(4, 4)],
+                player1_last_move: Direction::Right,
+                player2_last_move: Direction::Left,
+            },
+            0xABCD,
+        )
+    }
+
+    #[test]
+    fn compute_initial_hash_matches_hashed_turn_state() {
+        let cfg = test_config();
+        let state = GameState::from_config(&cfg).unwrap();
+
+        let expected = HashedTurnState::new(OwnedTurnState {
+            turn: 0,
+            player1_position: cfg.player1_start,
+            player2_position: cfg.player2_start,
+            player1_score: 0.0,
+            player2_score: 0.0,
             player1_mud_turns: 0,
-            player2_mud_turns: 2,
-            cheese: vec![Coordinates::new(4, 4)],
-            player1_last_move: Direction::Right,
-            player2_last_move: Direction::Left,
-            state_hash: 0xABCD,
-        }
+            player2_mud_turns: 0,
+            cheese: cfg.cheese.clone(),
+            player1_last_move: Direction::Stay,
+            player2_last_move: Direction::Stay,
+        })
+        .state_hash();
+
+        assert_eq!(state.compute_initial_hash(), expected);
     }
 
     #[test]
@@ -477,19 +503,21 @@ mod tests {
         let original_cheese_count = cfg.cheese.len();
 
         // Simulate mid-game: one cheese collected, player has some score
-        state.update(TurnStateData {
-            turn: 10,
-            player1_position: Coordinates::new(2, 2),
-            player2_position: Coordinates::new(0, 0),
-            player1_score: 1.0,
-            player2_score: 0.0,
-            player1_mud_turns: 0,
-            player2_mud_turns: 0,
-            cheese: vec![Coordinates::new(4, 4)], // one cheese collected
-            player1_last_move: Direction::Stay,
-            player2_last_move: Direction::Stay,
-            state_hash: 0,
-        });
+        state.update(HashedTurnState::with_unverified_hash(
+            OwnedTurnState {
+                turn: 10,
+                player1_position: Coordinates::new(2, 2),
+                player2_position: Coordinates::new(0, 0),
+                player1_score: 1.0,
+                player2_score: 0.0,
+                player1_mud_turns: 0,
+                player2_mud_turns: 0,
+                cheese: vec![Coordinates::new(4, 4)], // one cheese collected
+                player1_last_move: Direction::Stay,
+                player2_last_move: Direction::Stay,
+            },
+            0,
+        ));
 
         let sim = state.to_sim();
 

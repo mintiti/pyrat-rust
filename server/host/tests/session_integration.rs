@@ -14,6 +14,7 @@ use pyrat_host::session::messages::*;
 use pyrat_host::session::{run_session, SessionConfig};
 use pyrat_host::wire::framing::{FrameReader, FrameWriter};
 use pyrat_host::wire::*;
+use pyrat_protocol::{HashedTurnState, OwnedMatchConfig, OwnedTurnState};
 
 use common::*;
 
