@@ -43,7 +43,8 @@ impl GameState {
     /// Build from match configuration received during setup.
     pub fn from_config(cfg: &OwnedMatchConfig) -> Result<Self, String> {
         let walls: Vec<(Coordinates, Coordinates)> = cfg.walls.clone();
-        let mud: Vec<(Coordinates, Coordinates, u8)> = cfg.mud.clone();
+        let mud: Vec<(Coordinates, Coordinates, u8)> =
+            cfg.mud.iter().map(|m| (m.pos1, m.pos2, m.turns)).collect();
 
         let view = GameView::from_config(
             cfg.width,
@@ -351,7 +352,7 @@ mod tests {
     }
 
     fn test_turn_state() -> HashedTurnState {
-        HashedTurnState::with_hash(
+        HashedTurnState::with_unverified_hash(
             OwnedTurnState {
                 turn: 5,
                 player1_position: Coordinates::new(1, 1),
@@ -502,7 +503,7 @@ mod tests {
         let original_cheese_count = cfg.cheese.len();
 
         // Simulate mid-game: one cheese collected, player has some score
-        state.update(HashedTurnState::with_hash(
+        state.update(HashedTurnState::with_unverified_hash(
             OwnedTurnState {
                 turn: 10,
                 player1_position: Coordinates::new(2, 2),

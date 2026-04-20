@@ -701,7 +701,7 @@ mod tests {
         // out, and by the time the turn_loop drains the queue it finds a new
         // TurnState followed immediately by GameOver.
         msg_tx
-            .send(HostMsg::TurnState(HashedTurnState::with_hash(
+            .send(HostMsg::TurnState(HashedTurnState::with_unverified_hash(
                 OwnedTurnState {
                     turn: 2,
                     player1_position: pyrat::Coordinates::new(0, 0),

@@ -9,9 +9,8 @@ use tracing::{debug, warn};
 use pyrat::game::game_logic::GameState;
 use pyrat::Direction;
 
-use crate::session::messages::{
-    HashedTurnState, HostCommand, OwnedTurnState, SessionId, SessionMsg,
-};
+use crate::session::messages::{HostCommand, SessionId, SessionMsg};
+use pyrat_protocol::{HashedTurnState, OwnedInfo, OwnedTurnState};
 use pyrat_wire::{GameResult, Player};
 
 use super::config::{PlayingConfig, SessionHandle};
@@ -267,7 +266,7 @@ fn build_turn_state(game: &GameState, last_p1: Direction, last_p2: Direction) ->
     let p1 = &game.player1;
     let p2 = &game.player2;
     let hash = game.state_hash();
-    HashedTurnState::with_hash(
+    HashedTurnState::with_unverified_hash(
         OwnedTurnState {
             turn: game.turn,
             player1_position: p1.current_pos,
@@ -507,7 +506,7 @@ fn handle_info(
     session_players: &HashMap<SessionId, Vec<Player>>,
     event_tx: Option<&mpsc::UnboundedSender<MatchEvent>>,
     session_id: SessionId,
-    info: crate::session::messages::OwnedInfo,
+    info: OwnedInfo,
 ) {
     if let Some(players) = session_players.get(&session_id) {
         if let Some(&sender) = players.first() {
@@ -782,7 +781,7 @@ mod tests {
         game_tx
             .send(SessionMsg::Info {
                 session_id: SessionId(1),
-                info: crate::session::messages::OwnedInfo {
+                info: OwnedInfo {
                     player: Player::Player1,
                     multipv: 1,
                     target: None,
@@ -1064,7 +1063,7 @@ mod tests {
         game_tx
             .send(SessionMsg::Info {
                 session_id: SessionId(1),
-                info: crate::session::messages::OwnedInfo {
+                info: OwnedInfo {
                     player: Player::Player1,
                     multipv: 1,
                     target: None,
@@ -1143,7 +1142,7 @@ mod tests {
         }
     }
 
-    use crate::session::messages::HashedTurnState;
+    use pyrat_protocol::HashedTurnState;
 
     /// Helper: baseline state for hash distinctness tests.
     fn baseline_turn_state() -> OwnedTurnState {

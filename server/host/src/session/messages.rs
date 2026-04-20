@@ -1,11 +1,7 @@
 use tokio::sync::mpsc;
 
+use pyrat_protocol::{HashedTurnState, OwnedInfo, OwnedMatchConfig, OwnedOptionDef};
 use pyrat_wire::{GameResult, Player};
-
-// Re-export protocol types so internal `use crate::session::messages::*` paths stay valid.
-pub use pyrat_protocol::{
-    HashedTurnState, MudEntry, OwnedInfo, OwnedMatchConfig, OwnedOptionDef, OwnedTurnState,
-};
 
 // ── Session identity ────────────────────────────────
 

@@ -8,9 +8,10 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tracing::debug;
 
-use crate::session::messages::{HostCommand, OwnedInfo, SessionMsg};
+use crate::session::messages::{HostCommand, SessionMsg};
 use crate::session::SessionId;
 use pyrat::Direction;
+use pyrat_protocol::OwnedInfo;
 use pyrat_wire::Player;
 
 /// The four movement directions (excludes Stay).

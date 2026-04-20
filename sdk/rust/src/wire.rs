@@ -363,7 +363,7 @@ mod tests {
                 assert_eq!(cfg.walls[0].0, Coordinates::new(0, 0));
                 assert_eq!(cfg.walls[0].1, Coordinates::new(0, 1));
                 assert_eq!(cfg.mud.len(), 1);
-                assert_eq!(cfg.mud[0].2, 5);
+                assert_eq!(cfg.mud[0].turns, 5);
                 assert_eq!(cfg.cheese.len(), 2);
                 assert_eq!(cfg.player1_start, Coordinates::new(20, 14));
                 assert_eq!(cfg.player2_start, Coordinates::new(0, 0));

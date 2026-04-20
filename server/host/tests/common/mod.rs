@@ -14,6 +14,7 @@ use pyrat_host::session::messages::*;
 use pyrat_host::session::{run_session, SessionConfig, SessionId};
 use pyrat_host::wire::framing::{FrameReader, FrameWriter};
 use pyrat_host::wire::*;
+use pyrat_protocol::OwnedMatchConfig;
 
 /// Build a framed BotPacket from a closure that builds the inner message.
 pub fn build_bot_frame<F>(msg_type: BotMessage, build_msg: F) -> Vec<u8>

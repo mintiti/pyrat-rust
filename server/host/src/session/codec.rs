@@ -1,10 +1,17 @@
-//! FlatBuffers codec: borrowed→owned extraction and owned→bytes serialization.
+//! Host-side FlatBuffers codec.
+//!
+//! Dispatches incoming `BotPacket`s by message type and delegates per-table
+//! extraction to `pyrat_protocol::codec`. Serializes outgoing `HostCommand`s
+//! into finished FlatBuffer bytes.
 
 use flatbuffers::FlatBufferBuilder;
 
-use pyrat_protocol::{engine_to_wire_direction, extract_info, extract_option_defs};
+use pyrat_protocol::{
+    coords_to_vec2, engine_to_wire_direction, extract_info, extract_option_defs, OwnedInfo,
+    OwnedOptionDef,
+};
 
-use crate::session::messages::{HostCommand, OwnedInfo, OwnedOptionDef};
+use crate::session::messages::HostCommand;
 use pyrat_wire::{self as wire, BotMessage, HostMessage, HostPacket, HostPacketArgs, Vec2};
 
 // ── Extraction: borrowed FlatBuffers → owned types ──
@@ -106,8 +113,8 @@ pub fn serialize_host_command(fbb: &mut FlatBufferBuilder<'_>, cmd: &HostCommand
                     wire::Wall::create(
                         fbb,
                         &wire::WallArgs {
-                            pos1: Some(&Vec2::new(c1.x, c1.y)),
-                            pos2: Some(&Vec2::new(c2.x, c2.y)),
+                            pos1: Some(&coords_to_vec2(*c1)),
+                            pos2: Some(&coords_to_vec2(*c2)),
                         },
                     )
                 })
@@ -117,20 +124,20 @@ pub fn serialize_host_command(fbb: &mut FlatBufferBuilder<'_>, cmd: &HostCommand
             let muds: Vec<_> = cfg
                 .mud
                 .iter()
-                .map(|(c1, c2, v)| {
+                .map(|m| {
                     wire::Mud::create(
                         fbb,
                         &wire::MudArgs {
-                            pos1: Some(&Vec2::new(c1.x, c1.y)),
-                            pos2: Some(&Vec2::new(c2.x, c2.y)),
-                            value: *v,
+                            pos1: Some(&coords_to_vec2(m.pos1)),
+                            pos2: Some(&coords_to_vec2(m.pos2)),
+                            value: m.turns,
                         },
                     )
                 })
                 .collect();
             let muds = fbb.create_vector(&muds);
 
-            let cheese_vec: Vec<Vec2> = cfg.cheese.iter().map(|c| Vec2::new(c.x, c.y)).collect();
+            let cheese_vec: Vec<Vec2> = cfg.cheese.iter().copied().map(coords_to_vec2).collect();
             let cheese = fbb.create_vector(&cheese_vec);
 
             let players = fbb.create_vector(&cfg.controlled_players);
@@ -144,8 +151,8 @@ pub fn serialize_host_command(fbb: &mut FlatBufferBuilder<'_>, cmd: &HostCommand
                     walls: Some(walls),
                     mud: Some(muds),
                     cheese: Some(cheese),
-                    player1_start: Some(&Vec2::new(cfg.player1_start.x, cfg.player1_start.y)),
-                    player2_start: Some(&Vec2::new(cfg.player2_start.x, cfg.player2_start.y)),
+                    player1_start: Some(&coords_to_vec2(cfg.player1_start)),
+                    player2_start: Some(&coords_to_vec2(cfg.player2_start)),
                     controlled_players: Some(players),
                     timing: cfg.timing,
                     move_timeout_ms: cfg.move_timeout_ms,
@@ -164,21 +171,15 @@ pub fn serialize_host_command(fbb: &mut FlatBufferBuilder<'_>, cmd: &HostCommand
             (HostMessage::StartPreprocessing, off.as_union_value())
         },
         HostCommand::TurnState(ts) => {
-            let cheese_vec: Vec<Vec2> = ts.cheese.iter().map(|c| Vec2::new(c.x, c.y)).collect();
+            let cheese_vec: Vec<Vec2> = ts.cheese.iter().copied().map(coords_to_vec2).collect();
             let cheese = fbb.create_vector(&cheese_vec);
 
             let off = wire::TurnState::create(
                 fbb,
                 &wire::TurnStateArgs {
                     turn: ts.turn,
-                    player1_position: Some(&Vec2::new(
-                        ts.player1_position.x,
-                        ts.player1_position.y,
-                    )),
-                    player2_position: Some(&Vec2::new(
-                        ts.player2_position.x,
-                        ts.player2_position.y,
-                    )),
+                    player1_position: Some(&coords_to_vec2(ts.player1_position)),
+                    player2_position: Some(&coords_to_vec2(ts.player2_position)),
                     player1_score: ts.player1_score,
                     player2_score: ts.player2_score,
                     player1_mud_turns: ts.player1_mud_turns,
@@ -245,9 +246,10 @@ pub fn serialize_host_command(fbb: &mut FlatBufferBuilder<'_>, cmd: &HostCommand
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::session::messages::{HashedTurnState, OwnedMatchConfig, OwnedTurnState};
     use pyrat::Coordinates;
-    use pyrat_protocol::extract_match_config;
+    use pyrat_protocol::{
+        extract_match_config, HashedTurnState, MudEntry, OwnedMatchConfig, OwnedTurnState,
+    };
     use pyrat_wire::{Direction, GameResult, Player, TimingMode};
 
     // Helper: build a BotPacket with Identify
@@ -433,7 +435,11 @@ mod tests {
                 (Coordinates::new(0, 0), Coordinates::new(0, 1)),
                 (Coordinates::new(1, 2), Coordinates::new(2, 2)),
             ],
-            mud: vec![(Coordinates::new(3, 3), Coordinates::new(3, 4), 5)],
+            mud: vec![MudEntry {
+                pos1: Coordinates::new(3, 3),
+                pos2: Coordinates::new(3, 4),
+                turns: 5,
+            }],
             cheese: vec![Coordinates::new(10, 7), Coordinates::new(5, 3)],
             player1_start: Coordinates::new(20, 14),
             player2_start: Coordinates::new(0, 0),

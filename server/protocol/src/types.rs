@@ -33,7 +33,9 @@ pub fn wire_to_engine_direction(d: pyrat_wire::Direction) -> Direction {
 /// Convert an engine Direction to a wire Direction.
 ///
 /// Relies on engine `Direction` discriminants (0–4) matching wire `Direction`
-/// constants. The `direction_conversion_roundtrip` test verifies this.
+/// constants. The `direction_conversion_roundtrip` test checks the 5 current
+/// variants; if you add a new engine direction, update both the wire schema
+/// and that test.
 pub fn engine_to_wire_direction(d: Direction) -> pyrat_wire::Direction {
     pyrat_wire::Direction(d as u8)
 }
@@ -76,8 +78,14 @@ pub struct OwnedInfo {
 
 // ── Match configuration ─────────────────────────────
 
-/// Mud entry: (pos1, pos2, mud_value).
-pub type MudEntry = (Coordinates, Coordinates, u8);
+/// A single mud passage between two cells, with the number of turns it takes
+/// to cross.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct MudEntry {
+    pub pos1: Coordinates,
+    pub pos2: Coordinates,
+    pub turns: u8,
+}
 
 /// Match configuration sent to bots during the Lobby phase.
 ///
@@ -115,10 +123,7 @@ pub struct OwnedGameOver {
 ///
 /// Contains the raw game-position fields. Does **not** include `state_hash`,
 /// which is a derived value. Use [`HashedTurnState`] to pair a turn state with
-/// its content-addressable hash.
-///
-/// If you add or change position-defining fields here, update
-/// [`HashedTurnState::compute_hash`] in this same file.
+/// a fingerprint of its fields.
 #[derive(Debug, Clone)]
 pub struct OwnedTurnState {
     pub turn: u16,
@@ -133,11 +138,12 @@ pub struct OwnedTurnState {
     pub player2_last_move: Direction,
 }
 
-/// An [`OwnedTurnState`] paired with a content-addressable hash of its
+/// An [`OwnedTurnState`] paired with a 64-bit fingerprint of its
 /// position-defining fields.
 ///
 /// The hash is computed once at construction time. Two states that a bot would
-/// analyze differently will hash differently.
+/// analyze differently will hash differently. The hash is not collision-resistant;
+/// it's a correlation tag, not a trust boundary.
 #[derive(Debug, Clone)]
 pub struct HashedTurnState {
     inner: OwnedTurnState,
@@ -154,15 +160,21 @@ impl HashedTurnState {
         }
     }
 
-    /// Wrap a turn state with a pre-computed hash (from `GameState::state_hash()`).
-    pub fn with_hash(ts: OwnedTurnState, state_hash: u64) -> Self {
+    /// Wrap a turn state with a hash supplied by the producer, without
+    /// recomputing it.
+    ///
+    /// The caller vouches that `state_hash` matches the fields in `ts`. The
+    /// wrapper does not verify this. Name chosen to advertise the trust:
+    /// mismatches are only caught by the setup-phase hash handshake in
+    /// consumers.
+    pub fn with_unverified_hash(ts: OwnedTurnState, state_hash: u64) -> Self {
         Self {
             inner: ts,
             state_hash,
         }
     }
 
-    /// The content-addressable hash for this turn state.
+    /// The fingerprint hash for this turn state.
     pub fn state_hash(&self) -> u64 {
         self.state_hash
     }
@@ -229,10 +241,22 @@ mod tests {
         assert_eq!(a.state_hash(), b.state_hash());
     }
 
+    /// Pinned hash for `sample_turn_state()` — catches silent changes to the
+    /// hasher, field ordering, or score quantization. If this test fails after
+    /// an intentional change, recompute the expected value once and update it.
     #[test]
-    fn hashed_turn_state_with_hash_stores_provided_hash() {
+    fn hashed_turn_state_golden_value() {
+        let got = HashedTurnState::new(sample_turn_state()).state_hash();
+        assert_eq!(
+            got, 0x7006_86d9_8688_95f5,
+            "update expected value if the hash algorithm changed intentionally"
+        );
+    }
+
+    #[test]
+    fn hashed_turn_state_with_unverified_hash_stores_provided_hash() {
         let ts = sample_turn_state();
-        let hts = HashedTurnState::with_hash(ts, 0xDEAD_BEEF);
+        let hts = HashedTurnState::with_unverified_hash(ts, 0xDEAD_BEEF);
         assert_eq!(hts.state_hash(), 0xDEAD_BEEF);
     }
 

@@ -1,32 +1,46 @@
 //! FlatBuffers → owned type extraction.
 //!
 //! Shared extraction functions used by both the host and SDK codecs.
-//! Each consumer dispatches on packet type locally; the per-table extraction
-//! logic lives here.
+//! Host receives `BotPacket`, SDK receives `HostPacket` — the message-type
+//! sets are disjoint, so dispatch is local. The per-table extraction logic
+//! is identical and lives here.
 //!
 //! This module covers the **extraction direction only** (wire → owned).
 //! Serialization (owned → wire) stays in each consumer because it's coupled
-//! to their local enum structure (`HostCommand`, bot builders).
+//! to their local enum structure (`HostCommand`, bot builders). [`coords_to_vec2`]
+//! is the one serialization-side helper that lives here, as a mirror of
+//! [`vec2_to_coords`].
 
 use pyrat::Coordinates;
 use pyrat_wire::{self as wire, Vec2};
 
 use crate::{
-    wire_to_engine_direction, HashedTurnState, OwnedGameOver, OwnedInfo, OwnedMatchConfig,
-    OwnedOptionDef, OwnedTurnState,
+    wire_to_engine_direction, HashedTurnState, MudEntry, OwnedGameOver, OwnedInfo,
+    OwnedMatchConfig, OwnedOptionDef, OwnedTurnState,
 };
 
-// ── Coordinate helpers (crate-internal) ─────────────
+// ── Coordinate helpers ──────────────────────────────
 
 /// Convert a wire `Vec2` to engine `Coordinates`.
 pub(crate) fn vec2_to_coords(v: &Vec2) -> Coordinates {
     Coordinates::new(v.x(), v.y())
 }
 
-/// Convert an optional wire `Vec2` to engine `Coordinates`, defaulting to (0,0).
+/// Extract a required wire `Vec2` as engine `Coordinates`.
+///
+/// Panics in debug builds if the field is missing; returns `(0, 0)` in release
+/// builds (the schema marks these fields required, so `None` indicates a
+/// protocol violation that should not occur in practice).
 pub(crate) fn vec2_opt(v: Option<&Vec2>) -> Coordinates {
     debug_assert!(v.is_some(), "expected required Vec2 field, got None");
     v.map_or(Coordinates::new(0, 0), vec2_to_coords)
+}
+
+/// Convert engine `Coordinates` to a wire `Vec2`.
+///
+/// Mirror of [`vec2_to_coords`]. Use at the serialization boundary.
+pub fn coords_to_vec2(c: Coordinates) -> Vec2 {
+    Vec2::new(c.x, c.y)
 }
 
 // ── Extraction functions ────────────────────────────
@@ -54,7 +68,11 @@ pub fn extract_match_config(mc: &wire::MatchConfig<'_>) -> OwnedMatchConfig {
                 (0..ms.len())
                     .map(|i| {
                         let m = ms.get(i);
-                        (vec2_opt(m.pos1()), vec2_opt(m.pos2()), m.value())
+                        MudEntry {
+                            pos1: vec2_opt(m.pos1()),
+                            pos2: vec2_opt(m.pos2()),
+                            turns: m.value(),
+                        }
                     })
                     .collect()
             })
@@ -80,6 +98,11 @@ pub fn extract_match_config(mc: &wire::MatchConfig<'_>) -> OwnedMatchConfig {
 /// Trusts the wire-provided `state_hash` rather than recomputing it.
 /// The host computed the hash from the same fields; recomputing would be
 /// wasteful and would couple the consumer to the hash algorithm.
+///
+/// The hash is a correlation tag, not a trust boundary. Host/SDK agreement
+/// on initial state is verified once at the setup-phase handshake (see the
+/// SDK's `compute_initial_hash`); per-turn hashes ride along on the wire
+/// after that.
 pub fn extract_turn_state(ts: &wire::TurnState<'_>) -> HashedTurnState {
     let owned = OwnedTurnState {
         turn: ts.turn(),
@@ -96,7 +119,7 @@ pub fn extract_turn_state(ts: &wire::TurnState<'_>) -> HashedTurnState {
         player1_last_move: wire_to_engine_direction(ts.player1_last_move()),
         player2_last_move: wire_to_engine_direction(ts.player2_last_move()),
     };
-    HashedTurnState::with_hash(owned, ts.state_hash())
+    HashedTurnState::with_unverified_hash(owned, ts.state_hash())
 }
 
 /// Extract an [`OwnedInfo`] from a wire `Info` table.
@@ -217,7 +240,7 @@ mod tests {
         assert_eq!(cfg.walls[0].0, Coordinates::new(0, 0));
         assert_eq!(cfg.walls[0].1, Coordinates::new(0, 1));
         assert_eq!(cfg.mud.len(), 1);
-        assert_eq!(cfg.mud[0].2, 5);
+        assert_eq!(cfg.mud[0].turns, 5);
         assert_eq!(cfg.cheese.len(), 2);
         assert_eq!(cfg.cheese[0], Coordinates::new(10, 7));
         assert_eq!(cfg.player1_start, Coordinates::new(20, 14));

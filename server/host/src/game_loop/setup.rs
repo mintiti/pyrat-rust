@@ -6,8 +6,9 @@ use tokio::sync::mpsc;
 use tokio::time::Instant;
 use tracing::{debug, info, info_span, warn, Instrument};
 
-use crate::session::messages::{HashedTurnState, HostCommand, OwnedTurnState};
+use crate::session::messages::HostCommand;
 use crate::session::{run_session, SessionConfig, SessionId, SessionMsg};
+use pyrat_protocol::{HashedTurnState, OwnedTurnState};
 
 use pyrat_wire::Player;
 
