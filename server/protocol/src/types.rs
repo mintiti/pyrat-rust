@@ -26,7 +26,7 @@ pub fn wire_to_engine_direction(d: pyrat_wire::Direction) -> Direction {
         _ => {
             debug_assert!(false, "unknown wire Direction discriminant: {}", d.0);
             Direction::Stay
-        }
+        },
     }
 }
 

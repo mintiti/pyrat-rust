@@ -11,8 +11,8 @@ use pyrat_engine_interface::pathfinding::FullPathResult;
 use pyrat_engine_interface::GameView;
 use pyrat_wire::Player;
 
-use pyrat_protocol::{HashedTurnState, OwnedMatchConfig, OwnedTurnState};
 use crate::GameSim;
+use pyrat_protocol::{HashedTurnState, OwnedMatchConfig, OwnedTurnState};
 
 /// SDK-facing game state. Built once from `OwnedMatchConfig`, updated each turn.
 pub struct GameState {

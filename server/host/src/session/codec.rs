@@ -42,10 +42,7 @@ pub fn extract_bot_packet(buf: &[u8]) -> Result<(BotMessage, BotPayload), String
         let id = packet
             .message_as_identify()
             .ok_or("missing Identify body")?;
-        let options = id
-            .options()
-            .map(extract_option_defs)
-            .unwrap_or_default();
+        let options = id.options().map(extract_option_defs).unwrap_or_default();
         BotPayload::Identify {
             name: id.name().unwrap_or("").to_owned(),
             author: id.author().unwrap_or("").to_owned(),
@@ -249,8 +246,8 @@ pub fn serialize_host_command(fbb: &mut FlatBufferBuilder<'_>, cmd: &HostCommand
 mod tests {
     use super::*;
     use crate::session::messages::{HashedTurnState, OwnedMatchConfig, OwnedTurnState};
-    use pyrat_protocol::extract_match_config;
     use pyrat::Coordinates;
+    use pyrat_protocol::extract_match_config;
     use pyrat_wire::{Direction, GameResult, Player, TimingMode};
 
     // Helper: build a BotPacket with Identify

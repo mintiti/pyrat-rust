@@ -351,7 +351,19 @@ mod tests {
     #[test]
     fn extract_info_empty_optional_fields() {
         let mut fbb = FlatBufferBuilder::new();
-        build_wire_info(&mut fbb, Player::Player1, 0, None, 0, 0, None, &[], "", 0, 0);
+        build_wire_info(
+            &mut fbb,
+            Player::Player1,
+            0,
+            None,
+            0,
+            0,
+            None,
+            &[],
+            "",
+            0,
+            0,
+        );
         let buf = fbb.finished_data();
         let info_fb = flatbuffers::root::<wire::Info>(buf).unwrap();
 
