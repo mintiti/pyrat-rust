@@ -19,11 +19,15 @@
 //! with the same API surface as the SDK `Context`. Calls are routed to the
 //! [`EventSink`](super::EventSink) instead of an mpsc-backed codec.
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-use pyrat::{Coordinates, Direction};
-use pyrat_protocol::{BotMsg, HashedTurnState, HostMsg, OwnedOptionDef};
+use pyrat::{Coordinates, Direction, GameBuilder, GameState, MudMap};
+use pyrat_protocol::{
+    BotMsg, HashedTurnState, HostMsg, OwnedMatchConfig, OwnedOptionDef, OwnedTurnState,
+    SearchLimits,
+};
 use pyrat_wire::{GameResult, Player as PlayerSlot};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -119,7 +123,6 @@ pub struct EmbeddedCtx {
 }
 
 impl EmbeddedCtx {
-    #[expect(dead_code, reason = "consumed by dispatcher in follow-up commit")]
     pub(crate) fn new(
         event_sink: EventSink,
         bot_tx: mpsc::UnboundedSender<BotMsg>,
@@ -275,10 +278,10 @@ async fn reap(dispatcher: Option<JoinHandle<Result<(), PlayerError>>>) -> Result
 
 /// Run one bot to completion.
 ///
-/// Lifecycle: setup typestate chain (Initial → Connected → Identified →
-/// Configured → Playing) then the playing loop. The setup chain is fully
-/// wired in this commit. Playing currently exits immediately after Ready;
-/// the turn loop lands in a follow-up.
+/// Lifecycle: setup typestate chain (Initial → Connected → Identified) then
+/// the playing loop (Playing<Synced> alternating with Playing<Desynced> on
+/// hash mismatches). Exits cleanly on [`HostMsg::GameOver`], with an error on
+/// unexpected messages or channel closure.
 async fn dispatcher_task<B: EmbeddedBot>(
     bot: B,
     identity: PlayerIdentity,
@@ -286,39 +289,34 @@ async fn dispatcher_task<B: EmbeddedBot>(
     host_rx: mpsc::UnboundedReceiver<HostMsg>,
     bot_tx: mpsc::UnboundedSender<BotMsg>,
 ) -> Result<(), PlayerError> {
-    let stopped = Arc::new(AtomicBool::new(false));
     let core = DispatcherCore {
-        bot,
         event_sink,
         host_rx,
         bot_tx,
-        stopped,
+        stopped: Arc::new(AtomicBool::new(false)),
     };
 
-    let initial = Setup::<B, Initial>::new(core);
+    let initial = Setup::<B, Initial>::new(bot, core);
     let connected = initial.emit_identify(&identity)?;
     let identified = connected.await_welcome().await?;
-    let _playing = identified.await_configure_emit_ready().await?;
-    // TODO: playing loop lands in the next commit.
-    Ok(())
+    let mut playing = identified.await_configure_emit_ready().await?;
+
+    loop {
+        match playing.next_event().await? {
+            Event::Continue(p) => playing = p,
+            Event::Desynced(d) => playing = d.recover().await?,
+            Event::GameOver => return Ok(()),
+        }
+    }
 }
 
-/// Data shared across every dispatcher state. Re-typed but not rebuilt across
-/// transitions: the bot, event sink, channels, and stop flag persist for the
-/// lifetime of the dispatcher.
-struct DispatcherCore<B> {
-    bot: B,
-    #[expect(
-        dead_code,
-        reason = "consumed by the playing loop in a follow-up commit"
-    )]
+/// Data shared across every dispatcher state: channels, event sink, stop
+/// flag. The bot lives separately on each state struct so it can move in and
+/// out of `spawn_blocking` without any `Option` / sentinel dance.
+struct DispatcherCore {
     event_sink: EventSink,
     host_rx: mpsc::UnboundedReceiver<HostMsg>,
     bot_tx: mpsc::UnboundedSender<BotMsg>,
-    #[expect(
-        dead_code,
-        reason = "consumed by the playing loop in a follow-up commit"
-    )]
     stopped: Arc<AtomicBool>,
 }
 
@@ -330,7 +328,8 @@ struct DispatcherCore<B> {
 // lives on the marker struct.
 
 struct Setup<B, S> {
-    core: DispatcherCore<B>,
+    bot: B,
+    core: DispatcherCore,
     state: S,
 }
 
@@ -341,8 +340,9 @@ struct Identified {
 }
 
 impl<B: EmbeddedBot> Setup<B, Initial> {
-    fn new(core: DispatcherCore<B>) -> Self {
+    fn new(bot: B, core: DispatcherCore) -> Self {
         Self {
+            bot,
             core,
             state: Initial,
         }
@@ -352,7 +352,7 @@ impl<B: EmbeddedBot> Setup<B, Initial> {
     ///
     /// Synchronous: `UnboundedSender::send` never awaits.
     fn emit_identify(self, identity: &PlayerIdentity) -> Result<Setup<B, Connected>, PlayerError> {
-        let options = self.core.bot.option_defs();
+        let options = self.bot.option_defs();
         self.core
             .bot_tx
             .send(BotMsg::Identify {
@@ -363,6 +363,7 @@ impl<B: EmbeddedBot> Setup<B, Initial> {
             })
             .map_err(|_| PlayerError::TransportError("bot_tx closed".into()))?;
         Ok(Setup {
+            bot: self.bot,
             core: self.core,
             state: Connected,
         })
@@ -374,6 +375,7 @@ impl<B: EmbeddedBot> Setup<B, Connected> {
     async fn await_welcome(mut self) -> Result<Setup<B, Identified>, PlayerError> {
         match self.core.host_rx.recv().await {
             Some(HostMsg::Welcome { player_slot }) => Ok(Setup {
+                bot: self.bot,
                 core: self.core,
                 state: Identified { player_slot },
             }),
@@ -387,12 +389,12 @@ impl<B: EmbeddedBot> Setup<B, Connected> {
 }
 
 impl<B: EmbeddedBot> Setup<B, Identified> {
-    /// Await `HostMsg::Configure`, apply options, compute the initial state
-    /// hash, emit `BotMsg::Ready`. Returns a `Playing<Synced>`.
+    /// Await `HostMsg::Configure`, apply options, build the local engine
+    /// state mirror, compute the initial hash, emit `BotMsg::Ready`.
+    /// Returns a `Playing<Synced>`.
     ///
-    /// Options whose `apply_option` returns `Err` are reported through the
-    /// event sink but do not abort setup (the fault policy for bad option
-    /// values is "warn and use default", matching the SDK).
+    /// Options whose `apply_option` returns `Err` are logged but do not abort
+    /// setup (fault policy: "warn and use default", matching the SDK).
     async fn await_configure_emit_ready(mut self) -> Result<Playing<B, Synced>, PlayerError> {
         let (options, match_config) = match self.core.host_rx.recv().await {
             Some(HostMsg::Configure {
@@ -411,13 +413,13 @@ impl<B: EmbeddedBot> Setup<B, Identified> {
         };
 
         for (name, value) in &options {
-            if let Err(err) = self.core.bot.apply_option(name, value) {
+            if let Err(err) = self.bot.apply_option(name, value) {
                 tracing::warn!(option = %name, error = %err, "bot rejected option");
             }
         }
 
-        let initial_state = initial_turn_state(&match_config);
-        let hash = initial_state.state_hash();
+        let game = build_engine_state(&match_config)?;
+        let hash = hash_from_game(&game, Direction::Stay, Direction::Stay);
 
         self.core
             .bot_tx
@@ -425,52 +427,434 @@ impl<B: EmbeddedBot> Setup<B, Identified> {
             .map_err(|_| PlayerError::TransportError("bot_tx closed".into()))?;
 
         Ok(Playing {
+            bot: Some(self.bot),
             core: self.core,
             player_slot: self.state.player_slot,
             match_config,
-            state: initial_state,
+            game,
+            last_moves: (Direction::Stay, Direction::Stay),
+            inner: InnerState::Idle,
             _sync: std::marker::PhantomData,
         })
     }
 }
 
-// ── Playing<Sync> (placeholder — dispatcher loop in follow-up) ────────
+// ── Playing<Sync> typestate ───────────────────────────
 
-/// Sync marker: the local state mirror agrees with the server's.
+/// Sync status markers. `Playing<Synced>` exposes the turn-handling methods;
+/// `Playing<Desynced>` exposes only `recover`.
 struct Synced;
+struct Desynced;
 
-/// Playing state with sync-status marker. Methods and the inner runtime-enum
-/// step loop (Idle / Syncing / Thinking / Preprocessing) land in the next
-/// commit; the struct exists here so setup has a concrete return type.
-#[allow(
-    dead_code,
-    reason = "fields consumed by the playing loop in a follow-up commit"
-)]
+/// Inner state machine inside `Playing<Synced>`. Tracked as a runtime enum —
+/// typestate in a message-driven loop collapses back to this shape anyway.
+#[derive(Debug, Clone, Copy)]
+enum InnerState {
+    /// Between turns, awaiting Advance / GoState / GameOver.
+    Idle,
+    /// Preprocessing phase: awaiting Stop (optional) while the bot runs
+    /// `preprocess`.
+    Preprocessing,
+    /// Post-Advance: SyncOk emitted, awaiting Go or FullState.
+    Syncing,
+    /// Thinking phase: bot is running `think`, awaiting Stop (optional).
+    Thinking,
+}
+
 struct Playing<B, Sync> {
-    core: DispatcherCore<B>,
+    /// The bot. `Option` so we can temporarily move it into a
+    /// `spawn_blocking` closure during think/preprocess; always `Some` at
+    /// every `.await` point in `next_event`. Unwrap sites document the
+    /// invariant.
+    bot: Option<B>,
+    core: DispatcherCore,
     player_slot: PlayerSlot,
-    match_config: Box<pyrat_protocol::OwnedMatchConfig>,
-    state: HashedTurnState,
+    match_config: Box<OwnedMatchConfig>,
+    /// Local engine state mirror. Authoritative for the client's view.
+    game: GameState,
+    /// Last moves applied (for `OwnedTurnState::player{1,2}_last_move`).
+    last_moves: (Direction, Direction),
+    inner: InnerState,
     _sync: std::marker::PhantomData<Sync>,
 }
 
-/// Build the initial `HashedTurnState` a client would compute at Ready time.
+/// Return value of one iteration of `Playing<Synced>::next_event`.
+enum Event<B> {
+    /// Still Synced; loop continues.
+    Continue(Playing<B, Synced>),
+    /// Hash mismatch observed; await FullState before doing anything else.
+    Desynced(Playing<B, Desynced>),
+    /// `HostMsg::GameOver` received and processed; dispatcher exits.
+    GameOver,
+}
+
+impl<B: EmbeddedBot> Playing<B, Synced> {
+    /// Advance the dispatcher by one host message.
+    ///
+    /// Takes `self` and returns one of:
+    /// - `Event::Continue` — still Synced, loop with the returned value.
+    /// - `Event::Desynced` — hash mismatch detected, Resync emitted.
+    /// - `Event::GameOver` — GameOver processed, dispatcher exits.
+    async fn next_event(mut self) -> Result<Event<B>, PlayerError> {
+        let msg = self
+            .core
+            .host_rx
+            .recv()
+            .await
+            .ok_or_else(|| PlayerError::TransportError("host_rx closed".into()))?;
+
+        match msg {
+            HostMsg::GoPreprocess { state_hash } => self.handle_go_preprocess(state_hash).await,
+            HostMsg::Go { state_hash, limits } => self.handle_go(state_hash, limits).await,
+            HostMsg::GoState {
+                turn_state,
+                state_hash,
+                limits,
+            } => self.handle_go_state(*turn_state, state_hash, limits).await,
+            HostMsg::Advance {
+                p1_dir,
+                p2_dir,
+                turn,
+                new_hash,
+            } => self.handle_advance(p1_dir, p2_dir, turn, new_hash),
+            HostMsg::GameOver {
+                result,
+                player1_score,
+                player2_score,
+            } => {
+                self.bot
+                    .as_mut()
+                    .expect("bot present between turns")
+                    .on_game_over(result, (player1_score, player2_score));
+                Ok(Event::GameOver)
+            },
+            HostMsg::Stop => {
+                // Stop outside of thinking/preprocessing is a no-op: nothing
+                // to interrupt. Silently ignored.
+                Ok(Event::Continue(self))
+            },
+            HostMsg::FullState { .. } => Err(PlayerError::ProtocolError(
+                "FullState received while Synced — server sent without Resync".into(),
+            )),
+            HostMsg::Welcome { .. } | HostMsg::Configure { .. } => Err(PlayerError::ProtocolError(
+                format!("setup message in Playing: {msg:?}"),
+            )),
+            HostMsg::ProtocolError { reason } => Err(PlayerError::ProtocolError(reason)),
+        }
+    }
+
+    /// Handle GoPreprocess: run bot.preprocess, emit PreprocessingDone.
+    async fn handle_go_preprocess(mut self, state_hash: u64) -> Result<Event<B>, PlayerError> {
+        if !matches!(self.inner, InnerState::Idle) {
+            return Err(PlayerError::ProtocolError(format!(
+                "GoPreprocess in state {:?}",
+                self.inner
+            )));
+        }
+        self.inner = InnerState::Preprocessing;
+        self.core.stopped.store(false, Ordering::Relaxed);
+        self.run_preprocess(state_hash).await?;
+        self.core
+            .bot_tx
+            .send(BotMsg::PreprocessingDone)
+            .map_err(|_| PlayerError::TransportError("bot_tx closed".into()))?;
+        self.inner = InnerState::Idle;
+        Ok(Event::Continue(self))
+    }
+
+    /// Handle Go: run bot.think, emit Action.
+    async fn handle_go(
+        mut self,
+        state_hash: u64,
+        _limits: SearchLimits,
+    ) -> Result<Event<B>, PlayerError> {
+        if !matches!(self.inner, InnerState::Idle | InnerState::Syncing) {
+            return Err(PlayerError::ProtocolError(format!(
+                "Go in state {:?}",
+                self.inner
+            )));
+        }
+        self.inner = InnerState::Thinking;
+        self.core.stopped.store(false, Ordering::Relaxed);
+        let (turn, direction, think_ms) = self.run_think(state_hash).await?;
+        self.core
+            .bot_tx
+            .send(BotMsg::Action {
+                direction,
+                player: self.player_slot,
+                turn,
+                state_hash,
+                think_ms,
+            })
+            .map_err(|_| PlayerError::TransportError("bot_tx closed".into()))?;
+        self.inner = InnerState::Idle;
+        Ok(Event::Continue(self))
+    }
+
+    /// Handle GoState: overwrite local state with the provided turn state,
+    /// then run Go as usual.
+    async fn handle_go_state(
+        mut self,
+        turn_state: OwnedTurnState,
+        state_hash: u64,
+        limits: SearchLimits,
+    ) -> Result<Event<B>, PlayerError> {
+        // Rebuild the engine mirror to match the injected state.
+        self.game = rebuild_engine_state(&self.match_config, &turn_state)?;
+        self.last_moves = (turn_state.player1_last_move, turn_state.player2_last_move);
+        self.handle_go(state_hash, limits).await
+    }
+
+    /// Handle Advance: apply moves locally, verify hash.
+    fn handle_advance(
+        mut self,
+        p1_dir: Direction,
+        p2_dir: Direction,
+        _turn: u16,
+        new_hash: u64,
+    ) -> Result<Event<B>, PlayerError> {
+        if !matches!(self.inner, InnerState::Idle) {
+            return Err(PlayerError::ProtocolError(format!(
+                "Advance in state {:?}",
+                self.inner
+            )));
+        }
+        // Apply the two moves. The returned undo token is discarded — on
+        // desync we defer to the server's FullState rather than rolling back.
+        let _undo = self.game.make_move(p1_dir, p2_dir);
+        self.last_moves = (p1_dir, p2_dir);
+        let local_hash = hash_from_game(&self.game, p1_dir, p2_dir);
+
+        if local_hash == new_hash {
+            self.core
+                .bot_tx
+                .send(BotMsg::SyncOk { hash: local_hash })
+                .map_err(|_| PlayerError::TransportError("bot_tx closed".into()))?;
+            self.inner = InnerState::Syncing;
+            Ok(Event::Continue(self))
+        } else {
+            self.core
+                .bot_tx
+                .send(BotMsg::Resync {
+                    my_hash: local_hash,
+                })
+                .map_err(|_| PlayerError::TransportError("bot_tx closed".into()))?;
+            Ok(Event::Desynced(Playing {
+                bot: self.bot,
+                core: self.core,
+                player_slot: self.player_slot,
+                match_config: self.match_config,
+                game: self.game,
+                last_moves: self.last_moves,
+                inner: InnerState::Idle, // not meaningful while desynced
+                _sync: std::marker::PhantomData,
+            }))
+        }
+    }
+
+    /// Run `bot.preprocess` while selecting on `host_rx` for concurrent Stop
+    /// messages. Sideband forwarding goes through `EmbeddedCtx`.
+    async fn run_preprocess(&mut self, state_hash: u64) -> Result<(), PlayerError> {
+        let (hts, ctx) = self.prepare_ctx(state_hash);
+        let mut bot = self.bot.take().expect("bot present between turns");
+        let mut handle = tokio::task::spawn_blocking(move || {
+            bot.preprocess(&hts, &ctx);
+            bot
+        });
+        let stopped = self.core.stopped.clone();
+        let returned_bot = watch_for_stop(&mut self.core.host_rx, &stopped, &mut handle).await?;
+        self.bot = Some(returned_bot);
+        Ok(())
+    }
+
+    /// Run `bot.think` while selecting on `host_rx` for concurrent Stop.
+    /// Returns the turn number, chosen direction, and recorded think time.
+    async fn run_think(&mut self, state_hash: u64) -> Result<(u16, Direction, u32), PlayerError> {
+        let (hts, ctx) = self.prepare_ctx(state_hash);
+        let turn = hts.turn;
+        let start = std::time::Instant::now();
+        let mut bot = self.bot.take().expect("bot present between turns");
+        let mut handle = tokio::task::spawn_blocking(move || {
+            let dir = bot.think(&hts, &ctx);
+            (bot, dir)
+        });
+        let stopped = self.core.stopped.clone();
+        let (returned_bot, direction) =
+            watch_for_stop(&mut self.core.host_rx, &stopped, &mut handle).await?;
+        self.bot = Some(returned_bot);
+        let think_ms = start.elapsed().as_millis() as u32;
+        Ok((turn, direction, think_ms))
+    }
+
+    fn prepare_ctx(&self, state_hash: u64) -> (HashedTurnState, EmbeddedCtx) {
+        let hts = HashedTurnState::new(owned_turn_state_from_game(&self.game, self.last_moves));
+        let ctx = EmbeddedCtx::new(
+            self.core.event_sink.clone(),
+            self.core.bot_tx.clone(),
+            self.game.turn,
+            state_hash,
+            self.player_slot,
+            self.core.stopped.clone(),
+        );
+        (hts, ctx)
+    }
+}
+
+impl<B: EmbeddedBot> Playing<B, Desynced> {
+    /// Await `HostMsg::FullState`, rebuild the local mirror, emit `SyncOk`,
+    /// return to `Playing<Synced>`.
+    async fn recover(mut self) -> Result<Playing<B, Synced>, PlayerError> {
+        let (match_config, turn_state) = match self.core.host_rx.recv().await {
+            Some(HostMsg::FullState {
+                match_config,
+                turn_state,
+            }) => (match_config, *turn_state),
+            Some(HostMsg::ProtocolError { reason }) => {
+                return Err(PlayerError::ProtocolError(reason));
+            },
+            Some(other) => {
+                return Err(PlayerError::ProtocolError(format!(
+                    "expected FullState while Desynced, got {other:?}"
+                )));
+            },
+            None => return Err(PlayerError::TransportError("host_rx closed".into())),
+        };
+
+        self.match_config = match_config;
+        self.game = rebuild_engine_state(&self.match_config, &turn_state)?;
+        self.last_moves = (turn_state.player1_last_move, turn_state.player2_last_move);
+        let hash = hash_from_game(&self.game, self.last_moves.0, self.last_moves.1);
+        self.core
+            .bot_tx
+            .send(BotMsg::SyncOk { hash })
+            .map_err(|_| PlayerError::TransportError("bot_tx closed".into()))?;
+
+        Ok(Playing {
+            bot: self.bot,
+            core: self.core,
+            player_slot: self.player_slot,
+            match_config: self.match_config,
+            game: self.game,
+            last_moves: self.last_moves,
+            inner: InnerState::Idle,
+            _sync: std::marker::PhantomData,
+        })
+    }
+}
+
+// ── State mirror helpers ──────────────────────────────
+
+/// Construct an engine `GameState` from an `OwnedMatchConfig`.
+fn build_engine_state(cfg: &OwnedMatchConfig) -> Result<GameState, PlayerError> {
+    let mut walls: HashMap<Coordinates, Vec<Coordinates>> = HashMap::new();
+    for (a, b) in &cfg.walls {
+        walls.entry(*a).or_default().push(*b);
+        walls.entry(*b).or_default().push(*a);
+    }
+    let mut mud = MudMap::new();
+    for entry in &cfg.mud {
+        mud.insert(entry.pos1, entry.pos2, entry.turns);
+    }
+
+    GameBuilder::new(cfg.width, cfg.height)
+        .with_max_turns(cfg.max_turns)
+        .with_custom_maze(walls, mud)
+        .with_custom_positions(cfg.player1_start, cfg.player2_start)
+        .with_custom_cheese(cfg.cheese.clone())
+        .build()
+        .create(None)
+        .map_err(|e| PlayerError::ProtocolError(format!("invalid match config: {e}")))
+}
+
+/// Rebuild the engine state to match an injected turn state (GoState or
+/// FullState recovery).
+fn rebuild_engine_state(
+    cfg: &OwnedMatchConfig,
+    ts: &OwnedTurnState,
+) -> Result<GameState, PlayerError> {
+    let mut game = build_engine_state(cfg)?;
+    game.turn = ts.turn;
+    game.player1.current_pos = ts.player1_position;
+    game.player2.current_pos = ts.player2_position;
+    game.player1.score = ts.player1_score;
+    game.player2.score = ts.player2_score;
+    game.player1.mud_timer = ts.player1_mud_turns;
+    game.player2.mud_timer = ts.player2_mud_turns;
+    // Cheese: replace whatever the builder placed with the set in `ts`.
+    // Simplest path: clear and re-place. `CheeseBoard::place_cheese` is
+    // idempotent; `clear` / per-cell remove is not exposed, so rebuild.
+    for pos in cfg.cheese.iter() {
+        if !ts.cheese.contains(pos) {
+            game.cheese.take_cheese(*pos);
+        }
+    }
+    Ok(game)
+}
+
+/// Hash a `GameState` via the protocol-canonical path: derive
+/// `OwnedTurnState`, wrap in `HashedTurnState::new()` (DefaultHasher). This
+/// is the same hashing used for Ready; `Advance` must produce a compatible
+/// hash for desync detection to work.
+fn hash_from_game(game: &GameState, last_p1: Direction, last_p2: Direction) -> u64 {
+    HashedTurnState::new(owned_turn_state_from_game(game, (last_p1, last_p2))).state_hash()
+}
+
+/// Extract an `OwnedTurnState` from an engine `GameState`.
+fn owned_turn_state_from_game(
+    game: &GameState,
+    last_moves: (Direction, Direction),
+) -> OwnedTurnState {
+    OwnedTurnState {
+        turn: game.turn,
+        player1_position: game.player1.current_pos,
+        player2_position: game.player2.current_pos,
+        player1_score: game.player1.score,
+        player2_score: game.player2.score,
+        player1_mud_turns: game.player1.mud_timer,
+        player2_mud_turns: game.player2.mud_timer,
+        cheese: game.cheese_positions(),
+        player1_last_move: last_moves.0,
+        player2_last_move: last_moves.1,
+    }
+}
+
+/// Await a blocking bot task while watching `host_rx` for Stop messages.
 ///
-/// Positions from the config, scores zero, no mud, no last move, all cheese
-/// still on the board. Does not require the engine.
-fn initial_turn_state(cfg: &pyrat_protocol::OwnedMatchConfig) -> HashedTurnState {
-    HashedTurnState::new(pyrat_protocol::OwnedTurnState {
-        turn: 0,
-        player1_position: cfg.player1_start,
-        player2_position: cfg.player2_start,
-        player1_score: 0.0,
-        player2_score: 0.0,
-        player1_mud_turns: 0,
-        player2_mud_turns: 0,
-        cheese: cfg.cheese.clone(),
-        player1_last_move: Direction::Stay,
-        player2_last_move: Direction::Stay,
-    })
+/// - If the blocking task completes first, return its value.
+/// - If Stop arrives, flip `stopped` and keep waiting.
+/// - Any other message during bot execution is a protocol error.
+async fn watch_for_stop<T>(
+    host_rx: &mut mpsc::UnboundedReceiver<HostMsg>,
+    stopped: &Arc<AtomicBool>,
+    handle: &mut JoinHandle<T>,
+) -> Result<T, PlayerError> {
+    loop {
+        tokio::select! {
+            biased;
+            result = &mut *handle => {
+                return result.map_err(|e| PlayerError::TransportError(
+                    format!("bot task panicked: {e}"),
+                ));
+            }
+            msg = host_rx.recv() => {
+                match msg {
+                    Some(HostMsg::Stop) => {
+                        stopped.store(true, Ordering::Relaxed);
+                    }
+                    Some(other) => {
+                        return Err(PlayerError::ProtocolError(format!(
+                            "unexpected {other:?} while bot is working"
+                        )));
+                    }
+                    None => {
+                        return Err(PlayerError::TransportError(
+                            "host_rx closed while bot is working".into(),
+                        ));
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -538,7 +922,11 @@ mod tests {
 
         // Configure triggers the Ready emission with a hash over initial state.
         let match_config = sample_match_config();
-        let expected_hash = initial_turn_state(&match_config).state_hash();
+        let expected_hash = hash_from_game(
+            &build_engine_state(&match_config).unwrap(),
+            Direction::Stay,
+            Direction::Stay,
+        );
         player
             .send(HostMsg::Configure {
                 options: vec![],
@@ -552,11 +940,12 @@ mod tests {
             other => panic!("expected Ready, got {other:?}"),
         }
 
-        // Setup complete. The current (partial) dispatcher exits immediately
-        // after Ready; close the player and confirm clean exit.
-        // recv() should surface Ok(None) once the dispatcher drops bot_tx.
-        assert!(matches!(player.recv().await, Ok(None)));
-        player.close().await.unwrap();
+        // Setup is done; dispatcher is now in Playing<Synced>, awaiting a
+        // host message. Close the player; dispatcher sees host_tx drop and
+        // exits with a TransportError ("host_rx closed"). That's the
+        // expected clean-close semantics for a synced player with no pending
+        // GameOver.
+        drop(player);
     }
 
     #[tokio::test]
