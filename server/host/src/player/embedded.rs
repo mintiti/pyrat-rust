@@ -974,4 +974,85 @@ mod tests {
         let err = player.recv().await.unwrap_err();
         assert!(matches!(err, PlayerError::ProtocolError(_)), "{err:?}");
     }
+
+    /// Verifies the Advance + SyncOk happy path. Lives here (not in the
+    /// integration tests) because computing the expected post-move hash
+    /// needs the crate-private `build_engine_state` / `hash_from_game`
+    /// helpers; exposing them publicly would leak implementation details.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn advance_with_correct_hash_emits_syncok() {
+        let identity = PlayerIdentity {
+            name: "Dummy".into(),
+            author: "test".into(),
+            agent_id: "pyrat/dummy".into(),
+        };
+        let mut player = EmbeddedPlayer::new(DummyBot, identity, EventSink::noop());
+
+        // Setup.
+        let _ = player.recv().await.unwrap().unwrap(); // Identify
+        player
+            .send(HostMsg::Welcome {
+                player_slot: PlayerSlot::Player1,
+            })
+            .await
+            .unwrap();
+        let match_config = sample_match_config();
+        player
+            .send(HostMsg::Configure {
+                options: vec![],
+                match_config: match_config.clone(),
+            })
+            .await
+            .unwrap();
+        let hash0 = match player.recv().await.unwrap().unwrap() {
+            BotMsg::Ready { state_hash } => state_hash,
+            _ => panic!("expected Ready"),
+        };
+
+        // First turn: Go (from Configured/Idle) → Action. Bot plays Stay.
+        player
+            .send(HostMsg::Go {
+                state_hash: hash0,
+                limits: SearchLimits::default(),
+            })
+            .await
+            .unwrap();
+        match player.recv().await.unwrap().unwrap() {
+            BotMsg::Action { .. } => {},
+            other => panic!("expected Action, got {other:?}"),
+        }
+
+        // Compute the hash the dispatcher would arrive at after applying
+        // (Stay, Stay) to the initial state — same helpers the dispatcher
+        // uses internally.
+        let mut game = build_engine_state(&match_config).unwrap();
+        let _ = game.make_move(Direction::Stay, Direction::Stay);
+        let hash_after = hash_from_game(&game, Direction::Stay, Direction::Stay);
+
+        player
+            .send(HostMsg::Advance {
+                p1_dir: Direction::Stay,
+                p2_dir: Direction::Stay,
+                turn: 1,
+                new_hash: hash_after,
+            })
+            .await
+            .unwrap();
+
+        match player.recv().await.unwrap().unwrap() {
+            BotMsg::SyncOk { hash } => assert_eq!(hash, hash_after),
+            other => panic!("expected SyncOk, got {other:?}"),
+        }
+
+        // Clean shutdown.
+        player
+            .send(HostMsg::GameOver {
+                result: GameResult::Draw,
+                player1_score: 0.0,
+                player2_score: 0.0,
+            })
+            .await
+            .unwrap();
+        let _ = player.close().await;
+    }
 }
