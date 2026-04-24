@@ -24,36 +24,15 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use pyrat::{Coordinates, Direction, GameBuilder, GameState, MudMap};
+use pyrat_bot_api::Options;
 use pyrat_protocol::{
-    BotMsg, HashedTurnState, HostMsg, OwnedMatchConfig, OwnedOptionDef, OwnedTurnState,
-    SearchLimits,
+    BotMsg, HashedTurnState, HostMsg, OwnedMatchConfig, OwnedTurnState, SearchLimits,
 };
 use pyrat_wire::{GameResult, Player as PlayerSlot};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use super::{EventSink, Player, PlayerError, PlayerIdentity};
-
-// ── Bot-author-facing surface ──────────────────────────
-
-/// Bot-declared option application.
-///
-/// Shape mirrors the SDK `pyrat_sdk::Options` trait verbatim, re-declared
-/// here to avoid a `pyrat-host → pyrat-sdk` dependency edge. If drift between
-/// the two becomes a problem, the open plan item is to extract a shared
-/// `pyrat-bot-api` crate.
-pub trait Options {
-    /// Declare configurable options.
-    fn option_defs(&self) -> Vec<OwnedOptionDef> {
-        vec![]
-    }
-
-    /// Apply a named option value. Called once per entry in
-    /// [`HostMsg::Configure`]'s `options` vector.
-    fn apply_option(&mut self, _name: &str, _value: &str) -> Result<(), String> {
-        Err("unknown option".into())
-    }
-}
 
 /// In-process bot interface.
 ///

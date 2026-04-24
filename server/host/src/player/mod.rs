@@ -13,7 +13,8 @@ use tokio::sync::mpsc;
 
 pub mod embedded;
 
-pub use embedded::{EmbeddedBot, EmbeddedCtx, EmbeddedPlayer, InfoParams, Options};
+pub use embedded::{EmbeddedBot, EmbeddedCtx, EmbeddedPlayer, InfoParams};
+pub use pyrat_bot_api::Options;
 
 use crate::game_loop::MatchEvent;
 
