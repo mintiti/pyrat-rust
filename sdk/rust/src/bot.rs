@@ -5,6 +5,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use pyrat::Direction;
+use pyrat_bot_api::{BotContext, InfoSink};
+use pyrat_protocol::OwnedInfo;
 use pyrat_wire::{GameResult, Player};
 use tokio::sync::mpsc;
 
@@ -55,6 +57,66 @@ impl InfoSender {
 }
 
 pub use pyrat_bot_api::InfoParams;
+
+impl InfoSink for InfoSender {
+    fn send_info(&self, info: OwnedInfo) {
+        let frame = crate::wire::build_info(
+            info.player,
+            info.multipv,
+            info.target,
+            info.depth,
+            info.nodes,
+            info.score,
+            &info.pv,
+            &info.message,
+            info.turn,
+            info.state_hash,
+        );
+        self.send(&frame);
+    }
+}
+
+impl BotContext for Context {
+    fn player(&self) -> Player {
+        self.player
+    }
+
+    fn turn(&self) -> u16 {
+        self.turn
+    }
+
+    fn state_hash(&self) -> u64 {
+        self.state_hash
+    }
+
+    fn should_stop(&self) -> bool {
+        Context::should_stop(self)
+    }
+
+    fn time_remaining_ms(&self) -> u64 {
+        Context::time_remaining_ms(self)
+    }
+
+    fn think_elapsed_ms(&self) -> u32 {
+        Context::think_elapsed_ms(self)
+    }
+
+    fn send_info(&self, params: &InfoParams<'_>) {
+        Context::send_info(self, params);
+    }
+
+    fn send_provisional(&self, direction: Direction) {
+        Context::send_provisional(self, direction);
+    }
+
+    fn info_sender(&self) -> Option<pyrat_bot_api::InfoSender> {
+        self.info_sender
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|sdk_sender| pyrat_bot_api::InfoSender::new(Arc::new(sdk_sender.clone())))
+    }
+}
 
 /// Timing context passed to `think()` and `preprocess()`.
 ///
