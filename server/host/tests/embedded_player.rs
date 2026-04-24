@@ -340,7 +340,8 @@ async fn go_state_overrides_local_mirror() {
     let _hash = walk_through_setup(&mut player).await;
 
     // Local mirror has turn=0; TurnSensitiveBot would return Down. Inject
-    // turn=42 via GoState and expect Right.
+    // turn=42 via GoState and expect Right. Compute the canonical hash of
+    // the injected state so the dispatcher's verification accepts it.
     let injected = OwnedTurnState {
         turn: 42,
         player1_position: Coordinates::new(0, 0),
@@ -353,10 +354,11 @@ async fn go_state_overrides_local_mirror() {
         player1_last_move: Direction::Stay,
         player2_last_move: Direction::Stay,
     };
+    let state_hash = HashedTurnState::new(injected.clone()).state_hash();
     player
         .send(HostMsg::GoState {
             turn_state: Box::new(injected),
-            state_hash: 0,
+            state_hash,
             limits: SearchLimits::default(),
         })
         .await

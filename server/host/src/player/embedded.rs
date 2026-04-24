@@ -563,12 +563,17 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
                 // to interrupt. Silently ignored.
                 Ok(Event::Continue(self))
             },
-            HostMsg::FullState { .. } => Err(PlayerError::ProtocolError(
-                "FullState received while Synced — server sent without Resync".into(),
-            )),
-            HostMsg::Welcome { .. } | HostMsg::Configure { .. } => Err(PlayerError::ProtocolError(
-                format!("setup message in Playing: {msg:?}"),
-            )),
+            HostMsg::FullState { .. } => Err(PlayerError::ProtocolError(format!(
+                "FullState received while Synced, server sent without Resync \
+                 (player={:?}, turn={})",
+                self.player_slot, self.game.turn
+            ))),
+            HostMsg::Welcome { .. } | HostMsg::Configure { .. } => {
+                Err(PlayerError::ProtocolError(format!(
+                    "setup message in Playing: {msg:?} (player={:?}, turn={})",
+                    self.player_slot, self.game.turn
+                )))
+            },
             HostMsg::ProtocolError { reason } => Err(PlayerError::ProtocolError(reason)),
         }
     }
@@ -577,8 +582,8 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
     async fn handle_go_preprocess(mut self, state_hash: u64) -> Result<Event<B>, PlayerError> {
         if !matches!(self.inner, InnerState::Idle) {
             return Err(PlayerError::ProtocolError(format!(
-                "GoPreprocess in state {:?}",
-                self.inner
+                "GoPreprocess in state {:?} (player={:?}, turn={})",
+                self.inner, self.player_slot, self.game.turn
             )));
         }
         self.inner = InnerState::Preprocessing;
@@ -599,8 +604,8 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
     ) -> Result<Event<B>, PlayerError> {
         if !matches!(self.inner, InnerState::Idle | InnerState::Syncing) {
             return Err(PlayerError::ProtocolError(format!(
-                "Go in state {:?}",
-                self.inner
+                "Go in state {:?} (player={:?}, turn={})",
+                self.inner, self.player_slot, self.game.turn
             )));
         }
         self.inner = InnerState::Thinking;
@@ -625,7 +630,8 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
     }
 
     /// Handle GoState: overwrite local state with the provided turn state,
-    /// then run Go as usual.
+    /// verify the host-claimed hash against the rebuilt state, then run Go
+    /// as usual.
     async fn handle_go_state(
         mut self,
         turn_state: OwnedTurnState,
@@ -635,27 +641,41 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
         // Rebuild the engine mirror to match the injected state.
         self.game = rebuild_engine_state(&self.match_config, &turn_state)?;
         self.last_moves = (turn_state.player1_last_move, turn_state.player2_last_move);
+        let local_hash = hash_from_game(&self.game, self.last_moves.0, self.last_moves.1);
+        if local_hash != state_hash {
+            return Err(PlayerError::ProtocolError(format!(
+                "GoState hash mismatch: local={local_hash}, host={state_hash} \
+                 (player={:?}, turn={})",
+                self.player_slot, self.game.turn
+            )));
+        }
         self.handle_go(state_hash, limits).await
     }
 
-    /// Handle Advance: apply moves locally, verify hash.
+    /// Handle Advance: apply moves locally, verify turn and hash.
     fn handle_advance(
         mut self,
         p1_dir: Direction,
         p2_dir: Direction,
-        _turn: u16,
+        turn: u16,
         new_hash: u64,
     ) -> Result<Event<B>, PlayerError> {
         if !matches!(self.inner, InnerState::Idle) {
             return Err(PlayerError::ProtocolError(format!(
-                "Advance in state {:?}",
-                self.inner
+                "Advance in state {:?} (player={:?}, turn={})",
+                self.inner, self.player_slot, self.game.turn
             )));
         }
-        // Apply the two moves. The returned undo token is discarded — on
+        // Apply the two moves. The returned undo token is discarded: on
         // desync we defer to the server's FullState rather than rolling back.
         let _undo = self.game.make_move(p1_dir, p2_dir);
         self.last_moves = (p1_dir, p2_dir);
+        if turn != self.game.turn {
+            return Err(PlayerError::ProtocolError(format!(
+                "Advance turn mismatch: msg={turn}, local={} (player={:?})",
+                self.game.turn, self.player_slot
+            )));
+        }
         let local_hash = hash_from_game(&self.game, p1_dir, p2_dir);
 
         if local_hash == new_hash {
@@ -697,13 +717,21 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
     /// messages. Sideband forwarding goes through `EmbeddedCtx`.
     async fn run_preprocess(&mut self, state_hash: u64) -> Result<(), PlayerError> {
         let (hts, ctx) = self.prepare_ctx(state_hash);
+        let turn = hts.turn;
         let mut bot = self.bot.take().expect("bot present between turns");
         let mut handle = tokio::task::spawn_blocking(move || {
             bot.preprocess(&hts, &ctx);
             bot
         });
         let stopped = self.core.stopped.clone();
-        let returned_bot = watch_for_stop(&mut self.core.host_rx, &stopped, &mut handle).await?;
+        let returned_bot = watch_for_stop(
+            &mut self.core.host_rx,
+            &stopped,
+            &mut handle,
+            self.player_slot,
+            turn,
+        )
+        .await?;
         self.bot = Some(returned_bot);
         Ok(())
     }
@@ -720,8 +748,14 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
             (bot, dir)
         });
         let stopped = self.core.stopped.clone();
-        let (returned_bot, direction) =
-            watch_for_stop(&mut self.core.host_rx, &stopped, &mut handle).await?;
+        let (returned_bot, direction) = watch_for_stop(
+            &mut self.core.host_rx,
+            &stopped,
+            &mut handle,
+            self.player_slot,
+            turn,
+        )
+        .await?;
         self.bot = Some(returned_bot);
         let think_ms = start.elapsed().as_millis() as u32;
         Ok((turn, direction, think_ms))
@@ -870,13 +904,15 @@ async fn watch_for_stop<T>(
     host_rx: &mut mpsc::UnboundedReceiver<HostMsg>,
     stopped: &Arc<AtomicBool>,
     handle: &mut JoinHandle<T>,
+    player_slot: PlayerSlot,
+    turn: u16,
 ) -> Result<T, PlayerError> {
     loop {
         tokio::select! {
             biased;
             result = &mut *handle => {
                 return result.map_err(|e| PlayerError::TransportError(
-                    format!("bot task panicked: {e}"),
+                    format!("bot task panicked (player={player_slot:?}, turn={turn}): {e}"),
                 ));
             }
             msg = host_rx.recv() => {
@@ -886,13 +922,15 @@ async fn watch_for_stop<T>(
                     }
                     Some(other) => {
                         return Err(PlayerError::ProtocolError(format!(
-                            "unexpected {other:?} while bot is working"
+                            "unexpected {other:?} while bot is working \
+                             (player={player_slot:?}, turn={turn})"
                         )));
                     }
                     None => {
-                        return Err(PlayerError::TransportError(
-                            "host_rx closed while bot is working".into(),
-                        ));
+                        return Err(PlayerError::TransportError(format!(
+                            "host_rx closed while bot is working \
+                             (player={player_slot:?}, turn={turn})"
+                        )));
                     }
                 }
             }
