@@ -22,11 +22,12 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use pyrat::{Coordinates, Direction, GameBuilder, GameState, MudMap};
-use pyrat_bot_api::{InfoParams, Options};
+use pyrat_bot_api::{BotContext, InfoParams, InfoSink, Options};
 use pyrat_protocol::{
-    BotMsg, HashedTurnState, HostMsg, OwnedMatchConfig, OwnedTurnState, SearchLimits,
+    BotMsg, HashedTurnState, HostMsg, OwnedInfo, OwnedMatchConfig, OwnedTurnState, SearchLimits,
 };
 use pyrat_wire::{GameResult, Player as PlayerSlot};
 use tokio::sync::mpsc;
@@ -53,13 +54,12 @@ pub trait EmbeddedBot: Options + Send + 'static {
 /// Per-turn context passed to [`EmbeddedBot::think`] and
 /// [`EmbeddedBot::preprocess`].
 ///
-/// Shape mirrors the SDK `Context` API surface. `should_stop` reads an atomic
-/// that the dispatcher flips on [`HostMsg::Stop`]. Sideband routing:
-/// - `send_info` → observer-facing, forwarded to [`EventSink`] as
-///   `MatchEvent::BotInfo`.
-/// - `send_provisional` → game-driving, forwarded to the Match's `recv()`
-///   queue as [`BotMsg::Provisional`] (Match uses the latest as timeout
-///   fallback).
+/// Shape mirrors the SDK `Context` API surface. `should_stop` reads both an
+/// atomic the dispatcher flips on [`HostMsg::Stop`] and an optional per-turn
+/// deadline derived from the match config. Sideband routing:
+/// - `send_info` forwarded to [`EventSink`] as `MatchEvent::BotInfo`.
+/// - `send_provisional` forwarded to the Match's `recv()` queue as
+///   [`BotMsg::Provisional`] (Match uses the latest as timeout fallback).
 pub struct EmbeddedCtx {
     event_sink: EventSink,
     bot_tx: mpsc::UnboundedSender<BotMsg>,
@@ -67,9 +67,12 @@ pub struct EmbeddedCtx {
     state_hash: u64,
     player: PlayerSlot,
     stopped: Arc<AtomicBool>,
+    think_start: Instant,
+    deadline: Option<Instant>,
 }
 
 impl EmbeddedCtx {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         event_sink: EventSink,
         bot_tx: mpsc::UnboundedSender<BotMsg>,
@@ -77,6 +80,8 @@ impl EmbeddedCtx {
         state_hash: u64,
         player: PlayerSlot,
         stopped: Arc<AtomicBool>,
+        think_start: Instant,
+        deadline: Option<Instant>,
     ) -> Self {
         Self {
             event_sink,
@@ -85,19 +90,43 @@ impl EmbeddedCtx {
             state_hash,
             player,
             stopped,
+            think_start,
+            deadline,
         }
     }
 
-    /// True if the host has signalled Stop. Cooperatively polled from the
-    /// bot's think loop.
+    /// True when the bot should stop: host sent Stop, or the per-turn
+    /// deadline passed. Cooperatively polled from the bot's think loop.
     pub fn should_stop(&self) -> bool {
-        self.stopped.load(Ordering::Relaxed)
+        if self.stopped.load(Ordering::Relaxed) {
+            return true;
+        }
+        self.deadline.is_some_and(|d| Instant::now() >= d)
+    }
+
+    /// Milliseconds remaining before the deadline. Returns 0 if the bot has
+    /// been told to stop; `u64::MAX` if no deadline was configured.
+    pub fn time_remaining_ms(&self) -> u64 {
+        if self.stopped.load(Ordering::Relaxed) {
+            return 0;
+        }
+        let Some(deadline) = self.deadline else {
+            return u64::MAX;
+        };
+        deadline
+            .checked_duration_since(Instant::now())
+            .map_or(0, |d| d.as_millis() as u64)
+    }
+
+    /// Milliseconds elapsed since think started.
+    pub fn think_elapsed_ms(&self) -> u32 {
+        self.think_start.elapsed().as_millis() as u32
     }
 
     /// Send an Info message. Routed to the attached [`EventSink`] as a
     /// `MatchEvent::BotInfo` (observer-facing, never inspected by Match).
     pub fn send_info(&self, params: &InfoParams<'_>) {
-        let info = pyrat_protocol::OwnedInfo {
+        let info = OwnedInfo {
             player: params.player,
             multipv: params.multipv,
             target: params.target,
@@ -121,11 +150,81 @@ impl EmbeddedCtx {
     /// [`BotMsg::Provisional`] on the game-driving channel: Match holds the
     /// latest as its timeout fallback.
     pub fn send_provisional(&self, direction: Direction) {
-        let _ = self.bot_tx.send(BotMsg::Provisional {
-            direction,
+        if self
+            .bot_tx
+            .send(BotMsg::Provisional {
+                direction,
+                player: self.player,
+                turn: self.turn,
+                state_hash: self.state_hash,
+            })
+            .is_err()
+        {
+            tracing::debug!(
+                player = ?self.player,
+                turn = self.turn,
+                "provisional dropped: bot_tx closed"
+            );
+        }
+    }
+}
+
+impl BotContext for EmbeddedCtx {
+    fn player(&self) -> PlayerSlot {
+        self.player
+    }
+
+    fn turn(&self) -> u16 {
+        self.turn
+    }
+
+    fn state_hash(&self) -> u64 {
+        self.state_hash
+    }
+
+    fn should_stop(&self) -> bool {
+        EmbeddedCtx::should_stop(self)
+    }
+
+    fn time_remaining_ms(&self) -> u64 {
+        EmbeddedCtx::time_remaining_ms(self)
+    }
+
+    fn think_elapsed_ms(&self) -> u32 {
+        EmbeddedCtx::think_elapsed_ms(self)
+    }
+
+    fn send_info(&self, params: &InfoParams<'_>) {
+        EmbeddedCtx::send_info(self, params);
+    }
+
+    fn send_provisional(&self, direction: Direction) {
+        EmbeddedCtx::send_provisional(self, direction);
+    }
+
+    fn info_sender(&self) -> Option<pyrat_bot_api::InfoSender> {
+        let sink: Arc<dyn InfoSink> = Arc::new(EmbeddedInfoSink {
+            event_sink: self.event_sink.clone(),
             player: self.player,
-            turn: self.turn,
-            state_hash: self.state_hash,
+        });
+        Some(pyrat_bot_api::InfoSender::new(sink))
+    }
+}
+
+/// Adapter so `InfoSender` handles from worker threads reach the Match's
+/// event sink as `MatchEvent::BotInfo`.
+struct EmbeddedInfoSink {
+    event_sink: EventSink,
+    player: PlayerSlot,
+}
+
+impl InfoSink for EmbeddedInfoSink {
+    fn send_info(&self, info: OwnedInfo) {
+        self.event_sink.emit(crate::game_loop::MatchEvent::BotInfo {
+            sender: self.player,
+            turn: info.turn,
+            state_hash: info.state_hash,
+            info,
         });
     }
 }
@@ -668,7 +767,9 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
     /// Run `bot.preprocess` while selecting on `host_rx` for concurrent Stop
     /// messages. Sideband forwarding goes through `EmbeddedCtx`.
     async fn run_preprocess(&mut self, state_hash: u64) -> Result<(), PlayerError> {
-        let (hts, ctx) = self.prepare_ctx(state_hash);
+        let start = Instant::now();
+        let deadline = deadline_from_ms(start, self.match_config.preprocessing_timeout_ms);
+        let (hts, ctx) = self.prepare_ctx(state_hash, start, deadline);
         let turn = hts.turn;
         let mut bot = self.bot.take().expect("bot present between turns");
         let mut handle = tokio::task::spawn_blocking(move || {
@@ -691,9 +792,10 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
     /// Run `bot.think` while selecting on `host_rx` for concurrent Stop.
     /// Returns the turn number, chosen direction, and recorded think time.
     async fn run_think(&mut self, state_hash: u64) -> Result<(u16, Direction, u32), PlayerError> {
-        let (hts, ctx) = self.prepare_ctx(state_hash);
+        let start = Instant::now();
+        let deadline = deadline_from_ms(start, self.match_config.move_timeout_ms);
+        let (hts, ctx) = self.prepare_ctx(state_hash, start, deadline);
         let turn = hts.turn;
-        let start = std::time::Instant::now();
         let mut bot = self.bot.take().expect("bot present between turns");
         let mut handle = tokio::task::spawn_blocking(move || {
             let dir = bot.think(&hts, &ctx);
@@ -713,7 +815,12 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
         Ok((turn, direction, think_ms))
     }
 
-    fn prepare_ctx(&self, state_hash: u64) -> (HashedTurnState, EmbeddedCtx) {
+    fn prepare_ctx(
+        &self,
+        state_hash: u64,
+        think_start: Instant,
+        deadline: Option<Instant>,
+    ) -> (HashedTurnState, EmbeddedCtx) {
         let hts = HashedTurnState::new(owned_turn_state_from_game(&self.game, self.last_moves));
         let ctx = EmbeddedCtx::new(
             self.core.event_sink.clone(),
@@ -722,8 +829,20 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
             state_hash,
             self.player_slot,
             self.core.stopped.clone(),
+            think_start,
+            deadline,
         );
         (hts, ctx)
+    }
+}
+
+/// Derive a deadline instant from a `_timeout_ms` field. A zero timeout
+/// means "no wall-clock deadline"; bots cooperate on `HostMsg::Stop` only.
+fn deadline_from_ms(start: Instant, timeout_ms: u32) -> Option<Instant> {
+    if timeout_ms == 0 {
+        None
+    } else {
+        Some(start + Duration::from_millis(u64::from(timeout_ms)))
     }
 }
 
