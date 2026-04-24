@@ -463,21 +463,26 @@ impl<B: EmbeddedBot> Setup<B, Identified> {
             match_config,
             game,
             last_moves: (Direction::Stay, Direction::Stay),
-            inner: InnerState::Idle,
-            _sync: std::marker::PhantomData,
+            state: Synced {
+                inner: InnerState::Idle,
+            },
         }))
     }
 }
 
-// ── Playing<Sync> typestate ───────────────────────────
+// ── Playing<S> typestate ──────────────────────────────
 
-/// Sync status markers. `Playing<Synced>` exposes the turn-handling methods;
-/// `Playing<Desynced>` exposes only `recover`.
-struct Synced;
+/// Sync status markers. `Playing<Synced>` exposes the turn-handling methods
+/// and carries the runtime `InnerState`; `Playing<Desynced>` exposes only
+/// `recover` and carries no inner state.
+struct Synced {
+    inner: InnerState,
+}
 struct Desynced;
 
-/// Inner state machine inside `Playing<Synced>`. Tracked as a runtime enum —
-/// typestate in a message-driven loop collapses back to this shape anyway.
+/// Inner state machine inside `Playing<Synced>`. Tracked as a runtime enum
+/// because typestate in a message-driven loop collapses back to this shape
+/// anyway.
 #[derive(Debug, Clone, Copy)]
 enum InnerState {
     /// Between turns, awaiting Advance / GoState / GameOver.
@@ -491,7 +496,7 @@ enum InnerState {
     Thinking,
 }
 
-struct Playing<B, Sync> {
+struct Playing<B, S> {
     /// The bot. `Option` so we can temporarily move it into a
     /// `spawn_blocking` closure during think/preprocess; always `Some` at
     /// every `.await` point in `next_event`. Unwrap sites document the
@@ -504,8 +509,9 @@ struct Playing<B, Sync> {
     game: GameState,
     /// Last moves applied (for `OwnedTurnState::player{1,2}_last_move`).
     last_moves: (Direction, Direction),
-    inner: InnerState,
-    _sync: std::marker::PhantomData<Sync>,
+    /// Sync-state-specific data. `Synced` carries `InnerState`, `Desynced`
+    /// is empty.
+    state: S,
 }
 
 /// Return value of one iteration of `Playing<Synced>::next_event`.
@@ -580,19 +586,19 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
 
     /// Handle GoPreprocess: run bot.preprocess, emit PreprocessingDone.
     async fn handle_go_preprocess(mut self, state_hash: u64) -> Result<Event<B>, PlayerError> {
-        if !matches!(self.inner, InnerState::Idle) {
+        if !matches!(self.state.inner, InnerState::Idle) {
             return Err(PlayerError::ProtocolError(format!(
                 "GoPreprocess in state {:?} (player={:?}, turn={})",
-                self.inner, self.player_slot, self.game.turn
+                self.state.inner, self.player_slot, self.game.turn
             )));
         }
-        self.inner = InnerState::Preprocessing;
+        self.state.inner = InnerState::Preprocessing;
         self.core.stopped.store(false, Ordering::Relaxed);
         self.run_preprocess(state_hash).await?;
         if self.core.bot_tx.send(BotMsg::PreprocessingDone).is_err() {
             return Ok(Event::CleanClose);
         }
-        self.inner = InnerState::Idle;
+        self.state.inner = InnerState::Idle;
         Ok(Event::Continue(self))
     }
 
@@ -602,13 +608,13 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
         state_hash: u64,
         _limits: SearchLimits,
     ) -> Result<Event<B>, PlayerError> {
-        if !matches!(self.inner, InnerState::Idle | InnerState::Syncing) {
+        if !matches!(self.state.inner, InnerState::Idle | InnerState::Syncing) {
             return Err(PlayerError::ProtocolError(format!(
                 "Go in state {:?} (player={:?}, turn={})",
-                self.inner, self.player_slot, self.game.turn
+                self.state.inner, self.player_slot, self.game.turn
             )));
         }
-        self.inner = InnerState::Thinking;
+        self.state.inner = InnerState::Thinking;
         self.core.stopped.store(false, Ordering::Relaxed);
         let (turn, direction, think_ms) = self.run_think(state_hash).await?;
         if self
@@ -625,7 +631,7 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
         {
             return Ok(Event::CleanClose);
         }
-        self.inner = InnerState::Idle;
+        self.state.inner = InnerState::Idle;
         Ok(Event::Continue(self))
     }
 
@@ -660,10 +666,10 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
         turn: u16,
         new_hash: u64,
     ) -> Result<Event<B>, PlayerError> {
-        if !matches!(self.inner, InnerState::Idle) {
+        if !matches!(self.state.inner, InnerState::Idle) {
             return Err(PlayerError::ProtocolError(format!(
                 "Advance in state {:?} (player={:?}, turn={})",
-                self.inner, self.player_slot, self.game.turn
+                self.state.inner, self.player_slot, self.game.turn
             )));
         }
         // Apply the two moves. The returned undo token is discarded: on
@@ -687,7 +693,7 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
             {
                 return Ok(Event::CleanClose);
             }
-            self.inner = InnerState::Syncing;
+            self.state.inner = InnerState::Syncing;
             Ok(Event::Continue(self))
         } else {
             if self
@@ -707,8 +713,7 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
                 match_config: self.match_config,
                 game: self.game,
                 last_moves: self.last_moves,
-                inner: InnerState::Idle, // not meaningful while desynced
-                _sync: std::marker::PhantomData,
+                state: Desynced,
             }))
         }
     }
@@ -813,8 +818,9 @@ impl<B: EmbeddedBot> Playing<B, Desynced> {
             match_config: self.match_config,
             game: self.game,
             last_moves: self.last_moves,
-            inner: InnerState::Idle,
-            _sync: std::marker::PhantomData,
+            state: Synced {
+                inner: InnerState::Idle,
+            },
         }))
     }
 }
