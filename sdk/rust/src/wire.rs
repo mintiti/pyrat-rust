@@ -216,7 +216,7 @@ pub fn build_action_full(
 pub fn build_info(
     player: wire::Player,
     multipv: u16,
-    target: Option<(u8, u8)>,
+    target: Option<pyrat::Coordinates>,
     depth: u16,
     nodes: u32,
     score: Option<f32>,
@@ -240,7 +240,7 @@ pub fn build_info(
             Some(fbb.create_vector(&pv_vec))
         };
 
-        let target_v = target.map(|(x, y)| Vec2::new(x, y));
+        let target_v = target.map(|c| Vec2::new(c.x, c.y));
 
         wire::Info::create(
             fbb,
@@ -542,7 +542,7 @@ mod tests {
         let bytes = build_info(
             Player::Player2,
             3,
-            Some((10, 7)),
+            Some(Coordinates::new(10, 7)),
             5,
             42000,
             Some(2.5),

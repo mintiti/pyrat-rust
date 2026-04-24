@@ -54,43 +54,7 @@ impl InfoSender {
     }
 }
 
-/// Parameters for sending an Info message to the host.
-///
-/// Use [`InfoParams::for_player`] to create with defaults, then override
-/// fields with struct update syntax:
-///
-/// ```ignore
-/// ctx.send_info(&InfoParams {
-///     depth: 5,
-///     score: 3.0,
-///     ..InfoParams::for_player(player)
-/// });
-/// ```
-pub struct InfoParams<'a> {
-    pub player: Player,
-    pub multipv: u16,
-    pub target: Option<(u8, u8)>,
-    pub depth: u16,
-    pub nodes: u32,
-    pub score: Option<f32>,
-    pub pv: &'a [Direction],
-    pub message: &'a str,
-}
-
-impl InfoParams<'_> {
-    pub fn for_player(player: Player) -> Self {
-        Self {
-            player,
-            multipv: 0,
-            target: None,
-            depth: 0,
-            nodes: 0,
-            score: None,
-            pv: &[],
-            message: "",
-        }
-    }
-}
+pub use pyrat_bot_api::InfoParams;
 
 /// Timing context passed to `think()` and `preprocess()`.
 ///

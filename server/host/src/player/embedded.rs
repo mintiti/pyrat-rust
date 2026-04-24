@@ -24,7 +24,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use pyrat::{Coordinates, Direction, GameBuilder, GameState, MudMap};
-use pyrat_bot_api::Options;
+use pyrat_bot_api::{InfoParams, Options};
 use pyrat_protocol::{
     BotMsg, HashedTurnState, HostMsg, OwnedMatchConfig, OwnedTurnState, SearchLimits,
 };
@@ -48,38 +48,6 @@ pub trait EmbeddedBot: Options + Send + 'static {
 
     /// Called when the game ends. Default: no-op.
     fn on_game_over(&mut self, _result: GameResult, _scores: (f32, f32)) {}
-}
-
-/// Parameters for sending an Info message.
-///
-/// Shape mirrors `pyrat_sdk::InfoParams`. Use [`InfoParams::for_player`]
-/// and override fields with struct update syntax.
-#[derive(Debug)]
-pub struct InfoParams<'a> {
-    pub player: PlayerSlot,
-    pub multipv: u16,
-    pub target: Option<Coordinates>,
-    pub depth: u16,
-    pub nodes: u32,
-    pub score: Option<f32>,
-    pub pv: &'a [Direction],
-    pub message: &'a str,
-}
-
-impl InfoParams<'_> {
-    /// Defaults for the given player slot.
-    pub fn for_player(player: PlayerSlot) -> Self {
-        Self {
-            player,
-            multipv: 0,
-            target: None,
-            depth: 0,
-            nodes: 0,
-            score: None,
-            pv: &[],
-            message: "",
-        }
-    }
 }
 
 /// Per-turn context passed to [`EmbeddedBot::think`] and

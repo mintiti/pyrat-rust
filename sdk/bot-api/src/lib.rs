@@ -6,7 +6,9 @@
 //! mental model. No `tokio` dependency: async channel types live on the
 //! consumer side.
 
+pub mod info;
 pub mod options;
 
+pub use info::InfoParams;
 pub use options::Options;
 pub use pyrat_protocol::OwnedOptionDef;
