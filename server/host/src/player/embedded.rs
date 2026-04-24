@@ -1123,7 +1123,12 @@ mod tests {
         // recv() drains bot_tx (empty) then reaps the dispatcher and surfaces
         // its error verbatim.
         let err = player.recv().await.unwrap_err();
-        assert!(matches!(err, PlayerError::ProtocolError(_)), "{err:?}");
+        match err {
+            PlayerError::ProtocolError(msg) => {
+                assert!(msg.contains("expected Welcome"), "msg={msg}");
+            },
+            other => panic!("expected ProtocolError, got {other:?}"),
+        }
     }
 
     /// Verifies the Advance + SyncOk happy path. Lives here (not in the

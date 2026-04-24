@@ -6,6 +6,7 @@
 //! `player/embedded.rs`; this file covers end-to-end flows that only need
 //! public API.
 
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use pyrat::{Coordinates, Direction};
@@ -18,7 +19,7 @@ use pyrat_protocol::{
     BotMsg, HashedTurnState, HostMsg, OwnedMatchConfig, OwnedTurnState, SearchLimits,
 };
 use pyrat_wire::{GameResult, Player as PlayerSlot, TimingMode};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 use tokio::time::timeout;
 
 // ── Test fixtures ─────────────────────────────────────
@@ -124,13 +125,16 @@ impl EmbeddedBot for InfoEmittingBot {
     }
 }
 
-/// Cooperative-stop bot. Busy-waits until `should_stop` flips, then returns
-/// `Right` (distinct from `Stay` so the test can tell early-exit from
-/// never-started).
-struct SpinBot;
+/// Cooperative-stop bot. Signals `started` once `think` is entered, then
+/// busy-waits until `should_stop` flips. Returns `Right` (distinct from
+/// `Stay` so the test can tell early-exit from never-started).
+struct SpinBot {
+    started: Arc<Notify>,
+}
 impl Options for SpinBot {}
 impl EmbeddedBot for SpinBot {
     fn think(&mut self, _: &HashedTurnState, ctx: &EmbeddedCtx) -> Direction {
+        self.started.notify_one();
         while !ctx.should_stop() {
             std::thread::sleep(Duration::from_millis(1));
         }
@@ -309,10 +313,17 @@ async fn desync_emits_resync_then_fullstate_recovers() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stop_cancels_think_cooperatively() {
-    let mut player = EmbeddedPlayer::new(SpinBot, identity(), EventSink::noop());
+    let started = Arc::new(Notify::new());
+    let mut player = EmbeddedPlayer::new(
+        SpinBot {
+            started: started.clone(),
+        },
+        identity(),
+        EventSink::noop(),
+    );
     let hash = walk_through_setup(&mut player).await;
 
-    // Kick off a Go — the bot spins until should_stop() flips.
+    // Kick off a Go; the bot spins until should_stop() flips.
     player
         .send(HostMsg::Go {
             state_hash: hash,
@@ -321,8 +332,8 @@ async fn stop_cancels_think_cooperatively() {
         .await
         .unwrap();
 
-    // Give the bot a moment to enter its spin loop, then send Stop.
-    tokio::time::sleep(Duration::from_millis(20)).await;
+    // Wait for the bot to enter think, then send Stop.
+    started.notified().await;
     player.send(HostMsg::Stop).await.unwrap();
 
     // The bot should observe should_stop and return Direction::Right.
@@ -404,4 +415,294 @@ async fn protocol_error_message_propagates() {
         PlayerError::ProtocolError(msg) => assert!(msg.contains("test fault")),
         other => panic!("expected ProtocolError, got {other:?}"),
     }
+}
+
+// ── New coverage ──────────────────────────────────────
+
+/// Bot that calls `ctx.send_provisional(Right)` from inside `think`, then
+/// returns `Stay` as its committed move. Lets the test verify that
+/// provisional messages flow through `recv()` before the final Action.
+struct ProvisionalBot;
+impl Options for ProvisionalBot {}
+impl EmbeddedBot for ProvisionalBot {
+    fn think(&mut self, _: &HashedTurnState, ctx: &EmbeddedCtx) -> Direction {
+        ctx.send_provisional(Direction::Right);
+        Direction::Stay
+    }
+}
+
+type GameOverRecord = Arc<Mutex<Option<(GameResult, (f32, f32))>>>;
+
+/// Bot that records its `on_game_over` invocation.
+struct GameOverBot {
+    called: GameOverRecord,
+}
+impl Options for GameOverBot {}
+impl EmbeddedBot for GameOverBot {
+    fn think(&mut self, _: &HashedTurnState, _: &EmbeddedCtx) -> Direction {
+        Direction::Stay
+    }
+    fn on_game_over(&mut self, result: GameResult, scores: (f32, f32)) {
+        *self.called.lock().unwrap() = Some((result, scores));
+    }
+}
+
+/// Bot whose `think` blocks for 100ms with `std::thread::sleep`, ignoring
+/// `should_stop`. Used to force the dispatcher into a mid-think state while
+/// the test injects a forbidden host message.
+struct DelayedBot;
+impl Options for DelayedBot {}
+impl EmbeddedBot for DelayedBot {
+    fn think(&mut self, _: &HashedTurnState, _: &EmbeddedCtx) -> Direction {
+        std::thread::sleep(Duration::from_millis(100));
+        Direction::Stay
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn recv_is_cancel_safe() {
+    let mut player = EmbeddedPlayer::new(StayBot, identity(), EventSink::noop());
+    let hash = walk_through_setup(&mut player).await;
+
+    // Drop a pending recv() by letting a biased zero-duration timer win.
+    // The trait contract says the next recv() must still deliver any
+    // message that arrives after cancellation.
+    tokio::select! {
+        biased;
+        () = tokio::time::sleep(Duration::from_millis(0)) => {},
+        _ = player.recv() => panic!("recv should lose to zero-duration timer"),
+    }
+
+    // Now produce a BotMsg and verify recv still yields it.
+    player
+        .send(HostMsg::Go {
+            state_hash: hash,
+            limits: SearchLimits::default(),
+        })
+        .await
+        .unwrap();
+    match recv_ok(&mut player).await {
+        BotMsg::Action { .. } => {},
+        other => panic!("recv lost a message after cancel: {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn provisional_routes_through_recv() {
+    let mut player = EmbeddedPlayer::new(ProvisionalBot, identity(), EventSink::noop());
+    let hash = walk_through_setup(&mut player).await;
+
+    player
+        .send(HostMsg::Go {
+            state_hash: hash,
+            limits: SearchLimits::default(),
+        })
+        .await
+        .unwrap();
+
+    // Provisional arrives first, then the committed Action.
+    match recv_ok(&mut player).await {
+        BotMsg::Provisional {
+            direction,
+            player: slot,
+            state_hash: h,
+            ..
+        } => {
+            assert_eq!(direction, Direction::Right);
+            assert_eq!(slot, PlayerSlot::Player1);
+            assert_eq!(h, hash);
+        },
+        other => panic!("expected Provisional, got {other:?}"),
+    }
+    match recv_ok(&mut player).await {
+        BotMsg::Action { direction, .. } => assert_eq!(direction, Direction::Stay),
+        other => panic!("expected Action, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn on_game_over_is_invoked() {
+    let called = Arc::new(Mutex::new(None));
+    let mut player = EmbeddedPlayer::new(
+        GameOverBot {
+            called: called.clone(),
+        },
+        identity(),
+        EventSink::noop(),
+    );
+    let _hash = walk_through_setup(&mut player).await;
+
+    player
+        .send(HostMsg::GameOver {
+            result: GameResult::Player1,
+            player1_score: 5.0,
+            player2_score: 2.5,
+        })
+        .await
+        .unwrap();
+
+    // Dispatcher processes GameOver and exits cleanly: next recv yields None.
+    let next = timeout(Duration::from_secs(1), player.recv())
+        .await
+        .expect("recv timed out");
+    assert!(matches!(next, Ok(None)));
+    player.close().await.expect("close should succeed");
+
+    let recorded = *called.lock().unwrap();
+    let (result, scores) = recorded.expect("on_game_over not called");
+    assert!(matches!(result, GameResult::Player1));
+    assert!((scores.0 - 5.0).abs() < f32::EPSILON);
+    assert!((scores.1 - 2.5).abs() < f32::EPSILON);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn protocol_error_fullstate_while_synced() {
+    let mut player = EmbeddedPlayer::new(StayBot, identity(), EventSink::noop());
+    let _hash = walk_through_setup(&mut player).await;
+
+    // In Playing<Synced>/Idle; a FullState arriving here is a protocol
+    // violation (the server must only send FullState after a Resync).
+    let bogus_state = OwnedTurnState {
+        turn: 0,
+        player1_position: Coordinates::new(0, 0),
+        player2_position: Coordinates::new(4, 4),
+        player1_score: 0.0,
+        player2_score: 0.0,
+        player1_mud_turns: 0,
+        player2_mud_turns: 0,
+        cheese: vec![Coordinates::new(2, 2)],
+        player1_last_move: Direction::Stay,
+        player2_last_move: Direction::Stay,
+    };
+    player
+        .send(HostMsg::FullState {
+            match_config: sample_match_config(),
+            turn_state: Box::new(bogus_state),
+        })
+        .await
+        .unwrap();
+
+    let err = timeout(Duration::from_secs(1), player.recv())
+        .await
+        .expect("recv timed out")
+        .expect_err("expected protocol error");
+    match err {
+        PlayerError::ProtocolError(msg) => {
+            assert!(msg.contains("FullState received while Synced"), "msg={msg}");
+            assert!(msg.contains("player=Player1"), "msg={msg}");
+        },
+        other => panic!("expected ProtocolError, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn protocol_error_go_preprocess_while_syncing() {
+    let mut player = EmbeddedPlayer::new(StayBot, identity(), EventSink::noop());
+    let hash0 = walk_through_setup(&mut player).await;
+
+    // Walk one turn to land in InnerState::Syncing: Go -> Action -> Advance
+    // -> SyncOk. After SyncOk the dispatcher is in Syncing, awaiting Go or
+    // FullState. GoPreprocess is forbidden here.
+    player
+        .send(HostMsg::Go {
+            state_hash: hash0,
+            limits: SearchLimits::default(),
+        })
+        .await
+        .unwrap();
+    match recv_ok(&mut player).await {
+        BotMsg::Action { .. } => {},
+        other => panic!("expected Action, got {other:?}"),
+    }
+
+    // Apply a (Stay, Stay) advance. The post-move local state has turn=1
+    // and its canonical hash is what the bot will compare against.
+    let advanced = OwnedTurnState {
+        turn: 1,
+        player1_position: Coordinates::new(0, 0),
+        player2_position: Coordinates::new(4, 4),
+        player1_score: 0.0,
+        player2_score: 0.0,
+        player1_mud_turns: 0,
+        player2_mud_turns: 0,
+        cheese: vec![Coordinates::new(2, 2)],
+        player1_last_move: Direction::Stay,
+        player2_last_move: Direction::Stay,
+    };
+    let hash1 = HashedTurnState::new(advanced).state_hash();
+    player
+        .send(HostMsg::Advance {
+            p1_dir: Direction::Stay,
+            p2_dir: Direction::Stay,
+            turn: 1,
+            new_hash: hash1,
+        })
+        .await
+        .unwrap();
+    match recv_ok(&mut player).await {
+        BotMsg::SyncOk { .. } => {},
+        other => panic!("expected SyncOk, got {other:?}"),
+    }
+
+    // Dispatcher is Syncing; GoPreprocess from Syncing is a protocol error.
+    player
+        .send(HostMsg::GoPreprocess { state_hash: hash1 })
+        .await
+        .unwrap();
+    let err = timeout(Duration::from_secs(1), player.recv())
+        .await
+        .expect("recv timed out")
+        .expect_err("expected protocol error");
+    match err {
+        PlayerError::ProtocolError(msg) => {
+            assert!(msg.contains("GoPreprocess in state Syncing"), "msg={msg}");
+            assert!(msg.contains("player=Player1"), "msg={msg}");
+            assert!(msg.contains("turn=1"), "msg={msg}");
+        },
+        other => panic!("expected ProtocolError, got {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn protocol_error_advance_while_thinking() {
+    let mut player = EmbeddedPlayer::new(DelayedBot, identity(), EventSink::noop());
+    let hash = walk_through_setup(&mut player).await;
+
+    player
+        .send(HostMsg::Go {
+            state_hash: hash,
+            limits: SearchLimits::default(),
+        })
+        .await
+        .unwrap();
+
+    // Bot is now sleeping inside spawn_blocking. Send a forbidden Advance
+    // while it works — the dispatcher's watch_for_stop should reject it.
+    tokio::time::sleep(Duration::from_millis(20)).await;
+    player
+        .send(HostMsg::Advance {
+            p1_dir: Direction::Stay,
+            p2_dir: Direction::Stay,
+            turn: 1,
+            new_hash: 0,
+        })
+        .await
+        .unwrap();
+
+    let err = timeout(Duration::from_secs(2), player.recv())
+        .await
+        .expect("recv timed out")
+        .expect_err("expected protocol error");
+    match err {
+        PlayerError::ProtocolError(msg) => {
+            assert!(msg.contains("Advance"), "msg={msg}");
+            assert!(msg.contains("bot is working"), "msg={msg}");
+            assert!(msg.contains("player=Player1"), "msg={msg}");
+        },
+        other => panic!("expected ProtocolError, got {other:?}"),
+    }
+
+    // Let the detached blocking bot task finish before the runtime shuts
+    // down. DelayedBot sleeps 100ms; give it headroom.
+    tokio::time::sleep(Duration::from_millis(150)).await;
 }
