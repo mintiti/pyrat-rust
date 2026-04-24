@@ -6,7 +6,6 @@ use std::time::Instant;
 
 use pyrat::Direction;
 use pyrat_bot_api::{BotContext, InfoSink};
-use pyrat_protocol::OwnedInfo;
 use pyrat_wire::{GameResult, Player};
 use tokio::sync::mpsc;
 
@@ -32,7 +31,7 @@ impl InfoSender {
     }
 
     /// Send a pre-built frame through the writer channel.
-    pub fn send(&self, frame: &[u8]) {
+    pub(crate) fn send(&self, frame: &[u8]) {
         if let Err(e) = self.tx.send(frame.to_vec()) {
             eprintln!("[sdk] send() failed: channel closed ({e})");
         }
@@ -59,18 +58,18 @@ impl InfoSender {
 pub use pyrat_bot_api::InfoParams;
 
 impl InfoSink for InfoSender {
-    fn send_info(&self, info: OwnedInfo) {
+    fn send_info(&self, params: &InfoParams<'_>, turn: u16, state_hash: u64) {
         let frame = crate::wire::build_info(
-            info.player,
-            info.multipv,
-            info.target,
-            info.depth,
-            info.nodes,
-            info.score,
-            &info.pv,
-            &info.message,
-            info.turn,
-            info.state_hash,
+            params.player,
+            params.multipv,
+            params.target,
+            params.depth,
+            params.nodes,
+            params.score,
+            params.pv,
+            params.message,
+            turn,
+            state_hash,
         );
         self.send(&frame);
     }

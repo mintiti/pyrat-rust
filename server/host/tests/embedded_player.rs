@@ -49,6 +49,24 @@ fn sample_match_config() -> Box<OwnedMatchConfig> {
     })
 }
 
+/// Default `OwnedTurnState` matching `sample_match_config`'s layout: players
+/// at their starting corners, one cheese at (2, 2), no mud, zero scores,
+/// last moves `Stay`. Callers override fields via struct update syntax.
+fn base_turn_state(turn: u16) -> OwnedTurnState {
+    OwnedTurnState {
+        turn,
+        player1_position: Coordinates::new(0, 0),
+        player2_position: Coordinates::new(4, 4),
+        player1_score: 0.0,
+        player2_score: 0.0,
+        player1_mud_turns: 0,
+        player2_mud_turns: 0,
+        cheese: vec![Coordinates::new(2, 2)],
+        player1_last_move: Direction::Stay,
+        player2_last_move: Direction::Stay,
+    }
+}
+
 /// Drive an [`EmbeddedPlayer`] through setup (Identify → Welcome →
 /// Configure → Ready), returning the hash the bot announced.
 async fn walk_through_setup(player: &mut EmbeddedPlayer) -> u64 {
@@ -272,16 +290,9 @@ async fn desync_emits_resync_then_fullstate_recovers() {
     // Send a FullState that restores a known position. The bot should emit
     // SyncOk with the hash of that state.
     let recovery_state = OwnedTurnState {
-        turn: 1,
         player1_position: Coordinates::new(1, 0),
-        player2_position: Coordinates::new(4, 4),
-        player1_score: 0.0,
-        player2_score: 0.0,
-        player1_mud_turns: 0,
-        player2_mud_turns: 0,
-        cheese: vec![Coordinates::new(2, 2)],
         player1_last_move: Direction::Right,
-        player2_last_move: Direction::Stay,
+        ..base_turn_state(1)
     };
     player
         .send(HostMsg::FullState {
@@ -352,18 +363,7 @@ async fn go_state_overrides_local_mirror() {
     // Local mirror has turn=0; TurnSensitiveBot would return Down. Inject
     // turn=42 via GoState and expect Right. Compute the canonical hash of
     // the injected state so the dispatcher's verification accepts it.
-    let injected = OwnedTurnState {
-        turn: 42,
-        player1_position: Coordinates::new(0, 0),
-        player2_position: Coordinates::new(4, 4),
-        player1_score: 0.0,
-        player2_score: 0.0,
-        player1_mud_turns: 0,
-        player2_mud_turns: 0,
-        cheese: vec![Coordinates::new(2, 2)],
-        player1_last_move: Direction::Stay,
-        player2_last_move: Direction::Stay,
-    };
+    let injected = base_turn_state(42);
     let state_hash = HashedTurnState::new(injected.clone()).state_hash();
     player
         .send(HostMsg::GoState {
@@ -561,22 +561,10 @@ async fn protocol_error_fullstate_while_synced() {
 
     // In Playing<Synced>/Idle; a FullState arriving here is a protocol
     // violation (the server must only send FullState after a Resync).
-    let bogus_state = OwnedTurnState {
-        turn: 0,
-        player1_position: Coordinates::new(0, 0),
-        player2_position: Coordinates::new(4, 4),
-        player1_score: 0.0,
-        player2_score: 0.0,
-        player1_mud_turns: 0,
-        player2_mud_turns: 0,
-        cheese: vec![Coordinates::new(2, 2)],
-        player1_last_move: Direction::Stay,
-        player2_last_move: Direction::Stay,
-    };
     player
         .send(HostMsg::FullState {
             match_config: sample_match_config(),
-            turn_state: Box::new(bogus_state),
+            turn_state: Box::new(base_turn_state(0)),
         })
         .await
         .unwrap();
@@ -616,19 +604,7 @@ async fn protocol_error_go_preprocess_while_syncing() {
 
     // Apply a (Stay, Stay) advance. The post-move local state has turn=1
     // and its canonical hash is what the bot will compare against.
-    let advanced = OwnedTurnState {
-        turn: 1,
-        player1_position: Coordinates::new(0, 0),
-        player2_position: Coordinates::new(4, 4),
-        player1_score: 0.0,
-        player2_score: 0.0,
-        player1_mud_turns: 0,
-        player2_mud_turns: 0,
-        cheese: vec![Coordinates::new(2, 2)],
-        player1_last_move: Direction::Stay,
-        player2_last_move: Direction::Stay,
-    };
-    let hash1 = HashedTurnState::new(advanced).state_hash();
+    let hash1 = HashedTurnState::new(base_turn_state(1)).state_hash();
     player
         .send(HostMsg::Advance {
             p1_dir: Direction::Stay,

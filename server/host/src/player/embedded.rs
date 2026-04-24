@@ -61,40 +61,17 @@ pub trait EmbeddedBot: Options + Send + 'static {
 /// - `send_provisional` forwarded to the Match's `recv()` queue as
 ///   [`BotMsg::Provisional`] (Match uses the latest as timeout fallback).
 pub struct EmbeddedCtx {
-    event_sink: EventSink,
-    bot_tx: mpsc::UnboundedSender<BotMsg>,
-    turn: u16,
-    state_hash: u64,
-    player: PlayerSlot,
-    stopped: Arc<AtomicBool>,
-    think_start: Instant,
-    deadline: Option<Instant>,
+    pub(crate) event_sink: EventSink,
+    pub(crate) bot_tx: mpsc::UnboundedSender<BotMsg>,
+    pub(crate) turn: u16,
+    pub(crate) state_hash: u64,
+    pub(crate) player: PlayerSlot,
+    pub(crate) stopped: Arc<AtomicBool>,
+    pub(crate) think_start: Instant,
+    pub(crate) deadline: Option<Instant>,
 }
 
 impl EmbeddedCtx {
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
-        event_sink: EventSink,
-        bot_tx: mpsc::UnboundedSender<BotMsg>,
-        turn: u16,
-        state_hash: u64,
-        player: PlayerSlot,
-        stopped: Arc<AtomicBool>,
-        think_start: Instant,
-        deadline: Option<Instant>,
-    ) -> Self {
-        Self {
-            event_sink,
-            bot_tx,
-            turn,
-            state_hash,
-            player,
-            stopped,
-            think_start,
-            deadline,
-        }
-    }
-
     /// True when the bot should stop: host sent Stop, or the per-turn
     /// deadline passed. Cooperatively polled from the bot's think loop.
     pub fn should_stop(&self) -> bool {
@@ -126,24 +103,13 @@ impl EmbeddedCtx {
     /// Send an Info message. Routed to the attached [`EventSink`] as a
     /// `MatchEvent::BotInfo` (observer-facing, never inspected by Match).
     pub fn send_info(&self, params: &InfoParams<'_>) {
-        let info = OwnedInfo {
-            player: params.player,
-            multipv: params.multipv,
-            target: params.target,
-            depth: params.depth,
-            nodes: params.nodes,
-            score: params.score,
-            pv: params.pv.to_vec(),
-            message: params.message.to_string(),
-            turn: self.turn,
-            state_hash: self.state_hash,
-        };
-        self.event_sink.emit(crate::game_loop::MatchEvent::BotInfo {
-            sender: self.player,
-            turn: self.turn,
-            state_hash: self.state_hash,
-            info,
-        });
+        emit_bot_info(
+            &self.event_sink,
+            self.player,
+            params,
+            self.turn,
+            self.state_hash,
+        );
     }
 
     /// Send a provisional (best-so-far) direction. Emitted as
@@ -219,14 +185,36 @@ struct EmbeddedInfoSink {
 }
 
 impl InfoSink for EmbeddedInfoSink {
-    fn send_info(&self, info: OwnedInfo) {
-        self.event_sink.emit(crate::game_loop::MatchEvent::BotInfo {
-            sender: self.player,
-            turn: info.turn,
-            state_hash: info.state_hash,
-            info,
-        });
+    fn send_info(&self, params: &InfoParams<'_>, turn: u16, state_hash: u64) {
+        emit_bot_info(&self.event_sink, self.player, params, turn, state_hash);
     }
+}
+
+fn emit_bot_info(
+    event_sink: &EventSink,
+    sender: PlayerSlot,
+    params: &InfoParams<'_>,
+    turn: u16,
+    state_hash: u64,
+) {
+    let info = OwnedInfo {
+        player: params.player,
+        multipv: params.multipv,
+        target: params.target,
+        depth: params.depth,
+        nodes: params.nodes,
+        score: params.score,
+        pv: params.pv.to_vec(),
+        message: params.message.to_string(),
+        turn,
+        state_hash,
+    };
+    event_sink.emit(crate::game_loop::MatchEvent::BotInfo {
+        sender,
+        turn,
+        state_hash,
+        info,
+    });
 }
 
 // ── EmbeddedPlayer ────────────────────────────────────
@@ -410,9 +398,7 @@ impl<B: EmbeddedBot> Setup<B, Initial> {
     }
 
     /// Emit `BotMsg::Identify` from the bot's declared identity + options.
-    ///
-    /// Synchronous: `UnboundedSender::send` never awaits. Returns `Ok(None)`
-    /// if the player handle was already dropped (clean local close).
+    /// Returns `Ok(None)` if the player handle was already dropped.
     fn emit_identify(
         self,
         identity: &PlayerIdentity,
@@ -559,9 +545,23 @@ struct Playing<B, S> {
     game: GameState,
     /// Last moves applied (for `OwnedTurnState::player{1,2}_last_move`).
     last_moves: (Direction, Direction),
-    /// Sync-state-specific data. `Synced` carries `InnerState`, `Desynced`
-    /// is empty.
     state: S,
+}
+
+impl<B, S> Playing<B, S> {
+    /// Swap the sync-state marker, keeping everything else. Used for the
+    /// `Synced` <-> `Desynced` transitions at Advance-mismatch and recovery.
+    fn with_state<S2>(self, state: S2) -> Playing<B, S2> {
+        Playing {
+            bot: self.bot,
+            core: self.core,
+            player_slot: self.player_slot,
+            match_config: self.match_config,
+            game: self.game,
+            last_moves: self.last_moves,
+            state,
+        }
+    }
 }
 
 /// Return value of one iteration of `Playing<Synced>::next_event`.
@@ -756,15 +756,7 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
             {
                 return Ok(Event::CleanClose);
             }
-            Ok(Event::Desynced(Playing {
-                bot: self.bot,
-                core: self.core,
-                player_slot: self.player_slot,
-                match_config: self.match_config,
-                game: self.game,
-                last_moves: self.last_moves,
-                state: Desynced,
-            }))
+            Ok(Event::Desynced(self.with_state(Desynced)))
         }
     }
 
@@ -780,15 +772,7 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
             bot.preprocess(&hts, &ctx);
             bot
         });
-        let stopped = self.core.stopped.clone();
-        let returned_bot = watch_for_stop(
-            &mut self.core.host_rx,
-            &stopped,
-            &mut handle,
-            self.player_slot,
-            turn,
-        )
-        .await?;
+        let returned_bot = self.watch_for_stop(&mut handle, turn).await?;
         self.bot = Some(returned_bot);
         Ok(())
     }
@@ -805,18 +789,50 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
             let dir = bot.think(&hts, &ctx);
             (bot, dir)
         });
-        let stopped = self.core.stopped.clone();
-        let (returned_bot, direction) = watch_for_stop(
-            &mut self.core.host_rx,
-            &stopped,
-            &mut handle,
-            self.player_slot,
-            turn,
-        )
-        .await?;
+        let (returned_bot, direction) = self.watch_for_stop(&mut handle, turn).await?;
         self.bot = Some(returned_bot);
         let think_ms = start.elapsed().as_millis() as u32;
         Ok((turn, direction, think_ms))
+    }
+
+    /// Await a spawn_blocking bot task while draining `host_rx` for Stop or
+    /// protocol faults. If Stop arrives, flips the `stopped` flag and keeps
+    /// waiting. Any other in-flight message is a protocol error.
+    async fn watch_for_stop<T>(
+        &mut self,
+        handle: &mut JoinHandle<T>,
+        turn: u16,
+    ) -> Result<T, PlayerError> {
+        let player_slot = self.player_slot;
+        loop {
+            tokio::select! {
+                biased;
+                result = &mut *handle => {
+                    return result.map_err(|e| PlayerError::TransportError(
+                        format!("bot task panicked (player={player_slot:?}, turn={turn}): {e}"),
+                    ));
+                }
+                msg = self.core.host_rx.recv() => {
+                    match msg {
+                        Some(HostMsg::Stop) => {
+                            self.core.stopped.store(true, Ordering::Relaxed);
+                        }
+                        Some(other) => {
+                            return Err(PlayerError::ProtocolError(format!(
+                                "unexpected {other:?} while bot is working \
+                                 (player={player_slot:?}, turn={turn})"
+                            )));
+                        }
+                        None => {
+                            return Err(PlayerError::TransportError(format!(
+                                "host_rx closed while bot is working \
+                                 (player={player_slot:?}, turn={turn})"
+                            )));
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fn prepare_ctx(
@@ -826,16 +842,16 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
         deadline: Option<Instant>,
     ) -> (HashedTurnState, EmbeddedCtx) {
         let hts = HashedTurnState::new(owned_turn_state_from_game(&self.game, self.last_moves));
-        let ctx = EmbeddedCtx::new(
-            self.core.event_sink.clone(),
-            self.core.bot_tx.clone(),
-            self.game.turn,
+        let ctx = EmbeddedCtx {
+            event_sink: self.core.event_sink.clone(),
+            bot_tx: self.core.bot_tx.clone(),
+            turn: self.game.turn,
             state_hash,
-            self.player_slot,
-            self.core.stopped.clone(),
+            player: self.player_slot,
+            stopped: self.core.stopped.clone(),
             think_start,
             deadline,
-        );
+        };
         (hts, ctx)
     }
 }
@@ -881,17 +897,9 @@ impl<B: EmbeddedBot> Playing<B, Desynced> {
             return Ok(None);
         }
 
-        Ok(Some(Playing {
-            bot: self.bot,
-            core: self.core,
-            player_slot: self.player_slot,
-            match_config: self.match_config,
-            game: self.game,
-            last_moves: self.last_moves,
-            state: Synced {
-                inner: InnerState::Idle,
-            },
-        }))
+        Ok(Some(self.with_state(Synced {
+            inner: InnerState::Idle,
+        })))
     }
 }
 
@@ -967,49 +975,6 @@ fn owned_turn_state_from_game(
         cheese: game.cheese_positions(),
         player1_last_move: last_moves.0,
         player2_last_move: last_moves.1,
-    }
-}
-
-/// Await a blocking bot task while watching `host_rx` for Stop messages.
-///
-/// - If the blocking task completes first, return its value.
-/// - If Stop arrives, flip `stopped` and keep waiting.
-/// - Any other message during bot execution is a protocol error.
-async fn watch_for_stop<T>(
-    host_rx: &mut mpsc::UnboundedReceiver<HostMsg>,
-    stopped: &Arc<AtomicBool>,
-    handle: &mut JoinHandle<T>,
-    player_slot: PlayerSlot,
-    turn: u16,
-) -> Result<T, PlayerError> {
-    loop {
-        tokio::select! {
-            biased;
-            result = &mut *handle => {
-                return result.map_err(|e| PlayerError::TransportError(
-                    format!("bot task panicked (player={player_slot:?}, turn={turn}): {e}"),
-                ));
-            }
-            msg = host_rx.recv() => {
-                match msg {
-                    Some(HostMsg::Stop) => {
-                        stopped.store(true, Ordering::Relaxed);
-                    }
-                    Some(other) => {
-                        return Err(PlayerError::ProtocolError(format!(
-                            "unexpected {other:?} while bot is working \
-                             (player={player_slot:?}, turn={turn})"
-                        )));
-                    }
-                    None => {
-                        return Err(PlayerError::TransportError(format!(
-                            "host_rx closed while bot is working \
-                             (player={player_slot:?}, turn={turn})"
-                        )));
-                    }
-                }
-            }
-        }
     }
 }
 

@@ -4,7 +4,6 @@
 use std::sync::Arc;
 
 use pyrat::Direction;
-use pyrat_protocol::OwnedInfo;
 use pyrat_wire::Player;
 
 use crate::InfoParams;
@@ -64,27 +63,14 @@ impl InfoSender {
         Self { sink }
     }
 
-    /// Build an `OwnedInfo` from `params` and the worker-supplied
-    /// `turn` / `state_hash`, then forward to the underlying sink.
+    /// Forward an Info emission to the underlying sink.
     pub fn send_info(&self, params: &InfoParams<'_>, turn: u16, state_hash: u64) {
-        let info = OwnedInfo {
-            player: params.player,
-            multipv: params.multipv,
-            target: params.target,
-            depth: params.depth,
-            nodes: params.nodes,
-            score: params.score,
-            pv: params.pv.to_vec(),
-            message: params.message.to_string(),
-            turn,
-            state_hash,
-        };
-        self.sink.send_info(info);
+        self.sink.send_info(params, turn, state_hash);
     }
 }
 
 /// Transport-specific Info emitter. SDK wraps a frame-writer channel;
 /// host wraps an `EventSink` + per-match metadata.
 pub trait InfoSink: Send + Sync {
-    fn send_info(&self, info: OwnedInfo);
+    fn send_info(&self, params: &InfoParams<'_>, turn: u16, state_hash: u64);
 }
