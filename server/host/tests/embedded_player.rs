@@ -12,8 +12,8 @@ use std::time::Duration;
 use pyrat::{Coordinates, Direction};
 use pyrat_host::game_loop::MatchEvent;
 use pyrat_host::player::{
-    EmbeddedBot, EmbeddedCtx, EmbeddedPlayer, EventSink, InfoParams, Options, Player,
-    PlayerError, PlayerIdentity,
+    EmbeddedBot, EmbeddedCtx, EmbeddedPlayer, EventSink, InfoParams, Options, Player, PlayerError,
+    PlayerIdentity,
 };
 use pyrat_protocol::{
     BotMsg, HashedTurnState, HostMsg, OwnedMatchConfig, OwnedTurnState, SearchLimits,
@@ -96,7 +96,7 @@ impl EmbeddedBot for StayBot {
 }
 
 /// Returns a different direction depending on the turn number the dispatcher
-/// passes in — lets tests verify `GoState` overwrote the local mirror.
+/// passes in. Lets tests verify `GoState` overwrote the local mirror.
 struct TurnSensitiveBot;
 impl Options for TurnSensitiveBot {}
 impl EmbeddedBot for TurnSensitiveBot {
@@ -202,8 +202,7 @@ async fn happy_path_preprocess_think_game_over() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn info_routes_to_event_sink_not_bot_recv() {
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
-    let mut player =
-        EmbeddedPlayer::new(InfoEmittingBot, identity(), EventSink::new(event_tx));
+    let mut player = EmbeddedPlayer::new(InfoEmittingBot, identity(), EventSink::new(event_tx));
     let hash = walk_through_setup(&mut player).await;
 
     player
@@ -677,7 +676,7 @@ async fn protocol_error_advance_while_thinking() {
         .unwrap();
 
     // Bot is now sleeping inside spawn_blocking. Send a forbidden Advance
-    // while it works — the dispatcher's watch_for_stop should reject it.
+    // while it works; the dispatcher's watch_for_stop should reject it.
     tokio::time::sleep(Duration::from_millis(20)).await;
     player
         .send(HostMsg::Advance {

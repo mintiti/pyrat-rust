@@ -1,7 +1,7 @@
 //! In-process [`Player`](super::Player) implementation.
 //!
 //! `EmbeddedPlayer` runs a bot in the same process as the Match. No TCP, no
-//! FlatBuffers, no subprocess — a dispatcher task translates [`HostMsg`] into
+//! FlatBuffers, no subprocess. A dispatcher task translates [`HostMsg`] into
 //! method calls on an [`EmbeddedBot`] and wraps the results in [`BotMsg`].
 //!
 //! ## Who writes what
@@ -245,6 +245,10 @@ pub struct EmbeddedPlayer {
 impl EmbeddedPlayer {
     /// Construct an EmbeddedPlayer wrapping `bot`. Spawns a dispatcher task
     /// on the current tokio runtime.
+    ///
+    /// # Panics
+    ///
+    /// Panics if called outside a tokio runtime (via `tokio::spawn`).
     pub fn new<B: EmbeddedBot>(bot: B, identity: PlayerIdentity, event_sink: EventSink) -> Self {
         let (host_tx, host_rx) = mpsc::unbounded_channel();
         let (bot_tx, bot_rx) = mpsc::unbounded_channel();
@@ -577,9 +581,9 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
     /// Advance the dispatcher by one host message.
     ///
     /// Takes `self` and returns one of:
-    /// - `Event::Continue` — still Synced, loop with the returned value.
-    /// - `Event::Desynced` — hash mismatch detected, Resync emitted.
-    /// - `Event::GameOver` — GameOver processed, dispatcher exits.
+    /// - `Event::Continue`: still Synced, loop with the returned value.
+    /// - `Event::Desynced`: hash mismatch detected, Resync emitted.
+    /// - `Event::GameOver`: GameOver processed, dispatcher exits.
     async fn next_event(mut self) -> Result<Event<B>, PlayerError> {
         let Some(msg) = self.core.host_rx.recv().await else {
             return Ok(Event::CleanClose);
@@ -948,7 +952,6 @@ fn hash_from_game(game: &GameState, last_p1: Direction, last_p2: Direction) -> u
     HashedTurnState::new(owned_turn_state_from_game(game, (last_p1, last_p2))).state_hash()
 }
 
-/// Extract an `OwnedTurnState` from an engine `GameState`.
 fn owned_turn_state_from_game(
     game: &GameState,
     last_moves: (Direction, Direction),
@@ -1179,7 +1182,7 @@ mod tests {
         }
 
         // Compute the hash the dispatcher would arrive at after applying
-        // (Stay, Stay) to the initial state — same helpers the dispatcher
+        // (Stay, Stay) to the initial state, using the same helpers the dispatcher
         // uses internally.
         let mut game = build_engine_state(&match_config).unwrap();
         let _ = game.make_move(Direction::Stay, Direction::Stay);

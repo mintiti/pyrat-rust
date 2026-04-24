@@ -27,7 +27,6 @@ pub struct InfoParams<'a> {
 }
 
 impl InfoParams<'_> {
-    /// Defaults for the given player slot.
     pub fn for_player(player: Player) -> Self {
         Self {
             player,

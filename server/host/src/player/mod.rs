@@ -1,12 +1,10 @@
-//! Player abstraction — bidirectional message pipe between Match and bot endpoint.
+//! Player abstraction: bidirectional message pipe between Match and bot endpoint.
 //!
 //! The `Player` trait is the single protocol interface Match uses to drive a
 //! bot. It is transport-agnostic: an [`embedded::EmbeddedPlayer`] runs a bot
 //! in-process (no TCP, no serialization), while a future `TcpPlayer` will wrap
 //! the session layer. Either way, the Match only speaks in [`HostMsg`] /
 //! [`BotMsg`] through [`Player::send`] and [`Player::recv`].
-//!
-//! See `.mt/briefs/host-restructure/architecture.md` for the design rationale.
 
 use pyrat_protocol::{BotMsg, HostMsg};
 use tokio::sync::mpsc;
@@ -64,9 +62,8 @@ impl EventSink {
 
 /// Errors returned by [`Player`] methods.
 ///
-/// Variants mirror the distinctions in `architecture.md`: clean close is
-/// distinct from a protocol or transport fault, which is distinct from a
-/// deadline timeout.
+/// Variants separate clean close from protocol or transport faults, and
+/// either of those from a deadline timeout.
 #[derive(Debug, thiserror::Error)]
 pub enum PlayerError {
     /// Reserved for future impls where the peer signals clean close
@@ -112,7 +109,6 @@ pub trait Player: Send + Sync {
     /// Identity known at construction, before any handshake.
     fn identity(&self) -> &PlayerIdentity;
 
-    /// Send a host-to-bot message.
     fn send(
         &mut self,
         msg: HostMsg,
@@ -120,9 +116,9 @@ pub trait Player: Send + Sync {
 
     /// Receive the next bot-to-host message.
     ///
-    /// - `Ok(Some(msg))` — a message was received.
-    /// - `Ok(None)` — the peer closed cleanly.
-    /// - `Err(_)` — a protocol, transport, or timeout failure occurred.
+    /// - `Ok(Some(msg))`: a message was received.
+    /// - `Ok(None)`: the peer closed cleanly.
+    /// - `Err(_)`: a protocol, transport, or timeout failure occurred.
     fn recv(
         &mut self,
     ) -> impl std::future::Future<Output = Result<Option<BotMsg>, PlayerError>> + Send;
