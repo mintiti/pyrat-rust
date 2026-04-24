@@ -68,8 +68,10 @@ impl EventSink {
 /// deadline timeout.
 #[derive(Debug, thiserror::Error)]
 pub enum PlayerError {
-    /// Peer closed gracefully. Currently returned by `close()` after a clean
-    /// shutdown; `recv()` signals clean close with `Ok(None)` instead.
+    /// Reserved for future impls where the peer signals clean close
+    /// explicitly (e.g., `TcpPlayer` receiving a Disconnect frame).
+    /// `EmbeddedPlayer` signals clean close via `Ok(None)` on `recv()` and
+    /// `Ok(())` on `close()`, so it never constructs this variant.
     #[error("peer closed cleanly")]
     CleanClose,
     /// Parse failure, unexpected message type, or other protocol violation.

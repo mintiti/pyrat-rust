@@ -297,15 +297,26 @@ async fn dispatcher_task<B: EmbeddedBot>(
     };
 
     let initial = Setup::<B, Initial>::new(bot, core);
-    let connected = initial.emit_identify(&identity)?;
-    let identified = connected.await_welcome().await?;
-    let mut playing = identified.await_configure_emit_ready().await?;
+    let Some(connected) = initial.emit_identify(&identity)? else {
+        return Ok(());
+    };
+    let Some(identified) = connected.await_welcome().await? else {
+        return Ok(());
+    };
+    let Some(mut playing) = identified.await_configure_emit_ready().await? else {
+        return Ok(());
+    };
 
     loop {
         match playing.next_event().await? {
             Event::Continue(p) => playing = p,
-            Event::Desynced(d) => playing = d.recover().await?,
-            Event::GameOver => return Ok(()),
+            Event::Desynced(d) => {
+                let Some(p) = d.recover().await? else {
+                    return Ok(());
+                };
+                playing = p;
+            },
+            Event::GameOver | Event::CleanClose => return Ok(()),
         }
     }
 }
@@ -350,10 +361,15 @@ impl<B: EmbeddedBot> Setup<B, Initial> {
 
     /// Emit `BotMsg::Identify` from the bot's declared identity + options.
     ///
-    /// Synchronous: `UnboundedSender::send` never awaits.
-    fn emit_identify(self, identity: &PlayerIdentity) -> Result<Setup<B, Connected>, PlayerError> {
+    /// Synchronous: `UnboundedSender::send` never awaits. Returns `Ok(None)`
+    /// if the player handle was already dropped (clean local close).
+    fn emit_identify(
+        self,
+        identity: &PlayerIdentity,
+    ) -> Result<Option<Setup<B, Connected>>, PlayerError> {
         let options = self.bot.option_defs();
-        self.core
+        if self
+            .core
             .bot_tx
             .send(BotMsg::Identify {
                 name: identity.name.clone(),
@@ -361,29 +377,35 @@ impl<B: EmbeddedBot> Setup<B, Initial> {
                 agent_id: identity.agent_id.clone(),
                 options,
             })
-            .map_err(|_| PlayerError::TransportError("bot_tx closed".into()))?;
-        Ok(Setup {
+            .is_err()
+        {
+            return Ok(None);
+        }
+        Ok(Some(Setup {
             bot: self.bot,
             core: self.core,
             state: Connected,
-        })
+        }))
     }
 }
 
 impl<B: EmbeddedBot> Setup<B, Connected> {
     /// Await `HostMsg::Welcome`, store the assigned player slot.
-    async fn await_welcome(mut self) -> Result<Setup<B, Identified>, PlayerError> {
+    ///
+    /// Returns `Ok(None)` if the player handle was dropped before Welcome
+    /// arrived (clean local close).
+    async fn await_welcome(mut self) -> Result<Option<Setup<B, Identified>>, PlayerError> {
         match self.core.host_rx.recv().await {
-            Some(HostMsg::Welcome { player_slot }) => Ok(Setup {
+            Some(HostMsg::Welcome { player_slot }) => Ok(Some(Setup {
                 bot: self.bot,
                 core: self.core,
                 state: Identified { player_slot },
-            }),
+            })),
             Some(HostMsg::ProtocolError { reason }) => Err(PlayerError::ProtocolError(reason)),
             Some(other) => Err(PlayerError::ProtocolError(format!(
                 "expected Welcome, got {other:?}"
             ))),
-            None => Err(PlayerError::TransportError("host_rx closed".into())),
+            None => Ok(None),
         }
     }
 }
@@ -395,7 +417,11 @@ impl<B: EmbeddedBot> Setup<B, Identified> {
     ///
     /// Options whose `apply_option` returns `Err` are logged but do not abort
     /// setup (fault policy: "warn and use default", matching the SDK).
-    async fn await_configure_emit_ready(mut self) -> Result<Playing<B, Synced>, PlayerError> {
+    /// Returns `Ok(None)` if the player handle was dropped before Configure
+    /// arrived or before Ready could be emitted (clean local close).
+    async fn await_configure_emit_ready(
+        mut self,
+    ) -> Result<Option<Playing<B, Synced>>, PlayerError> {
         let (options, match_config) = match self.core.host_rx.recv().await {
             Some(HostMsg::Configure {
                 options,
@@ -409,7 +435,7 @@ impl<B: EmbeddedBot> Setup<B, Identified> {
                     "expected Configure, got {other:?}"
                 )));
             },
-            None => return Err(PlayerError::TransportError("host_rx closed".into())),
+            None => return Ok(None),
         };
 
         for (name, value) in &options {
@@ -421,12 +447,16 @@ impl<B: EmbeddedBot> Setup<B, Identified> {
         let game = build_engine_state(&match_config)?;
         let hash = hash_from_game(&game, Direction::Stay, Direction::Stay);
 
-        self.core
+        if self
+            .core
             .bot_tx
             .send(BotMsg::Ready { state_hash: hash })
-            .map_err(|_| PlayerError::TransportError("bot_tx closed".into()))?;
+            .is_err()
+        {
+            return Ok(None);
+        }
 
-        Ok(Playing {
+        Ok(Some(Playing {
             bot: Some(self.bot),
             core: self.core,
             player_slot: self.state.player_slot,
@@ -435,7 +465,7 @@ impl<B: EmbeddedBot> Setup<B, Identified> {
             last_moves: (Direction::Stay, Direction::Stay),
             inner: InnerState::Idle,
             _sync: std::marker::PhantomData,
-        })
+        }))
     }
 }
 
@@ -486,6 +516,9 @@ enum Event<B> {
     Desynced(Playing<B, Desynced>),
     /// `HostMsg::GameOver` received and processed; dispatcher exits.
     GameOver,
+    /// Player handle dropped (host_rx closed or bot_tx send failed).
+    /// Dispatcher exits cleanly with `Ok(())`.
+    CleanClose,
 }
 
 impl<B: EmbeddedBot> Playing<B, Synced> {
@@ -496,12 +529,9 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
     /// - `Event::Desynced` — hash mismatch detected, Resync emitted.
     /// - `Event::GameOver` — GameOver processed, dispatcher exits.
     async fn next_event(mut self) -> Result<Event<B>, PlayerError> {
-        let msg = self
-            .core
-            .host_rx
-            .recv()
-            .await
-            .ok_or_else(|| PlayerError::TransportError("host_rx closed".into()))?;
+        let Some(msg) = self.core.host_rx.recv().await else {
+            return Ok(Event::CleanClose);
+        };
 
         match msg {
             HostMsg::GoPreprocess { state_hash } => self.handle_go_preprocess(state_hash).await,
@@ -554,10 +584,9 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
         self.inner = InnerState::Preprocessing;
         self.core.stopped.store(false, Ordering::Relaxed);
         self.run_preprocess(state_hash).await?;
-        self.core
-            .bot_tx
-            .send(BotMsg::PreprocessingDone)
-            .map_err(|_| PlayerError::TransportError("bot_tx closed".into()))?;
+        if self.core.bot_tx.send(BotMsg::PreprocessingDone).is_err() {
+            return Ok(Event::CleanClose);
+        }
         self.inner = InnerState::Idle;
         Ok(Event::Continue(self))
     }
@@ -577,7 +606,8 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
         self.inner = InnerState::Thinking;
         self.core.stopped.store(false, Ordering::Relaxed);
         let (turn, direction, think_ms) = self.run_think(state_hash).await?;
-        self.core
+        if self
+            .core
             .bot_tx
             .send(BotMsg::Action {
                 direction,
@@ -586,7 +616,10 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
                 state_hash,
                 think_ms,
             })
-            .map_err(|_| PlayerError::TransportError("bot_tx closed".into()))?;
+            .is_err()
+        {
+            return Ok(Event::CleanClose);
+        }
         self.inner = InnerState::Idle;
         Ok(Event::Continue(self))
     }
@@ -626,19 +659,27 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
         let local_hash = hash_from_game(&self.game, p1_dir, p2_dir);
 
         if local_hash == new_hash {
-            self.core
+            if self
+                .core
                 .bot_tx
                 .send(BotMsg::SyncOk { hash: local_hash })
-                .map_err(|_| PlayerError::TransportError("bot_tx closed".into()))?;
+                .is_err()
+            {
+                return Ok(Event::CleanClose);
+            }
             self.inner = InnerState::Syncing;
             Ok(Event::Continue(self))
         } else {
-            self.core
+            if self
+                .core
                 .bot_tx
                 .send(BotMsg::Resync {
                     my_hash: local_hash,
                 })
-                .map_err(|_| PlayerError::TransportError("bot_tx closed".into()))?;
+                .is_err()
+            {
+                return Ok(Event::CleanClose);
+            }
             Ok(Event::Desynced(Playing {
                 bot: self.bot,
                 core: self.core,
@@ -703,7 +744,10 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
 impl<B: EmbeddedBot> Playing<B, Desynced> {
     /// Await `HostMsg::FullState`, rebuild the local mirror, emit `SyncOk`,
     /// return to `Playing<Synced>`.
-    async fn recover(mut self) -> Result<Playing<B, Synced>, PlayerError> {
+    ///
+    /// Returns `Ok(None)` if the player handle was dropped before recovery
+    /// completed (clean local close).
+    async fn recover(mut self) -> Result<Option<Playing<B, Synced>>, PlayerError> {
         let (match_config, turn_state) = match self.core.host_rx.recv().await {
             Some(HostMsg::FullState {
                 match_config,
@@ -717,19 +761,18 @@ impl<B: EmbeddedBot> Playing<B, Desynced> {
                     "expected FullState while Desynced, got {other:?}"
                 )));
             },
-            None => return Err(PlayerError::TransportError("host_rx closed".into())),
+            None => return Ok(None),
         };
 
         self.match_config = match_config;
         self.game = rebuild_engine_state(&self.match_config, &turn_state)?;
         self.last_moves = (turn_state.player1_last_move, turn_state.player2_last_move);
         let hash = hash_from_game(&self.game, self.last_moves.0, self.last_moves.1);
-        self.core
-            .bot_tx
-            .send(BotMsg::SyncOk { hash })
-            .map_err(|_| PlayerError::TransportError("bot_tx closed".into()))?;
+        if self.core.bot_tx.send(BotMsg::SyncOk { hash }).is_err() {
+            return Ok(None);
+        }
 
-        Ok(Playing {
+        Ok(Some(Playing {
             bot: self.bot,
             core: self.core,
             player_slot: self.player_slot,
@@ -738,7 +781,7 @@ impl<B: EmbeddedBot> Playing<B, Desynced> {
             last_moves: self.last_moves,
             inner: InnerState::Idle,
             _sync: std::marker::PhantomData,
-        })
+        }))
     }
 }
 
@@ -941,10 +984,8 @@ mod tests {
         }
 
         // Setup is done; dispatcher is now in Playing<Synced>, awaiting a
-        // host message. Close the player; dispatcher sees host_tx drop and
-        // exits with a TransportError ("host_rx closed"). That's the
-        // expected clean-close semantics for a synced player with no pending
-        // GameOver.
+        // host message. Dropping the player closes host_tx; the dispatcher
+        // sees recv() yield None from Idle and exits cleanly.
         drop(player);
     }
 

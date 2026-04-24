@@ -376,11 +376,8 @@ async fn close_during_idle_exits_cleanly() {
     let _hash = walk_through_setup(&mut player).await;
 
     // Sitting in Playing<Synced> / Idle. Closing drops host_tx; the
-    // dispatcher's host_rx.recv() yields None → TransportError. `close()`
-    // surfaces that verbatim — not a regression, just the protocol's
-    // "channel gone" semantics without a GameOver.
-    let err = player.close().await.expect_err("close should surface error");
-    assert!(matches!(err, PlayerError::TransportError(_)), "{err:?}");
+    // dispatcher sees host_rx.recv() yield None from Idle and exits Ok(()).
+    player.close().await.expect("close should succeed");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
