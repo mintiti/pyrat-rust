@@ -35,6 +35,12 @@ use tokio::task::JoinHandle;
 
 use super::{EventSink, Player, PlayerError, PlayerIdentity};
 
+/// Maximum time `close` waits for the dispatcher to exit before aborting it.
+/// A bot that ignores `ctx.should_stop()` may still be running on a
+/// `spawn_blocking` thread when this fires; the task is detached. Honors the
+/// `Player::close` "best-effort, bounded" contract.
+const CLOSE_GRACE: Duration = Duration::from_secs(1);
+
 /// In-process bot interface.
 ///
 /// Shape mirrors the SDK `Bot` trait so a bot author switches between
@@ -228,6 +234,9 @@ pub struct EmbeddedPlayer {
     host_tx: mpsc::UnboundedSender<HostMsg>,
     bot_rx: mpsc::UnboundedReceiver<BotMsg>,
     dispatcher: Option<JoinHandle<Result<(), PlayerError>>>,
+    /// Cooperative-stop signal shared with the dispatcher and any in-flight
+    /// `EmbeddedCtx`. `close` flips this so bots polling `should_stop` exit.
+    stopped: Arc<AtomicBool>,
 }
 
 impl EmbeddedPlayer {
@@ -240,18 +249,21 @@ impl EmbeddedPlayer {
     pub fn new<B: EmbeddedBot>(bot: B, identity: PlayerIdentity, event_sink: EventSink) -> Self {
         let (host_tx, host_rx) = mpsc::unbounded_channel();
         let (bot_tx, bot_rx) = mpsc::unbounded_channel();
+        let stopped = Arc::new(AtomicBool::new(false));
         let dispatcher = tokio::spawn(dispatcher_task(
             bot,
             identity.clone(),
             event_sink,
             host_rx,
             bot_tx,
+            stopped.clone(),
         ));
         Self {
             identity,
             host_tx,
             bot_rx,
             dispatcher: Some(dispatcher),
+            stopped,
         }
     }
 
@@ -288,14 +300,49 @@ impl Player for EmbeddedPlayer {
     async fn close(self) -> Result<(), PlayerError> {
         let Self {
             host_tx,
-            mut bot_rx,
+            bot_rx,
             dispatcher,
+            stopped,
             identity: _,
         } = self;
-        // Signal the dispatcher by dropping host_tx; drain any pending BotMsgs.
+        // Signal cooperative bots first so they get the earliest possible
+        // chance to observe `should_stop()`. Order matters: another tokio
+        // worker can drive the dispatcher past the closed channel before our
+        // store completes if we drop host_tx first.
+        stopped.store(true, Ordering::Relaxed);
         drop(host_tx);
-        while bot_rx.recv().await.is_some() {}
-        reap(dispatcher).await
+        // Don't drain bot_rx: queued BotMsgs at close time are observer state
+        // nobody is consuming, and any in-flight EmbeddedCtx in spawn_blocking
+        // holds a bot_tx clone that keeps the channel open until the bot
+        // returns — that's the unbounded-wait bug we're fixing.
+        drop(bot_rx);
+
+        let Some(mut handle) = dispatcher else {
+            return Ok(());
+        };
+        // Bounded wait for the dispatcher to exit. We borrow the JoinHandle
+        // so the timeout branch can still call `abort()` on it — using
+        // `tokio::time::timeout(_, reap(dispatcher))` would consume the
+        // handle into reap and drop it on timeout, leaving nothing to abort.
+        tokio::select! {
+            result = &mut handle => match result {
+                // Swallow any dispatcher Err: close was intentional, and the
+                // contract authorizes "if the peer is already gone, swallow
+                // the error and return Ok(())". The expected error here is
+                // `TransportError("host_rx closed while bot is working")`.
+                Ok(_) => Ok(()),
+                Err(join_err) => Err(PlayerError::TransportError(format!(
+                    "dispatcher panicked: {join_err}"
+                ))),
+            },
+            () = tokio::time::sleep(CLOSE_GRACE) => {
+                // The bot ignored `should_stop`. Abort the dispatcher; the
+                // spawn_blocking task running the bot is detached, which is
+                // unavoidable since spawn_blocking tasks cannot be aborted.
+                handle.abort();
+                Ok(())
+            }
+        }
     }
 }
 
@@ -326,12 +373,13 @@ async fn dispatcher_task<B: EmbeddedBot>(
     event_sink: EventSink,
     host_rx: mpsc::UnboundedReceiver<HostMsg>,
     bot_tx: mpsc::UnboundedSender<BotMsg>,
+    stopped: Arc<AtomicBool>,
 ) -> Result<(), PlayerError> {
     let core = DispatcherCore {
         event_sink,
         host_rx,
         bot_tx,
-        stopped: Arc::new(AtomicBool::new(false)),
+        stopped,
     };
 
     let initial = Setup::<B, Initial>::new(bot, core);
@@ -791,7 +839,8 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
         });
         let (returned_bot, direction) = self.watch_for_stop(&mut handle, turn).await?;
         self.bot = Some(returned_bot);
-        let think_ms = start.elapsed().as_millis() as u32;
+        // Clamp to 1: the host rejects think_ms == 0 (indistinguishable from missing field).
+        let think_ms = (start.elapsed().as_millis() as u32).max(1);
         Ok((turn, direction, think_ms))
     }
 
@@ -824,6 +873,11 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
                             )));
                         }
                         None => {
+                            // Defense in depth: signal the bot cooperatively
+                            // so it gets a chance to exit before this
+                            // dispatcher is reaped. `close` already sets this,
+                            // but other paths that drop host_tx don't.
+                            self.core.stopped.store(true, Ordering::Relaxed);
                             return Err(PlayerError::TransportError(format!(
                                 "host_rx closed while bot is working \
                                  (player={player_slot:?}, turn={turn})"

@@ -681,3 +681,104 @@ async fn protocol_error_advance_while_thinking() {
     // down. DelayedBot sleeps 100ms; give it headroom.
     tokio::time::sleep(Duration::from_millis(150)).await;
 }
+
+// ── close + think_ms coverage ────────────────────────
+
+/// Bot that sleeps inside `think` for longer than the close grace period
+/// and never polls `should_stop`. Used to verify `close` is bounded by the
+/// grace timeout, not by the bot's wall time.
+struct UncooperativeSleeperBot;
+impl Options for UncooperativeSleeperBot {}
+impl EmbeddedBot for UncooperativeSleeperBot {
+    fn think(&mut self, _: &HashedTurnState, _: &EmbeddedCtx) -> Direction {
+        // Must exceed `embedded::CLOSE_GRACE` (1s) so the close timeout fires.
+        std::thread::sleep(Duration::from_millis(1200));
+        Direction::Stay
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn close_during_cooperative_think_returns_promptly() {
+    let started = Arc::new(Notify::new());
+    let mut player = EmbeddedPlayer::new(
+        SpinBot {
+            started: started.clone(),
+        },
+        identity(),
+        EventSink::noop(),
+    );
+    let hash = walk_through_setup(&mut player).await;
+
+    player
+        .send(HostMsg::Go {
+            state_hash: hash,
+            limits: SearchLimits::default(),
+        })
+        .await
+        .unwrap();
+    started.notified().await;
+
+    // SpinBot exits as soon as `should_stop()` flips. close should set the
+    // flag and reap well under the grace period.
+    let close_start = std::time::Instant::now();
+    player.close().await.expect("close should succeed");
+    let elapsed = close_start.elapsed();
+    assert!(
+        elapsed < Duration::from_millis(300),
+        "close took {elapsed:?}, expected fast exit for cooperative bot"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn close_during_uncooperative_think_is_bounded() {
+    let mut player = EmbeddedPlayer::new(UncooperativeSleeperBot, identity(), EventSink::noop());
+    let hash = walk_through_setup(&mut player).await;
+
+    player
+        .send(HostMsg::Go {
+            state_hash: hash,
+            limits: SearchLimits::default(),
+        })
+        .await
+        .unwrap();
+    // Let the bot enter spawn_blocking before close.
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // close should fire its grace timeout (~1s) and abort the dispatcher.
+    // Bound the assertion at 1.5s to leave room for scheduling jitter.
+    let close_start = std::time::Instant::now();
+    player.close().await.expect("close should succeed within grace");
+    let elapsed = close_start.elapsed();
+    assert!(
+        elapsed < Duration::from_millis(1500),
+        "close took {elapsed:?}, expected bounded by CLOSE_GRACE (~1s)"
+    );
+
+    // Let the detached blocking bot task drain before runtime shutdown.
+    // UncooperativeSleeperBot sleeps 1200ms; give it headroom from t=0.
+    tokio::time::sleep(Duration::from_millis(1300)).await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn think_ms_clamped_to_one_for_fast_bots() {
+    let mut player = EmbeddedPlayer::new(StayBot, identity(), EventSink::noop());
+    let hash = walk_through_setup(&mut player).await;
+
+    player
+        .send(HostMsg::Go {
+            state_hash: hash,
+            limits: SearchLimits::default(),
+        })
+        .await
+        .unwrap();
+
+    match recv_ok(&mut player).await {
+        BotMsg::Action { think_ms, .. } => {
+            assert!(
+                think_ms >= 1,
+                "think_ms must be clamped to >=1 (host rejects 0), got {think_ms}"
+            );
+        },
+        other => panic!("expected Action, got {other:?}"),
+    }
+}
