@@ -5,6 +5,7 @@ edition = "2021"
 publish = false
 
 [dependencies]
+pyrat-bot-api = { path = "../bot-api" }
 pyrat-wire = { path = "../../server/wire" }
 pyrat-protocol = { path = "../../server/protocol" }
 pyrat-engine-interface = { path = "../../interface" }

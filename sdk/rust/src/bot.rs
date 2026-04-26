@@ -5,6 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use pyrat::Direction;
+use pyrat_bot_api::{BotContext, InfoSink};
 use pyrat_wire::{GameResult, Player};
 use tokio::sync::mpsc;
 
@@ -30,7 +31,7 @@ impl InfoSender {
     }
 
     /// Send a pre-built frame through the writer channel.
-    pub fn send(&self, frame: &[u8]) {
+    pub(crate) fn send(&self, frame: &[u8]) {
         if let Err(e) = self.tx.send(frame.to_vec()) {
             eprintln!("[sdk] send() failed: channel closed ({e})");
         }
@@ -54,41 +55,65 @@ impl InfoSender {
     }
 }
 
-/// Parameters for sending an Info message to the host.
-///
-/// Use [`InfoParams::for_player`] to create with defaults, then override
-/// fields with struct update syntax:
-///
-/// ```ignore
-/// ctx.send_info(&InfoParams {
-///     depth: 5,
-///     score: 3.0,
-///     ..InfoParams::for_player(player)
-/// });
-/// ```
-pub struct InfoParams<'a> {
-    pub player: Player,
-    pub multipv: u16,
-    pub target: Option<(u8, u8)>,
-    pub depth: u16,
-    pub nodes: u32,
-    pub score: Option<f32>,
-    pub pv: &'a [Direction],
-    pub message: &'a str,
+pub use pyrat_bot_api::InfoParams;
+
+impl InfoSink for InfoSender {
+    fn send_info(&self, params: &InfoParams<'_>, turn: u16, state_hash: u64) {
+        let frame = crate::wire::build_info(
+            params.player,
+            params.multipv,
+            params.target,
+            params.depth,
+            params.nodes,
+            params.score,
+            params.pv,
+            params.message,
+            turn,
+            state_hash,
+        );
+        self.send(&frame);
+    }
 }
 
-impl InfoParams<'_> {
-    pub fn for_player(player: Player) -> Self {
-        Self {
-            player,
-            multipv: 0,
-            target: None,
-            depth: 0,
-            nodes: 0,
-            score: None,
-            pv: &[],
-            message: "",
-        }
+impl BotContext for Context {
+    fn player(&self) -> Player {
+        self.player
+    }
+
+    fn turn(&self) -> u16 {
+        self.turn
+    }
+
+    fn state_hash(&self) -> u64 {
+        self.state_hash
+    }
+
+    fn should_stop(&self) -> bool {
+        Context::should_stop(self)
+    }
+
+    fn time_remaining_ms(&self) -> u64 {
+        Context::time_remaining_ms(self)
+    }
+
+    fn think_elapsed_ms(&self) -> u32 {
+        Context::think_elapsed_ms(self)
+    }
+
+    fn send_info(&self, params: &InfoParams<'_>) {
+        Context::send_info(self, params);
+    }
+
+    fn send_provisional(&self, direction: Direction) {
+        Context::send_provisional(self, direction);
+    }
+
+    fn info_sender(&self) -> Option<pyrat_bot_api::InfoSender> {
+        self.info_sender
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|sdk_sender| pyrat_bot_api::InfoSender::new(Arc::new(sdk_sender.clone())))
     }
 }
 

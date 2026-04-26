@@ -1,0 +1,13 @@
+[package]
+name = "pyrat-bot-api"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+pyrat = { package = "pyrat-rust", path = "../../engine", default-features = false }
+pyrat-wire = { path = "../../server/wire" }
+pyrat-protocol = { path = "../../server/protocol" }
+
+[lints]
+workspace = true
