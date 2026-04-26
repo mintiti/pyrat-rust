@@ -300,7 +300,7 @@ mod tests {
         fbb: &mut FlatBufferBuilder<'_>,
         player: Player,
         multipv: u16,
-        target: Option<(u8, u8)>,
+        target: Option<Coordinates>,
         depth: u16,
         nodes: u32,
         score: Option<f32>,
@@ -319,7 +319,7 @@ mod tests {
         } else {
             Some(fbb.create_vector(pv))
         };
-        let target_v = target.map(|(x, y)| Vec2::new(x, y));
+        let target_v = target.map(|coords| Vec2::new(coords.x, coords.y));
 
         let info = wire::Info::create(
             fbb,
@@ -346,7 +346,7 @@ mod tests {
             &mut fbb,
             Player::Player2,
             3,
-            Some((10, 7)),
+            Some(Coordinates::new(10, 7)),
             5,
             42000,
             Some(2.5),

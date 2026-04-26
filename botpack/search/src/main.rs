@@ -22,7 +22,9 @@
 //!
 //! SDK features: GameSim, effective_moves, should_stop, send_info, send_provisional.
 
-use pyrat_sdk::{Bot, Context, Direction, GameSim, GameState, InfoParams, Options, Player};
+use pyrat_sdk::{
+    Bot, Context, Coordinates, Direction, GameSim, GameState, InfoParams, Options, Player,
+};
 use rand::prelude::SliceRandom;
 
 struct Search {
@@ -379,7 +381,7 @@ impl Search {
     }
 }
 
-type Target = Option<(u8, u8)>;
+type Target = Option<Coordinates>;
 
 fn find_targets(
     sim: &mut GameSim,
@@ -414,11 +416,11 @@ fn find_targets(
 
         if our_target.is_none() && cur_our > prev_our {
             let pos = if am_player1 { clone.player1_position() } else { clone.player2_position() };
-            our_target = Some((pos.x, pos.y));
+            our_target = Some(pos);
         }
         if opp_target.is_none() && cur_opp > prev_opp {
             let pos = if am_player1 { clone.player2_position() } else { clone.player1_position() };
-            opp_target = Some((pos.x, pos.y));
+            opp_target = Some(pos);
         }
 
         if our_target.is_some() && opp_target.is_some() {

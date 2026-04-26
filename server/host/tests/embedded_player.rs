@@ -747,7 +747,10 @@ async fn close_during_uncooperative_think_is_bounded() {
     // close should fire its grace timeout (~1s) and abort the dispatcher.
     // Bound the assertion at 1.5s to leave room for scheduling jitter.
     let close_start = std::time::Instant::now();
-    player.close().await.expect("close should succeed within grace");
+    player
+        .close()
+        .await
+        .expect("close should succeed within grace");
     let elapsed = close_start.elapsed();
     assert!(
         elapsed < Duration::from_millis(1500),

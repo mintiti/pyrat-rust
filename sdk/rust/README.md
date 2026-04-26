@@ -180,7 +180,7 @@ use pyrat_sdk::InfoParams;
 
 ctx.send_info(&InfoParams {
     depth: 5,
-    score: 3.0,
+    score: Some(3.0),
     message: "best: Right",
     ..InfoParams::for_player(state.my_player())
 });
@@ -190,10 +190,10 @@ ctx.send_info(&InfoParams {
 |---|---|---|
 | `player` | `Player` | Which player this info is about |
 | `multipv` | `u16` | Principal variation index (0 for single line) |
-| `target` | `Option<(u8, u8)>` | Cell the bot is heading toward |
+| `target` | `Option<Coordinates>` | Cell the bot is heading toward |
 | `depth` | `u16` | Search depth reached |
 | `nodes` | `u32` | Nodes evaluated |
-| `score` | `f32` | Evaluation score |
+| `score` | `Option<f32>` | Evaluation score |
 | `pv` | `&[Direction]` | Principal variation (sequence of moves) |
 | `message` | `&str` | Free-form debug text |
 

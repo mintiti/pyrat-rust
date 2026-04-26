@@ -19,7 +19,7 @@ impl Bot for Greedy {
         let chosen = candidates.choose(&mut rand::rng());
         match chosen {
             Some(result) if !result.path.is_empty() => {
-                let target = (result.target.x, result.target.y);
+                let target = result.target;
                 ctx.send_info(&InfoParams {
                     multipv: 1,
                     target: Some(target),
@@ -27,8 +27,8 @@ impl Bot for Greedy {
                     pv: &result.path,
                     message: &format!(
                         "target ({}, {}), {} steps",
-                        target.0,
-                        target.1,
+                        target.x,
+                        target.y,
                         result.path.len()
                     ),
                     ..InfoParams::for_player(state.my_player())
