@@ -8,14 +8,15 @@
 //! distinct from the host-internal `HostCommand`/`SessionMsg` channel types,
 //! which will eventually be replaced.
 //!
-//! **Status: spec-only.** Not yet consumed by host or SDK. The current host
-//! uses `HostCommand`/`SessionMsg` internally. These enums will be wired in
-//! when the Player trait is implemented.
+//! Consumed today by `EmbeddedPlayer` (in `pyrat-host`) for the in-process
+//! Player trait implementation. The TCP path still uses the legacy
+//! `HostCommand`/`SessionMsg` types in `pyrat-host`; those will be replaced
+//! when `TcpPlayer` lands.
 
 use pyrat::Direction;
 use pyrat_wire::{GameResult, Player};
 
-use crate::{OwnedInfo, OwnedMatchConfig, OwnedOptionDef, OwnedTurnState};
+use crate::{Info, MatchConfig, OptionDef, TurnState};
 
 // ── Search limits ───────────────────────────────────
 
@@ -57,7 +58,7 @@ pub enum HostMsg {
     /// declared none in Identify.
     Configure {
         options: Vec<(String, String)>,
-        match_config: Box<OwnedMatchConfig>,
+        match_config: Box<MatchConfig>,
     },
 
     /// Playing phase: begin preprocessing.
@@ -100,7 +101,7 @@ pub enum HostMsg {
     /// prior Advance/SyncOk exchange needed. Used for analysis mode (GUI sends
     /// arbitrary position), restart, and reconnection recovery.
     GoState {
-        turn_state: Box<OwnedTurnState>,
+        turn_state: Box<TurnState>,
         state_hash: u64,
         limits: SearchLimits,
     },
@@ -120,8 +121,8 @@ pub enum HostMsg {
     /// is preserved: recovery returns to where the client was, not back to
     /// the start.
     FullState {
-        match_config: Box<OwnedMatchConfig>,
-        turn_state: Box<OwnedTurnState>,
+        match_config: Box<MatchConfig>,
+        turn_state: Box<TurnState>,
     },
 
     /// Any phase: protocol violation, followed by disconnect.
@@ -161,7 +162,7 @@ pub enum BotMsg {
         name: String,
         author: String,
         agent_id: String,
-        options: Vec<OwnedOptionDef>,
+        options: Vec<OptionDef>,
     },
 
     /// Lobby phase: ready with state hash (initial sync).
@@ -225,7 +226,7 @@ pub enum BotMsg {
     /// inspecting contents. Tagged with `state_hash` for correlation with
     /// the game state being analyzed. Valid during both Preprocessing and
     /// Thinking.
-    Info(OwnedInfo),
+    Info(Info),
 
     /// Playing phase: render commands for GUI visualization (sideband).
     ///

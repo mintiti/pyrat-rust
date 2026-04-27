@@ -650,7 +650,7 @@ mod tests {
     /// With the fix: think() sees the game is over and exits immediately.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn turn_state_does_not_clobber_game_over_stopped_flag() {
-        use pyrat_protocol::{HashedTurnState, OwnedGameOver, OwnedMatchConfig, OwnedTurnState};
+        use pyrat_protocol::{GameOver, HashedTurnState, MatchConfig, TurnState};
         use std::sync::atomic::AtomicU32;
 
         // Bot that spins in think(), counting iterations until should_stop().
@@ -671,7 +671,7 @@ mod tests {
         }
 
         // Minimal game state with a short move timeout.
-        let cfg = OwnedMatchConfig {
+        let cfg = MatchConfig {
             width: 3,
             height: 3,
             max_turns: 10,
@@ -702,7 +702,7 @@ mod tests {
         // TurnState followed immediately by GameOver.
         msg_tx
             .send(HostMsg::TurnState(HashedTurnState::with_unverified_hash(
-                OwnedTurnState {
+                TurnState {
                     turn: 2,
                     player1_position: pyrat::Coordinates::new(0, 0),
                     player2_position: pyrat::Coordinates::new(2, 2),
@@ -719,7 +719,7 @@ mod tests {
             .unwrap();
 
         msg_tx
-            .send(HostMsg::GameOver(OwnedGameOver {
+            .send(HostMsg::GameOver(GameOver {
                 result: GameResult::Draw,
                 player1_score: 0.0,
                 player2_score: 0.0,

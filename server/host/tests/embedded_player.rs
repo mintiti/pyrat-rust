@@ -15,9 +15,7 @@ use pyrat_host::player::{
     EmbeddedBot, EmbeddedCtx, EmbeddedPlayer, EventSink, InfoParams, Options, Player, PlayerError,
     PlayerIdentity,
 };
-use pyrat_protocol::{
-    BotMsg, HashedTurnState, HostMsg, OwnedMatchConfig, OwnedTurnState, SearchLimits,
-};
+use pyrat_protocol::{BotMsg, HashedTurnState, HostMsg, MatchConfig, SearchLimits, TurnState};
 use pyrat_wire::{GameResult, Player as PlayerSlot, TimingMode};
 use tokio::sync::{mpsc, Notify};
 use tokio::time::timeout;
@@ -32,8 +30,8 @@ fn identity() -> PlayerIdentity {
     }
 }
 
-fn sample_match_config() -> Box<OwnedMatchConfig> {
-    Box::new(OwnedMatchConfig {
+fn sample_match_config() -> Box<MatchConfig> {
+    Box::new(MatchConfig {
         width: 5,
         height: 5,
         max_turns: 100,
@@ -49,11 +47,11 @@ fn sample_match_config() -> Box<OwnedMatchConfig> {
     })
 }
 
-/// Default `OwnedTurnState` matching `sample_match_config`'s layout: players
+/// Default `TurnState` matching `sample_match_config`'s layout: players
 /// at their starting corners, one cheese at (2, 2), no mud, zero scores,
 /// last moves `Stay`. Callers override fields via struct update syntax.
-fn base_turn_state(turn: u16) -> OwnedTurnState {
-    OwnedTurnState {
+fn base_turn_state(turn: u16) -> TurnState {
+    TurnState {
         turn,
         player1_position: Coordinates::new(0, 0),
         player2_position: Coordinates::new(4, 4),
@@ -289,7 +287,7 @@ async fn desync_emits_resync_then_fullstate_recovers() {
 
     // Send a FullState that restores a known position. The bot should emit
     // SyncOk with the hash of that state.
-    let recovery_state = OwnedTurnState {
+    let recovery_state = TurnState {
         player1_position: Coordinates::new(1, 0),
         player1_last_move: Direction::Right,
         ..base_turn_state(1)

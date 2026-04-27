@@ -6,7 +6,7 @@
 /// Bots with options: `#[derive(Options)]` on the struct.
 pub trait Options {
     /// Declare configurable options.
-    fn option_defs(&self) -> Vec<pyrat_protocol::OwnedOptionDef> {
+    fn option_defs(&self) -> Vec<pyrat_protocol::OptionDef> {
         vec![]
     }
 

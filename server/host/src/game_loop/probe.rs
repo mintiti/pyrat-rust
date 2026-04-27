@@ -5,7 +5,7 @@ use tokio::net::TcpListener;
 use tracing::debug;
 
 use crate::session::{extract_bot_packet, BotPayload};
-use pyrat_protocol::OwnedOptionDef;
+use pyrat_protocol::OptionDef;
 use pyrat_wire::framing::FrameReader;
 
 use super::config::BotConfig;
@@ -19,7 +19,7 @@ pub struct ProbeResult {
     pub name: String,
     pub author: String,
     pub agent_id: String,
-    pub options: Vec<OwnedOptionDef>,
+    pub options: Vec<OptionDef>,
 }
 
 /// What can go wrong when probing a bot.

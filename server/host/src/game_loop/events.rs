@@ -9,7 +9,7 @@ use tracing::warn;
 
 use crate::session::messages::DisconnectReason;
 use pyrat::Direction;
-use pyrat_protocol::{HashedTurnState, OwnedInfo, OwnedMatchConfig};
+use pyrat_protocol::{HashedTurnState, Info, MatchConfig};
 use pyrat_wire::Player;
 
 use super::playing::MatchResult;
@@ -30,7 +30,7 @@ pub enum MatchEvent {
     /// All bots connected, identified, configured, and preprocessed.
     SetupComplete,
     /// The match is starting — includes the resolved match configuration.
-    MatchStarted { config: OwnedMatchConfig },
+    MatchStarted { config: MatchConfig },
 
     // ── Playing ──────────────────────────────────
     /// A turn was played and the engine stepped.
@@ -46,7 +46,7 @@ pub enum MatchEvent {
         sender: Player,
         turn: u16,
         state_hash: u64,
-        info: OwnedInfo,
+        info: Info,
     },
     /// A bot timed out on an action this turn.
     BotTimeout { player: Player, turn: u16 },

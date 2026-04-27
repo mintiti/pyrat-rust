@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 
 use pyrat::game::builder::GameConfig;
 use pyrat_host::game_loop::{
-    accept_connections, build_owned_match_config, launch_bots, run_one_turn, run_setup, BotConfig,
+    accept_connections, build_match_config, launch_bots, run_one_turn, run_setup, BotConfig,
     MatchEvent, MatchSetup, PlayerEntry, PlayingConfig, PlayingState, SetupTiming, TurnOutcome,
 };
 use pyrat_host::session::messages::SessionMsg;
@@ -147,7 +147,7 @@ pub async fn run_check(bot_dir: &Path) -> CheckReport {
         },
     };
 
-    let match_config = build_owned_match_config(&game, TimingMode::Wait, 3000, 5000);
+    let match_config = build_match_config(&game, TimingMode::Wait, 3000, 5000);
 
     let listener = match TcpListener::bind("127.0.0.1:0").await {
         Ok(l) => l,

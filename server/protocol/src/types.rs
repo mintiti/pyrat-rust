@@ -1,8 +1,8 @@
-//! Owned protocol types extracted from FlatBuffers messages.
+//! Protocol types extracted from FlatBuffers messages.
 //!
-//! These types are the canonical representations of protocol data. Both the host
-//! and SDK use them. The codec (in the host or SDK) converts between FlatBuffers
-//! wire format and these owned types at the boundary.
+//! These types are the canonical representations of protocol data, shared by
+//! the host and SDK. The [`crate::codec`] module converts between FlatBuffers
+//! wire format and these types at the boundary.
 //!
 //! All position and direction fields use engine types (`Coordinates`, `Direction`).
 //! The codec is the only place that touches wire representations.
@@ -47,7 +47,7 @@ pub fn engine_to_wire_direction(d: Direction) -> pyrat_wire::Direction {
 /// Bots declare these in their Identify message to advertise knobs the host
 /// or GUI can set before the match starts. Mirrors UCI option declarations.
 #[derive(Debug, Clone)]
-pub struct OwnedOptionDef {
+pub struct OptionDef {
     pub name: String,
     pub option_type: OptionType,
     pub default_value: String,
@@ -63,7 +63,7 @@ pub struct OwnedOptionDef {
 /// Tagged with player, turn, and state_hash for correlation. The host
 /// forwards these to the event stream without inspecting them.
 #[derive(Debug, Clone)]
-pub struct OwnedInfo {
+pub struct Info {
     pub player: Player,
     pub multipv: u16,
     pub target: Option<Coordinates>,
@@ -92,7 +92,7 @@ pub struct MudEntry {
 /// Contains the maze layout, player positions, cheese, timing, and
 /// which players this connection controls.
 #[derive(Debug, Clone)]
-pub struct OwnedMatchConfig {
+pub struct MatchConfig {
     pub width: u8,
     pub height: u8,
     pub max_turns: u16,
@@ -111,7 +111,7 @@ pub struct OwnedMatchConfig {
 
 /// Game-over result data sent to bots at the end of a match.
 #[derive(Debug, Clone)]
-pub struct OwnedGameOver {
+pub struct GameOver {
     pub result: GameResult,
     pub player1_score: f32,
     pub player2_score: f32,
@@ -125,7 +125,7 @@ pub struct OwnedGameOver {
 /// which is a derived value. Use [`HashedTurnState`] to pair a turn state with
 /// a fingerprint of its fields.
 #[derive(Debug, Clone)]
-pub struct OwnedTurnState {
+pub struct TurnState {
     pub turn: u16,
     pub player1_position: Coordinates,
     pub player2_position: Coordinates,
@@ -138,7 +138,7 @@ pub struct OwnedTurnState {
     pub player2_last_move: Direction,
 }
 
-/// An [`OwnedTurnState`] paired with a 64-bit fingerprint of its
+/// An [`TurnState`] paired with a 64-bit fingerprint of its
 /// position-defining fields.
 ///
 /// The hash is computed once at construction time. Two states that a bot would
@@ -146,13 +146,13 @@ pub struct OwnedTurnState {
 /// it's a correlation tag, not a trust boundary.
 #[derive(Debug, Clone)]
 pub struct HashedTurnState {
-    inner: OwnedTurnState,
+    inner: TurnState,
     state_hash: u64,
 }
 
 impl HashedTurnState {
     /// Wrap a turn state, computing the hash from its fields.
-    pub fn new(ts: OwnedTurnState) -> Self {
+    pub fn new(ts: TurnState) -> Self {
         let state_hash = Self::compute_hash(&ts);
         Self {
             inner: ts,
@@ -167,7 +167,7 @@ impl HashedTurnState {
     /// wrapper does not verify this. Name chosen to advertise the trust:
     /// mismatches are only caught by the setup-phase hash handshake in
     /// consumers.
-    pub fn with_unverified_hash(ts: OwnedTurnState, state_hash: u64) -> Self {
+    pub fn with_unverified_hash(ts: TurnState, state_hash: u64) -> Self {
         Self {
             inner: ts,
             state_hash,
@@ -182,15 +182,15 @@ impl HashedTurnState {
     /// Consume the wrapper and return the inner turn state.
     ///
     /// Use `state_hash()` before calling this if you need the hash.
-    pub fn into_inner(self) -> OwnedTurnState {
+    pub fn into_inner(self) -> TurnState {
         self.inner
     }
 
     /// Deterministic hash of all game-position fields.
     ///
     /// Two states that a bot would analyze differently must hash differently.
-    /// If you add a field to [`OwnedTurnState`], update this function.
-    fn compute_hash(ts: &OwnedTurnState) -> u64 {
+    /// If you add a field to [`TurnState`], update this function.
+    fn compute_hash(ts: &TurnState) -> u64 {
         let mut h = std::collections::hash_map::DefaultHasher::new();
         ts.turn.hash(&mut h);
         ts.player1_position.hash(&mut h);
@@ -208,9 +208,9 @@ impl HashedTurnState {
 }
 
 impl Deref for HashedTurnState {
-    type Target = OwnedTurnState;
+    type Target = TurnState;
 
-    fn deref(&self) -> &OwnedTurnState {
+    fn deref(&self) -> &TurnState {
         &self.inner
     }
 }
@@ -219,8 +219,8 @@ impl Deref for HashedTurnState {
 mod tests {
     use super::*;
 
-    fn sample_turn_state() -> OwnedTurnState {
-        OwnedTurnState {
+    fn sample_turn_state() -> TurnState {
+        TurnState {
             turn: 42,
             player1_position: Coordinates::new(10, 7),
             player2_position: Coordinates::new(0, 0),

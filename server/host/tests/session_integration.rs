@@ -14,7 +14,7 @@ use pyrat_host::session::messages::*;
 use pyrat_host::session::{run_session, SessionConfig};
 use pyrat_host::wire::framing::{FrameReader, FrameWriter};
 use pyrat_host::wire::*;
-use pyrat_protocol::{HashedTurnState, OwnedMatchConfig, OwnedTurnState};
+use pyrat_protocol::{HashedTurnState, MatchConfig, TurnState};
 
 use common::*;
 
@@ -73,7 +73,7 @@ async fn try_recv(rx: &mut mpsc::Receiver<SessionMsg>) -> Option<SessionMsg> {
         .flatten()
 }
 
-fn session_match_config() -> OwnedMatchConfig {
+fn session_match_config() -> MatchConfig {
     let mut cfg = simple_match_config();
     cfg.controlled_players = vec![Player::Player1];
     cfg
@@ -169,7 +169,7 @@ async fn happy_path_full_lifecycle() {
     // 7. Host sends TurnState, bot sends Action
     cmd_tx
         .send(HostCommand::TurnState(Box::new(HashedTurnState::new(
-            OwnedTurnState {
+            TurnState {
                 turn: 1,
                 player1_position: Coordinates::new(20, 14),
                 player2_position: Coordinates::new(0, 0),
@@ -675,7 +675,7 @@ async fn stop_sends_wire_stop_and_session_stays_alive() {
     // Session stays alive — send TurnState after Stop.
     cmd_tx
         .send(HostCommand::TurnState(Box::new(HashedTurnState::new(
-            OwnedTurnState {
+            TurnState {
                 turn: 1,
                 player1_position: Coordinates::new(20, 14),
                 player2_position: Coordinates::new(0, 0),

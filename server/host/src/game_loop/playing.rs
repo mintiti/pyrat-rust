@@ -10,7 +10,7 @@ use pyrat::game::game_logic::GameState;
 use pyrat::Direction;
 
 use crate::session::messages::{HostCommand, SessionId, SessionMsg};
-use pyrat_protocol::{HashedTurnState, OwnedInfo, OwnedTurnState};
+use pyrat_protocol::{HashedTurnState, Info, TurnState};
 use pyrat_wire::{GameResult, Player};
 
 use super::config::{PlayingConfig, SessionHandle};
@@ -267,7 +267,7 @@ fn build_turn_state(game: &GameState, last_p1: Direction, last_p2: Direction) ->
     let p2 = &game.player2;
     let hash = game.state_hash();
     HashedTurnState::with_unverified_hash(
-        OwnedTurnState {
+        TurnState {
             turn: game.turn,
             player1_position: p1.current_pos,
             player2_position: p2.current_pos,
@@ -506,7 +506,7 @@ fn handle_info(
     session_players: &HashMap<SessionId, Vec<Player>>,
     event_tx: Option<&mpsc::UnboundedSender<MatchEvent>>,
     session_id: SessionId,
-    info: OwnedInfo,
+    info: Info,
 ) {
     if let Some(players) = session_players.get(&session_id) {
         if let Some(&sender) = players.first() {
@@ -781,7 +781,7 @@ mod tests {
         game_tx
             .send(SessionMsg::Info {
                 session_id: SessionId(1),
-                info: OwnedInfo {
+                info: Info {
                     player: Player::Player1,
                     multipv: 1,
                     target: None,
@@ -1063,7 +1063,7 @@ mod tests {
         game_tx
             .send(SessionMsg::Info {
                 session_id: SessionId(1),
-                info: OwnedInfo {
+                info: Info {
                     player: Player::Player1,
                     multipv: 1,
                     target: None,
@@ -1145,8 +1145,8 @@ mod tests {
     use pyrat_protocol::HashedTurnState;
 
     /// Helper: baseline state for hash distinctness tests.
-    fn baseline_turn_state() -> OwnedTurnState {
-        OwnedTurnState {
+    fn baseline_turn_state() -> TurnState {
+        TurnState {
             turn: 5,
             player1_position: Coordinates::new(1, 2),
             player2_position: Coordinates::new(3, 4),
@@ -1167,80 +1167,80 @@ mod tests {
         let base_hash = HashedTurnState::new(base.clone()).state_hash();
         assert_ne!(base_hash, 0, "hash should not be zero");
 
-        let cases: Vec<(&str, OwnedTurnState)> = vec![
+        let cases: Vec<(&str, TurnState)> = vec![
             (
                 "turn +1",
-                OwnedTurnState {
+                TurnState {
                     turn: 6,
                     ..base.clone()
                 },
             ),
             (
                 "p1 position",
-                OwnedTurnState {
+                TurnState {
                     player1_position: Coordinates::new(2, 2),
                     ..base.clone()
                 },
             ),
             (
                 "p2 position",
-                OwnedTurnState {
+                TurnState {
                     player2_position: Coordinates::new(3, 5),
                     ..base.clone()
                 },
             ),
             (
                 "p1 score +0.5",
-                OwnedTurnState {
+                TurnState {
                     player1_score: 2.5,
                     ..base.clone()
                 },
             ),
             (
                 "p2 score +0.5",
-                OwnedTurnState {
+                TurnState {
                     player2_score: 2.0,
                     ..base.clone()
                 },
             ),
             (
                 "p1 mud +1",
-                OwnedTurnState {
+                TurnState {
                     player1_mud_turns: 1,
                     ..base.clone()
                 },
             ),
             (
                 "p2 mud +1",
-                OwnedTurnState {
+                TurnState {
                     player2_mud_turns: 1,
                     ..base.clone()
                 },
             ),
             (
                 "one less cheese",
-                OwnedTurnState {
+                TurnState {
                     cheese: vec![Coordinates::new(5, 5)],
                     ..base.clone()
                 },
             ),
             (
                 "cheese offset by 1",
-                OwnedTurnState {
+                TurnState {
                     cheese: vec![Coordinates::new(5, 6), Coordinates::new(10, 7)],
                     ..base.clone()
                 },
             ),
             (
                 "p1 last move",
-                OwnedTurnState {
+                TurnState {
                     player1_last_move: Direction::Right,
                     ..base.clone()
                 },
             ),
             (
                 "p2 last move",
-                OwnedTurnState {
+                TurnState {
                     player2_last_move: Direction::Left,
                     ..base.clone()
                 },
@@ -1265,7 +1265,7 @@ mod tests {
     #[test]
     fn swapped_players_produce_different_hash() {
         let base = baseline_turn_state();
-        let swapped = OwnedTurnState {
+        let swapped = TurnState {
             player1_position: base.player2_position,
             player2_position: base.player1_position,
             player1_score: base.player2_score,

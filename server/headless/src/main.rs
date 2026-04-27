@@ -11,7 +11,7 @@ use tracing::{info, info_span, warn, Instrument};
 use pyrat::game::builder::GameConfig;
 
 use pyrat_host::game_loop::{
-    accept_connections, build_owned_match_config, launch_bots, run_playing, run_setup, BotConfig,
+    accept_connections, build_match_config, launch_bots, run_playing, run_setup, BotConfig,
     MatchEvent, MatchResult, MatchSetup, PlayerEntry, PlayingConfig, SetupTiming,
 };
 use pyrat_host::session::messages::SessionMsg;
@@ -229,7 +229,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     );
 
     // 2. Build match config
-    let match_config = build_owned_match_config(
+    let match_config = build_match_config(
         &game,
         TimingMode::Wait,
         cli.move_timeout_ms,

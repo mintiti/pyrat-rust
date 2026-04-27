@@ -9,9 +9,8 @@ use tracing::{debug, info, warn};
 use pyrat::game::game_logic::GameState;
 use pyrat::{Coordinates, Direction as EngineDirection};
 use pyrat_host::game_loop::{
-    build_owned_match_config, determine_result, run_playing, run_setup, HashedTurnState,
-    MatchEvent, MatchSetup, OwnedInfo, OwnedTurnState, PlayerEntry, PlayingConfig, PlayingState,
-    SetupTiming,
+    build_match_config, determine_result, run_playing, run_setup, HashedTurnState, Info,
+    MatchEvent, MatchSetup, PlayerEntry, PlayingConfig, PlayingState, SetupTiming, TurnState,
 };
 use pyrat_host::session::messages::{HostCommand, SessionId, SessionMsg};
 use pyrat_host::stub::spawn_stub_bot;
@@ -91,7 +90,7 @@ pub async fn run_match(
     // 1. Build match config
     // In step (analysis) mode, use 0 timeout so bots loop on should_stop() indefinitely
     let move_timeout = if cmd_rx.is_some() { 0 } else { 3000 };
-    let match_config = build_owned_match_config(&game, TimingMode::Wait, move_timeout, 10000);
+    let match_config = build_match_config(&game, TimingMode::Wait, move_timeout, 10000);
 
     let mut bot_options: HashMap<String, Vec<(String, String)>> = HashMap::new();
     if !p1.options.is_empty() {
@@ -400,7 +399,7 @@ async fn run_analysis_inner(
 
 /// Build a HashedTurnState from an arbitrary game-tree position (cursor-follows-analysis).
 fn build_turn_state_from_position(pos: AnalysisPosition) -> HashedTurnState {
-    HashedTurnState::new(OwnedTurnState {
+    HashedTurnState::new(TurnState {
         turn: pos.turn,
         player1_position: Coordinates::new(pos.player1.position.x, pos.player1.position.y),
         player2_position: Coordinates::new(pos.player2.position.x, pos.player2.position.y),
@@ -697,7 +696,7 @@ fn build_bot_info_event(
     sender: Player,
     turn: u16,
     state_hash: u64,
-    info: &OwnedInfo,
+    info: &Info,
 ) -> BotInfoEvent {
     BotInfoEvent {
         match_id,

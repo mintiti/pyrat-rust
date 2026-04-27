@@ -27,7 +27,7 @@ use std::time::{Duration, Instant};
 use pyrat::{Coordinates, Direction, GameBuilder, GameState, MudMap};
 use pyrat_bot_api::{BotContext, InfoParams, InfoSink, Options};
 use pyrat_protocol::{
-    BotMsg, HashedTurnState, HostMsg, OwnedInfo, OwnedMatchConfig, OwnedTurnState, SearchLimits,
+    BotMsg, HashedTurnState, HostMsg, Info, MatchConfig, SearchLimits, TurnState,
 };
 use pyrat_wire::{GameResult, Player as PlayerSlot};
 use tokio::sync::mpsc;
@@ -203,7 +203,7 @@ fn emit_bot_info(
     turn: u16,
     state_hash: u64,
 ) {
-    let info = OwnedInfo {
+    let info = Info {
         player: params.player,
         multipv: params.multipv,
         target: params.target,
@@ -588,10 +588,10 @@ struct Playing<B, S> {
     bot: Option<B>,
     core: DispatcherCore,
     player_slot: PlayerSlot,
-    match_config: Box<OwnedMatchConfig>,
+    match_config: Box<MatchConfig>,
     /// Local engine state mirror. Authoritative for the client's view.
     game: GameState,
-    /// Last moves applied (for `OwnedTurnState::player{1,2}_last_move`).
+    /// Last moves applied (for `TurnState::player{1,2}_last_move`).
     last_moves: (Direction, Direction),
     state: S,
 }
@@ -738,7 +738,7 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
     /// as usual.
     async fn handle_go_state(
         mut self,
-        turn_state: OwnedTurnState,
+        turn_state: TurnState,
         state_hash: u64,
         limits: SearchLimits,
     ) -> Result<Event<B>, PlayerError> {
@@ -895,7 +895,7 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
         think_start: Instant,
         deadline: Option<Instant>,
     ) -> (HashedTurnState, EmbeddedCtx) {
-        let hts = HashedTurnState::new(owned_turn_state_from_game(&self.game, self.last_moves));
+        let hts = HashedTurnState::new(turn_state_from_game(&self.game, self.last_moves));
         let ctx = EmbeddedCtx {
             event_sink: self.core.event_sink.clone(),
             bot_tx: self.core.bot_tx.clone(),
@@ -959,8 +959,8 @@ impl<B: EmbeddedBot> Playing<B, Desynced> {
 
 // ── State mirror helpers ──────────────────────────────
 
-/// Construct an engine `GameState` from an `OwnedMatchConfig`.
-fn build_engine_state(cfg: &OwnedMatchConfig) -> Result<GameState, PlayerError> {
+/// Construct an engine `GameState` from a `MatchConfig`.
+fn build_engine_state(cfg: &MatchConfig) -> Result<GameState, PlayerError> {
     let mut walls: HashMap<Coordinates, Vec<Coordinates>> = HashMap::new();
     for (a, b) in &cfg.walls {
         walls.entry(*a).or_default().push(*b);
@@ -983,10 +983,7 @@ fn build_engine_state(cfg: &OwnedMatchConfig) -> Result<GameState, PlayerError> 
 
 /// Rebuild the engine state to match an injected turn state (GoState or
 /// FullState recovery).
-fn rebuild_engine_state(
-    cfg: &OwnedMatchConfig,
-    ts: &OwnedTurnState,
-) -> Result<GameState, PlayerError> {
+fn rebuild_engine_state(cfg: &MatchConfig, ts: &TurnState) -> Result<GameState, PlayerError> {
     let mut game = build_engine_state(cfg)?;
     game.turn = ts.turn;
     game.player1.current_pos = ts.player1_position;
@@ -1007,18 +1004,15 @@ fn rebuild_engine_state(
 }
 
 /// Hash a `GameState` via the protocol-canonical path: derive
-/// `OwnedTurnState`, wrap in `HashedTurnState::new()` (DefaultHasher). This
+/// `TurnState`, wrap in `HashedTurnState::new()` (DefaultHasher). This
 /// is the same hashing used for Ready; `Advance` must produce a compatible
 /// hash for desync detection to work.
 fn hash_from_game(game: &GameState, last_p1: Direction, last_p2: Direction) -> u64 {
-    HashedTurnState::new(owned_turn_state_from_game(game, (last_p1, last_p2))).state_hash()
+    HashedTurnState::new(turn_state_from_game(game, (last_p1, last_p2))).state_hash()
 }
 
-fn owned_turn_state_from_game(
-    game: &GameState,
-    last_moves: (Direction, Direction),
-) -> OwnedTurnState {
-    OwnedTurnState {
+fn turn_state_from_game(game: &GameState, last_moves: (Direction, Direction)) -> TurnState {
+    TurnState {
         turn: game.turn,
         player1_position: game.player1.current_pos,
         player2_position: game.player2.current_pos,
@@ -1045,8 +1039,8 @@ mod tests {
         }
     }
 
-    fn sample_match_config() -> Box<pyrat_protocol::OwnedMatchConfig> {
-        Box::new(pyrat_protocol::OwnedMatchConfig {
+    fn sample_match_config() -> Box<pyrat_protocol::MatchConfig> {
+        Box::new(pyrat_protocol::MatchConfig {
             width: 5,
             height: 5,
             max_turns: 100,

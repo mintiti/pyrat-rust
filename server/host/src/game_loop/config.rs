@@ -6,7 +6,7 @@ use tokio::sync::mpsc;
 
 use crate::session::messages::HostCommand;
 use crate::session::SessionId;
-use pyrat_protocol::{MudEntry, OwnedMatchConfig};
+use pyrat_protocol::{MatchConfig, MudEntry};
 use pyrat_wire::{Player, TimingMode};
 
 /// Which player a bot controls, identified by agent_id.
@@ -92,22 +92,22 @@ pub struct MatchSetup {
     pub players: Vec<PlayerEntry>,
     /// Game config sent to bots. `controlled_players` left empty;
     /// the setup phase fills it per session.
-    pub match_config: OwnedMatchConfig,
+    pub match_config: MatchConfig,
     /// Options to set per bot, keyed by agent_id.
     pub bot_options: HashMap<String, Vec<(String, String)>>,
     /// Setup phase timeouts.
     pub timing: SetupTiming,
 }
 
-/// Build an `OwnedMatchConfig` from engine state + timing parameters.
+/// Build a `MatchConfig` from engine state + timing parameters.
 ///
 /// `controlled_players` is left empty — the setup phase fills it per session.
-pub fn build_owned_match_config(
+pub fn build_match_config(
     game: &GameState,
     timing: TimingMode,
     move_timeout_ms: u32,
     preprocessing_timeout_ms: u32,
-) -> OwnedMatchConfig {
+) -> MatchConfig {
     let walls = game
         .wall_entries()
         .into_iter()
@@ -125,7 +125,7 @@ pub fn build_owned_match_config(
 
     let cheese = game.cheese_positions();
 
-    OwnedMatchConfig {
+    MatchConfig {
         width: game.width(),
         height: game.height(),
         max_turns: game.max_turns(),
@@ -148,7 +148,7 @@ mod tests {
     use pyrat::{Coordinates, GameBuilder};
 
     #[test]
-    fn build_owned_match_config_round_trips_game_state() {
+    fn build_match_config_round_trips_game_state() {
         let game = GameBuilder::new(3, 3)
             .with_open_maze()
             .with_custom_positions(Coordinates::new(0, 0), Coordinates::new(2, 2))
@@ -157,7 +157,7 @@ mod tests {
             .create(Some(42))
             .unwrap();
 
-        let cfg = build_owned_match_config(&game, TimingMode::Wait, 500, 3000);
+        let cfg = build_match_config(&game, TimingMode::Wait, 500, 3000);
 
         assert_eq!(cfg.width, 3);
         assert_eq!(cfg.height, 3);
@@ -176,10 +176,10 @@ mod tests {
     }
 
     #[test]
-    fn build_owned_match_config_extracts_walls_and_mud() {
+    fn build_match_config_extracts_walls_and_mud() {
         let game = GameConfig::classic(7, 5, 3).create(Some(42)).unwrap();
 
-        let cfg = build_owned_match_config(&game, TimingMode::Wait, 500, 3000);
+        let cfg = build_match_config(&game, TimingMode::Wait, 500, 3000);
 
         assert_eq!(cfg.width, 7);
         assert_eq!(cfg.height, 5);
