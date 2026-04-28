@@ -8,6 +8,7 @@ publish = false
 pyrat-rust = { path = "../../engine", default-features = false }
 pyrat-wire = { path = "../wire" }
 flatbuffers = "25.2.10"
+thiserror = "2"
 
 [lints]
 workspace = true

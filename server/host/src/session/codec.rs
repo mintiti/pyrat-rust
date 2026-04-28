@@ -284,6 +284,7 @@ mod tests {
                 turn,
                 provisional: false,
                 think_ms: 0,
+                state_hash: 0,
             },
         );
         let packet = wire::BotPacket::create(
@@ -299,7 +300,7 @@ mod tests {
 
     fn build_ready() -> Vec<u8> {
         let mut fbb = FlatBufferBuilder::new();
-        let ready = wire::Ready::create(&mut fbb, &wire::ReadyArgs {});
+        let ready = wire::Ready::create(&mut fbb, &wire::ReadyArgs { state_hash: 0 });
         let packet = wire::BotPacket::create(
             &mut fbb,
             &wire::BotPacketArgs {

@@ -65,7 +65,7 @@ pub fn identify_frame_with_agent(name: &str, author: &str, agent_id: &str) -> Ve
 
 pub fn ready_frame() -> Vec<u8> {
     build_bot_frame(BotMessage::Ready, |fbb| {
-        Ready::create(fbb, &ReadyArgs {}).as_union_value()
+        Ready::create(fbb, &ReadyArgs { state_hash: 0 }).as_union_value()
     })
 }
 
@@ -85,6 +85,7 @@ pub fn action_frame(direction: Direction, player: Player, turn: u16) -> Vec<u8> 
                 turn,
                 provisional: false,
                 think_ms: 1,
+                state_hash: 0,
             },
         )
         .as_union_value()

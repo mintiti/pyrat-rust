@@ -163,7 +163,7 @@ pub fn build_identify(
 /// Build a Ready bot packet.
 pub fn build_ready() -> Vec<u8> {
     build_bot_frame(BotMessage::Ready, |fbb| {
-        wire::Ready::create(fbb, &wire::ReadyArgs {}).as_union_value()
+        wire::Ready::create(fbb, &wire::ReadyArgs { state_hash: 0 }).as_union_value()
     })
 }
 
@@ -205,6 +205,7 @@ pub fn build_action_full(
                 turn,
                 provisional,
                 think_ms,
+                state_hash: 0,
             },
         )
         .as_union_value()

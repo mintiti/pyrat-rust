@@ -6,45 +6,45 @@ import flatbuffers
 from flatbuffers.compat import import_numpy
 np = import_numpy()
 
-class Ready(object):
+class GoPreprocess(object):
     __slots__ = ['_tab']
 
     @classmethod
     def GetRootAs(cls, buf, offset=0):
         n = flatbuffers.encode.Get(flatbuffers.packer.uoffset, buf, offset)
-        x = Ready()
+        x = GoPreprocess()
         x.Init(buf, n + offset)
         return x
 
     @classmethod
-    def GetRootAsReady(cls, buf, offset=0):
+    def GetRootAsGoPreprocess(cls, buf, offset=0):
         """This method is deprecated. Please switch to GetRootAs."""
         return cls.GetRootAs(buf, offset)
-    # Ready
+    # GoPreprocess
     def Init(self, buf, pos):
         self._tab = flatbuffers.table.Table(buf, pos)
 
-    # Ready
+    # GoPreprocess
     def StateHash(self):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(4))
         if o != 0:
             return self._tab.Get(flatbuffers.number_types.Uint64Flags, o + self._tab.Pos)
         return 0
 
-def ReadyStart(builder):
+def GoPreprocessStart(builder):
     builder.StartObject(1)
 
 def Start(builder):
-    ReadyStart(builder)
+    GoPreprocessStart(builder)
 
-def ReadyAddStateHash(builder, stateHash):
+def GoPreprocessAddStateHash(builder, stateHash):
     builder.PrependUint64Slot(0, stateHash, 0)
 
 def AddStateHash(builder, stateHash):
-    ReadyAddStateHash(builder, stateHash)
+    GoPreprocessAddStateHash(builder, stateHash)
 
-def ReadyEnd(builder):
+def GoPreprocessEnd(builder):
     return builder.EndObject()
 
 def End(builder):
-    return ReadyEnd(builder)
+    return GoPreprocessEnd(builder)

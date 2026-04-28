@@ -6,71 +6,71 @@ import flatbuffers
 from flatbuffers.compat import import_numpy
 np = import_numpy()
 
-class RenderCommands(object):
+class SearchLimits(object):
     __slots__ = ['_tab']
 
     @classmethod
     def GetRootAs(cls, buf, offset=0):
         n = flatbuffers.encode.Get(flatbuffers.packer.uoffset, buf, offset)
-        x = RenderCommands()
+        x = SearchLimits()
         x.Init(buf, n + offset)
         return x
 
     @classmethod
-    def GetRootAsRenderCommands(cls, buf, offset=0):
+    def GetRootAsSearchLimits(cls, buf, offset=0):
         """This method is deprecated. Please switch to GetRootAs."""
         return cls.GetRootAs(buf, offset)
-    # RenderCommands
+    # SearchLimits
     def Init(self, buf, pos):
         self._tab = flatbuffers.table.Table(buf, pos)
 
-    # RenderCommands
-    def Player(self):
+    # SearchLimits
+    def TimeoutMs(self):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(4))
         if o != 0:
-            return self._tab.Get(flatbuffers.number_types.Uint8Flags, o + self._tab.Pos)
+            return self._tab.Get(flatbuffers.number_types.Uint32Flags, o + self._tab.Pos)
         return 0
 
-    # RenderCommands
-    def Turn(self):
+    # SearchLimits
+    def Depth(self):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(6))
         if o != 0:
             return self._tab.Get(flatbuffers.number_types.Uint16Flags, o + self._tab.Pos)
         return 0
 
-    # RenderCommands
-    def StateHash(self):
+    # SearchLimits
+    def Nodes(self):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(8))
         if o != 0:
-            return self._tab.Get(flatbuffers.number_types.Uint64Flags, o + self._tab.Pos)
+            return self._tab.Get(flatbuffers.number_types.Uint32Flags, o + self._tab.Pos)
         return 0
 
-def RenderCommandsStart(builder):
+def SearchLimitsStart(builder):
     builder.StartObject(3)
 
 def Start(builder):
-    RenderCommandsStart(builder)
+    SearchLimitsStart(builder)
 
-def RenderCommandsAddPlayer(builder, player):
-    builder.PrependUint8Slot(0, player, 0)
+def SearchLimitsAddTimeoutMs(builder, timeoutMs):
+    builder.PrependUint32Slot(0, timeoutMs, 0)
 
-def AddPlayer(builder, player):
-    RenderCommandsAddPlayer(builder, player)
+def AddTimeoutMs(builder, timeoutMs):
+    SearchLimitsAddTimeoutMs(builder, timeoutMs)
 
-def RenderCommandsAddTurn(builder, turn):
-    builder.PrependUint16Slot(1, turn, 0)
+def SearchLimitsAddDepth(builder, depth):
+    builder.PrependUint16Slot(1, depth, 0)
 
-def AddTurn(builder, turn):
-    RenderCommandsAddTurn(builder, turn)
+def AddDepth(builder, depth):
+    SearchLimitsAddDepth(builder, depth)
 
-def RenderCommandsAddStateHash(builder, stateHash):
-    builder.PrependUint64Slot(2, stateHash, 0)
+def SearchLimitsAddNodes(builder, nodes):
+    builder.PrependUint32Slot(2, nodes, 0)
 
-def AddStateHash(builder, stateHash):
-    RenderCommandsAddStateHash(builder, stateHash)
+def AddNodes(builder, nodes):
+    SearchLimitsAddNodes(builder, nodes)
 
-def RenderCommandsEnd(builder):
+def SearchLimitsEnd(builder):
     return builder.EndObject()
 
 def End(builder):
-    return RenderCommandsEnd(builder)
+    return SearchLimitsEnd(builder)

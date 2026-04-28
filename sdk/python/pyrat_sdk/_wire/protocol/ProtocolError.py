@@ -6,45 +6,45 @@ import flatbuffers
 from flatbuffers.compat import import_numpy
 np = import_numpy()
 
-class Ready(object):
+class ProtocolError(object):
     __slots__ = ['_tab']
 
     @classmethod
     def GetRootAs(cls, buf, offset=0):
         n = flatbuffers.encode.Get(flatbuffers.packer.uoffset, buf, offset)
-        x = Ready()
+        x = ProtocolError()
         x.Init(buf, n + offset)
         return x
 
     @classmethod
-    def GetRootAsReady(cls, buf, offset=0):
+    def GetRootAsProtocolError(cls, buf, offset=0):
         """This method is deprecated. Please switch to GetRootAs."""
         return cls.GetRootAs(buf, offset)
-    # Ready
+    # ProtocolError
     def Init(self, buf, pos):
         self._tab = flatbuffers.table.Table(buf, pos)
 
-    # Ready
-    def StateHash(self):
+    # ProtocolError
+    def Reason(self):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(4))
         if o != 0:
-            return self._tab.Get(flatbuffers.number_types.Uint64Flags, o + self._tab.Pos)
-        return 0
+            return self._tab.String(o + self._tab.Pos)
+        return None
 
-def ReadyStart(builder):
+def ProtocolErrorStart(builder):
     builder.StartObject(1)
 
 def Start(builder):
-    ReadyStart(builder)
+    ProtocolErrorStart(builder)
 
-def ReadyAddStateHash(builder, stateHash):
-    builder.PrependUint64Slot(0, stateHash, 0)
+def ProtocolErrorAddReason(builder, reason):
+    builder.PrependUOffsetTRelativeSlot(0, flatbuffers.number_types.UOffsetTFlags.py_type(reason), 0)
 
-def AddStateHash(builder, stateHash):
-    ReadyAddStateHash(builder, stateHash)
+def AddReason(builder, reason):
+    ProtocolErrorAddReason(builder, reason)
 
-def ReadyEnd(builder):
+def ProtocolErrorEnd(builder):
     return builder.EndObject()
 
 def End(builder):
-    return ReadyEnd(builder)
+    return ProtocolErrorEnd(builder)

@@ -6,45 +6,62 @@ import flatbuffers
 from flatbuffers.compat import import_numpy
 np = import_numpy()
 
-class Ready(object):
+class Go(object):
     __slots__ = ['_tab']
 
     @classmethod
     def GetRootAs(cls, buf, offset=0):
         n = flatbuffers.encode.Get(flatbuffers.packer.uoffset, buf, offset)
-        x = Ready()
+        x = Go()
         x.Init(buf, n + offset)
         return x
 
     @classmethod
-    def GetRootAsReady(cls, buf, offset=0):
+    def GetRootAsGo(cls, buf, offset=0):
         """This method is deprecated. Please switch to GetRootAs."""
         return cls.GetRootAs(buf, offset)
-    # Ready
+    # Go
     def Init(self, buf, pos):
         self._tab = flatbuffers.table.Table(buf, pos)
 
-    # Ready
+    # Go
     def StateHash(self):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(4))
         if o != 0:
             return self._tab.Get(flatbuffers.number_types.Uint64Flags, o + self._tab.Pos)
         return 0
 
-def ReadyStart(builder):
-    builder.StartObject(1)
+    # Go
+    def Limits(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(6))
+        if o != 0:
+            x = self._tab.Indirect(o + self._tab.Pos)
+            from pyrat_sdk._wire.protocol.SearchLimits import SearchLimits
+            obj = SearchLimits()
+            obj.Init(self._tab.Bytes, x)
+            return obj
+        return None
+
+def GoStart(builder):
+    builder.StartObject(2)
 
 def Start(builder):
-    ReadyStart(builder)
+    GoStart(builder)
 
-def ReadyAddStateHash(builder, stateHash):
+def GoAddStateHash(builder, stateHash):
     builder.PrependUint64Slot(0, stateHash, 0)
 
 def AddStateHash(builder, stateHash):
-    ReadyAddStateHash(builder, stateHash)
+    GoAddStateHash(builder, stateHash)
 
-def ReadyEnd(builder):
+def GoAddLimits(builder, limits):
+    builder.PrependUOffsetTRelativeSlot(1, flatbuffers.number_types.UOffsetTFlags.py_type(limits), 0)
+
+def AddLimits(builder, limits):
+    GoAddLimits(builder, limits)
+
+def GoEnd(builder):
     return builder.EndObject()
 
 def End(builder):
-    return ReadyEnd(builder)
+    return GoEnd(builder)

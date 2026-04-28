@@ -67,7 +67,7 @@ async fn main() {
 
     // Send Ready
     let ready = build_bot_frame(BotMessage::Ready, |fbb| {
-        Ready::create(fbb, &ReadyArgs {}).as_union_value()
+        Ready::create(fbb, &ReadyArgs { state_hash: 0 }).as_union_value()
     });
     writer.write_frame(&ready).await.unwrap();
 
@@ -111,6 +111,7 @@ async fn main() {
                             turn,
                             provisional: false,
                             think_ms: 1,
+                            state_hash: 0,
                         },
                     )
                     .as_union_value()

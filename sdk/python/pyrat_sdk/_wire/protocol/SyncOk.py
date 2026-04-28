@@ -6,45 +6,45 @@ import flatbuffers
 from flatbuffers.compat import import_numpy
 np = import_numpy()
 
-class Ready(object):
+class SyncOk(object):
     __slots__ = ['_tab']
 
     @classmethod
     def GetRootAs(cls, buf, offset=0):
         n = flatbuffers.encode.Get(flatbuffers.packer.uoffset, buf, offset)
-        x = Ready()
+        x = SyncOk()
         x.Init(buf, n + offset)
         return x
 
     @classmethod
-    def GetRootAsReady(cls, buf, offset=0):
+    def GetRootAsSyncOk(cls, buf, offset=0):
         """This method is deprecated. Please switch to GetRootAs."""
         return cls.GetRootAs(buf, offset)
-    # Ready
+    # SyncOk
     def Init(self, buf, pos):
         self._tab = flatbuffers.table.Table(buf, pos)
 
-    # Ready
-    def StateHash(self):
+    # SyncOk
+    def Hash(self):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(4))
         if o != 0:
             return self._tab.Get(flatbuffers.number_types.Uint64Flags, o + self._tab.Pos)
         return 0
 
-def ReadyStart(builder):
+def SyncOkStart(builder):
     builder.StartObject(1)
 
 def Start(builder):
-    ReadyStart(builder)
+    SyncOkStart(builder)
 
-def ReadyAddStateHash(builder, stateHash):
-    builder.PrependUint64Slot(0, stateHash, 0)
+def SyncOkAddHash(builder, hash):
+    builder.PrependUint64Slot(0, hash, 0)
 
-def AddStateHash(builder, stateHash):
-    ReadyAddStateHash(builder, stateHash)
+def AddHash(builder, hash):
+    SyncOkAddHash(builder, hash)
 
-def ReadyEnd(builder):
+def SyncOkEnd(builder):
     return builder.EndObject()
 
 def End(builder):
-    return ReadyEnd(builder)
+    return SyncOkEnd(builder)

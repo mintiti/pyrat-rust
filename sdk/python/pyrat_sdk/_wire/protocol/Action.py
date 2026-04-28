@@ -59,8 +59,15 @@ class Action(object):
             return self._tab.Get(flatbuffers.number_types.Uint32Flags, o + self._tab.Pos)
         return 0
 
+    # Action
+    def StateHash(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(14))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Uint64Flags, o + self._tab.Pos)
+        return 0
+
 def ActionStart(builder):
-    builder.StartObject(5)
+    builder.StartObject(6)
 
 def Start(builder):
     ActionStart(builder)
@@ -94,6 +101,12 @@ def ActionAddThinkMs(builder, thinkMs):
 
 def AddThinkMs(builder, thinkMs):
     ActionAddThinkMs(builder, thinkMs)
+
+def ActionAddStateHash(builder, stateHash):
+    builder.PrependUint64Slot(5, stateHash, 0)
+
+def AddStateHash(builder, stateHash):
+    ActionAddStateHash(builder, stateHash)
 
 def ActionEnd(builder):
     return builder.EndObject()

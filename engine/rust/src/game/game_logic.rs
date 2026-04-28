@@ -549,6 +549,25 @@ impl GameState {
         self.state_hash
     }
 
+    /// Recompute the Zobrist hash from current fields, replacing the stored
+    /// value.
+    ///
+    /// Use this after directly mutating dynamic state (positions, scores,
+    /// mud timers, turn counter, cheese set) without going through
+    /// [`process_turn`](Self::process_turn) or
+    /// [`make_move`](Self::make_move) — those paths apply Zobrist deltas
+    /// incrementally and keep `state_hash` consistent. Direct mutation does
+    /// not, so the stored hash drifts.
+    ///
+    /// Cost: walks the entire state once (positions, scores, mud, turn, all
+    /// remaining cheese cells) plus the maze topology hash. Not free, but
+    /// only called at protocol reconstruction boundaries (FullState/GoState
+    /// recovery), not in the hot turn loop.
+    pub fn recompute_state_hash(&mut self) {
+        self.state_hash = zobrist::maze_hash(&self.move_table, &self.mud, self.width, self.height)
+            ^ zobrist::compute_from_scratch(self);
+    }
+
     /// Get the mud timer for player 1
     #[must_use]
     #[inline(always)]
@@ -1769,5 +1788,115 @@ mod make_unmake_tests {
             .build()
             .create(None)
             .unwrap()
+    }
+}
+
+#[cfg(test)]
+mod recompute_state_hash_tests {
+    use super::*;
+    use crate::game::builder::GameBuilder;
+    use crate::game::types::MudMap;
+
+    fn fresh_game() -> GameState {
+        let mut mud = MudMap::new();
+        mud.insert(Coordinates::new(1, 0), Coordinates::new(1, 1), 2);
+        GameBuilder::new(5, 5)
+            .with_custom_maze(HashMap::new(), mud)
+            .with_corner_positions()
+            .with_custom_cheese(vec![Coordinates::new(2, 2), Coordinates::new(3, 3)])
+            .build()
+            .create(None)
+            .unwrap()
+    }
+
+    /// recompute on an untouched state preserves the hash exactly.
+    #[test]
+    fn recompute_preserves_hash_on_fresh_state() {
+        let mut game = fresh_game();
+        let original = game.state_hash();
+        game.recompute_state_hash();
+        assert_eq!(game.state_hash(), original);
+    }
+
+    /// Two independently-evolved states that end up with identical fields
+    /// must hash identically — the very property protocol sync depends on.
+    /// Path A: process_turn (delta-updates the hash). Path B: directly
+    /// mutate fields to match Path A's end state, then recompute.
+    #[test]
+    fn recompute_matches_delta_hash_after_evolution() {
+        // Path A: process turns, let Zobrist deltas update the hash.
+        let mut game_a = fresh_game();
+        game_a.process_turn(Direction::Up, Direction::Down);
+        game_a.process_turn(Direction::Right, Direction::Left);
+        let hash_a = game_a.state_hash();
+
+        // Path B: take a fresh game, manually copy Path A's dynamic state
+        // (positions, mud, scores, turn, cheese), recompute the hash.
+        let mut game_b = fresh_game();
+        game_b.turn = game_a.turn;
+        game_b.player1.current_pos = game_a.player1.current_pos;
+        game_b.player1.mud_timer = game_a.player1.mud_timer;
+        game_b.player1.score = game_a.player1.score;
+        game_b.player2.current_pos = game_a.player2.current_pos;
+        game_b.player2.mud_timer = game_a.player2.mud_timer;
+        game_b.player2.score = game_a.player2.score;
+        // Sync cheese: remove from B any cell not present in A.
+        let cheese_in_a = game_a.cheese_positions();
+        let mut to_remove: Vec<Coordinates> = Vec::new();
+        for x in 0..game_b.width {
+            for y in 0..game_b.height {
+                let pos = Coordinates::new(x, y);
+                if game_b.cheese.has_cheese(pos) && !cheese_in_a.contains(&pos) {
+                    to_remove.push(pos);
+                }
+            }
+        }
+        for pos in to_remove {
+            game_b.cheese.take_cheese(pos);
+        }
+        game_b.recompute_state_hash();
+
+        assert_eq!(
+            game_b.state_hash(),
+            hash_a,
+            "recompute must produce the same canonical hash as delta-updated evolution",
+        );
+    }
+
+    /// Mutating a field without recompute leaves the stored hash stale;
+    /// recompute fixes it (and the value differs from the pre-mutation hash).
+    #[test]
+    fn recompute_after_field_mutation_changes_hash() {
+        let mut game = fresh_game();
+        let original = game.state_hash();
+        game.player1.current_pos = Coordinates::new(2, 2);
+        // Stale: stored hash hasn't been updated.
+        assert_eq!(game.state_hash(), original);
+        game.recompute_state_hash();
+        assert_ne!(
+            game.state_hash(),
+            original,
+            "recompute must reflect the mutated field",
+        );
+    }
+
+    /// Two semantically identical states reconstructed independently produce
+    /// the same hash. This is the cross-process invariant SDKs rely on:
+    /// host and bot can each rebuild from a `(MatchConfig, TurnState)`
+    /// snapshot and compare hashes byte-for-byte.
+    #[test]
+    fn recompute_is_deterministic_across_independent_constructions() {
+        let mut a = fresh_game();
+        let mut b = fresh_game();
+        // Mutate both identically.
+        a.turn = 7;
+        a.player1.current_pos = Coordinates::new(1, 2);
+        a.player1.score = 1.5;
+        b.turn = 7;
+        b.player1.current_pos = Coordinates::new(1, 2);
+        b.player1.score = 1.5;
+        a.recompute_state_hash();
+        b.recompute_state_hash();
+        assert_eq!(a.state_hash(), b.state_hash());
     }
 }

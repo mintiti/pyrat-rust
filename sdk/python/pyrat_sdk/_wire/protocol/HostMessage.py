@@ -12,3 +12,11 @@ class HostMessage(object):
     Timeout = 6
     GameOver = 7
     Ping = 8
+    Welcome = 9
+    Configure = 10
+    GoPreprocess = 11
+    Advance = 12
+    Go = 13
+    GoState = 14
+    FullState = 15
+    ProtocolError = 16

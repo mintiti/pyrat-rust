@@ -151,7 +151,17 @@ pub struct HashedTurnState {
 }
 
 impl HashedTurnState {
-    /// Wrap a turn state, computing the hash from its fields.
+    /// Wrap a turn state, computing the hash from its fields via
+    /// `DefaultHasher`.
+    ///
+    /// **Being phased out.** New protocol code computes the canonical
+    /// hash via the engine's Zobrist (`pyrat::GameState::state_hash`) and
+    /// pairs it with a `TurnState` using
+    /// [`with_unverified_hash`](Self::with_unverified_hash). The two hash
+    /// algorithms differ; using `new` for protocol sync against a peer that
+    /// uses the engine hash will desync every turn. Kept here so legacy
+    /// host/SDK call sites keep compiling until they migrate (slice-by-slice
+    /// per the host-restructure plan).
     pub fn new(ts: TurnState) -> Self {
         let state_hash = Self::compute_hash(&ts);
         Self {
@@ -167,6 +177,9 @@ impl HashedTurnState {
     /// wrapper does not verify this. Name chosen to advertise the trust:
     /// mismatches are only caught by the setup-phase hash handshake in
     /// consumers.
+    ///
+    /// New protocol code uses this constructor with the engine's Zobrist
+    /// hash (`game.state_hash()`), making it the canonical sync hash.
     pub fn with_unverified_hash(ts: TurnState, state_hash: u64) -> Self {
         Self {
             inner: ts,

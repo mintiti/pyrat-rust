@@ -11,3 +11,6 @@ class BotMessage(object):
     Pong = 5
     Info = 6
     RenderCommands = 7
+    Provisional = 8
+    SyncOk = 9
+    Resync = 10

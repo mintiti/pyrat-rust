@@ -30,6 +30,7 @@ fn action_frame(direction: Direction, player: Player, turn: u16) -> Vec<u8> {
                 turn,
                 provisional: false,
                 think_ms: 0,
+                state_hash: 0,
             },
         )
         .as_union_value()

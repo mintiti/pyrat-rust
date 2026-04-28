@@ -6,71 +6,84 @@ import flatbuffers
 from flatbuffers.compat import import_numpy
 np = import_numpy()
 
-class RenderCommands(object):
+class Provisional(object):
     __slots__ = ['_tab']
 
     @classmethod
     def GetRootAs(cls, buf, offset=0):
         n = flatbuffers.encode.Get(flatbuffers.packer.uoffset, buf, offset)
-        x = RenderCommands()
+        x = Provisional()
         x.Init(buf, n + offset)
         return x
 
     @classmethod
-    def GetRootAsRenderCommands(cls, buf, offset=0):
+    def GetRootAsProvisional(cls, buf, offset=0):
         """This method is deprecated. Please switch to GetRootAs."""
         return cls.GetRootAs(buf, offset)
-    # RenderCommands
+    # Provisional
     def Init(self, buf, pos):
         self._tab = flatbuffers.table.Table(buf, pos)
 
-    # RenderCommands
-    def Player(self):
+    # Provisional
+    def Direction(self):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(4))
         if o != 0:
             return self._tab.Get(flatbuffers.number_types.Uint8Flags, o + self._tab.Pos)
         return 0
 
-    # RenderCommands
-    def Turn(self):
+    # Provisional
+    def Player(self):
         o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(6))
+        if o != 0:
+            return self._tab.Get(flatbuffers.number_types.Uint8Flags, o + self._tab.Pos)
+        return 0
+
+    # Provisional
+    def Turn(self):
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(8))
         if o != 0:
             return self._tab.Get(flatbuffers.number_types.Uint16Flags, o + self._tab.Pos)
         return 0
 
-    # RenderCommands
+    # Provisional
     def StateHash(self):
-        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(8))
+        o = flatbuffers.number_types.UOffsetTFlags.py_type(self._tab.Offset(10))
         if o != 0:
             return self._tab.Get(flatbuffers.number_types.Uint64Flags, o + self._tab.Pos)
         return 0
 
-def RenderCommandsStart(builder):
-    builder.StartObject(3)
+def ProvisionalStart(builder):
+    builder.StartObject(4)
 
 def Start(builder):
-    RenderCommandsStart(builder)
+    ProvisionalStart(builder)
 
-def RenderCommandsAddPlayer(builder, player):
-    builder.PrependUint8Slot(0, player, 0)
+def ProvisionalAddDirection(builder, direction):
+    builder.PrependUint8Slot(0, direction, 0)
+
+def AddDirection(builder, direction):
+    ProvisionalAddDirection(builder, direction)
+
+def ProvisionalAddPlayer(builder, player):
+    builder.PrependUint8Slot(1, player, 0)
 
 def AddPlayer(builder, player):
-    RenderCommandsAddPlayer(builder, player)
+    ProvisionalAddPlayer(builder, player)
 
-def RenderCommandsAddTurn(builder, turn):
-    builder.PrependUint16Slot(1, turn, 0)
+def ProvisionalAddTurn(builder, turn):
+    builder.PrependUint16Slot(2, turn, 0)
 
 def AddTurn(builder, turn):
-    RenderCommandsAddTurn(builder, turn)
+    ProvisionalAddTurn(builder, turn)
 
-def RenderCommandsAddStateHash(builder, stateHash):
-    builder.PrependUint64Slot(2, stateHash, 0)
+def ProvisionalAddStateHash(builder, stateHash):
+    builder.PrependUint64Slot(3, stateHash, 0)
 
 def AddStateHash(builder, stateHash):
-    RenderCommandsAddStateHash(builder, stateHash)
+    ProvisionalAddStateHash(builder, stateHash)
 
-def RenderCommandsEnd(builder):
+def ProvisionalEnd(builder):
     return builder.EndObject()
 
 def End(builder):
-    return RenderCommandsEnd(builder)
+    return ProvisionalEnd(builder)
