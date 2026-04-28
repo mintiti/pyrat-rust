@@ -138,7 +138,7 @@ pub struct TurnState {
     pub player2_last_move: Direction,
 }
 
-/// An [`TurnState`] paired with a 64-bit fingerprint of its
+/// A [`TurnState`] paired with a 64-bit fingerprint of its
 /// position-defining fields.
 ///
 /// The hash is computed once at construction time. Two states that a bot would

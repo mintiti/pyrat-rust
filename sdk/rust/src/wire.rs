@@ -10,7 +10,7 @@ use pyrat_protocol::{
 };
 use pyrat_wire::{self as wire, BotMessage, HostMessage, Vec2};
 
-// ── Owned extraction types ───────────────────────────
+// ── Extracted host messages ──────────────────────────
 
 /// Parsed host message.
 #[derive(Debug)]
