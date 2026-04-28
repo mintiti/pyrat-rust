@@ -1,7 +1,15 @@
-"""GameState — the single rich object passed to ``think()``."""
+"""GameState — the single rich object passed to ``think()``.
+
+Holds an engine-backed ``GameSim`` mirror that tracks the canonical Zobrist
+hash. Each ``apply_advance`` invokes the engine's ``process_turn`` so the
+state hash stays in sync turn-by-turn. ``load_turn_state`` /
+``load_full_state`` rebuild from a snapshot (received via GoState or
+FullState) and recompute the hash from scratch.
+"""
 
 from __future__ import annotations
 
+import copy
 from enum import IntEnum
 from typing import Any, NamedTuple
 
@@ -44,51 +52,106 @@ class PathResult(NamedTuple):
 
 
 class GameState:
-    """Combines static match config, per-turn snapshot, and convenience methods.
+    """SDK-facing game state.
 
-    Built once from MatchConfig (maze, movement_matrix are computed once).
-    Updated each turn from TurnState (positions, scores, cheese, etc.).
+    Built once from MatchConfig + the slot assigned by ``Welcome``. The
+    canonical state advances via ``apply_advance`` (one engine step,
+    incremental Zobrist) or rebuilds via ``load_turn_state`` /
+    ``load_full_state`` (full snapshot, recompute Zobrist).
     """
 
-    # ── Built from MatchConfig (once) ──────────────────
-
+    # Static config
     width: int
     height: int
     max_turns: int
-    _maze: PyMaze
-    movement_matrix: np.ndarray
     move_timeout_ms: int
     preprocessing_timeout_ms: int
 
-    # Which players this bot controls (usually [0] or [1]).
-    controlled_players: list[int]
-    # True when this bot is Player1, False when Player2.
-    _is_player1: bool
+    # Maze topology and the engine mirror
+    _maze: PyMaze
+    _sim: GameSim
+    movement_matrix: np.ndarray
 
-    # ── Updated from TurnState (each turn) ─────────────
-
-    turn: int
-    cheese: list[tuple[int, int]]
+    # Cached derived data
     cheese_matrix: np.ndarray
 
-    _player1_pos: tuple[int, int]
-    _player2_pos: tuple[int, int]
-    _player1_score: float
-    _player2_score: float
-    _player1_mud_turns: int
-    _player2_mud_turns: int
+    # Slot assigned by Welcome
+    _is_player1: bool
+
+    # Last moves (engine doesn't track them)
     _player1_last_move: int
     _player2_last_move: int
 
-    def __init__(self, config: dict[str, Any]) -> None:
+    def __init__(self, slot: int, config: dict[str, Any]) -> None:
+        self._is_player1 = slot == 0
+        self._load_config(config)
+
+        # Initial sim from config: starts, zero scores, no mud, turn 0.
+        self._sim = self._maze.to_sim(
+            config["player1_start"],
+            config["player2_start"],
+            0.0,
+            0.0,
+            0,
+            0,
+            config["cheese"],
+            0,
+        )
+        self._player1_last_move = int(Direction.STAY)
+        self._player2_last_move = int(Direction.STAY)
+        self.cheese_matrix = _build_cheese_matrix(
+            config["cheese"], self.width, self.height
+        )
+
+    # ── Mutation paths ────────────────────────────────
+
+    def apply_advance(self, p1: Direction | int, p2: Direction | int) -> int:
+        """Apply both players' moves and return the new state hash.
+
+        Drives the engine via ``make_move`` so Zobrist stays consistent
+        without a full recompute.
+        """
+        p1_int, p2_int = int(p1), int(p2)
+        self._sim.make_move(p1_int, p2_int)
+        self._player1_last_move = p1_int
+        self._player2_last_move = p2_int
+        self.cheese_matrix = _build_cheese_matrix(
+            self._sim.cheese_positions, self.width, self.height
+        )
+        return self._sim.state_hash
+
+    def load_turn_state(self, ts: dict[str, Any]) -> int:
+        """Replace the sim with a snapshot from the given TurnState dict."""
+        self._sim = self._maze.to_sim(
+            ts["player1_position"],
+            ts["player2_position"],
+            ts["player1_score"],
+            ts["player2_score"],
+            ts["player1_mud_turns"],
+            ts["player2_mud_turns"],
+            ts["cheese"],
+            ts["turn"],
+        )
+        self._player1_last_move = ts["player1_last_move"]
+        self._player2_last_move = ts["player2_last_move"]
+        self.cheese_matrix = _build_cheese_matrix(
+            ts["cheese"], self.width, self.height
+        )
+        return self._sim.state_hash
+
+    def load_full_state(
+        self, config: dict[str, Any], ts: dict[str, Any]
+    ) -> int:
+        """Rebuild from a fresh MatchConfig + TurnState (FullState recovery)."""
+        self._load_config(config)
+        return self.load_turn_state(ts)
+
+    def _load_config(self, config: dict[str, Any]) -> None:
         self.width = config["width"]
         self.height = config["height"]
         self.max_turns = config["max_turns"]
         self.move_timeout_ms = config["move_timeout_ms"]
         self.preprocessing_timeout_ms = config["preprocessing_timeout_ms"]
-        self.controlled_players = config["controlled_players"]
-        self._is_player1 = 0 in self.controlled_players
-
         self._maze = PyMaze(
             self.width,
             self.height,
@@ -97,147 +160,114 @@ class GameState:
         )
         self.movement_matrix = self._maze.build_movement_matrix()
 
-        # Initial cheese from config.
-        self.cheese = config["cheese"]
-        self.cheese_matrix = _build_cheese_matrix(self.cheese, self.width, self.height)
+    # ── Sim-backed accessors ──────────────────────────
 
-        # Initial positions.
-        self._player1_pos = config["player1_start"]
-        self._player2_pos = config["player2_start"]
-        self._player1_score = 0.0
-        self._player2_score = 0.0
-        self._player1_mud_turns = 0
-        self._player2_mud_turns = 0
-        self._player1_last_move = 4  # STAY
-        self._player2_last_move = 4
-        self.turn = 0
-        self.state_hash = 0
+    @property
+    def turn(self) -> int:
+        """Current turn number."""
+        return self._sim.turn
 
-    def update(self, ts: dict[str, Any]) -> None:
-        """Apply a TurnState dict (from ``codec.extract_turn_state``)."""
-        self.turn = ts["turn"]
-        self._player1_pos = ts["player1_position"]
-        self._player2_pos = ts["player2_position"]
-        self._player1_score = ts["player1_score"]
-        self._player2_score = ts["player2_score"]
-        self._player1_mud_turns = ts["player1_mud_turns"]
-        self._player2_mud_turns = ts["player2_mud_turns"]
-        self._player1_last_move = ts["player1_last_move"]
-        self._player2_last_move = ts["player2_last_move"]
-        self.cheese = ts["cheese"]
-        self.cheese_matrix = _build_cheese_matrix(self.cheese, self.width, self.height)
-        self.state_hash = ts["state_hash"]
+    @property
+    def state_hash(self) -> int:
+        """Canonical engine Zobrist hash for the current position."""
+        return self._sim.state_hash
+
+    @property
+    def cheese(self) -> list[tuple[int, int]]:
+        """Cheese positions remaining on the board."""
+        return self._sim.cheese_positions
 
     # ── My / opponent perspective ──────────────────────
 
     @property
     def my_position(self) -> tuple[int, int]:
-        """(x, y) position of this bot."""
-        return self._player1_pos if self._is_player1 else self._player2_pos
+        return self._sim.player1_position if self._is_player1 else self._sim.player2_position
 
     @property
     def opponent_position(self) -> tuple[int, int]:
-        """(x, y) position of the opponent."""
-        return self._player2_pos if self._is_player1 else self._player1_pos
+        return self._sim.player2_position if self._is_player1 else self._sim.player1_position
 
     @property
     def my_score(self) -> float:
-        """Current score. 1.0 per cheese, 0.5 if both collect simultaneously."""
-        return self._player1_score if self._is_player1 else self._player2_score
+        return self._sim.player1_score if self._is_player1 else self._sim.player2_score
 
     @property
     def opponent_score(self) -> float:
-        """Opponent's current score."""
-        return self._player2_score if self._is_player1 else self._player1_score
+        return self._sim.player2_score if self._is_player1 else self._sim.player1_score
 
     @property
     def my_mud_turns(self) -> int:
-        """Turns remaining stuck in mud. 0 means free to move."""
-        return self._player1_mud_turns if self._is_player1 else self._player2_mud_turns
+        return (
+            self._sim.player1_mud_turns
+            if self._is_player1
+            else self._sim.player2_mud_turns
+        )
 
     @property
     def opponent_mud_turns(self) -> int:
-        """Opponent's remaining mud turns."""
-        return self._player2_mud_turns if self._is_player1 else self._player1_mud_turns
+        return (
+            self._sim.player2_mud_turns
+            if self._is_player1
+            else self._sim.player1_mud_turns
+        )
 
     @property
     def my_last_move(self) -> Direction:
-        """This bot's last move as a Direction."""
         raw = self._player1_last_move if self._is_player1 else self._player2_last_move
         return Direction(raw)
 
     @property
     def opponent_last_move(self) -> Direction:
-        """Opponent's last move as a Direction."""
         raw = self._player2_last_move if self._is_player1 else self._player1_last_move
         return Direction(raw)
 
     @property
     def my_player(self) -> Player:
-        """The Player enum value (PLAYER1 or PLAYER2) for this bot."""
         return Player.PLAYER1 if self._is_player1 else Player.PLAYER2
 
     # ── Raw player data (for HivemindBot) ─────────────
 
     @property
     def player1_position(self) -> tuple[int, int]:
-        """Player 1's (x, y) position."""
-        return self._player1_pos
+        return self._sim.player1_position
 
     @property
     def player2_position(self) -> tuple[int, int]:
-        """Player 2's (x, y) position."""
-        return self._player2_pos
+        return self._sim.player2_position
 
     @property
     def player1_score(self) -> float:
-        """Player 1's current score."""
-        return self._player1_score
+        return self._sim.player1_score
 
     @property
     def player2_score(self) -> float:
-        """Player 2's current score."""
-        return self._player2_score
+        return self._sim.player2_score
 
     @property
     def player1_mud_turns(self) -> int:
-        """Player 1's remaining mud turns."""
-        return self._player1_mud_turns
+        return self._sim.player1_mud_turns
 
     @property
     def player2_mud_turns(self) -> int:
-        """Player 2's remaining mud turns."""
-        return self._player2_mud_turns
+        return self._sim.player2_mud_turns
 
     @property
     def player1_last_move(self) -> Direction:
-        """Player 1's last move as a Direction."""
         return Direction(self._player1_last_move)
 
     @property
     def player2_last_move(self) -> Direction:
-        """Player 2's last move as a Direction."""
         return Direction(self._player2_last_move)
 
     # ── Layer 4: simulation ───────────────────────────
 
     def to_sim(self) -> GameSim:
-        """Mutable game snapshot for make_move / unmake_move tree search.
+        """Independent mutable copy of the engine state.
 
-        Returns a Rust-backed ``GameSim`` with the current maze topology
-        and game state. Uses objective player1/player2 naming — no
-        my/opponent mapping.
+        Returns a clone for tree-search use (``make_move`` / ``unmake_move``)
+        that doesn't disturb the SDK's internal mirror.
         """
-        return self._maze.to_sim(
-            self._player1_pos,
-            self._player2_pos,
-            self._player1_score,
-            self._player2_score,
-            self._player1_mud_turns,
-            self._player2_mud_turns,
-            self.cheese,
-            self.turn,
-        )
+        return copy.copy(self._sim)
 
     # ── Layer 2 convenience ────────────────────────────
 

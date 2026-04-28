@@ -212,19 +212,22 @@ def collect_options(cls: type) -> dict[str, _OptionDescriptor]:
 def options_to_wire(
     options: dict[str, _OptionDescriptor],
 ) -> list[dict[str, Any]]:
-    """Convert collected descriptors to dicts the codec can serialize."""
+    """Convert collected descriptors to dicts matching ``OptionDef``.
+
+    Field names mirror the Rust ``OptionDef`` struct so the codec can
+    serialize without translation: ``name``, ``option_type``, ``default_value``,
+    ``min``, ``max``, ``choices``.
+    """
     result = []
     for name, desc in options.items():
         entry: dict[str, Any] = {
             "name": name,
-            "wire_type": desc.wire_type,
-            "default_str": desc.to_wire_default(),
+            "option_type": desc.wire_type,
+            "default_value": desc.to_wire_default(),
+            "min": desc.min if isinstance(desc, Spin) else 0,
+            "max": desc.max if isinstance(desc, Spin) else 0,
+            "choices": list(desc.choices) if isinstance(desc, Combo) else [],
         }
-        if isinstance(desc, Spin):
-            entry["min"] = desc.min
-            entry["max"] = desc.max
-        if isinstance(desc, Combo):
-            entry["choices"] = desc.choices
         result.append(entry)
     return result
 

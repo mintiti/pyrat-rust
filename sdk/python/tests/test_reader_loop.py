@@ -5,28 +5,15 @@ from __future__ import annotations
 import queue
 import threading
 
-from conftest import (
-    MockConnection,
-    build_host_packet,
-    build_ping,
-    build_stop,
-    build_timeout,
-    build_turn_state,
-)
+from conftest import MockConnection, host_frame
 
-from pyrat_sdk._wire.protocol.BotMessage import BotMessage
-from pyrat_sdk._wire.protocol.BotPacket import BotPacket
-from pyrat_sdk._wire.protocol.HostMessage import HostMessage
 from pyrat_sdk.bot import _reader_loop
 
 
 def _run(frames: list[bytes]):
-    """Run _reader_loop to completion with the given frames.
-
-    Returns (queue contents as list, stop_event, conn).
-    """
+    """Run _reader_loop to completion. Returns (queue items, stop_event, conn)."""
     conn = MockConnection(frames)
-    q: queue.Queue[tuple[int, object] | None] = queue.Queue()
+    q: queue.Queue[dict | None] = queue.Queue()
     event = threading.Event()
 
     _reader_loop(conn, q, event)
@@ -38,62 +25,59 @@ def _run(frames: list[bytes]):
 
 
 def test_stop_sets_event_and_queues():
-    frame = build_host_packet(HostMessage.Stop, build_stop)
-    items, event, _ = _run([frame])
-
+    items, event, _ = _run([host_frame({"kind": "Stop"})])
     assert event.is_set()
     assert len(items) == 2
-    msg_type, _table = items[0]
-    assert msg_type == HostMessage.Stop
+    assert items[0]["kind"] == "Stop"
     assert items[1] is None  # sentinel
 
 
-def test_timeout_sets_event_and_queues():
-    frame = build_host_packet(HostMessage.Timeout, build_timeout)
+def test_advance_queued_without_stop():
+    frame = host_frame(
+        {
+            "kind": "Advance",
+            "p1_dir": 0,
+            "p2_dir": 4,
+            "turn": 1,
+            "new_hash": 0xCAFE,
+        }
+    )
     items, event, _ = _run([frame])
-
-    assert event.is_set()
+    assert not event.is_set()
     assert len(items) == 2
-    msg_type, _table = items[0]
-    assert msg_type == HostMessage.Timeout
+    assert items[0]["kind"] == "Advance"
     assert items[1] is None
 
 
-def test_ping_sends_pong_not_queued():
-    frame = build_host_packet(HostMessage.Ping, build_ping)
-    items, event, conn = _run([frame])
-
-    assert not event.is_set()
-    assert items == [None]  # only the sentinel
-    assert len(conn.sent) == 1
-
-    pong = BotPacket.GetRootAs(conn.sent[0])
-    assert pong.MessageType() == BotMessage.Pong
-
-
-def test_turnstate_queued_without_stop():
-    frame = build_host_packet(
-        HostMessage.TurnState, lambda b: build_turn_state(b, turn=1)
+def test_go_queued_without_stop():
+    frame = host_frame(
+        {
+            "kind": "Go",
+            "state_hash": 0,
+            "limits": {"timeout_ms": None, "depth": None, "nodes": None},
+        }
     )
     items, event, _ = _run([frame])
-
     assert not event.is_set()
     assert len(items) == 2
-    msg_type, _table = items[0]
-    assert msg_type == HostMessage.TurnState
+    assert items[0]["kind"] == "Go"
     assert items[1] is None
 
 
-def test_stop_after_turnstate():
-    ts_frame = build_host_packet(
-        HostMessage.TurnState, lambda b: build_turn_state(b, turn=1)
+def test_stop_after_advance():
+    advance = host_frame(
+        {
+            "kind": "Advance",
+            "p1_dir": 0,
+            "p2_dir": 4,
+            "turn": 1,
+            "new_hash": 0,
+        }
     )
-    stop_frame = build_host_packet(HostMessage.Stop, build_stop)
-    items, event, _ = _run([ts_frame, stop_frame])
-
+    stop = host_frame({"kind": "Stop"})
+    items, event, _ = _run([advance, stop])
     assert event.is_set()
-    # TurnState, Stop, sentinel
     assert len(items) == 3
-    assert items[0][0] == HostMessage.TurnState
-    assert items[1][0] == HostMessage.Stop
+    assert items[0]["kind"] == "Advance"
+    assert items[1]["kind"] == "Stop"
     assert items[2] is None

@@ -28,29 +28,6 @@ else
     echo "Generated $TARGET (cargo fmt not available, skipping format)"
 fi
 
-# ── Python codegen ──────────────────────────────────────
-PY_FINAL_DIR="$SCRIPT_DIR/../../sdk/python/pyrat_sdk/_wire/protocol"
-PY_TMP_DIR=$(mktemp -d)
-
-echo "Generating Python code from $SCHEMA..."
-flatc --python -o "$PY_TMP_DIR" "$SCHEMA"
-
-PY_TMP_TARGET="$PY_TMP_DIR/pyrat/protocol"
-if [[ ! -d "$PY_TMP_TARGET" ]]; then
-    echo "error: expected $PY_TMP_TARGET not found" >&2
-    ls -la "$PY_TMP_DIR"
-    rm -rf "$PY_TMP_DIR"
-    exit 1
-fi
-
-rm -rf "$PY_FINAL_DIR"
-mkdir -p "$PY_FINAL_DIR"
-cp "$PY_TMP_TARGET/"*.py "$PY_FINAL_DIR/"
-
-# Rewrite internal imports so standard Python resolution works.
-# macOS sed needs '' after -i; use a temp suffix and remove backup files.
-sed -i.bak 's/from pyrat\.protocol\./from pyrat_sdk._wire.protocol./g' "$PY_FINAL_DIR/"*.py
-rm -f "$PY_FINAL_DIR/"*.bak
-rm -rf "$PY_TMP_DIR"
-
-echo "Generated Python FlatBuffers code in $PY_FINAL_DIR"
+# Note: per-language Python codegen used to live here. It was dropped when
+# the Python SDK switched to PyO3-bridged pyrat-protocol — one codec, every
+# SDK. See briefs/host-restructure/architecture.md ("Across languages too.").

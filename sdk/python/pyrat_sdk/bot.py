@@ -17,7 +17,6 @@ from typing import Any
 
 from pyrat_sdk._wire import codec
 from pyrat_sdk._wire.connection import Connection
-from pyrat_sdk._wire.protocol.HostMessage import HostMessage
 from pyrat_sdk.options import apply_set_option, collect_options, options_to_wire
 from pyrat_sdk.state import Direction, GameState, Player
 
@@ -25,7 +24,7 @@ from pyrat_sdk.state import Direction, GameState, Player
 
 
 class GameResult(enum.IntEnum):
-    """Outcome of a match.  Values match the wire protocol."""
+    """Outcome of a match. Values match the wire protocol."""
 
     PLAYER1 = 0
     PLAYER2 = 1
@@ -36,7 +35,7 @@ class GameResult(enum.IntEnum):
 
 
 class Context:
-    """Passed to ``think()`` and ``preprocess()``.  Provides timing and info sending."""
+    """Passed to ``think()`` and ``preprocess()``. Provides timing and info sending."""
 
     def __init__(
         self,
@@ -82,12 +81,11 @@ class Context:
         p = player if player is not None else self._player
         try:
             self._conn.send_frame(
-                codec.encode_action(
+                codec.encode_provisional(
                     int(direction),
                     int(p),
                     self._turn,
-                    provisional=True,
-                    think_ms=self.think_elapsed_ms(),
+                    self._state_hash,
                 )
             )
         except Exception as e:
@@ -115,7 +113,7 @@ class Context:
                     depth=depth,
                     nodes=nodes,
                     score=score,
-                    pv=pv,
+                    pv=[int(d) for d in pv] if pv else None,
                     message=message,
                     turn=self._turn,
                     state_hash=self._state_hash,
@@ -138,7 +136,7 @@ class Bot:
     author: str = "Unknown"
 
     def think(self, state: GameState, ctx: Context) -> Direction:
-        """Return the direction to move this turn.  Must be overridden."""
+        """Return the direction to move this turn. Must be overridden."""
         raise NotImplementedError(
             "Override think() in your Bot subclass. Return a Direction (e.g., Direction.UP)."
         )
@@ -150,7 +148,7 @@ class Bot:
         """Optional — called when the game ends with the result and final scores."""
 
     def run(self) -> None:
-        """Entry point.  Reads env vars, connects, plays, exits."""
+        """Entry point. Reads env vars, connects, plays, exits."""
         _run_bot(self, self.preprocess, self._handle_turn)
 
     def _handle_turn(self, state: GameState, ctx: Context, conn: Connection) -> None:
@@ -173,6 +171,7 @@ class Bot:
                 int(direction),
                 int(state.my_player),
                 state.turn,
+                state.state_hash,
                 think_ms=think_ms,
             )
         )
@@ -235,6 +234,7 @@ class HivemindBot:
                     int(direction),
                     int(player),
                     state.turn,
+                    state.state_hash,
                     think_ms=think_ms,
                 )
             )
@@ -274,10 +274,10 @@ def _validate_direction(value: Any, source: str) -> Direction:
 
 def _reader_loop(
     conn: Connection,
-    msg_queue: queue.Queue[tuple[int, object] | None],
+    msg_queue: queue.Queue[dict[str, Any] | None],
     stop_event: threading.Event,
 ) -> None:
-    """Background reader — forwards host messages, sets stop flag on Stop/Timeout."""
+    """Background reader — forwards host messages, sets stop flag on Stop."""
     while True:
         try:
             buf = conn.recv_frame()
@@ -288,24 +288,23 @@ def _reader_loop(
             break
 
         try:
-            msg_type, table = codec.decode_host_packet(buf)
+            msg = codec.parse_host_frame(buf)
         except Exception as e:
             print(f"[sdk] parse error: {e}", file=sys.stderr)
             continue
 
-        if msg_type == HostMessage.Ping:
-            try:
-                conn.send_frame(codec.encode_pong())
-            except Exception:
-                pass
-            continue
-
-        if msg_type in (HostMessage.Stop, HostMessage.Timeout):
+        if msg.get("kind") == "Stop":
             stop_event.set()
 
-        msg_queue.put((msg_type, table))
+        msg_queue.put(msg)
 
     msg_queue.put(None)
+
+
+def _read_one(conn: Connection) -> dict[str, Any]:
+    """Read a single message synchronously. Used during pre-loop setup."""
+    buf = conn.recv_frame()
+    return codec.parse_host_frame(buf)
 
 
 def _run_bot(bot: Any, preprocess_fn: Any, turn_fn: Any) -> None:
@@ -346,51 +345,50 @@ def _run_lifecycle(
     preprocess_fn: Any,
     turn_fn: Any,
 ) -> None:
-    """Shared connect → identify → ready → config → preprocess → turn-loop."""
-    # 1. Collect options and Identify + Ready.
+    """Handshake → preprocessing → turn loop."""
     option_defs = collect_options(type(bot))
     wire_options = options_to_wire(option_defs) if option_defs else None
     conn.send_frame(codec.encode_identify(bot.name, bot.author, agent_id, wire_options))
-    conn.send_frame(codec.encode_ready())
 
-    # 2. Wait for SetOption*, MatchConfig, and StartPreprocessing.
-    config: dict[str, Any] | None = None
-    while True:
-        try:
-            msg_type, table = codec.decode_host_packet(conn.recv_frame())
-        except ConnectionError:
-            raise
-        except Exception as e:
-            raise ConnectionError(f"Failed to decode host message: {e}") from e
-
-        if msg_type == HostMessage.SetOption:
-            name, value = codec.extract_set_option(table)
-            apply_set_option(bot, option_defs, name, value)
-        elif msg_type == HostMessage.MatchConfig:
-            try:
-                config = codec.extract_match_config(table)
-            except Exception as e:
-                raise ConnectionError(f"Failed to decode MatchConfig: {e}") from e
-        elif msg_type == HostMessage.StartPreprocessing:
-            initial_state_hash = codec.extract_start_preprocessing(table)
-            break
-        else:
-            print(
-                f"Unexpected message during setup: type={msg_type}. Ignoring.",
-                file=sys.stderr,
-            )
-
-    if config is None:
-        raise RuntimeError(
-            "Protocol error: no MatchConfig before StartPreprocessing. "
-            "This is a host bug, not your bot."
+    # Welcome assigns the player slot.
+    welcome = _read_one(conn)
+    if welcome.get("kind") != "Welcome":
+        raise ConnectionError(
+            f"expected Welcome, got {welcome.get('kind')!r}"
         )
-    state = GameState(config)
+    slot = welcome["player_slot"]
 
-    # Start background reader thread before preprocessing so the stop flag
-    # works for long preprocess() calls too.
+    # Configure carries options + match config in one message.
+    configure = _read_one(conn)
+    if configure.get("kind") != "Configure":
+        raise ConnectionError(
+            f"expected Configure, got {configure.get('kind')!r}"
+        )
+    match_config = configure["match_config"]
+    for name, value in configure.get("options", []):
+        apply_set_option(bot, option_defs, name, value)
+
+    state = GameState(slot, match_config)
+
+    # Ready carries the bot's local state hash. Host verifies and replies
+    # with GoPreprocess.
+    conn.send_frame(codec.encode_ready(state.state_hash))
+
+    go_pre = _read_one(conn)
+    if go_pre.get("kind") != "GoPreprocess":
+        raise ConnectionError(
+            f"expected GoPreprocess, got {go_pre.get('kind')!r}"
+        )
+    if go_pre["state_hash"] != state.state_hash:
+        print(
+            f"[sdk] state_hash mismatch: bot {state.state_hash:#x} "
+            f"vs host {go_pre['state_hash']:#x}",
+            file=sys.stderr,
+        )
+
+    # Reader thread runs from here on so Stop during preprocessing is honored.
     stop_event = threading.Event()
-    msg_queue: queue.Queue[tuple[int, object] | None] = queue.Queue()
+    msg_queue: queue.Queue[dict[str, Any] | None] = queue.Queue()
     reader_thread = threading.Thread(
         target=_reader_loop,
         args=(conn, msg_queue, stop_event),
@@ -398,13 +396,14 @@ def _run_lifecycle(
     )
     reader_thread.start()
 
-    # 3. Preprocessing.
-    state.state_hash = initial_state_hash
+    # Preprocessing.
     ctx = Context(
-        config["preprocessing_timeout_ms"],
+        match_config["preprocessing_timeout_ms"],
         conn,
         stop_event,
-        state_hash=initial_state_hash,
+        player=state.my_player,
+        turn=0,
+        state_hash=state.state_hash,
     )
     try:
         preprocess_fn(state, ctx)
@@ -413,23 +412,28 @@ def _run_lifecycle(
         print("preprocess() crashed, but the game will continue.", file=sys.stderr)
     conn.send_frame(codec.encode_preprocessing_done())
 
-    # 4. Turn loop — reads from queue instead of socket.
+    # Turn loop.
     while True:
         item = msg_queue.get()
         if item is None:
             break
 
-        msg_type, table = item
+        kind = item.get("kind")
 
-        if msg_type == HostMessage.TurnState:
-            try:
-                ts = codec.extract_turn_state(table)
-            except Exception as e:
-                raise ConnectionError(f"Failed to decode TurnState: {e}") from e
-            state.update(ts)
+        if kind == "Advance":
+            new_hash = state.apply_advance(item["p1_dir"], item["p2_dir"])
+            if new_hash == item["new_hash"]:
+                conn.send_frame(codec.encode_sync_ok(new_hash))
+            else:
+                conn.send_frame(codec.encode_resync(new_hash))
+
+        elif kind == "Go":
             stop_event.clear()
+            timeout_ms = (item.get("limits") or {}).get("timeout_ms") or match_config[
+                "move_timeout_ms"
+            ]
             ctx = Context(
-                config["move_timeout_ms"],
+                timeout_ms,
                 conn,
                 stop_event,
                 player=state.my_player,
@@ -437,17 +441,51 @@ def _run_lifecycle(
                 state_hash=state.state_hash,
             )
             turn_fn(state, ctx, conn)
-        elif msg_type == HostMessage.GameOver:
+
+        elif kind == "GoState":
+            state.load_turn_state(item["turn_state"])
+            stop_event.clear()
+            timeout_ms = (item.get("limits") or {}).get("timeout_ms") or match_config[
+                "move_timeout_ms"
+            ]
+            ctx = Context(
+                timeout_ms,
+                conn,
+                stop_event,
+                player=state.my_player,
+                turn=state.turn,
+                state_hash=state.state_hash,
+            )
+            turn_fn(state, ctx, conn)
+
+        elif kind == "FullState":
+            new_match_config = item["match_config"]
+            new_hash = state.load_full_state(new_match_config, item["turn_state"])
+            match_config = new_match_config
+            conn.send_frame(codec.encode_sync_ok(new_hash))
+
+        elif kind == "Stop":
+            # Reader already set stop_event; nothing more to do at the
+            # dispatch level. The flag has either already been observed by
+            # the just-finished think() or applies to the next one.
+            pass
+
+        elif kind == "GameOver":
             try:
-                go = codec.extract_game_over(table)
                 bot.on_game_over(
-                    GameResult(go["result"]),
-                    (go["player1_score"], go["player2_score"]),
+                    GameResult(item["result"]),
+                    (item["player1_score"], item["player2_score"]),
                 )
             except Exception:
                 traceback.print_exc()
             break
-        elif msg_type == HostMessage.Stop:
-            pass  # Non-terminal — flag already set by reader thread.
-        elif msg_type == HostMessage.Timeout:
-            pass  # Flag already set by reader thread.
+
+        elif kind == "ProtocolError":
+            print(
+                f"[sdk] host reported protocol error: {item.get('reason', '')}",
+                file=sys.stderr,
+            )
+            break
+
+        else:
+            print(f"[sdk] ignoring unexpected message kind: {kind!r}", file=sys.stderr)
