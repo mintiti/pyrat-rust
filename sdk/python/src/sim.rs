@@ -126,6 +126,11 @@ impl PyGameSim {
 
         game.turn = turn;
 
+        // Direct mutation above bypasses the engine's incremental Zobrist
+        // updates — the inner state_hash is now stale. Recompute so the
+        // sim matches the canonical protocol hash from the start.
+        game.recompute_state_hash();
+
         Self { game }
     }
 }
@@ -211,6 +216,21 @@ impl PyGameSim {
     #[getter]
     fn is_game_over(&self) -> bool {
         self.game.check_game_over()
+    }
+
+    /// Engine Zobrist hash. Canonical sync hash for the protocol.
+    #[getter]
+    fn state_hash(&self) -> u64 {
+        self.game.state_hash()
+    }
+
+    /// Recompute the Zobrist hash from current fields.
+    ///
+    /// `make_move` keeps `state_hash` consistent incrementally; only call this
+    /// after manually mutating sim fields outside the engine's `make_move` /
+    /// `unmake_move` path.
+    fn recompute_state_hash(&mut self) {
+        self.game.recompute_state_hash();
     }
 
     fn __copy__(&self) -> Self {

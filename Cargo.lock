@@ -3121,11 +3121,14 @@ dependencies = [
 name = "pyrat-sdk-python"
 version = "0.1.0"
 dependencies = [
+ "flatbuffers",
  "ndarray",
  "numpy",
  "pyo3",
  "pyrat-engine-interface",
+ "pyrat-protocol",
  "pyrat-rust",
+ "pyrat-wire",
 ]
 
 [[package]]

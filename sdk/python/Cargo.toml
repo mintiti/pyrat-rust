@@ -11,6 +11,9 @@ crate-type = ["cdylib"]
 [dependencies]
 pyrat-engine-interface = { path = "../../interface" }
 pyrat = { package = "pyrat-rust", path = "../../engine", default-features = false }
+pyrat-protocol = { path = "../../server/protocol" }
+pyrat-wire = { path = "../../server/wire" }
+flatbuffers = "25.2.10"
 pyo3 = { version = "0.25", features = ["extension-module"] }
 numpy = "0.25"
 ndarray = "0.16"
