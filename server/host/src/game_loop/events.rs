@@ -48,6 +48,15 @@ pub enum MatchEvent {
         state_hash: u64,
         info: Info,
     },
+    /// A bot sent a provisional (best-so-far) direction during think.
+    /// Observer-facing only: `Player::take_provisional` is the game-driving
+    /// access path. See `Player` trait docs.
+    BotProvisional {
+        sender: Player,
+        turn: u16,
+        state_hash: u64,
+        direction: Direction,
+    },
     /// A bot timed out on an action this turn.
     BotTimeout { player: Player, turn: u16 },
     /// A bot disconnected during play.

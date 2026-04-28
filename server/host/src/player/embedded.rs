@@ -24,6 +24,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use async_trait::async_trait;
 use pyrat::{Coordinates, Direction, GameBuilder, GameState, MudMap};
 use pyrat_bot_api::{BotContext, InfoParams, InfoSink, Options};
 use pyrat_protocol::{
@@ -33,7 +34,7 @@ use pyrat_wire::{GameResult, Player as PlayerSlot};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
-use super::{EventSink, Player, PlayerError, PlayerIdentity};
+use super::{EventSink, Player, PlayerError, PlayerIdentity, ProvisionalSlot};
 
 /// Maximum time `close` waits for the dispatcher to exit before aborting it.
 /// A bot that ignores `ctx.should_stop()` may still be running on a
@@ -237,6 +238,12 @@ pub struct EmbeddedPlayer {
     /// Cooperative-stop signal shared with the dispatcher and any in-flight
     /// `EmbeddedCtx`. `close` flips this so bots polling `should_stop` exit.
     stopped: Arc<AtomicBool>,
+    /// Sink for observer-facing events (Provisional forwarding lives here in
+    /// `recv`; Info routing happens inside the dispatcher).
+    event_sink: EventSink,
+    /// Latest provisional direction (Foundation F2). `recv` populates it,
+    /// `take_provisional` consumes it, sending `Go`/`GoState` clears it.
+    latest_provisional: Option<ProvisionalSlot>,
 }
 
 impl EmbeddedPlayer {
@@ -253,7 +260,7 @@ impl EmbeddedPlayer {
         let dispatcher = tokio::spawn(dispatcher_task(
             bot,
             identity.clone(),
-            event_sink,
+            event_sink.clone(),
             host_rx,
             bot_tx,
             stopped.clone(),
@@ -264,6 +271,8 @@ impl EmbeddedPlayer {
             bot_rx,
             dispatcher: Some(dispatcher),
             stopped,
+            event_sink,
+            latest_provisional: None,
         }
     }
 
@@ -274,37 +283,74 @@ impl EmbeddedPlayer {
     }
 }
 
+#[async_trait]
 impl Player for EmbeddedPlayer {
     fn identity(&self) -> &PlayerIdentity {
         &self.identity
     }
 
     async fn send(&mut self, msg: HostMsg) -> Result<(), PlayerError> {
+        // Whole-turn boundary: any provisional from the previous turn is
+        // invalid once the host commits to a new turn (via Go/GoState).
+        if matches!(msg, HostMsg::Go { .. } | HostMsg::GoState { .. }) {
+            self.latest_provisional = None;
+        }
         self.host_tx
             .send(msg)
             .map_err(|_| PlayerError::TransportError("dispatcher closed".into()))
     }
 
     async fn recv(&mut self) -> Result<Option<BotMsg>, PlayerError> {
-        match self.bot_rx.recv().await {
-            Some(msg) => Ok(Some(msg)),
-            None => {
-                // Dispatcher has dropped its sender → it has exited. Surface
-                // its exit reason, if any.
-                self.reap_dispatcher().await?;
-                Ok(None)
-            },
+        loop {
+            match self.bot_rx.recv().await {
+                Some(BotMsg::Provisional {
+                    direction,
+                    player,
+                    turn,
+                    state_hash,
+                }) => {
+                    // Update turn-scoped slot AND forward as observer event.
+                    // Match never sees Provisional through recv(); the slot is
+                    // the only game-driving access path.
+                    self.latest_provisional = Some(ProvisionalSlot {
+                        direction,
+                        turn,
+                        state_hash,
+                    });
+                    self.event_sink
+                        .emit(crate::game_loop::MatchEvent::BotProvisional {
+                            sender: player,
+                            turn,
+                            state_hash,
+                            direction,
+                        });
+                    continue;
+                },
+                Some(msg) => return Ok(Some(msg)),
+                None => {
+                    // Dispatcher has dropped its sender → it has exited.
+                    // Surface its exit reason, if any.
+                    self.reap_dispatcher().await?;
+                    return Ok(None);
+                },
+            }
         }
     }
 
-    async fn close(self) -> Result<(), PlayerError> {
+    fn take_provisional(&mut self, expected_turn: u16, expected_hash: u64) -> Option<Direction> {
+        ProvisionalSlot::match_take(&mut self.latest_provisional, expected_turn, expected_hash)
+    }
+
+    async fn close(self: Box<Self>) -> Result<(), PlayerError> {
         let Self {
             host_tx,
             bot_rx,
             dispatcher,
             stopped,
             identity: _,
-        } = self;
+            event_sink: _,
+            latest_provisional: _,
+        } = *self;
         // Signal cooperative bots first so they get the earliest possible
         // chance to observe `should_stop()`. Order matters: another tokio
         // worker can drive the dispatcher past the closed channel before our
@@ -529,7 +575,7 @@ impl<B: EmbeddedBot> Setup<B, Identified> {
         }
 
         let game = build_engine_state(&match_config)?;
-        let hash = hash_from_game(&game, Direction::Stay, Direction::Stay);
+        let hash = game.state_hash();
 
         if self
             .core
@@ -745,7 +791,7 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
         // Rebuild the engine mirror to match the injected state.
         self.game = rebuild_engine_state(&self.match_config, &turn_state)?;
         self.last_moves = (turn_state.player1_last_move, turn_state.player2_last_move);
-        let local_hash = hash_from_game(&self.game, self.last_moves.0, self.last_moves.1);
+        let local_hash = self.game.state_hash();
         if local_hash != state_hash {
             return Err(PlayerError::ProtocolError(format!(
                 "GoState hash mismatch: local={local_hash}, host={state_hash} \
@@ -780,7 +826,7 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
                 self.game.turn, self.player_slot
             )));
         }
-        let local_hash = hash_from_game(&self.game, p1_dir, p2_dir);
+        let local_hash = self.game.state_hash();
 
         if local_hash == new_hash {
             if self
@@ -895,7 +941,10 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
         think_start: Instant,
         deadline: Option<Instant>,
     ) -> (HashedTurnState, EmbeddedCtx) {
-        let hts = HashedTurnState::new(turn_state_from_game(&self.game, self.last_moves));
+        let hts = HashedTurnState::with_unverified_hash(
+            turn_state_from_game(&self.game, self.last_moves),
+            self.game.state_hash(),
+        );
         let ctx = EmbeddedCtx {
             event_sink: self.core.event_sink.clone(),
             bot_tx: self.core.bot_tx.clone(),
@@ -946,7 +995,7 @@ impl<B: EmbeddedBot> Playing<B, Desynced> {
         self.match_config = match_config;
         self.game = rebuild_engine_state(&self.match_config, &turn_state)?;
         self.last_moves = (turn_state.player1_last_move, turn_state.player2_last_move);
-        let hash = hash_from_game(&self.game, self.last_moves.0, self.last_moves.1);
+        let hash = self.game.state_hash();
         if self.core.bot_tx.send(BotMsg::SyncOk { hash }).is_err() {
             return Ok(None);
         }
@@ -983,6 +1032,12 @@ fn build_engine_state(cfg: &MatchConfig) -> Result<GameState, PlayerError> {
 
 /// Rebuild the engine state to match an injected turn state (GoState or
 /// FullState recovery).
+///
+/// Mutates fields directly after the builder hands us a fresh `GameState`,
+/// then calls `recompute_state_hash` so the internal Zobrist matches the new
+/// fields (Foundation F4). Without the recompute, `state_hash()` would still
+/// reflect the builder's initial state and downstream sync checks would
+/// silently desync.
 fn rebuild_engine_state(cfg: &MatchConfig, ts: &TurnState) -> Result<GameState, PlayerError> {
     let mut game = build_engine_state(cfg)?;
     game.turn = ts.turn;
@@ -1000,15 +1055,8 @@ fn rebuild_engine_state(cfg: &MatchConfig, ts: &TurnState) -> Result<GameState, 
             game.cheese.take_cheese(*pos);
         }
     }
+    game.recompute_state_hash();
     Ok(game)
-}
-
-/// Hash a `GameState` via the protocol-canonical path: derive
-/// `TurnState`, wrap in `HashedTurnState::new()` (DefaultHasher). This
-/// is the same hashing used for Ready; `Advance` must produce a compatible
-/// hash for desync detection to work.
-fn hash_from_game(game: &GameState, last_p1: Direction, last_p2: Direction) -> u64 {
-    HashedTurnState::new(turn_state_from_game(game, (last_p1, last_p2))).state_hash()
 }
 
 fn turn_state_from_game(game: &GameState, last_moves: (Direction, Direction)) -> TurnState {
@@ -1056,14 +1104,22 @@ mod tests {
         })
     }
 
-    #[tokio::test]
-    async fn setup_flow_emits_identify_then_ready() {
-        let identity = PlayerIdentity {
+    fn test_identity(slot: PlayerSlot) -> PlayerIdentity {
+        PlayerIdentity {
             name: "Dummy".into(),
             author: "test".into(),
             agent_id: "pyrat/dummy".into(),
-        };
-        let mut player = EmbeddedPlayer::new(DummyBot, identity, EventSink::noop());
+            slot,
+        }
+    }
+
+    #[tokio::test]
+    async fn setup_flow_emits_identify_then_ready() {
+        let mut player = EmbeddedPlayer::new(
+            DummyBot,
+            test_identity(PlayerSlot::Player1),
+            EventSink::noop(),
+        );
 
         // Dispatcher's first emission is Identify, without any host input.
         let identify = player.recv().await.unwrap().unwrap();
@@ -1089,13 +1145,9 @@ mod tests {
             .await
             .unwrap();
 
-        // Configure triggers the Ready emission with a hash over initial state.
+        // Configure triggers the Ready emission with the engine Zobrist hash.
         let match_config = sample_match_config();
-        let expected_hash = hash_from_game(
-            &build_engine_state(&match_config).unwrap(),
-            Direction::Stay,
-            Direction::Stay,
-        );
+        let expected_hash = build_engine_state(&match_config).unwrap().state_hash();
         player
             .send(HostMsg::Configure {
                 options: vec![],
@@ -1117,12 +1169,11 @@ mod tests {
 
     #[tokio::test]
     async fn unexpected_message_during_setup_is_a_protocol_error() {
-        let identity = PlayerIdentity {
-            name: "Dummy".into(),
-            author: "test".into(),
-            agent_id: "pyrat/dummy".into(),
-        };
-        let mut player = EmbeddedPlayer::new(DummyBot, identity, EventSink::noop());
+        let mut player = EmbeddedPlayer::new(
+            DummyBot,
+            test_identity(PlayerSlot::Player1),
+            EventSink::noop(),
+        );
 
         // Drain the bot's Identify.
         let _ = player.recv().await.unwrap().unwrap();
@@ -1149,16 +1200,15 @@ mod tests {
 
     /// Verifies the Advance + SyncOk happy path. Lives here (not in the
     /// integration tests) because computing the expected post-move hash
-    /// needs the crate-private `build_engine_state` / `hash_from_game`
-    /// helpers; exposing them publicly would leak implementation details.
+    /// uses the crate-private `build_engine_state` helper; exposing it
+    /// publicly would leak implementation details.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn advance_with_correct_hash_emits_syncok() {
-        let identity = PlayerIdentity {
-            name: "Dummy".into(),
-            author: "test".into(),
-            agent_id: "pyrat/dummy".into(),
-        };
-        let mut player = EmbeddedPlayer::new(DummyBot, identity, EventSink::noop());
+        let mut player = EmbeddedPlayer::new(
+            DummyBot,
+            test_identity(PlayerSlot::Player1),
+            EventSink::noop(),
+        );
 
         // Setup.
         let _ = player.recv().await.unwrap().unwrap(); // Identify
@@ -1195,11 +1245,10 @@ mod tests {
         }
 
         // Compute the hash the dispatcher would arrive at after applying
-        // (Stay, Stay) to the initial state, using the same helpers the dispatcher
-        // uses internally.
+        // (Stay, Stay) to the initial state — engine Zobrist hash.
         let mut game = build_engine_state(&match_config).unwrap();
         let _ = game.make_move(Direction::Stay, Direction::Stay);
-        let hash_after = hash_from_game(&game, Direction::Stay, Direction::Stay);
+        let hash_after = game.state_hash();
 
         player
             .send(HostMsg::Advance {
@@ -1225,6 +1274,6 @@ mod tests {
             })
             .await
             .unwrap();
-        let _ = player.close().await;
+        let _ = Box::new(player).close().await;
     }
 }
