@@ -1,6 +1,6 @@
 use tokio::sync::mpsc;
 
-use pyrat_protocol::{HashedTurnState, OwnedInfo, OwnedMatchConfig, OwnedOptionDef};
+use pyrat_protocol::{HashedTurnState, Info, MatchConfig, OptionDef};
 use pyrat_wire::{GameResult, Player};
 
 // ── Session identity ────────────────────────────────
@@ -33,7 +33,7 @@ pub enum SessionMsg {
         session_id: SessionId,
         name: String,
         author: String,
-        options: Vec<OwnedOptionDef>,
+        options: Vec<OptionDef>,
         agent_id: String,
     },
     /// Bot declared itself ready to receive match configuration.
@@ -50,10 +50,7 @@ pub enum SessionMsg {
         think_ms: u32,
     },
     /// Bot sent debug/analysis info (forwarded as-is).
-    Info {
-        session_id: SessionId,
-        info: OwnedInfo,
-    },
+    Info { session_id: SessionId, info: Info },
     /// Session ended (TCP closed, shutdown, or error).
     Disconnected {
         session_id: SessionId,
@@ -85,7 +82,7 @@ pub enum HostCommand {
         name: String,
         value: String,
     },
-    MatchConfig(Box<OwnedMatchConfig>),
+    MatchConfig(Box<MatchConfig>),
     StartPreprocessing {
         state_hash: u64,
     },

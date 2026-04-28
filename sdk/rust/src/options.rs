@@ -5,5 +5,5 @@
 
 pub use pyrat_bot_api::Options;
 
-/// Owned option definition sent during Identify.
-pub type SdkOptionDef = pyrat_protocol::OwnedOptionDef;
+/// Option definition sent during Identify.
+pub type SdkOptionDef = pyrat_protocol::OptionDef;

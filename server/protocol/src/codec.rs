@@ -15,8 +15,8 @@ use pyrat::Coordinates;
 use pyrat_wire::{self as wire, Vec2};
 
 use crate::{
-    wire_to_engine_direction, HashedTurnState, MudEntry, OwnedGameOver, OwnedInfo,
-    OwnedMatchConfig, OwnedOptionDef, OwnedTurnState,
+    wire_to_engine_direction, GameOver, HashedTurnState, Info, MatchConfig, MudEntry, OptionDef,
+    TurnState,
 };
 
 // ── Coordinate helpers ──────────────────────────────
@@ -45,9 +45,9 @@ pub fn coords_to_vec2(c: Coordinates) -> Vec2 {
 
 // ── Extraction functions ────────────────────────────
 
-/// Extract an [`OwnedMatchConfig`] from a wire `MatchConfig` table.
-pub fn extract_match_config(mc: &wire::MatchConfig<'_>) -> OwnedMatchConfig {
-    OwnedMatchConfig {
+/// Extract a [`MatchConfig`] from a wire `MatchConfig` table.
+pub fn extract_match_config(mc: &wire::MatchConfig<'_>) -> MatchConfig {
+    MatchConfig {
         width: mc.width(),
         height: mc.height(),
         max_turns: mc.max_turns(),
@@ -104,7 +104,7 @@ pub fn extract_match_config(mc: &wire::MatchConfig<'_>) -> OwnedMatchConfig {
 /// SDK's `compute_initial_hash`); per-turn hashes ride along on the wire
 /// after that.
 pub fn extract_turn_state(ts: &wire::TurnState<'_>) -> HashedTurnState {
-    let owned = OwnedTurnState {
+    let owned = TurnState {
         turn: ts.turn(),
         player1_position: vec2_opt(ts.player1_position()),
         player2_position: vec2_opt(ts.player2_position()),
@@ -122,9 +122,9 @@ pub fn extract_turn_state(ts: &wire::TurnState<'_>) -> HashedTurnState {
     HashedTurnState::with_unverified_hash(owned, ts.state_hash())
 }
 
-/// Extract an [`OwnedInfo`] from a wire `Info` table.
-pub fn extract_info(info: &wire::Info<'_>) -> OwnedInfo {
-    OwnedInfo {
+/// Extract an [`Info`] from a wire `Info` table.
+pub fn extract_info(info: &wire::Info<'_>) -> Info {
+    Info {
         player: info.player(),
         multipv: info.multipv(),
         target: info.target().map(vec2_to_coords),
@@ -141,9 +141,9 @@ pub fn extract_info(info: &wire::Info<'_>) -> OwnedInfo {
     }
 }
 
-/// Extract an [`OwnedGameOver`] from a wire `GameOver` table.
-pub fn extract_game_over(go: &wire::GameOver<'_>) -> OwnedGameOver {
-    OwnedGameOver {
+/// Extract a [`GameOver`] from a wire `GameOver` table.
+pub fn extract_game_over(go: &wire::GameOver<'_>) -> GameOver {
+    GameOver {
         result: go.result(),
         player1_score: go.player1_score(),
         player2_score: go.player2_score(),
@@ -153,11 +153,11 @@ pub fn extract_game_over(go: &wire::GameOver<'_>) -> OwnedGameOver {
 /// Extract option definitions from a FlatBuffers vector of `OptionDef` tables.
 pub fn extract_option_defs(
     opts: flatbuffers::Vector<'_, flatbuffers::ForwardsUOffset<wire::OptionDef<'_>>>,
-) -> Vec<OwnedOptionDef> {
+) -> Vec<OptionDef> {
     (0..opts.len())
         .map(|i| {
             let o = opts.get(i);
-            OwnedOptionDef {
+            OptionDef {
                 name: o.name().unwrap_or("").to_owned(),
                 option_type: o.type_(),
                 default_value: o.default_value().unwrap_or("").to_owned(),

@@ -7,8 +7,7 @@
 use flatbuffers::FlatBufferBuilder;
 
 use pyrat_protocol::{
-    coords_to_vec2, engine_to_wire_direction, extract_info, extract_option_defs, OwnedInfo,
-    OwnedOptionDef,
+    coords_to_vec2, engine_to_wire_direction, extract_info, extract_option_defs, Info, OptionDef,
 };
 
 use crate::session::messages::HostCommand;
@@ -21,7 +20,7 @@ pub enum BotPayload {
     Identify {
         name: String,
         author: String,
-        options: Vec<OwnedOptionDef>,
+        options: Vec<OptionDef>,
         agent_id: String,
     },
     Ready,
@@ -34,7 +33,7 @@ pub enum BotPayload {
         think_ms: u32,
     },
     Pong,
-    Info(OwnedInfo),
+    Info(Info),
     RenderCommands,
 }
 
@@ -247,9 +246,7 @@ pub fn serialize_host_command(fbb: &mut FlatBufferBuilder<'_>, cmd: &HostCommand
 mod tests {
     use super::*;
     use pyrat::Coordinates;
-    use pyrat_protocol::{
-        extract_match_config, HashedTurnState, MudEntry, OwnedMatchConfig, OwnedTurnState,
-    };
+    use pyrat_protocol::{extract_match_config, HashedTurnState, MatchConfig, MudEntry, TurnState};
     use pyrat_wire::{Direction, GameResult, Player, TimingMode};
 
     // Helper: build a BotPacket with Identify
@@ -427,7 +424,7 @@ mod tests {
     #[test]
     fn round_trip_match_config() {
         let mut fbb = FlatBufferBuilder::new();
-        let cfg = OwnedMatchConfig {
+        let cfg = MatchConfig {
             width: 21,
             height: 15,
             max_turns: 300,
@@ -476,7 +473,7 @@ mod tests {
     #[test]
     fn round_trip_turn_state() {
         let mut fbb = FlatBufferBuilder::new();
-        let ts = HashedTurnState::new(OwnedTurnState {
+        let ts = HashedTurnState::new(TurnState {
             turn: 42,
             player1_position: Coordinates::new(10, 7),
             player2_position: Coordinates::new(0, 0),

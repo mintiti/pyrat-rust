@@ -8,7 +8,7 @@ use tracing::{debug, info, info_span, warn, Instrument};
 
 use crate::session::messages::HostCommand;
 use crate::session::{run_session, SessionConfig, SessionId, SessionMsg};
-use pyrat_protocol::{HashedTurnState, OwnedTurnState};
+use pyrat_protocol::{HashedTurnState, TurnState};
 
 use pyrat_wire::Player;
 
@@ -247,7 +247,7 @@ pub async fn run_setup(
     // Compute the initial state hash from match_config. Sent to bots via
     // StartPreprocessing so they can use it on preprocessing Info frames.
     // Must match the hash the GUI stores on the root node.
-    let initial_state_hash = HashedTurnState::new(OwnedTurnState {
+    let initial_state_hash = HashedTurnState::new(TurnState {
         turn: 0,
         player1_position: setup.match_config.player1_start,
         player2_position: setup.match_config.player2_start,

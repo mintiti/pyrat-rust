@@ -13,4 +13,4 @@ pub mod options;
 pub use context::{BotContext, InfoSender, InfoSink};
 pub use info::InfoParams;
 pub use options::Options;
-pub use pyrat_protocol::OwnedOptionDef;
+pub use pyrat_protocol::OptionDef;

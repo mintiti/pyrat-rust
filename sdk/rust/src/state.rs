@@ -12,9 +12,9 @@ use pyrat_engine_interface::GameView;
 use pyrat_wire::Player;
 
 use crate::GameSim;
-use pyrat_protocol::{HashedTurnState, OwnedMatchConfig, OwnedTurnState};
+use pyrat_protocol::{HashedTurnState, MatchConfig, TurnState};
 
-/// SDK-facing game state. Built once from `OwnedMatchConfig`, updated each turn.
+/// SDK-facing game state. Built once from `MatchConfig`, updated each turn.
 pub struct GameState {
     view: GameView,
     my_player: Player,
@@ -41,7 +41,7 @@ pub struct GameState {
 
 impl GameState {
     /// Build from match configuration received during setup.
-    pub fn from_config(cfg: &OwnedMatchConfig) -> Result<Self, String> {
+    pub fn from_config(cfg: &MatchConfig) -> Result<Self, String> {
         let walls: Vec<(Coordinates, Coordinates)> = cfg.walls.clone();
         let mud: Vec<(Coordinates, Coordinates, u8)> =
             cfg.mud.iter().map(|m| (m.pos1, m.pos2, m.turns)).collect();
@@ -229,7 +229,7 @@ impl GameState {
     /// Delegates to `HashedTurnState::new` so the hash algorithm is defined in
     /// one place. The SDK uses this to verify agreement with the host.
     pub fn compute_initial_hash(&self) -> u64 {
-        let ts = OwnedTurnState {
+        let ts = TurnState {
             turn: 0,
             player1_position: self.player1_position,
             player2_position: self.player2_position,
@@ -331,11 +331,11 @@ impl GameState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pyrat_protocol::OwnedTurnState;
+    use pyrat_protocol::TurnState;
     use pyrat_wire::TimingMode;
 
-    fn test_config() -> OwnedMatchConfig {
-        OwnedMatchConfig {
+    fn test_config() -> MatchConfig {
+        MatchConfig {
             width: 5,
             height: 5,
             max_turns: 300,
@@ -353,7 +353,7 @@ mod tests {
 
     fn test_turn_state() -> HashedTurnState {
         HashedTurnState::with_unverified_hash(
-            OwnedTurnState {
+            TurnState {
                 turn: 5,
                 player1_position: Coordinates::new(1, 1),
                 player2_position: Coordinates::new(3, 3),
@@ -374,7 +374,7 @@ mod tests {
         let cfg = test_config();
         let state = GameState::from_config(&cfg).unwrap();
 
-        let expected = HashedTurnState::new(OwnedTurnState {
+        let expected = HashedTurnState::new(TurnState {
             turn: 0,
             player1_position: cfg.player1_start,
             player2_position: cfg.player2_start,
@@ -504,7 +504,7 @@ mod tests {
 
         // Simulate mid-game: one cheese collected, player has some score
         state.update(HashedTurnState::with_unverified_hash(
-            OwnedTurnState {
+            TurnState {
                 turn: 10,
                 player1_position: Coordinates::new(2, 2),
                 player2_position: Coordinates::new(0, 0),

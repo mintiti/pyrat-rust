@@ -11,7 +11,7 @@ use tracing::debug;
 use crate::session::messages::{HostCommand, SessionMsg};
 use crate::session::SessionId;
 use pyrat::Direction;
-use pyrat_protocol::OwnedInfo;
+use pyrat_protocol::Info;
 use pyrat_wire::Player;
 
 /// The four movement directions (excludes Stay).
@@ -133,7 +133,7 @@ async fn run_stub(
                 let _ = game_tx
                     .send(SessionMsg::Info {
                         session_id,
-                        info: OwnedInfo {
+                        info: Info {
                             player,
                             multipv: 1,
                             target,

@@ -14,7 +14,7 @@ use pyrat_host::session::messages::*;
 use pyrat_host::session::{run_session, SessionConfig, SessionId};
 use pyrat_host::wire::framing::{FrameReader, FrameWriter};
 use pyrat_host::wire::*;
-use pyrat_protocol::OwnedMatchConfig;
+use pyrat_protocol::MatchConfig;
 
 /// Build a framed BotPacket from a closure that builds the inner message.
 pub fn build_bot_frame<F>(msg_type: BotMessage, build_msg: F) -> Vec<u8>
@@ -91,8 +91,8 @@ pub fn action_frame(direction: Direction, player: Player, turn: u16) -> Vec<u8> 
     })
 }
 
-pub fn simple_match_config() -> OwnedMatchConfig {
-    OwnedMatchConfig {
+pub fn simple_match_config() -> MatchConfig {
+    MatchConfig {
         width: 21,
         height: 15,
         max_turns: 300,

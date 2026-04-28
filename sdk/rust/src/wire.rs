@@ -6,22 +6,22 @@
 use flatbuffers::FlatBufferBuilder;
 use pyrat_protocol::{
     engine_to_wire_direction, extract_game_over, extract_match_config, extract_turn_state,
-    wire_to_engine_direction, HashedTurnState, OwnedGameOver, OwnedMatchConfig,
+    wire_to_engine_direction, GameOver, HashedTurnState, MatchConfig,
 };
 use pyrat_wire::{self as wire, BotMessage, HostMessage, Vec2};
 
-// ── Owned extraction types ───────────────────────────
+// ── Extracted host messages ──────────────────────────
 
 /// Parsed host message.
 #[derive(Debug)]
 #[allow(dead_code)] // Fields are extracted for completeness; not all are consumed.
 pub enum HostMsg {
     SetOption { name: String, value: String },
-    MatchConfig(OwnedMatchConfig),
+    MatchConfig(MatchConfig),
     StartPreprocessing { state_hash: u64 },
     TurnState(HashedTurnState),
     Timeout { default_move: pyrat::Direction },
-    GameOver(OwnedGameOver),
+    GameOver(GameOver),
     Ping,
     Stop,
 }
