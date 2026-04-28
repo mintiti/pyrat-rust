@@ -78,7 +78,6 @@ Coordinates are `Coordinates` objects with `.x` and `.y` fields. `(0, 0)` is at 
 | `my_last_move()` | `Direction` | This bot's last move |
 | `opponent_last_move()` | `Direction` | Opponent's last move |
 | `my_player()` | `Player` | Which player this bot is |
-| `controlled_players()` | `&[Player]` | All controlled players (usually one) |
 
 ### Methods: raw (for Hivemind)
 

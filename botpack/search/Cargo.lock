@@ -218,6 +218,7 @@ dependencies = [
  "flatbuffers",
  "pyrat-rust",
  "pyrat-wire",
+ "thiserror",
 ]
 
 [[package]]
