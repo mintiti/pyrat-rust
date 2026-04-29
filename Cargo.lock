@@ -3055,9 +3055,9 @@ name = "pyrat-headless"
 version = "0.1.0"
 dependencies = [
  "clap",
- "flatbuffers",
  "pyrat-host",
  "pyrat-rust",
+ "pyrat-sdk",
  "rand 0.10.0",
  "serde",
  "serde_json",
