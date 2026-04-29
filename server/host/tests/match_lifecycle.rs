@@ -1,0 +1,508 @@
+//! Integration tests for the slice 5 [`Match`] typestate.
+//!
+//! These exercise the full Match lifecycle: setup (Configure → Ready →
+//! GoPreprocess → PreprocessingDone), playing (Advance → SyncOk → Go →
+//! Action), Resync recovery, and ReadyHashMismatch failure paths.
+//!
+//! The happy path uses two `EmbeddedPlayer<StayBot>` instances boxed as
+//! `dyn Player`. The lie-based tests (Resync, hash mismatch) use a small
+//! channel-backed `ScriptedPlayer` so the test can choose what each bot
+//! reports.
+
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use async_trait::async_trait;
+use pyrat::{Coordinates, Direction, GameBuilder, GameState};
+use pyrat_host::game_loop::build_match_config;
+use pyrat_host::match_host::{Match, MatchError, MatchEvent, PlayingConfig, SetupTiming};
+use pyrat_host::player::{
+    EmbeddedBot, EmbeddedCtx, EmbeddedPlayer, EventSink, Options, Player, PlayerError,
+    PlayerIdentity,
+};
+use pyrat_protocol::{BotMsg, HashedTurnState, HostMsg};
+use pyrat_wire::{GameResult, Player as PlayerSlot, TimingMode};
+use tokio::sync::mpsc;
+use tokio::time::timeout;
+
+// ── Shared fixtures ───────────────────────────────────
+
+fn make_game() -> GameState {
+    GameBuilder::new(5, 5)
+        .with_max_turns(5)
+        .with_open_maze()
+        .with_custom_positions(Coordinates::new(0, 0), Coordinates::new(4, 4))
+        .with_custom_cheese(vec![Coordinates::new(2, 2)])
+        .build()
+        .create(Some(42))
+        .expect("create game")
+}
+
+fn identity(slot: PlayerSlot, name: &str) -> PlayerIdentity {
+    PlayerIdentity {
+        name: name.into(),
+        author: "tests".into(),
+        agent_id: format!("pyrat/test/{name}"),
+        slot,
+    }
+}
+
+fn fast_setup() -> SetupTiming {
+    SetupTiming {
+        configure_timeout: Duration::from_secs(2),
+        preprocessing_timeout: Duration::from_secs(2),
+    }
+}
+
+fn fast_playing() -> PlayingConfig {
+    PlayingConfig {
+        move_timeout: Duration::from_millis(500),
+        network_grace: Duration::from_millis(50),
+    }
+}
+
+// ── EmbeddedBot for happy path ────────────────────────
+
+struct StayBot;
+impl Options for StayBot {}
+impl EmbeddedBot for StayBot {
+    fn think(&mut self, _: &HashedTurnState, _: &EmbeddedCtx) -> Direction {
+        Direction::Stay
+    }
+}
+
+// ── ScriptedPlayer: channel-backed Player for lie-based tests ─
+
+/// Test-only `Player` that exposes raw `send`/`recv` channels so a test
+/// can drive arbitrary protocol exchanges.
+struct ScriptedPlayer {
+    identity: PlayerIdentity,
+    host_tx: mpsc::UnboundedSender<HostMsg>,
+    bot_rx: mpsc::UnboundedReceiver<BotMsg>,
+}
+
+struct ScriptedHandle {
+    host_rx: mpsc::UnboundedReceiver<HostMsg>,
+    bot_tx: mpsc::UnboundedSender<BotMsg>,
+}
+
+impl ScriptedPlayer {
+    fn pair(identity: PlayerIdentity) -> (Self, ScriptedHandle) {
+        let (host_tx, host_rx) = mpsc::unbounded_channel();
+        let (bot_tx, bot_rx) = mpsc::unbounded_channel();
+        (
+            Self {
+                identity,
+                host_tx,
+                bot_rx,
+            },
+            ScriptedHandle { host_rx, bot_tx },
+        )
+    }
+}
+
+#[async_trait]
+impl Player for ScriptedPlayer {
+    fn identity(&self) -> &PlayerIdentity {
+        &self.identity
+    }
+
+    async fn send(&mut self, msg: HostMsg) -> Result<(), PlayerError> {
+        self.host_tx
+            .send(msg)
+            .map_err(|_| PlayerError::TransportError("test driver dropped host_rx".into()))
+    }
+
+    async fn recv(&mut self) -> Result<Option<BotMsg>, PlayerError> {
+        Ok(self.bot_rx.recv().await)
+    }
+
+    fn take_provisional(&mut self, _turn: u16, _hash: u64) -> Option<Direction> {
+        None
+    }
+
+    async fn close(self: Box<Self>) -> Result<(), PlayerError> {
+        Ok(())
+    }
+}
+
+impl ScriptedHandle {
+    async fn expect_send(&mut self) -> HostMsg {
+        timeout(Duration::from_secs(2), self.host_rx.recv())
+            .await
+            .expect("expect_send timed out")
+            .expect("host_tx dropped")
+    }
+
+    fn respond(&self, msg: BotMsg) {
+        self.bot_tx.send(msg).expect("bot_rx dropped");
+    }
+}
+
+// ── Tests ─────────────────────────────────────────────
+
+/// Two cooperative bots run a 5-turn match to completion. Validates the
+/// full pipeline: setup → start → step loop → game over → MatchOver event.
+#[tokio::test]
+async fn match_run_completes_with_two_embedded_bots() {
+    let game = make_game();
+    let cfg = build_match_config(&game, TimingMode::Wait, 500, 1000);
+
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
+    let sink = EventSink::new(event_tx.clone());
+    let p1 = Box::new(
+        EmbeddedPlayer::accept(StayBot, identity(PlayerSlot::Player1, "p1"), sink.clone())
+            .await
+            .expect("accept p1"),
+    ) as Box<dyn Player>;
+    let p2 = Box::new(
+        EmbeddedPlayer::accept(StayBot, identity(PlayerSlot::Player2, "p2"), sink)
+            .await
+            .expect("accept p2"),
+    ) as Box<dyn Player>;
+
+    let m = Match::new(
+        game,
+        [p1, p2],
+        cfg,
+        [vec![], vec![]],
+        fast_setup(),
+        fast_playing(),
+        Some(event_tx),
+    );
+
+    let result = timeout(Duration::from_secs(5), m.run())
+        .await
+        .expect("match run hung")
+        .expect("match run failed");
+
+    // Both bots Stay forever, no cheese collected, max_turns=5 → draw.
+    assert_eq!(result.result, GameResult::Draw);
+    assert_eq!(result.turns_played, 5);
+
+    // Drain events: SetupComplete, MatchStarted, 5x TurnPlayed, MatchOver.
+    let mut events = vec![];
+    while let Ok(ev) = event_rx.try_recv() {
+        events.push(ev);
+    }
+    let n_turns = events
+        .iter()
+        .filter(|e| matches!(e, MatchEvent::TurnPlayed { .. }))
+        .count();
+    assert_eq!(n_turns, 5, "expected 5 TurnPlayed events, got {n_turns}");
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, MatchEvent::SetupComplete)));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, MatchEvent::MatchStarted { .. })));
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, MatchEvent::MatchOver { .. })));
+}
+
+/// Bot that lies about its initial hash → `MatchError::ReadyHashMismatch`.
+#[tokio::test]
+async fn ready_hash_mismatch_aborts_setup() {
+    let game = make_game();
+    let cfg = build_match_config(&game, TimingMode::Wait, 500, 1000);
+
+    let (p1_player, p1_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player1, "p1"));
+    let (p2_player, p2_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player2, "p2"));
+
+    let p1: Box<dyn Player> = Box::new(p1_player);
+    let p2: Box<dyn Player> = Box::new(p2_player);
+
+    let m = Match::new(
+        game,
+        [p1, p2],
+        cfg,
+        [vec![], vec![]],
+        fast_setup(),
+        fast_playing(),
+        None,
+    );
+
+    // Drive the bot side. P1 returns the wrong hash.
+    let driver = tokio::spawn(async move {
+        let mut p1 = p1_handle;
+        let mut p2 = p2_handle;
+        // Configure → Ready
+        match p1.expect_send().await {
+            HostMsg::Configure { .. } => {},
+            other => panic!("p1 expected Configure, got {other:?}"),
+        }
+        match p2.expect_send().await {
+            HostMsg::Configure { .. } => {},
+            other => panic!("p2 expected Configure, got {other:?}"),
+        }
+        // P1 lies; P2 still respond cleanly so order doesn't matter.
+        p1.respond(BotMsg::Ready {
+            state_hash: 0xDEAD_BEEF,
+        });
+        p2.respond(BotMsg::Ready { state_hash: 0 });
+    });
+
+    let err = timeout(Duration::from_secs(3), m.run())
+        .await
+        .expect("run hung")
+        .expect_err("expected ReadyHashMismatch");
+
+    driver.abort();
+    let _ = driver.await;
+
+    match err {
+        MatchError::ReadyHashMismatch { slot, .. } => {
+            assert_eq!(slot, PlayerSlot::Player1, "P1 was the liar");
+        },
+        other => panic!("expected ReadyHashMismatch, got {other:?}"),
+    }
+}
+
+/// Player1 sends Resync on the first Advance → Match recovers via
+/// FullState → SyncOk and the match continues normally.
+#[tokio::test]
+async fn resync_recovery_after_advance_continues_match() {
+    let game = make_game();
+    let expected_hash = game.state_hash();
+    let cfg = build_match_config(&game, TimingMode::Wait, 500, 1000);
+
+    let (p1_player, p1_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player1, "p1"));
+    let (p2_player, p2_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player2, "p2"));
+
+    let p1: Box<dyn Player> = Box::new(p1_player);
+    let p2: Box<dyn Player> = Box::new(p2_player);
+
+    let m = Match::new(
+        game,
+        [p1, p2],
+        cfg,
+        [vec![], vec![]],
+        fast_setup(),
+        fast_playing(),
+        None,
+    );
+
+    let resync_seen = Arc::new(Mutex::new(false));
+    let full_state_seen = Arc::new(Mutex::new(false));
+    let resync_seen_clone = resync_seen.clone();
+    let full_state_seen_clone = full_state_seen.clone();
+
+    // Drive both bots through the protocol. P1 sends Resync on the first
+    // Advance, expects FullState back, then SyncOk.
+    let driver = tokio::spawn(async move {
+        let mut p1 = p1_handle;
+        let mut p2 = p2_handle;
+
+        // Setup: Configure → Ready
+        let _ = p1.expect_send().await;
+        let _ = p2.expect_send().await;
+        p1.respond(BotMsg::Ready {
+            state_hash: expected_hash,
+        });
+        p2.respond(BotMsg::Ready {
+            state_hash: expected_hash,
+        });
+
+        // GoPreprocess → PreprocessingDone
+        let _ = p1.expect_send().await;
+        let _ = p2.expect_send().await;
+        p1.respond(BotMsg::PreprocessingDone);
+        p2.respond(BotMsg::PreprocessingDone);
+
+        // Turn 0: Go → Action(Stay)
+        let go1 = p1.expect_send().await;
+        let go2 = p2.expect_send().await;
+        let go_hash = match go1 {
+            HostMsg::Go { state_hash, .. } => state_hash,
+            other => panic!("p1 expected Go, got {other:?}"),
+        };
+        assert!(matches!(go2, HostMsg::Go { .. }));
+        p1.respond(BotMsg::Action {
+            direction: Direction::Stay,
+            player: PlayerSlot::Player1,
+            turn: 0,
+            state_hash: go_hash,
+            think_ms: 1,
+        });
+        p2.respond(BotMsg::Action {
+            direction: Direction::Stay,
+            player: PlayerSlot::Player2,
+            turn: 0,
+            state_hash: go_hash,
+            think_ms: 1,
+        });
+
+        // Turn 1: Advance → P1 Resyncs, P2 SyncOk.
+        let advance1 = p1.expect_send().await;
+        let advance2 = p2.expect_send().await;
+        let new_hash = match advance1 {
+            HostMsg::Advance { new_hash, .. } => new_hash,
+            other => panic!("p1 expected Advance, got {other:?}"),
+        };
+        assert!(matches!(advance2, HostMsg::Advance { .. }));
+
+        // P1 sends Resync; P2 sends SyncOk.
+        p1.respond(BotMsg::Resync { my_hash: 0 });
+        p2.respond(BotMsg::SyncOk { hash: new_hash });
+
+        // Match should respond to P1 with FullState.
+        let full = p1.expect_send().await;
+        match full {
+            HostMsg::FullState { .. } => {
+                *full_state_seen_clone.lock().unwrap() = true;
+            },
+            other => panic!("p1 expected FullState, got {other:?}"),
+        }
+        *resync_seen_clone.lock().unwrap() = true;
+        // P1 then sends SyncOk.
+        p1.respond(BotMsg::SyncOk { hash: new_hash });
+
+        // Drive remaining turns to completion (turns 1..5). The hash advances
+        // each turn; track it as `current_hash`.
+        let mut current_hash = new_hash;
+        for t in 1..5_u16 {
+            let _ = p1.expect_send().await; // Go
+            let _ = p2.expect_send().await; // Go
+            p1.respond(BotMsg::Action {
+                direction: Direction::Stay,
+                player: PlayerSlot::Player1,
+                turn: t,
+                state_hash: current_hash,
+                think_ms: 1,
+            });
+            p2.respond(BotMsg::Action {
+                direction: Direction::Stay,
+                player: PlayerSlot::Player2,
+                turn: t,
+                state_hash: current_hash,
+                think_ms: 1,
+            });
+            // For all turns except the last, respond to Advance with SyncOk.
+            // For the last turn (t == 4), the match sends GameOver, no Advance.
+            if t < 4 {
+                let adv1 = p1.expect_send().await;
+                let adv2 = p2.expect_send().await;
+                let nh = match adv1 {
+                    HostMsg::Advance { new_hash, .. } => new_hash,
+                    other => panic!("expected Advance, got {other:?}"),
+                };
+                assert!(matches!(adv2, HostMsg::Advance { .. }));
+                p1.respond(BotMsg::SyncOk { hash: nh });
+                p2.respond(BotMsg::SyncOk { hash: nh });
+                current_hash = nh;
+            }
+        }
+        // GameOver
+        let go1 = p1.expect_send().await;
+        let go2 = p2.expect_send().await;
+        assert!(matches!(go1, HostMsg::GameOver { .. }));
+        assert!(matches!(go2, HostMsg::GameOver { .. }));
+    });
+
+    let result = timeout(Duration::from_secs(5), m.run())
+        .await
+        .expect("match run hung")
+        .expect("match run failed");
+
+    driver.await.unwrap();
+
+    assert!(*resync_seen.lock().unwrap(), "Resync was processed");
+    assert!(
+        *full_state_seen.lock().unwrap(),
+        "FullState was sent in response"
+    );
+    assert_eq!(result.turns_played, 5);
+}
+
+/// Two Resyncs in a row from the same player on the same turn →
+/// `MatchError::PersistentDesync`.
+#[tokio::test]
+async fn second_resync_on_same_turn_is_persistent_desync() {
+    let game = make_game();
+    let expected_hash = game.state_hash();
+    let cfg = build_match_config(&game, TimingMode::Wait, 500, 1000);
+
+    let (p1_player, p1_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player1, "p1"));
+    let (p2_player, p2_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player2, "p2"));
+
+    let p1: Box<dyn Player> = Box::new(p1_player);
+    let p2: Box<dyn Player> = Box::new(p2_player);
+
+    let m = Match::new(
+        game,
+        [p1, p2],
+        cfg,
+        [vec![], vec![]],
+        fast_setup(),
+        fast_playing(),
+        None,
+    );
+
+    let driver = tokio::spawn(async move {
+        let mut p1 = p1_handle;
+        let mut p2 = p2_handle;
+
+        let _ = p1.expect_send().await;
+        let _ = p2.expect_send().await;
+        p1.respond(BotMsg::Ready {
+            state_hash: expected_hash,
+        });
+        p2.respond(BotMsg::Ready {
+            state_hash: expected_hash,
+        });
+
+        let _ = p1.expect_send().await; // GoPreprocess
+        let _ = p2.expect_send().await;
+        p1.respond(BotMsg::PreprocessingDone);
+        p2.respond(BotMsg::PreprocessingDone);
+
+        // Turn 0: Go → Action.
+        let go1 = p1.expect_send().await;
+        let _go2 = p2.expect_send().await;
+        let go_hash = match go1 {
+            HostMsg::Go { state_hash, .. } => state_hash,
+            _ => unreachable!(),
+        };
+        p1.respond(BotMsg::Action {
+            direction: Direction::Stay,
+            player: PlayerSlot::Player1,
+            turn: 0,
+            state_hash: go_hash,
+            think_ms: 1,
+        });
+        p2.respond(BotMsg::Action {
+            direction: Direction::Stay,
+            player: PlayerSlot::Player2,
+            turn: 0,
+            state_hash: go_hash,
+            think_ms: 1,
+        });
+
+        // Turn 1: P1 Resyncs twice in a row.
+        let _ = p1.expect_send().await; // Advance
+        let _ = p2.expect_send().await;
+        p1.respond(BotMsg::Resync { my_hash: 0 });
+        // P2 stays cooperative so we exit the SyncOk loop on P1 first.
+        // Actually: match awaits SyncOk for slot 0 first (resync_with_retry
+        // is per-slot in order). So we don't need to respond to P2 yet.
+        let _full = p1.expect_send().await; // FullState
+                                            // Second Resync on same turn → PersistentDesync.
+        p1.respond(BotMsg::Resync { my_hash: 0 });
+    });
+
+    let err = timeout(Duration::from_secs(3), m.run())
+        .await
+        .expect("run hung")
+        .expect_err("expected PersistentDesync");
+
+    driver.abort();
+    let _ = driver.await;
+
+    match err {
+        MatchError::PersistentDesync(slot) => {
+            assert_eq!(slot, PlayerSlot::Player1);
+        },
+        other => panic!("expected PersistentDesync, got {other:?}"),
+    }
+}

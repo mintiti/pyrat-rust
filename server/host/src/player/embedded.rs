@@ -10,8 +10,10 @@
 //!   The shape mirrors the SDK `Bot` trait exactly (`think`, `preprocess`,
 //!   `on_game_over`) so a single mental model covers both embedded and
 //!   networked bots.
-//! - The host constructs [`EmbeddedPlayer::new`] and hands the resulting
-//!   [`Player`](super::Player) impl to Match.
+//! - The host constructs [`EmbeddedPlayer::accept`] and hands the resulting
+//!   [`Player`](super::Player) impl to Match. `accept` runs the in-process
+//!   `Identify` → `Welcome` handshake the same way [`accept_players`](super::tcp::accept_players)
+//!   runs it on a TCP socket — both transports return post-Welcome players.
 //!
 //! ## Sideband
 //!
@@ -247,13 +249,59 @@ pub struct EmbeddedPlayer {
 }
 
 impl EmbeddedPlayer {
+    /// Construct + welcome an EmbeddedPlayer in one async step, returning a
+    /// player ready for `Match::setup()` (i.e. post-Identify, post-Welcome,
+    /// pre-Configure).
+    ///
+    /// Symmetric with [`accept_players`](super::tcp::accept_players) for the
+    /// TCP transport: it consumes the `Identify` the dispatcher emits on
+    /// construction and sends `Welcome { player_slot }` from `identity.slot`.
+    /// Production callers (Match builders, GUI, headless) should use this
+    /// instead of [`Self::new`] so Match sees uniformly-welcomed players.
+    pub async fn accept<B: EmbeddedBot>(
+        bot: B,
+        identity: PlayerIdentity,
+        event_sink: EventSink,
+    ) -> Result<Self, PlayerError> {
+        let mut player = Self::new(bot, identity, event_sink);
+        match player.recv().await? {
+            Some(BotMsg::Identify { .. }) => {},
+            Some(other) => {
+                return Err(PlayerError::ProtocolError(format!(
+                    "expected Identify from EmbeddedPlayer dispatcher, got {other:?}"
+                )))
+            },
+            None => {
+                return Err(PlayerError::TransportError(
+                    "dispatcher closed before Identify".into(),
+                ))
+            },
+        }
+        let slot = player.identity().slot;
+        player.send(HostMsg::Welcome { player_slot: slot }).await?;
+        Ok(player)
+    }
+
     /// Construct an EmbeddedPlayer wrapping `bot`. Spawns a dispatcher task
-    /// on the current tokio runtime.
+    /// on the current tokio runtime, then returns immediately — the
+    /// dispatcher emits `Identify` and waits for `Welcome` to come back, so
+    /// the player is *not* yet ready for [`Match::setup`](crate::match_host::Match::setup).
+    ///
+    /// `pub(crate)` because the post-Welcome state is the only one Match
+    /// (or any other consumer) ever wants. [`Self::accept`] is the public
+    /// constructor; it bundles the `Identify` → `Welcome` handshake and
+    /// returns a player ready for `Match::setup`. Use this raw constructor
+    /// only inside the crate, where the dispatcher's setup typestate is
+    /// being driven directly (e.g. unit tests of the handshake itself).
     ///
     /// # Panics
     ///
     /// Panics if called outside a tokio runtime (via `tokio::spawn`).
-    pub fn new<B: EmbeddedBot>(bot: B, identity: PlayerIdentity, event_sink: EventSink) -> Self {
+    pub(crate) fn new<B: EmbeddedBot>(
+        bot: B,
+        identity: PlayerIdentity,
+        event_sink: EventSink,
+    ) -> Self {
         let (host_tx, host_rx) = mpsc::unbounded_channel();
         let (bot_tx, bot_rx) = mpsc::unbounded_channel();
         let stopped = Arc::new(AtomicBool::new(false));

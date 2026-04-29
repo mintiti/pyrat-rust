@@ -107,19 +107,10 @@ fn base_turn_state(turn: u16) -> TurnState {
     }
 }
 
-/// Drive an [`EmbeddedPlayer`] through setup (Identify → Welcome →
-/// Configure → Ready), returning the hash the bot announced.
-async fn walk_through_setup(player: &mut EmbeddedPlayer) -> u64 {
-    match recv_ok(player).await {
-        BotMsg::Identify { .. } => {},
-        other => panic!("expected Identify, got {other:?}"),
-    }
-    player
-        .send(HostMsg::Welcome {
-            player_slot: PlayerSlot::Player1,
-        })
-        .await
-        .unwrap();
+/// Drive an already-welcomed [`EmbeddedPlayer`] through Configure → Ready,
+/// returning the hash the bot announced. Identify → Welcome happen inside
+/// [`EmbeddedPlayer::accept`].
+async fn walk_through_configure(player: &mut EmbeddedPlayer) -> u64 {
     player
         .send(HostMsg::Configure {
             options: vec![],
@@ -204,8 +195,10 @@ impl EmbeddedBot for SpinBot {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn happy_path_preprocess_think_game_over() {
-    let mut player = EmbeddedPlayer::new(StayBot, identity(), EventSink::noop());
-    let hash = walk_through_setup(&mut player).await;
+    let mut player = EmbeddedPlayer::accept(StayBot, identity(), EventSink::noop())
+        .await
+        .unwrap();
+    let hash = walk_through_configure(&mut player).await;
 
     // Preprocess → PreprocessingDone.
     player
@@ -260,8 +253,10 @@ async fn happy_path_preprocess_think_game_over() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn info_routes_to_event_sink_not_bot_recv() {
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
-    let mut player = EmbeddedPlayer::new(InfoEmittingBot, identity(), EventSink::new(event_tx));
-    let hash = walk_through_setup(&mut player).await;
+    let mut player = EmbeddedPlayer::accept(InfoEmittingBot, identity(), EventSink::new(event_tx))
+        .await
+        .unwrap();
+    let hash = walk_through_configure(&mut player).await;
 
     player
         .send(HostMsg::Go {
@@ -296,8 +291,10 @@ async fn info_routes_to_event_sink_not_bot_recv() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn desync_emits_resync_then_fullstate_recovers() {
-    let mut player = EmbeddedPlayer::new(StayBot, identity(), EventSink::noop());
-    let hash = walk_through_setup(&mut player).await;
+    let mut player = EmbeddedPlayer::accept(StayBot, identity(), EventSink::noop())
+        .await
+        .unwrap();
+    let hash = walk_through_configure(&mut player).await;
 
     // First turn to move the client past the initial-Go gate. After Action
     // we're back in Idle and can send Advance.
@@ -364,14 +361,16 @@ async fn desync_emits_resync_then_fullstate_recovers() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn stop_cancels_think_cooperatively() {
     let started = Arc::new(Notify::new());
-    let mut player = EmbeddedPlayer::new(
+    let mut player = EmbeddedPlayer::accept(
         SpinBot {
             started: started.clone(),
         },
         identity(),
         EventSink::noop(),
-    );
-    let hash = walk_through_setup(&mut player).await;
+    )
+    .await
+    .unwrap();
+    let hash = walk_through_configure(&mut player).await;
 
     // Kick off a Go; the bot spins until should_stop() flips.
     player
@@ -397,8 +396,10 @@ async fn stop_cancels_think_cooperatively() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn go_state_overrides_local_mirror() {
-    let mut player = EmbeddedPlayer::new(TurnSensitiveBot, identity(), EventSink::noop());
-    let _hash = walk_through_setup(&mut player).await;
+    let mut player = EmbeddedPlayer::accept(TurnSensitiveBot, identity(), EventSink::noop())
+        .await
+        .unwrap();
+    let _hash = walk_through_configure(&mut player).await;
 
     // Local mirror has turn=0; TurnSensitiveBot would return Down. Inject
     // turn=42 via GoState and expect Right. Compute the canonical engine
@@ -425,8 +426,10 @@ async fn go_state_overrides_local_mirror() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn close_during_idle_exits_cleanly() {
-    let mut player = EmbeddedPlayer::new(StayBot, identity(), EventSink::noop());
-    let _hash = walk_through_setup(&mut player).await;
+    let mut player = EmbeddedPlayer::accept(StayBot, identity(), EventSink::noop())
+        .await
+        .unwrap();
+    let _hash = walk_through_configure(&mut player).await;
 
     // Sitting in Playing<Synced> / Idle. Closing drops host_tx; the
     // dispatcher sees host_rx.recv() yield None from Idle and exits Ok(()).
@@ -438,8 +441,10 @@ async fn close_during_idle_exits_cleanly() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn protocol_error_message_propagates() {
-    let mut player = EmbeddedPlayer::new(StayBot, identity(), EventSink::noop());
-    let _hash = walk_through_setup(&mut player).await;
+    let mut player = EmbeddedPlayer::accept(StayBot, identity(), EventSink::noop())
+        .await
+        .unwrap();
+    let _hash = walk_through_configure(&mut player).await;
 
     // Synced + Idle: send a ProtocolError to simulate the server signalling a
     // terminal protocol fault. Dispatcher returns Err, surfaced on recv().
@@ -505,8 +510,10 @@ impl EmbeddedBot for DelayedBot {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn recv_is_cancel_safe() {
-    let mut player = EmbeddedPlayer::new(StayBot, identity(), EventSink::noop());
-    let hash = walk_through_setup(&mut player).await;
+    let mut player = EmbeddedPlayer::accept(StayBot, identity(), EventSink::noop())
+        .await
+        .unwrap();
+    let hash = walk_through_configure(&mut player).await;
 
     // Drop a pending recv() by letting a biased zero-duration timer win.
     // The trait contract says the next recv() must still deliver any
@@ -537,8 +544,10 @@ async fn provisional_emitted_to_event_sink_and_taken_via_take_provisional() {
     // MatchEvent::BotProvisional AND stored in a turn-scoped slot accessible
     // via take_provisional. It is NEVER returned through recv().
     let (events_tx, mut events_rx) = mpsc::unbounded_channel::<MatchEvent>();
-    let mut player = EmbeddedPlayer::new(ProvisionalBot, identity(), EventSink::new(events_tx));
-    let hash = walk_through_setup(&mut player).await;
+    let mut player = EmbeddedPlayer::accept(ProvisionalBot, identity(), EventSink::new(events_tx))
+        .await
+        .unwrap();
+    let hash = walk_through_configure(&mut player).await;
 
     player
         .send(HostMsg::Go {
@@ -591,14 +600,16 @@ async fn provisional_emitted_to_event_sink_and_taken_via_take_provisional() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn on_game_over_is_invoked() {
     let called = Arc::new(Mutex::new(None));
-    let mut player = EmbeddedPlayer::new(
+    let mut player = EmbeddedPlayer::accept(
         GameOverBot {
             called: called.clone(),
         },
         identity(),
         EventSink::noop(),
-    );
-    let _hash = walk_through_setup(&mut player).await;
+    )
+    .await
+    .unwrap();
+    let _hash = walk_through_configure(&mut player).await;
 
     player
         .send(HostMsg::GameOver {
@@ -628,8 +639,10 @@ async fn on_game_over_is_invoked() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn protocol_error_fullstate_while_synced() {
-    let mut player = EmbeddedPlayer::new(StayBot, identity(), EventSink::noop());
-    let _hash = walk_through_setup(&mut player).await;
+    let mut player = EmbeddedPlayer::accept(StayBot, identity(), EventSink::noop())
+        .await
+        .unwrap();
+    let _hash = walk_through_configure(&mut player).await;
 
     // In Playing<Synced>/Idle; a FullState arriving here is a protocol
     // violation (the server must only send FullState after a Resync).
@@ -656,8 +669,10 @@ async fn protocol_error_fullstate_while_synced() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn protocol_error_go_preprocess_while_syncing() {
-    let mut player = EmbeddedPlayer::new(StayBot, identity(), EventSink::noop());
-    let hash0 = walk_through_setup(&mut player).await;
+    let mut player = EmbeddedPlayer::accept(StayBot, identity(), EventSink::noop())
+        .await
+        .unwrap();
+    let hash0 = walk_through_configure(&mut player).await;
 
     // Walk one turn to land in InnerState::Syncing: Go -> Action -> Advance
     // -> SyncOk. After SyncOk the dispatcher is in Syncing, awaiting Go or
@@ -713,8 +728,10 @@ async fn protocol_error_go_preprocess_while_syncing() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn protocol_error_advance_while_thinking() {
-    let mut player = EmbeddedPlayer::new(DelayedBot, identity(), EventSink::noop());
-    let hash = walk_through_setup(&mut player).await;
+    let mut player = EmbeddedPlayer::accept(DelayedBot, identity(), EventSink::noop())
+        .await
+        .unwrap();
+    let hash = walk_through_configure(&mut player).await;
 
     player
         .send(HostMsg::Go {
@@ -773,14 +790,16 @@ impl EmbeddedBot for UncooperativeSleeperBot {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn close_during_cooperative_think_returns_promptly() {
     let started = Arc::new(Notify::new());
-    let mut player = EmbeddedPlayer::new(
+    let mut player = EmbeddedPlayer::accept(
         SpinBot {
             started: started.clone(),
         },
         identity(),
         EventSink::noop(),
-    );
-    let hash = walk_through_setup(&mut player).await;
+    )
+    .await
+    .unwrap();
+    let hash = walk_through_configure(&mut player).await;
 
     player
         .send(HostMsg::Go {
@@ -807,8 +826,10 @@ async fn close_during_cooperative_think_returns_promptly() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn close_during_uncooperative_think_is_bounded() {
-    let mut player = EmbeddedPlayer::new(UncooperativeSleeperBot, identity(), EventSink::noop());
-    let hash = walk_through_setup(&mut player).await;
+    let mut player = EmbeddedPlayer::accept(UncooperativeSleeperBot, identity(), EventSink::noop())
+        .await
+        .unwrap();
+    let hash = walk_through_configure(&mut player).await;
 
     player
         .send(HostMsg::Go {
@@ -840,8 +861,10 @@ async fn close_during_uncooperative_think_is_bounded() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn think_ms_clamped_to_one_for_fast_bots() {
-    let mut player = EmbeddedPlayer::new(StayBot, identity(), EventSink::noop());
-    let hash = walk_through_setup(&mut player).await;
+    let mut player = EmbeddedPlayer::accept(StayBot, identity(), EventSink::noop())
+        .await
+        .unwrap();
+    let hash = walk_through_configure(&mut player).await;
 
     player
         .send(HostMsg::Go {

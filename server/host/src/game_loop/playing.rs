@@ -11,21 +11,14 @@ use pyrat::Direction;
 
 use crate::session::messages::{HostCommand, SessionId, SessionMsg};
 use pyrat_protocol::{HashedTurnState, Info, TurnState};
-use pyrat_wire::{GameResult, Player};
+use pyrat_wire::Player;
 
 use super::config::{PlayingConfig, SessionHandle};
 use super::events::{emit, MatchEvent};
 
 // ── Public types ─────────────────────────────────────
 
-/// Result of a completed match.
-#[derive(Debug, Clone, PartialEq)]
-pub struct MatchResult {
-    pub result: GameResult,
-    pub player1_score: f32,
-    pub player2_score: f32,
-    pub turns_played: u16,
-}
+pub use crate::match_host::MatchResult;
 
 /// State that persists across turns during the playing phase.
 pub struct PlayingState {
@@ -627,21 +620,7 @@ fn resolve_think_ms(slot: &Option<ActionSlot>) -> u32 {
 }
 
 pub fn determine_result(game: &GameState) -> MatchResult {
-    let p1 = game.player1.score;
-    let p2 = game.player2.score;
-    let result = if p1 > p2 {
-        GameResult::Player1
-    } else if p2 > p1 {
-        GameResult::Player2
-    } else {
-        GameResult::Draw
-    };
-    MatchResult {
-        result,
-        player1_score: p1,
-        player2_score: p2,
-        turns_played: game.turn,
-    }
+    MatchResult::from_game(game)
 }
 
 #[cfg(test)]
