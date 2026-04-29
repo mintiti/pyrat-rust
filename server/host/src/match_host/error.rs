@@ -45,6 +45,12 @@ pub enum MatchError {
     #[error("player {0:?} disconnected during match")]
     BotDisconnected(PlayerSlot),
 
+    /// A bot didn't commit an action within the deadline + grace window, and
+    /// the active [`FaultPolicy`](super::FaultPolicy) escalated the timeout
+    /// rather than falling back to provisional / Stay.
+    #[error("player {0:?} action timeout")]
+    ActionTimeout(PlayerSlot),
+
     /// Underlying [`PlayerError`] from `send`/`recv`/`close`.
     #[error("player {slot:?} error: {source}")]
     PlayerError {

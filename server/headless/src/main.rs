@@ -230,6 +230,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         PlayingConfig {
             move_timeout: Duration::from_millis(u64::from(cli.move_timeout_ms)),
             network_grace: Duration::from_millis(u64::from(cli.network_grace_ms)),
+            ..Default::default()
         },
         Some(event_tx.clone()),
     );

@@ -1,11 +1,15 @@
-//! Host-side timing knobs for setup and the playing loop.
+//! Host-side timing knobs and fault policy for setup and the playing loop.
 //!
 //! Wire-level fields (`move_timeout_ms`, `preprocessing_timeout_ms`) live on
 //! the `MatchConfig` sent to bots. These structs hold the *host's* policy:
 //! how much grace to allow on top of the wire deadlines, how long setup may
-//! take, and so on. Not serialized; not visible to bots.
+//! take, and how to resolve missing actions. Not serialized; not visible to
+//! bots.
 
+use std::sync::Arc;
 use std::time::Duration;
+
+use super::policy::{default_policy, FaultPolicy};
 
 /// Host-only timing for the setup phase.
 #[derive(Debug, Clone)]
@@ -37,6 +41,12 @@ pub struct PlayingConfig {
     /// The host waits this long past the think deadline for packets to
     /// arrive before falling back to provisional / Stay.
     pub network_grace: Duration,
+    /// How to resolve per-slot action outcomes (committed / timed out /
+    /// disconnected) into a final [`Direction`](pyrat::Direction). Defaults
+    /// to [`DefaultFaultPolicy`](super::policy::DefaultFaultPolicy), which
+    /// preserves the host's pre-seam behavior (provisional fallback on
+    /// timeout, fatal on disconnect).
+    pub fault_policy: Arc<dyn FaultPolicy>,
 }
 
 impl Default for PlayingConfig {
@@ -44,6 +54,7 @@ impl Default for PlayingConfig {
         Self {
             move_timeout: Duration::from_secs(3),
             network_grace: Duration::from_millis(50),
+            fault_policy: default_policy(),
         }
     }
 }

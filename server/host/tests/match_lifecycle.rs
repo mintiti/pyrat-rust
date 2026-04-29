@@ -15,7 +15,9 @@ use std::time::Duration;
 use async_trait::async_trait;
 use pyrat::{Coordinates, Direction, GameBuilder, GameState};
 use pyrat_host::game_loop::build_match_config;
-use pyrat_host::match_host::{Match, MatchError, MatchEvent, PlayingConfig, SetupTiming};
+use pyrat_host::match_host::{
+    Match, MatchError, MatchEvent, PlayingConfig, SetupTiming, StrictFaultPolicy,
+};
 use pyrat_host::player::{
     EmbeddedBot, EmbeddedCtx, EmbeddedPlayer, EventSink, Options, Player, PlayerError,
     PlayerIdentity,
@@ -30,6 +32,19 @@ use tokio::time::timeout;
 fn make_game() -> GameState {
     GameBuilder::new(5, 5)
         .with_max_turns(5)
+        .with_open_maze()
+        .with_custom_positions(Coordinates::new(0, 0), Coordinates::new(4, 4))
+        .with_custom_cheese(vec![Coordinates::new(2, 2)])
+        .build()
+        .create(Some(42))
+        .expect("create game")
+}
+
+/// Single-turn variant for policy tests — match ends after turn 0 so the
+/// driver script doesn't need to handle Advance/Sync past the timeout.
+fn make_game_one_turn() -> GameState {
+    GameBuilder::new(5, 5)
+        .with_max_turns(1)
         .with_open_maze()
         .with_custom_positions(Coordinates::new(0, 0), Coordinates::new(4, 4))
         .with_custom_cheese(vec![Coordinates::new(2, 2)])
@@ -58,6 +73,7 @@ fn fast_playing() -> PlayingConfig {
     PlayingConfig {
         move_timeout: Duration::from_millis(500),
         network_grace: Duration::from_millis(50),
+        ..Default::default()
     }
 }
 
@@ -79,6 +95,10 @@ struct ScriptedPlayer {
     identity: PlayerIdentity,
     host_tx: mpsc::UnboundedSender<HostMsg>,
     bot_rx: mpsc::UnboundedReceiver<BotMsg>,
+    /// Returned (and cleared) by `take_provisional`. Tests for the
+    /// timeout-resolution seam set this to verify the FaultPolicy hook;
+    /// scripts that don't care leave it `None`.
+    stored_provisional: Option<Direction>,
 }
 
 struct ScriptedHandle {
@@ -88,6 +108,13 @@ struct ScriptedHandle {
 
 impl ScriptedPlayer {
     fn pair(identity: PlayerIdentity) -> (Self, ScriptedHandle) {
+        Self::pair_with_provisional(identity, None)
+    }
+
+    fn pair_with_provisional(
+        identity: PlayerIdentity,
+        stored_provisional: Option<Direction>,
+    ) -> (Self, ScriptedHandle) {
         let (host_tx, host_rx) = mpsc::unbounded_channel();
         let (bot_tx, bot_rx) = mpsc::unbounded_channel();
         (
@@ -95,6 +122,7 @@ impl ScriptedPlayer {
                 identity,
                 host_tx,
                 bot_rx,
+                stored_provisional,
             },
             ScriptedHandle { host_rx, bot_tx },
         )
@@ -118,7 +146,7 @@ impl Player for ScriptedPlayer {
     }
 
     fn take_provisional(&mut self, _turn: u16, _hash: u64) -> Option<Direction> {
-        None
+        self.stored_provisional.take()
     }
 
     async fn close(self: Box<Self>) -> Result<(), PlayerError> {
@@ -505,4 +533,274 @@ async fn second_resync_on_same_turn_is_persistent_desync() {
         },
         other => panic!("expected PersistentDesync, got {other:?}"),
     }
+}
+
+// ── FaultPolicy seam (slice 7) ────────────────────────
+
+/// Drive the Configure → Ready → GoPreprocess → PreprocessingDone setup
+/// for two scripted players whose initial hash should match `expected_hash`.
+async fn drive_setup(p1: &mut ScriptedHandle, p2: &mut ScriptedHandle, expected_hash: u64) {
+    let _ = p1.expect_send().await; // Configure
+    let _ = p2.expect_send().await;
+    p1.respond(BotMsg::Ready {
+        state_hash: expected_hash,
+    });
+    p2.respond(BotMsg::Ready {
+        state_hash: expected_hash,
+    });
+    let _ = p1.expect_send().await; // GoPreprocess
+    let _ = p2.expect_send().await;
+    p1.respond(BotMsg::PreprocessingDone);
+    p2.respond(BotMsg::PreprocessingDone);
+}
+
+fn tight_playing(
+    fault_policy: Option<std::sync::Arc<dyn pyrat_host::match_host::FaultPolicy>>,
+) -> PlayingConfig {
+    let mut cfg = PlayingConfig {
+        move_timeout: Duration::from_millis(80),
+        network_grace: Duration::from_millis(30),
+        ..Default::default()
+    };
+    if let Some(p) = fault_policy {
+        cfg.fault_policy = p;
+    }
+    cfg
+}
+
+/// P2 stalls on Go but has a stored Provisional. Default policy resolves the
+/// turn with the provisional direction; match completes; `BotTimeout` event
+/// fires for the timed-out slot.
+#[tokio::test]
+async fn default_policy_uses_provisional_on_timeout() {
+    let game = make_game_one_turn();
+    let expected_hash = game.state_hash();
+    let cfg = build_match_config(&game, TimingMode::Wait, 80, 1000);
+
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
+    let (p1_player, p1_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player1, "p1"));
+    let (p2_player, p2_handle) = ScriptedPlayer::pair_with_provisional(
+        identity(PlayerSlot::Player2, "p2"),
+        Some(Direction::Right),
+    );
+
+    let m = Match::new(
+        game,
+        [Box::new(p1_player), Box::new(p2_player)],
+        cfg,
+        [vec![], vec![]],
+        fast_setup(),
+        tight_playing(None),
+        Some(event_tx),
+    );
+
+    let driver = tokio::spawn(async move {
+        let mut p1 = p1_handle;
+        let mut p2 = p2_handle;
+        drive_setup(&mut p1, &mut p2, expected_hash).await;
+        // Turn 0: both Go received, only P1 commits.
+        let go1 = p1.expect_send().await;
+        let _go2 = p2.expect_send().await;
+        let go_hash = match go1 {
+            HostMsg::Go { state_hash, .. } => state_hash,
+            other => panic!("expected Go, got {other:?}"),
+        };
+        p1.respond(BotMsg::Action {
+            direction: Direction::Stay,
+            player: PlayerSlot::Player1,
+            turn: 0,
+            state_hash: go_hash,
+            think_ms: 1,
+        });
+        // P2 doesn't respond → Match deadline → Stop → grace → TimedOut.
+        // Hold handles alive so P2's recv sees no message (not a clean close).
+        std::future::pending::<()>().await;
+    });
+
+    let result = timeout(Duration::from_secs(3), m.run())
+        .await
+        .expect("match run hung")
+        .expect("match run failed");
+
+    driver.abort();
+    let _ = driver.await;
+
+    let mut events = vec![];
+    while let Ok(ev) = event_rx.try_recv() {
+        events.push(ev);
+    }
+    let timeouts: Vec<_> = events
+        .iter()
+        .filter_map(|e| match e {
+            MatchEvent::BotTimeout { player, turn } => Some((*player, *turn)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(timeouts, vec![(PlayerSlot::Player2, 0)]);
+
+    let actions = events
+        .iter()
+        .find_map(|e| match e {
+            MatchEvent::TurnPlayed {
+                p1_action,
+                p2_action,
+                ..
+            } => Some((*p1_action, *p2_action)),
+            _ => None,
+        })
+        .expect("expected TurnPlayed");
+    assert_eq!(actions, (Direction::Stay, Direction::Right));
+    assert_eq!(result.turns_played, 1);
+}
+
+/// P2 stalls on Go with no stored Provisional. Default policy falls back to
+/// `Direction::Stay`; match completes; `BotTimeout` event fires.
+#[tokio::test]
+async fn default_policy_falls_back_to_stay_when_no_provisional() {
+    let game = make_game_one_turn();
+    let expected_hash = game.state_hash();
+    let cfg = build_match_config(&game, TimingMode::Wait, 80, 1000);
+
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
+    let (p1_player, p1_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player1, "p1"));
+    let (p2_player, p2_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player2, "p2"));
+
+    let m = Match::new(
+        game,
+        [Box::new(p1_player), Box::new(p2_player)],
+        cfg,
+        [vec![], vec![]],
+        fast_setup(),
+        tight_playing(None),
+        Some(event_tx),
+    );
+
+    let driver = tokio::spawn(async move {
+        let mut p1 = p1_handle;
+        let mut p2 = p2_handle;
+        drive_setup(&mut p1, &mut p2, expected_hash).await;
+        let go1 = p1.expect_send().await;
+        let _go2 = p2.expect_send().await;
+        let go_hash = match go1 {
+            HostMsg::Go { state_hash, .. } => state_hash,
+            other => panic!("expected Go, got {other:?}"),
+        };
+        p1.respond(BotMsg::Action {
+            direction: Direction::Stay,
+            player: PlayerSlot::Player1,
+            turn: 0,
+            state_hash: go_hash,
+            think_ms: 1,
+        });
+        std::future::pending::<()>().await;
+    });
+
+    let result = timeout(Duration::from_secs(3), m.run())
+        .await
+        .expect("match run hung")
+        .expect("match run failed");
+
+    driver.abort();
+    let _ = driver.await;
+
+    let mut events = vec![];
+    while let Ok(ev) = event_rx.try_recv() {
+        events.push(ev);
+    }
+    assert!(events.iter().any(|e| matches!(
+        e,
+        MatchEvent::BotTimeout {
+            player: PlayerSlot::Player2,
+            turn: 0
+        }
+    )));
+
+    let actions = events
+        .iter()
+        .find_map(|e| match e {
+            MatchEvent::TurnPlayed {
+                p1_action,
+                p2_action,
+                ..
+            } => Some((*p1_action, *p2_action)),
+            _ => None,
+        })
+        .expect("expected TurnPlayed");
+    assert_eq!(actions, (Direction::Stay, Direction::Stay));
+    assert_eq!(result.turns_played, 1);
+}
+
+/// Strict policy: P2 stalls → `MatchError::ActionTimeout(Player2)`. Match
+/// aborts mid-turn; `BotTimeout` event still fires (observable protocol fact).
+#[tokio::test]
+async fn strict_policy_escalates_timeout_to_action_timeout() {
+    let game = make_game_one_turn();
+    let expected_hash = game.state_hash();
+    let cfg = build_match_config(&game, TimingMode::Wait, 80, 1000);
+
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
+    let (p1_player, p1_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player1, "p1"));
+    let (p2_player, p2_handle) = ScriptedPlayer::pair_with_provisional(
+        identity(PlayerSlot::Player2, "p2"),
+        Some(Direction::Right),
+    );
+
+    let m = Match::new(
+        game,
+        [Box::new(p1_player), Box::new(p2_player)],
+        cfg,
+        [vec![], vec![]],
+        fast_setup(),
+        tight_playing(Some(std::sync::Arc::new(StrictFaultPolicy))),
+        Some(event_tx),
+    );
+
+    let driver = tokio::spawn(async move {
+        let mut p1 = p1_handle;
+        let mut p2 = p2_handle;
+        drive_setup(&mut p1, &mut p2, expected_hash).await;
+        let go1 = p1.expect_send().await;
+        let _go2 = p2.expect_send().await;
+        let go_hash = match go1 {
+            HostMsg::Go { state_hash, .. } => state_hash,
+            other => panic!("expected Go, got {other:?}"),
+        };
+        p1.respond(BotMsg::Action {
+            direction: Direction::Stay,
+            player: PlayerSlot::Player1,
+            turn: 0,
+            state_hash: go_hash,
+            think_ms: 1,
+        });
+        std::future::pending::<()>().await;
+    });
+
+    let err = timeout(Duration::from_secs(3), m.run())
+        .await
+        .expect("match run hung")
+        .expect_err("expected ActionTimeout");
+
+    driver.abort();
+    let _ = driver.await;
+
+    match err {
+        MatchError::ActionTimeout(slot) => assert_eq!(slot, PlayerSlot::Player2),
+        other => panic!("expected ActionTimeout, got {other:?}"),
+    }
+
+    let mut events = vec![];
+    while let Ok(ev) = event_rx.try_recv() {
+        events.push(ev);
+    }
+    assert!(events.iter().any(|e| matches!(
+        e,
+        MatchEvent::BotTimeout {
+            player: PlayerSlot::Player2,
+            turn: 0
+        }
+    )));
+    // No TurnPlayed — match aborted before applying.
+    assert!(!events
+        .iter()
+        .any(|e| matches!(e, MatchEvent::TurnPlayed { .. })));
 }

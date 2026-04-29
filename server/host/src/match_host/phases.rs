@@ -13,6 +13,7 @@ use crate::player::{EventSink, Player, PlayerError};
 use super::config::{PlayingConfig, SetupTiming};
 use super::error::MatchError;
 use super::events::{emit, MatchEvent};
+use super::policy::ActionOutcome;
 use super::result::MatchResult;
 
 // ── Phase markers ─────────────────────────────────────
@@ -336,23 +337,25 @@ impl Match<Playing> {
                 .map_err(|e| MatchError::from_player(slot, e))?;
         }
 
-        // 3. Collect actions with per-turn deadline + Stop fallback.
-        let collected = self.collect_actions(go_hash).await?;
+        // 3. Collect per-slot outcomes (deadline + Stop fallback baked in),
+        //    then resolve via the configured FaultPolicy.
+        let outcomes = self.collect_outcomes(go_hash).await?;
+        let resolved = self.resolve_outcomes(outcomes, go_hash)?;
 
         // 4. Apply to engine.
         let result = self
             .game
-            .process_turn(collected.p1_action, collected.p2_action);
+            .process_turn(resolved.p1_action, resolved.p2_action);
         let new_hash = self.game.state_hash();
 
         emit(
             self.event_tx.as_ref(),
             MatchEvent::TurnPlayed {
-                state: build_turn_state(&self.game, collected.p1_action, collected.p2_action),
-                p1_action: collected.p1_action,
-                p2_action: collected.p2_action,
-                p1_think_ms: collected.p1_think_ms,
-                p2_think_ms: collected.p2_think_ms,
+                state: build_turn_state(&self.game, resolved.p1_action, resolved.p2_action),
+                p1_action: resolved.p1_action,
+                p2_action: resolved.p2_action,
+                p1_think_ms: resolved.p1_think_ms,
+                p2_think_ms: resolved.p2_think_ms,
             },
         );
 
@@ -393,8 +396,8 @@ impl Match<Playing> {
             }))
         } else {
             self.state.pending_advance = Some(PendingAdvance {
-                p1_action: collected.p1_action,
-                p2_action: collected.p2_action,
+                p1_action: resolved.p1_action,
+                p2_action: resolved.p2_action,
                 turn: self.state.turn + 1,
                 new_hash,
             });
@@ -477,13 +480,24 @@ impl Match<Playing> {
         }
     }
 
-    /// Wait for an `Action` from each player. On per-turn deadline expiry,
-    /// send `Stop` to both, accept any in-flight Action within the network
-    /// grace window, then fall back to the player's stored provisional or
-    /// `Direction::Stay`.
-    async fn collect_actions(&mut self, expected_hash: u64) -> Result<Collected, MatchError> {
-        let mut p1: Option<ActionSlot> = None;
-        let mut p2: Option<ActionSlot> = None;
+    /// Wait for one [`ActionOutcome`](super::ActionOutcome) per slot. A bot
+    /// produces `Committed` by sending a hash-and-turn-validated `Action`,
+    /// `Disconnected` by closing the channel, or `TimedOut` by failing to do
+    /// either before the deadline + grace window expires.
+    ///
+    /// On per-turn deadline expiry, `Stop` is sent to any still-thinking bots
+    /// and the grace window starts; in-flight Actions arriving within the
+    /// grace are still accepted as `Committed`. Any slot not filled by the
+    /// end of grace becomes `TimedOut`.
+    ///
+    /// This function does NOT decide what `TimedOut` or `Disconnected` mean
+    /// for the match — that's the [`FaultPolicy`](super::FaultPolicy)'s job
+    /// (see [`Match::resolve_outcomes`]). Outcomes here are protocol facts.
+    async fn collect_outcomes(
+        &mut self,
+        expected_hash: u64,
+    ) -> Result<[ActionOutcome; 2], MatchError> {
+        let mut outcomes: [Option<ActionOutcome>; 2] = [None, None];
 
         let move_timeout = self.playing_config.move_timeout;
         let infinite = move_timeout.is_zero();
@@ -497,14 +511,13 @@ impl Match<Playing> {
         let mut stop_sent = false;
         let mut effective_deadline = deadline;
         loop {
-            if p1.is_some() && p2.is_some() {
+            if outcomes[0].is_some() && outcomes[1].is_some() {
                 break;
             }
 
             let outcome = poll_either(
                 &mut self.players,
-                &mut p1,
-                &mut p2,
+                &mut outcomes,
                 expected_hash,
                 self.state.turn,
                 effective_deadline,
@@ -518,7 +531,10 @@ impl Match<Playing> {
                         turn = self.state.turn,
                         "move timeout — sending Stop and entering grace window"
                     );
-                    for slot_idx in 0..2 {
+                    for (slot_idx, outcome_slot) in outcomes.iter().enumerate() {
+                        if outcome_slot.is_some() {
+                            continue;
+                        }
                         let slot = slot_for(slot_idx);
                         if let Err(e) = self.players[slot_idx].send(HostMsg::Stop).await {
                             warn!(?slot, error = %e, "Stop send failed");
@@ -531,54 +547,69 @@ impl Match<Playing> {
             }
         }
 
-        // Any missing slots resolve to provisional (turn-scoped) or Stay.
-        let p1_resolved = self.resolve_slot(0, expected_hash, p1);
-        let p2_resolved = self.resolve_slot(1, expected_hash, p2);
-
-        Ok(Collected {
-            p1_action: p1_resolved.direction,
-            p2_action: p2_resolved.direction,
-            p1_think_ms: p1_resolved.think_ms,
-            p2_think_ms: p2_resolved.think_ms,
-        })
+        // Any unfilled slots after grace are TimedOut.
+        Ok([
+            outcomes[0].unwrap_or(ActionOutcome::TimedOut),
+            outcomes[1].unwrap_or(ActionOutcome::TimedOut),
+        ])
     }
 
-    /// Resolve a slot to a final action: committed > provisional > Stay.
-    /// Emits `BotTimeout` when neither a committed action nor a provisional
-    /// is available.
-    fn resolve_slot(
+    /// Run each per-slot outcome through the configured
+    /// [`FaultPolicy`](super::FaultPolicy) to produce final directions.
+    /// Emits `BotTimeout` for any slot whose outcome is `TimedOut`
+    /// (regardless of policy resolution — the event is an observable
+    /// protocol fact, not a policy decision).
+    fn resolve_outcomes(
         &mut self,
-        slot_idx: usize,
+        outcomes: [ActionOutcome; 2],
         expected_hash: u64,
-        action: Option<ActionSlot>,
-    ) -> ActionSlot {
-        if let Some(a) = action {
-            return a;
-        }
-        let slot = slot_for(slot_idx);
+    ) -> Result<Resolved, MatchError> {
         let turn = self.state.turn;
-        let provisional = self.players[slot_idx].take_provisional(turn, expected_hash);
-        emit(
-            self.event_tx.as_ref(),
-            MatchEvent::BotTimeout { player: slot, turn },
-        );
-        ActionSlot {
-            direction: provisional.unwrap_or(Direction::Stay),
-            think_ms: 0,
+        let policy = self.playing_config.fault_policy.clone();
+
+        let mut directions = [Direction::Stay; 2];
+        let mut think_ms = [0u32; 2];
+
+        for slot_idx in 0..2 {
+            let slot = slot_for(slot_idx);
+            let outcome = outcomes[slot_idx];
+
+            if matches!(outcome, ActionOutcome::TimedOut) {
+                emit(
+                    self.event_tx.as_ref(),
+                    MatchEvent::BotTimeout { player: slot, turn },
+                );
+            }
+
+            let provisional = match outcome {
+                ActionOutcome::TimedOut => {
+                    self.players[slot_idx].take_provisional(turn, expected_hash)
+                },
+                _ => None,
+            };
+
+            directions[slot_idx] = policy.resolve_action(slot, outcome, provisional)?;
+            think_ms[slot_idx] = match outcome {
+                ActionOutcome::Committed { think_ms, .. } => think_ms,
+                _ => 0,
+            };
         }
+
+        Ok(Resolved {
+            p1_action: directions[0],
+            p2_action: directions[1],
+            p1_think_ms: think_ms[0],
+            p2_think_ms: think_ms[1],
+        })
     }
 }
 
 // ── Helpers ───────────────────────────────────────────
 
+/// Per-turn resolution: Direction + think_ms per slot, ready to apply to
+/// the engine and report on `TurnPlayed`.
 #[derive(Debug, Clone, Copy)]
-struct ActionSlot {
-    direction: Direction,
-    think_ms: u32,
-}
-
-#[derive(Debug, Clone, Copy)]
-struct Collected {
+struct Resolved {
     p1_action: Direction,
     p2_action: Direction,
     p1_think_ms: u32,
@@ -662,15 +693,18 @@ async fn recv_with_timeout(
     }
 }
 
-/// Poll both players for the next [`BotMsg::Action`], honoring an optional
-/// deadline. `Action`s tagged for the wrong slot or for a stale turn are
-/// rejected (as `UnexpectedMessage`) or dropped (stale) per the protocol
-/// spec. A `None` deadline means wait forever (used in infinite-timeout
-/// mode where Stop is consumer-driven).
+/// Poll both players, filling `outcomes[slot]` with `Committed` on a valid
+/// `Action`, `Disconnected` on clean close, or returning a hard
+/// [`MatchError`] on protocol violations (wrong-slot, hash mismatch, transport
+/// error, unexpected message). Stale-turn Actions are dropped silently.
+///
+/// A `None` deadline means wait forever (used in infinite-timeout mode where
+/// Stop is consumer-driven). Already-filled slots are skipped via the
+/// `tokio::select!` guard so a second message from the same bot in the same
+/// turn doesn't get processed.
 async fn poll_either(
     players: &mut [Box<dyn Player>; 2],
-    p1: &mut Option<ActionSlot>,
-    p2: &mut Option<ActionSlot>,
+    outcomes: &mut [Option<ActionOutcome>; 2],
     expected_hash: u64,
     expected_turn: u16,
     deadline: Option<Instant>,
@@ -682,12 +716,12 @@ async fn poll_either(
             tokio::select! {
                 biased;
                 () = tokio::time::sleep_until(d) => Ok(PollOutcome::Timeout),
-                res = pa.recv(), if p1.is_none() => {
-                    handle_recv(res, PlayerSlot::Player1, p1, p2, expected_hash, expected_turn)?;
+                res = pa.recv(), if outcomes[0].is_none() => {
+                    handle_recv(res, PlayerSlot::Player1, &mut outcomes[0], expected_hash, expected_turn)?;
                     Ok(PollOutcome::Progress)
                 }
-                res = pb.recv(), if p2.is_none() => {
-                    handle_recv(res, PlayerSlot::Player2, p1, p2, expected_hash, expected_turn)?;
+                res = pb.recv(), if outcomes[1].is_none() => {
+                    handle_recv(res, PlayerSlot::Player2, &mut outcomes[1], expected_hash, expected_turn)?;
                     Ok(PollOutcome::Progress)
                 }
             }
@@ -695,12 +729,12 @@ async fn poll_either(
         None => {
             tokio::select! {
                 biased;
-                res = pa.recv(), if p1.is_none() => {
-                    handle_recv(res, PlayerSlot::Player1, p1, p2, expected_hash, expected_turn)?;
+                res = pa.recv(), if outcomes[0].is_none() => {
+                    handle_recv(res, PlayerSlot::Player1, &mut outcomes[0], expected_hash, expected_turn)?;
                     Ok(PollOutcome::Progress)
                 }
-                res = pb.recv(), if p2.is_none() => {
-                    handle_recv(res, PlayerSlot::Player2, p1, p2, expected_hash, expected_turn)?;
+                res = pb.recv(), if outcomes[1].is_none() => {
+                    handle_recv(res, PlayerSlot::Player2, &mut outcomes[1], expected_hash, expected_turn)?;
                     Ok(PollOutcome::Progress)
                 }
             }
@@ -711,8 +745,7 @@ async fn poll_either(
 fn handle_recv(
     res: Result<Option<BotMsg>, PlayerError>,
     slot: PlayerSlot,
-    p1: &mut Option<ActionSlot>,
-    p2: &mut Option<ActionSlot>,
+    outcome: &mut Option<ActionOutcome>,
     expected_hash: u64,
     expected_turn: u16,
 ) -> Result<(), MatchError> {
@@ -746,11 +779,7 @@ fn handle_recv(
                     got: state_hash,
                 });
             }
-            let target = match slot {
-                PlayerSlot::Player1 => p1,
-                _ => p2,
-            };
-            *target = Some(ActionSlot {
+            *outcome = Some(ActionOutcome::Committed {
                 direction,
                 think_ms,
             });
@@ -760,7 +789,10 @@ fn handle_recv(
             slot,
             detail: format!("expected Action, got {other:?}"),
         }),
-        Ok(None) => Err(MatchError::BotDisconnected(slot)),
+        Ok(None) => {
+            *outcome = Some(ActionOutcome::Disconnected);
+            Ok(())
+        },
         Err(e) => Err(MatchError::from_player(slot, e)),
     }
 }

@@ -16,6 +16,7 @@ mod config;
 mod error;
 mod events;
 mod phases;
+mod policy;
 mod result;
 
 pub use config::{PlayingConfig, SetupTiming};
@@ -23,4 +24,5 @@ pub use error::MatchError;
 pub(crate) use events::emit;
 pub use events::MatchEvent;
 pub use phases::{Created, Finished, Match, Playing, Ready, StepResult};
+pub use policy::{ActionOutcome, DefaultFaultPolicy, FaultPolicy, StrictFaultPolicy};
 pub use result::MatchResult;
