@@ -16,7 +16,7 @@ use async_trait::async_trait;
 use pyrat::{Coordinates, Direction, GameBuilder, GameState};
 use pyrat_host::game_loop::build_match_config;
 use pyrat_host::match_host::{
-    Match, MatchError, MatchEvent, PlayingConfig, SetupTiming, StrictFaultPolicy,
+    Match, MatchError, MatchEvent, PlayingConfig, SetupTiming, StepResult, StrictFaultPolicy,
 };
 use pyrat_host::player::{
     EmbeddedBot, EmbeddedCtx, EmbeddedPlayer, EventSink, Options, Player, PlayerError,
@@ -803,4 +803,249 @@ async fn strict_policy_escalates_timeout_to_action_timeout() {
     assert!(!events
         .iter()
         .any(|e| matches!(e, MatchEvent::TurnPlayed { .. })));
+}
+
+// ── Analysis sub-states (slice 7 part A) ──────────────
+
+/// Drive a 5-turn match through the analysis-mode typestate
+/// (`start_turn → stop_and_collect → advance`) instead of `step`/`run`.
+/// Both paths should produce the same end state.
+#[tokio::test]
+async fn analysis_lifecycle_completes_match() {
+    let game = make_game();
+    let cfg = build_match_config(&game, TimingMode::Wait, 200, 500);
+
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
+    let sink = EventSink::new(event_tx.clone());
+    let p1 = Box::new(
+        EmbeddedPlayer::accept(StayBot, identity(PlayerSlot::Player1, "p1"), sink.clone())
+            .await
+            .expect("accept p1"),
+    ) as Box<dyn Player>;
+    let p2 = Box::new(
+        EmbeddedPlayer::accept(StayBot, identity(PlayerSlot::Player2, "p2"), sink)
+            .await
+            .expect("accept p2"),
+    ) as Box<dyn Player>;
+
+    let m = Match::new(
+        game,
+        [p1, p2],
+        cfg,
+        [vec![], vec![]],
+        fast_setup(),
+        fast_playing(),
+        Some(event_tx.clone()),
+    );
+
+    let ready = timeout(Duration::from_secs(3), m.setup())
+        .await
+        .expect("setup hung")
+        .expect("setup failed");
+    let mut playing = ready.start();
+
+    let result = loop {
+        let thinking = playing.start_turn().await.expect("start_turn");
+        let collected = thinking.stop_and_collect().await.expect("stop_and_collect");
+        match collected.advance().await.expect("advance") {
+            StepResult::Continue(next) => playing = next,
+            StepResult::GameOver(finished) => break finished.finalize().await,
+        }
+    };
+
+    assert_eq!(result.result, GameResult::Draw);
+    assert_eq!(result.turns_played, 5);
+
+    drop(event_tx);
+    let mut events = vec![];
+    while let Some(ev) = event_rx.recv().await {
+        events.push(ev);
+    }
+    let n_turns = events
+        .iter()
+        .filter(|e| matches!(e, MatchEvent::TurnPlayed { .. }))
+        .count();
+    assert_eq!(n_turns, 5, "expected 5 TurnPlayed events");
+    assert!(events
+        .iter()
+        .any(|e| matches!(e, MatchEvent::MatchOver { .. })));
+}
+
+/// `start_turn_with(ts)` rebuilds `self.game` from the snapshot (F4) and
+/// sends `GoState`. The host-side hash must match what bots compute from
+/// the same `(MatchConfig, TurnState)`, so bots accept the GoState and the
+/// turn proceeds normally to a `Continue`.
+#[tokio::test]
+async fn start_turn_with_injects_state_and_continues() {
+    let game = make_game();
+    let cfg = build_match_config(&game, TimingMode::Wait, 200, 500);
+
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
+    let sink = EventSink::new(event_tx.clone());
+    let p1 = Box::new(
+        EmbeddedPlayer::accept(StayBot, identity(PlayerSlot::Player1, "p1"), sink.clone())
+            .await
+            .expect("accept p1"),
+    ) as Box<dyn Player>;
+    let p2 = Box::new(
+        EmbeddedPlayer::accept(StayBot, identity(PlayerSlot::Player2, "p2"), sink)
+            .await
+            .expect("accept p2"),
+    ) as Box<dyn Player>;
+
+    let m = Match::new(
+        game,
+        [p1, p2],
+        cfg,
+        [vec![], vec![]],
+        fast_setup(),
+        fast_playing(),
+        Some(event_tx.clone()),
+    );
+
+    let ready = timeout(Duration::from_secs(3), m.setup())
+        .await
+        .expect("setup hung")
+        .expect("setup failed");
+    let playing = ready.start();
+
+    // Inject: turn 2, players moved off corners, cheese still at center.
+    let injected = pyrat_protocol::TurnState {
+        turn: 2,
+        player1_position: Coordinates::new(1, 1),
+        player2_position: Coordinates::new(3, 3),
+        player1_score: 0.0,
+        player2_score: 0.0,
+        player1_mud_turns: 0,
+        player2_mud_turns: 0,
+        cheese: vec![Coordinates::new(2, 2)],
+        player1_last_move: Direction::Up,
+        player2_last_move: Direction::Down,
+    };
+
+    let thinking = playing
+        .start_turn_with(injected)
+        .await
+        .expect("start_turn_with");
+
+    // Host's engine reflects the injected state.
+    assert_eq!(thinking.game().turn, 2);
+    assert_eq!(thinking.game().player1.current_pos, Coordinates::new(1, 1));
+    assert_eq!(thinking.game().player2.current_pos, Coordinates::new(3, 3));
+
+    // Bots accept GoState (host hash = bot hash from same rebuild path),
+    // commit Stay quickly. stop_and_collect picks them up.
+    let collected = timeout(Duration::from_secs(2), thinking.stop_and_collect())
+        .await
+        .expect("stop_and_collect hung")
+        .expect("stop_and_collect");
+
+    use pyrat_host::match_host::ActionOutcome;
+    for outcome in collected.outcomes() {
+        assert!(
+            matches!(
+                outcome,
+                ActionOutcome::Committed {
+                    direction: Direction::Stay,
+                    ..
+                }
+            ),
+            "expected Committed(Stay), got {outcome:?}"
+        );
+    }
+
+    // Advance once: turn 2 → turn 3, no cheese, max_turns=5 ⇒ Continue.
+    let next = collected.advance().await.expect("advance");
+    let playing = match next {
+        StepResult::Continue(p) => p,
+        StepResult::GameOver(_) => panic!("unexpected GameOver at injected turn 2"),
+    };
+    assert_eq!(playing.game().turn, 3);
+    assert_eq!(playing.game().player1.current_pos, Coordinates::new(1, 1));
+
+    drop(playing); // dispatchers detach; harmless for the test runtime
+    drop(event_tx);
+    while event_rx.recv().await.is_some() {}
+}
+
+/// `advance_with(p1, p2)` overrides the bots' committed actions. Used by
+/// GUI analysis-mode "play this move instead" navigation. The override
+/// directions show up in `TurnPlayed`; `think_ms` reports as 0 since the
+/// bots' computation isn't being used.
+#[tokio::test]
+async fn advance_with_override_replaces_committed_actions() {
+    let game = make_game_one_turn();
+    let cfg = build_match_config(&game, TimingMode::Wait, 200, 500);
+
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
+    let sink = EventSink::new(event_tx.clone());
+    let p1 = Box::new(
+        EmbeddedPlayer::accept(StayBot, identity(PlayerSlot::Player1, "p1"), sink.clone())
+            .await
+            .expect("accept p1"),
+    ) as Box<dyn Player>;
+    let p2 = Box::new(
+        EmbeddedPlayer::accept(StayBot, identity(PlayerSlot::Player2, "p2"), sink)
+            .await
+            .expect("accept p2"),
+    ) as Box<dyn Player>;
+
+    let m = Match::new(
+        game,
+        [p1, p2],
+        cfg,
+        [vec![], vec![]],
+        fast_setup(),
+        fast_playing(),
+        Some(event_tx.clone()),
+    );
+
+    let ready = timeout(Duration::from_secs(3), m.setup())
+        .await
+        .expect("setup hung")
+        .expect("setup failed");
+    let playing = ready.start();
+
+    let thinking = playing.start_turn().await.expect("start_turn");
+    let collected = timeout(Duration::from_secs(2), thinking.stop_and_collect())
+        .await
+        .expect("stop_and_collect hung")
+        .expect("stop_and_collect");
+
+    // Bots committed Stay; we override.
+    let next = collected
+        .advance_with(Direction::Up, Direction::Down)
+        .await
+        .expect("advance_with");
+
+    // max_turns=1 ⇒ GameOver.
+    let result = match next {
+        StepResult::GameOver(finished) => finished.finalize().await,
+        StepResult::Continue(_) => panic!("expected GameOver at max_turns=1"),
+    };
+    assert_eq!(result.turns_played, 1);
+
+    drop(event_tx);
+    let mut events = vec![];
+    while let Some(ev) = event_rx.recv().await {
+        events.push(ev);
+    }
+    let played = events
+        .iter()
+        .find_map(|e| match e {
+            MatchEvent::TurnPlayed {
+                p1_action,
+                p2_action,
+                p1_think_ms,
+                p2_think_ms,
+                ..
+            } => Some((*p1_action, *p2_action, *p1_think_ms, *p2_think_ms)),
+            _ => None,
+        })
+        .expect("expected TurnPlayed");
+    assert_eq!(
+        played,
+        (Direction::Up, Direction::Down, 0, 0),
+        "advance_with overrides directions and zeroes think_ms"
+    );
 }

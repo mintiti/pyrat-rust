@@ -21,13 +21,12 @@
 //! with the same API surface as the SDK `Context`. Calls are routed to the
 //! [`EventSink`](super::EventSink) instead of an mpsc-backed codec.
 
-use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
-use pyrat::{Coordinates, Direction, GameBuilder, GameState, MudMap};
+use pyrat::{Direction, GameState};
 use pyrat_bot_api::{BotContext, InfoParams, InfoSink, Options};
 use pyrat_protocol::{
     BotMsg, HashedTurnState, HostMsg, Info, MatchConfig, SearchLimits, TurnState,
@@ -1057,54 +1056,18 @@ impl<B: EmbeddedBot> Playing<B, Desynced> {
 // ── State mirror helpers ──────────────────────────────
 
 /// Construct an engine `GameState` from a `MatchConfig`.
+///
+/// Wraps the shared [`crate::snapshot::build_engine_state`], lifting its
+/// `String` error into [`PlayerError::ProtocolError`].
 fn build_engine_state(cfg: &MatchConfig) -> Result<GameState, PlayerError> {
-    let mut walls: HashMap<Coordinates, Vec<Coordinates>> = HashMap::new();
-    for (a, b) in &cfg.walls {
-        walls.entry(*a).or_default().push(*b);
-        walls.entry(*b).or_default().push(*a);
-    }
-    let mut mud = MudMap::new();
-    for entry in &cfg.mud {
-        mud.insert(entry.pos1, entry.pos2, entry.turns);
-    }
-
-    GameBuilder::new(cfg.width, cfg.height)
-        .with_max_turns(cfg.max_turns)
-        .with_custom_maze(walls, mud)
-        .with_custom_positions(cfg.player1_start, cfg.player2_start)
-        .with_custom_cheese(cfg.cheese.clone())
-        .build()
-        .create(None)
-        .map_err(|e| PlayerError::ProtocolError(format!("invalid match config: {e}")))
+    crate::snapshot::build_engine_state(cfg).map_err(PlayerError::ProtocolError)
 }
 
 /// Rebuild the engine state to match an injected turn state (GoState or
-/// FullState recovery).
-///
-/// Mutates fields directly after the builder hands us a fresh `GameState`,
-/// then calls `recompute_state_hash` so the internal Zobrist matches the new
-/// fields (Foundation F4). Without the recompute, `state_hash()` would still
-/// reflect the builder's initial state and downstream sync checks would
-/// silently desync.
+/// FullState recovery). Foundation F4: `recompute_state_hash` is called so
+/// the rebuilt state's Zobrist matches the new fields.
 fn rebuild_engine_state(cfg: &MatchConfig, ts: &TurnState) -> Result<GameState, PlayerError> {
-    let mut game = build_engine_state(cfg)?;
-    game.turn = ts.turn;
-    game.player1.current_pos = ts.player1_position;
-    game.player2.current_pos = ts.player2_position;
-    game.player1.score = ts.player1_score;
-    game.player2.score = ts.player2_score;
-    game.player1.mud_timer = ts.player1_mud_turns;
-    game.player2.mud_timer = ts.player2_mud_turns;
-    // Cheese: replace whatever the builder placed with the set in `ts`.
-    // Simplest path: clear and re-place. `CheeseBoard::place_cheese` is
-    // idempotent; `clear` / per-cell remove is not exposed, so rebuild.
-    for pos in cfg.cheese.iter() {
-        if !ts.cheese.contains(pos) {
-            game.cheese.take_cheese(*pos);
-        }
-    }
-    game.recompute_state_hash();
-    Ok(game)
+    crate::snapshot::rebuild_engine_state(cfg, ts).map_err(PlayerError::ProtocolError)
 }
 
 fn turn_state_from_game(game: &GameState, last_moves: (Direction, Direction)) -> TurnState {
@@ -1125,6 +1088,7 @@ fn turn_state_from_game(game: &GameState, last_moves: (Direction, Direction)) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pyrat::Coordinates;
     use pyrat_wire::TimingMode;
 
     struct DummyBot;

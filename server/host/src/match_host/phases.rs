@@ -45,6 +45,34 @@ pub struct Playing {
     pending_advance: Option<PendingAdvance>,
 }
 
+/// Analysis-mode sub-state: bots are thinking, no `Action` collected yet.
+/// Reached via `Match<Playing>::start_turn` (live state, Advance + Go) or
+/// `Match<Playing>::start_turn_with` (injected state, GoState — no Advance).
+/// The caller drives [`Match::stop_and_collect`] when ready.
+#[derive(Debug)]
+pub struct Thinking {
+    /// Turn the bots are thinking for.
+    turn: u16,
+    /// Hash both bots are confirmed-synced to (the state they were sent in
+    /// `Go` or `GoState`).
+    bot_synced_hash: u64,
+}
+
+/// Analysis-mode sub-state: actions collected, ready to apply or override.
+/// Holds raw [`ActionOutcome`]s; the [`FaultPolicy`](super::FaultPolicy)
+/// runs in [`Match::advance`] (default), or is skipped entirely by
+/// [`Match::advance_with`] (caller supplies override directions).
+#[derive(Debug)]
+pub struct Collected {
+    /// Turn just finished thinking.
+    turn: u16,
+    /// Hash bots thought about. Used for `take_provisional` validation in
+    /// [`Match::advance`].
+    bot_synced_hash: u64,
+    /// Per-slot collection outcomes. Read via [`Match::outcomes`].
+    outcomes: [ActionOutcome; 2],
+}
+
 /// Final phase. `Match::run` returns `MatchResult` directly; consumers that
 /// drive `step` manually consume `Match<Finished>` for the result.
 #[derive(Debug)]
@@ -145,6 +173,18 @@ impl<S> Match<S> {
 impl Match<Finished> {
     pub fn result(&self) -> &MatchResult {
         &self.state.result
+    }
+
+    /// Close both players (best-effort) and unwrap the result. Mirrors the
+    /// cleanup [`Match::run`] does internally; analysis-mode callers that
+    /// drive the typestate by hand should call this when they reach
+    /// [`Finished`] so dispatcher tasks shut down cleanly.
+    pub async fn finalize(self) -> MatchResult {
+        let Self { players, state, .. } = self;
+        let [p1, p2] = players;
+        let _ = p1.close().await;
+        let _ = p2.close().await;
+        state.result
     }
 }
 
@@ -253,23 +293,16 @@ impl Match<Created> {
     }
 
     /// Convenience: setup → start → step until game over → return result.
-    /// Closes both players (best effort) before returning, regardless of
-    /// success or failure.
+    /// Closes both players (best effort) on the success path; protocol
+    /// errors propagate without close (the failing match's resources drop
+    /// when the caller drops the error).
     pub async fn run(self) -> Result<MatchResult, MatchError> {
-        let ready = match self.setup().await {
-            Ok(r) => r,
-            Err(e) => return Err(e),
-        };
+        let ready = self.setup().await?;
         let mut playing = ready.start();
         loop {
             match playing.step().await? {
                 StepResult::Continue(next) => playing = next,
-                StepResult::GameOver(finished) => {
-                    let [p1, p2] = finished.players;
-                    let _ = p1.close().await;
-                    let _ = p2.close().await;
-                    return Ok(finished.state.result);
-                },
+                StepResult::GameOver(finished) => return Ok(finished.finalize().await),
             }
         }
     }
@@ -305,25 +338,106 @@ impl Match<Ready> {
     }
 }
 
-// ── Playing::step ─────────────────────────────────────
+// ── Playing: step + start_turn + start_turn_with ──────
 
 impl Match<Playing> {
-    /// Advance the match by one full turn:
+    /// Advance the match by one full turn (live mode):
     /// 1. Optional Advance + SyncOk (skipped on the first turn).
-    /// 2. Send Go to both, await Action with deadline + Stop fallback.
-    /// 3. Apply actions to the engine, emit `TurnPlayed`.
-    /// 4. Either `GameOver` (and return `Finished`) or queue a new
-    ///    `pending_advance` (and return `Continue`).
+    /// 2. Send Go.
+    /// 3. Wait for actions with deadline + Stop fallback + grace.
+    /// 4. Resolve outcomes via [`FaultPolicy`](super::FaultPolicy).
+    /// 5. Apply to engine, emit `TurnPlayed`.
+    /// 6. Either GameOver → [`Finished`] or queue `pending_advance` and
+    ///    return [`Playing`].
+    ///
+    /// Convenience composition; analysis-mode callers use
+    /// [`Self::start_turn`] + [`Match::stop_and_collect`] + [`Match::advance`]
+    /// to drive the steps individually.
     pub async fn step(mut self) -> Result<StepResult, MatchError> {
-        // 1. Acknowledge previous turn (skip on first turn).
+        let go_hash = self.dispatch_go_live().await?;
+        let turn = self.state.turn;
+        let outcomes = self.collect_outcomes(go_hash, turn).await?;
+        let resolved = self.resolve_outcomes(outcomes, go_hash, turn)?;
+        self.apply_resolved(turn, go_hash, resolved).await
+    }
+
+    /// Analysis-mode: send Advance (if pending) + Go, transition to
+    /// [`Thinking`]. The caller drives [`Match::stop_and_collect`] when
+    /// ready to read outcomes.
+    pub async fn start_turn(mut self) -> Result<Match<Thinking>, MatchError> {
+        let go_hash = self.dispatch_go_live().await?;
+        let turn = self.state.turn;
+        Ok(Match {
+            game: self.game,
+            players: self.players,
+            match_config: self.match_config,
+            options: self.options,
+            setup_timing: self.setup_timing,
+            playing_config: self.playing_config,
+            event_sink: self.event_sink,
+            event_tx: self.event_tx,
+            state: Thinking {
+                turn,
+                bot_synced_hash: go_hash,
+            },
+        })
+    }
+
+    /// Analysis-mode: inject an arbitrary [`TurnState`]. Drops any pending
+    /// Advance (the injection IS the new sync), rebuilds `self.game` from
+    /// the snapshot via Foundation F4, and sends `GoState` to both bots.
+    /// Transitions to [`Thinking`] like [`Self::start_turn`].
+    pub async fn start_turn_with(mut self, ts: TurnState) -> Result<Match<Thinking>, MatchError> {
+        // Discontinuity: previous pending_advance is no longer relevant.
+        self.state.pending_advance = None;
+
+        // F4: rebuild engine from snapshot, recomputing the Zobrist.
+        let new_game = crate::snapshot::rebuild_engine_state(&self.match_config, &ts)
+            .map_err(MatchError::Internal)?;
+        self.game = new_game;
+        let go_hash = self.game.state_hash();
+        let new_turn = self.game.turn;
+
+        let limits = build_search_limits(&self.playing_config);
+        for slot_idx in 0..2 {
+            let slot = slot_for(slot_idx);
+            self.players[slot_idx]
+                .send(HostMsg::GoState {
+                    turn_state: Box::new(ts.clone()),
+                    state_hash: go_hash,
+                    limits: limits.clone(),
+                })
+                .await
+                .map_err(|e| MatchError::from_player(slot, e))?;
+        }
+
+        Ok(Match {
+            game: self.game,
+            players: self.players,
+            match_config: self.match_config,
+            options: self.options,
+            setup_timing: self.setup_timing,
+            playing_config: self.playing_config,
+            event_sink: self.event_sink,
+            event_tx: self.event_tx,
+            state: Thinking {
+                turn: new_turn,
+                bot_synced_hash: go_hash,
+            },
+        })
+    }
+
+    /// Acknowledge any pending advance (Advance + SyncOk round-trip), then
+    /// send `Go` to both bots. Mutates `self.state` so the post-call
+    /// `bot_synced_hash` and `turn` reflect what bots are now thinking
+    /// about. Shared by [`Self::step`] and [`Self::start_turn`].
+    async fn dispatch_go_live(&mut self) -> Result<u64, MatchError> {
         if let Some(pa) = self.state.pending_advance.take() {
             self.run_advance(pa).await?;
             self.state.bot_synced_hash = pa.new_hash;
             self.state.turn = pa.turn;
         }
 
-        // 2. Send Go (clears each Player's stored provisional via the
-        //    `send(Go|GoState)` whole-turn-boundary contract).
         let go_hash = self.state.bot_synced_hash;
         let limits = build_search_limits(&self.playing_config);
         for slot_idx in 0..2 {
@@ -336,73 +450,7 @@ impl Match<Playing> {
                 .await
                 .map_err(|e| MatchError::from_player(slot, e))?;
         }
-
-        // 3. Collect per-slot outcomes (deadline + Stop fallback baked in),
-        //    then resolve via the configured FaultPolicy.
-        let outcomes = self.collect_outcomes(go_hash).await?;
-        let resolved = self.resolve_outcomes(outcomes, go_hash)?;
-
-        // 4. Apply to engine.
-        let result = self
-            .game
-            .process_turn(resolved.p1_action, resolved.p2_action);
-        let new_hash = self.game.state_hash();
-
-        emit(
-            self.event_tx.as_ref(),
-            MatchEvent::TurnPlayed {
-                state: build_turn_state(&self.game, resolved.p1_action, resolved.p2_action),
-                p1_action: resolved.p1_action,
-                p2_action: resolved.p2_action,
-                p1_think_ms: resolved.p1_think_ms,
-                p2_think_ms: resolved.p2_think_ms,
-            },
-        );
-
-        if result.game_over {
-            // Notify both bots, emit MatchOver, return Finished.
-            let match_result = MatchResult::from_game(&self.game);
-            for slot_idx in 0..2 {
-                let slot = slot_for(slot_idx);
-                if let Err(e) = self.players[slot_idx]
-                    .send(HostMsg::GameOver {
-                        result: match_result.result,
-                        player1_score: match_result.player1_score,
-                        player2_score: match_result.player2_score,
-                    })
-                    .await
-                {
-                    debug!(?slot, error = %e, "GameOver send failed — bot already gone");
-                }
-            }
-            emit(
-                self.event_tx.as_ref(),
-                MatchEvent::MatchOver {
-                    result: match_result.clone(),
-                },
-            );
-            Ok(StepResult::GameOver(Match {
-                game: self.game,
-                players: self.players,
-                match_config: self.match_config,
-                options: self.options,
-                setup_timing: self.setup_timing,
-                playing_config: self.playing_config,
-                event_sink: self.event_sink,
-                event_tx: self.event_tx,
-                state: Finished {
-                    result: match_result,
-                },
-            }))
-        } else {
-            self.state.pending_advance = Some(PendingAdvance {
-                p1_action: resolved.p1_action,
-                p2_action: resolved.p2_action,
-                turn: self.state.turn + 1,
-                new_hash,
-            });
-            Ok(StepResult::Continue(self))
-        }
+        Ok(go_hash)
     }
 
     /// Send `Advance` to both players, await SyncOk from each, handling
@@ -479,7 +527,11 @@ impl Match<Playing> {
             }
         }
     }
+}
 
+// ── Generic helpers shared across phases ──────────────
+
+impl<S> Match<S> {
     /// Wait for one [`ActionOutcome`](super::ActionOutcome) per slot. A bot
     /// produces `Committed` by sending a hash-and-turn-validated `Action`,
     /// `Disconnected` by closing the channel, or `TimedOut` by failing to do
@@ -488,14 +540,16 @@ impl Match<Playing> {
     /// On per-turn deadline expiry, `Stop` is sent to any still-thinking bots
     /// and the grace window starts; in-flight Actions arriving within the
     /// grace are still accepted as `Committed`. Any slot not filled by the
-    /// end of grace becomes `TimedOut`.
+    /// end of grace becomes `TimedOut`. `BotTimeout` is emitted for each
+    /// such slot — observability of the protocol fact, not a policy
+    /// decision (see [`FaultPolicy`](super::FaultPolicy)).
     ///
-    /// This function does NOT decide what `TimedOut` or `Disconnected` mean
-    /// for the match — that's the [`FaultPolicy`](super::FaultPolicy)'s job
-    /// (see [`Match::resolve_outcomes`]). Outcomes here are protocol facts.
+    /// Used by live `step()`. For analysis-mode collection (Stop sent
+    /// immediately, no internal deadline) see [`Self::collect_outcomes_after_stop`].
     async fn collect_outcomes(
         &mut self,
         expected_hash: u64,
+        turn: u16,
     ) -> Result<[ActionOutcome; 2], MatchError> {
         let mut outcomes: [Option<ActionOutcome>; 2] = [None, None];
 
@@ -519,7 +573,7 @@ impl Match<Playing> {
                 &mut self.players,
                 &mut outcomes,
                 expected_hash,
-                self.state.turn,
+                turn,
                 effective_deadline,
             )
             .await?;
@@ -528,18 +582,10 @@ impl Match<Playing> {
                 PollOutcome::Progress => continue,
                 PollOutcome::Timeout if !stop_sent => {
                     debug!(
-                        turn = self.state.turn,
+                        turn,
                         "move timeout — sending Stop and entering grace window"
                     );
-                    for (slot_idx, outcome_slot) in outcomes.iter().enumerate() {
-                        if outcome_slot.is_some() {
-                            continue;
-                        }
-                        let slot = slot_for(slot_idx);
-                        if let Err(e) = self.players[slot_idx].send(HostMsg::Stop).await {
-                            warn!(?slot, error = %e, "Stop send failed");
-                        }
-                    }
+                    self.send_stop_to_unfilled(&outcomes).await;
                     stop_sent = true;
                     effective_deadline = Some(Instant::now() + grace);
                 },
@@ -547,24 +593,104 @@ impl Match<Playing> {
             }
         }
 
-        // Any unfilled slots after grace are TimedOut.
-        Ok([
+        Ok(self.finalize_outcomes(outcomes, turn))
+    }
+
+    /// Analysis-mode collection: send `Stop` to both bots immediately, then
+    /// wait `network_grace` for Actions. Pre-committed Actions sitting in
+    /// the recv queue are picked up by the wait loop's first poll.
+    /// `EmbeddedPlayer` silently ignores `Stop` outside of thinking, so
+    /// spurious Stops to bots that already committed are harmless.
+    ///
+    /// Slots not filled by grace expiry become `TimedOut`; `BotTimeout`
+    /// fires for each. Used by [`Match::stop_and_collect`].
+    async fn collect_outcomes_after_stop(
+        &mut self,
+        expected_hash: u64,
+        turn: u16,
+    ) -> Result<[ActionOutcome; 2], MatchError> {
+        let mut outcomes: [Option<ActionOutcome>; 2] = [None, None];
+
+        self.send_stop_to_unfilled(&outcomes).await;
+
+        let grace = self.playing_config.network_grace;
+        let deadline = Some(Instant::now() + grace);
+
+        loop {
+            if outcomes[0].is_some() && outcomes[1].is_some() {
+                break;
+            }
+
+            let outcome = poll_either(
+                &mut self.players,
+                &mut outcomes,
+                expected_hash,
+                turn,
+                deadline,
+            )
+            .await?;
+
+            match outcome {
+                PollOutcome::Progress => continue,
+                PollOutcome::Timeout => break,
+            }
+        }
+
+        Ok(self.finalize_outcomes(outcomes, turn))
+    }
+
+    /// Send `Stop` to every slot whose outcome hasn't been filled yet.
+    /// Failures are logged (the peer may already be gone) but don't
+    /// propagate — collection proceeds.
+    async fn send_stop_to_unfilled(&mut self, outcomes: &[Option<ActionOutcome>; 2]) {
+        for (slot_idx, outcome_slot) in outcomes.iter().enumerate() {
+            if outcome_slot.is_some() {
+                continue;
+            }
+            let slot = slot_for(slot_idx);
+            if let Err(e) = self.players[slot_idx].send(HostMsg::Stop).await {
+                warn!(?slot, error = %e, "Stop send failed");
+            }
+        }
+    }
+
+    /// Lower `Option<ActionOutcome>` slots to concrete `[ActionOutcome; 2]`,
+    /// emitting `BotTimeout` for any slot the wait loop didn't fill.
+    fn finalize_outcomes(
+        &self,
+        outcomes: [Option<ActionOutcome>; 2],
+        turn: u16,
+    ) -> [ActionOutcome; 2] {
+        let resolved = [
             outcomes[0].unwrap_or(ActionOutcome::TimedOut),
             outcomes[1].unwrap_or(ActionOutcome::TimedOut),
-        ])
+        ];
+        for (slot_idx, outcome) in resolved.iter().enumerate() {
+            if matches!(outcome, ActionOutcome::TimedOut) {
+                emit(
+                    self.event_tx.as_ref(),
+                    MatchEvent::BotTimeout {
+                        player: slot_for(slot_idx),
+                        turn,
+                    },
+                );
+            }
+        }
+        resolved
     }
 
     /// Run each per-slot outcome through the configured
     /// [`FaultPolicy`](super::FaultPolicy) to produce final directions.
-    /// Emits `BotTimeout` for any slot whose outcome is `TimedOut`
-    /// (regardless of policy resolution — the event is an observable
-    /// protocol fact, not a policy decision).
+    ///
+    /// `BotTimeout` emission already happened at collection time
+    /// (see [`Self::finalize_outcomes`]); this function is a pure policy
+    /// hook plus the `take_provisional` call for slots that timed out.
     fn resolve_outcomes(
         &mut self,
         outcomes: [ActionOutcome; 2],
         expected_hash: u64,
+        turn: u16,
     ) -> Result<Resolved, MatchError> {
-        let turn = self.state.turn;
         let policy = self.playing_config.fault_policy.clone();
 
         let mut directions = [Direction::Stay; 2];
@@ -573,13 +699,6 @@ impl Match<Playing> {
         for slot_idx in 0..2 {
             let slot = slot_for(slot_idx);
             let outcome = outcomes[slot_idx];
-
-            if matches!(outcome, ActionOutcome::TimedOut) {
-                emit(
-                    self.event_tx.as_ref(),
-                    MatchEvent::BotTimeout { player: slot, turn },
-                );
-            }
 
             let provisional = match outcome {
                 ActionOutcome::TimedOut => {
@@ -601,6 +720,190 @@ impl Match<Playing> {
             p1_think_ms: think_ms[0],
             p2_think_ms: think_ms[1],
         })
+    }
+
+    /// Apply resolved actions to the engine, emit `TurnPlayed`, and either
+    /// notify both bots of `GameOver` (returning [`Match<Finished>`]) or
+    /// queue a fresh `pending_advance` (returning [`Match<Playing>`]).
+    ///
+    /// Generic over the source phase: called from [`Match<Playing>::step`]
+    /// and from [`Match<Collected>::advance`] / [`advance_with`]. The new
+    /// `Playing.bot_synced_hash` keeps `bot_synced_hash` (bots are still
+    /// synced to the pre-action state until the next Advance lands).
+    async fn apply_resolved(
+        mut self,
+        turn_just_played: u16,
+        bot_synced_hash: u64,
+        resolved: Resolved,
+    ) -> Result<StepResult, MatchError> {
+        let result = self
+            .game
+            .process_turn(resolved.p1_action, resolved.p2_action);
+        let new_hash = self.game.state_hash();
+
+        emit(
+            self.event_tx.as_ref(),
+            MatchEvent::TurnPlayed {
+                state: build_turn_state(&self.game, resolved.p1_action, resolved.p2_action),
+                p1_action: resolved.p1_action,
+                p2_action: resolved.p2_action,
+                p1_think_ms: resolved.p1_think_ms,
+                p2_think_ms: resolved.p2_think_ms,
+            },
+        );
+
+        if result.game_over {
+            let match_result = MatchResult::from_game(&self.game);
+            for slot_idx in 0..2 {
+                let slot = slot_for(slot_idx);
+                if let Err(e) = self.players[slot_idx]
+                    .send(HostMsg::GameOver {
+                        result: match_result.result,
+                        player1_score: match_result.player1_score,
+                        player2_score: match_result.player2_score,
+                    })
+                    .await
+                {
+                    debug!(?slot, error = %e, "GameOver send failed — bot already gone");
+                }
+            }
+            emit(
+                self.event_tx.as_ref(),
+                MatchEvent::MatchOver {
+                    result: match_result.clone(),
+                },
+            );
+            Ok(StepResult::GameOver(Match {
+                game: self.game,
+                players: self.players,
+                match_config: self.match_config,
+                options: self.options,
+                setup_timing: self.setup_timing,
+                playing_config: self.playing_config,
+                event_sink: self.event_sink,
+                event_tx: self.event_tx,
+                state: Finished {
+                    result: match_result,
+                },
+            }))
+        } else {
+            Ok(StepResult::Continue(Match {
+                game: self.game,
+                players: self.players,
+                match_config: self.match_config,
+                options: self.options,
+                setup_timing: self.setup_timing,
+                playing_config: self.playing_config,
+                event_sink: self.event_sink,
+                event_tx: self.event_tx,
+                state: Playing {
+                    turn: turn_just_played,
+                    bot_synced_hash,
+                    pending_advance: Some(PendingAdvance {
+                        p1_action: resolved.p1_action,
+                        p2_action: resolved.p2_action,
+                        turn: turn_just_played + 1,
+                        new_hash,
+                    }),
+                },
+            }))
+        }
+    }
+}
+
+// ── Thinking: stop_and_collect ────────────────────────
+
+impl Match<Thinking> {
+    /// Inspect the turn the bots are thinking for.
+    pub fn turn(&self) -> u16 {
+        self.state.turn
+    }
+
+    /// Inspect the engine hash the bots are thinking about.
+    pub fn bot_synced_hash(&self) -> u64 {
+        self.state.bot_synced_hash
+    }
+
+    /// Send `Stop` to any bots that haven't already committed an Action this
+    /// turn, wait the network grace window, and fold incoming Actions into
+    /// per-slot [`ActionOutcome`]s. Slots not filled by the grace expiry
+    /// become `TimedOut`. Emits `BotTimeout` for each timed-out slot.
+    ///
+    /// Pre-committed Actions (sitting in the recv queue between
+    /// `start_turn` and `stop_and_collect`) are picked up early.
+    ///
+    /// Returns [`Match<Collected>`] carrying raw outcomes —
+    /// [`FaultPolicy`](super::FaultPolicy) resolution happens in
+    /// [`Match::advance`].
+    pub async fn stop_and_collect(mut self) -> Result<Match<Collected>, MatchError> {
+        let bot_synced_hash = self.state.bot_synced_hash;
+        let turn = self.state.turn;
+        let outcomes = self
+            .collect_outcomes_after_stop(bot_synced_hash, turn)
+            .await?;
+        Ok(Match {
+            game: self.game,
+            players: self.players,
+            match_config: self.match_config,
+            options: self.options,
+            setup_timing: self.setup_timing,
+            playing_config: self.playing_config,
+            event_sink: self.event_sink,
+            event_tx: self.event_tx,
+            state: Collected {
+                turn,
+                bot_synced_hash,
+                outcomes,
+            },
+        })
+    }
+}
+
+// ── Collected: outcomes / advance / advance_with ──────
+
+impl Match<Collected> {
+    /// Inspect the per-slot outcomes (read-only; consumed by `advance`).
+    pub fn outcomes(&self) -> &[ActionOutcome; 2] {
+        &self.state.outcomes
+    }
+
+    /// Inspect the turn the outcomes were collected for.
+    pub fn turn(&self) -> u16 {
+        self.state.turn
+    }
+
+    /// Run [`FaultPolicy`](super::FaultPolicy) over the collected outcomes
+    /// to produce final directions, then apply to the engine and transition
+    /// to [`Playing`] (with `pending_advance` queued) or [`Finished`].
+    ///
+    /// A strict policy may escalate `TimedOut` / `Disconnected` to
+    /// [`MatchError`] here.
+    pub async fn advance(mut self) -> Result<StepResult, MatchError> {
+        let outcomes = self.state.outcomes;
+        let bot_synced_hash = self.state.bot_synced_hash;
+        let turn = self.state.turn;
+        let resolved = self.resolve_outcomes(outcomes, bot_synced_hash, turn)?;
+        self.apply_resolved(turn, bot_synced_hash, resolved).await
+    }
+
+    /// Override the bots' actions with caller-supplied directions, skipping
+    /// [`FaultPolicy`] entirely. Used by GUI analysis-mode "play this move
+    /// instead" navigation. `think_ms` reports as 0 in `TurnPlayed` since
+    /// the bots' computation isn't being used.
+    pub async fn advance_with(
+        self,
+        p1_dir: Direction,
+        p2_dir: Direction,
+    ) -> Result<StepResult, MatchError> {
+        let bot_synced_hash = self.state.bot_synced_hash;
+        let turn = self.state.turn;
+        let resolved = Resolved {
+            p1_action: p1_dir,
+            p2_action: p2_dir,
+            p1_think_ms: 0,
+            p2_think_ms: 0,
+        };
+        self.apply_resolved(turn, bot_synced_hash, resolved).await
     }
 }
 
