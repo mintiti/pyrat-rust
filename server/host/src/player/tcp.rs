@@ -1,11 +1,9 @@
 //! TCP-backed [`Player`] implementation and the multi-slot accept layer.
 //!
-//! `TcpPlayer` owns its own minimal session task — it does **not** reuse the
-//! legacy `crate::session` infrastructure (whose codec predates the wire
-//! upgrade and doesn't know any of the new variants). The task wraps a
-//! `TcpStream` in `pyrat_wire::framing::{FrameReader, FrameWriter}`, decodes
-//! frames via [`pyrat_protocol::codec`], and shuttles owned messages over a
-//! pair of bounded `mpsc` channels.
+//! `TcpPlayer` owns its own minimal session task: it wraps a `TcpStream` in
+//! `pyrat_wire::framing::{FrameReader, FrameWriter}`, decodes frames via
+//! [`pyrat_protocol::codec`], and shuttles owned messages over a pair of
+//! bounded `mpsc` channels.
 //!
 //! [`accept_players`] is the multi-slot accept layer: it dispatches incoming
 //! connections by `agent_id` and runs handshakes concurrently on a `JoinSet`,
@@ -33,7 +31,7 @@ use tokio::task::{JoinHandle, JoinSet};
 use tokio::time::timeout;
 
 use super::{EventSink, Player, PlayerError, PlayerIdentity, ProvisionalSlot};
-use crate::game_loop::MatchEvent;
+use crate::match_host::MatchEvent;
 
 /// Default depth of the bounded outbound and inbound mpsc channels between
 /// `TcpPlayer` and its session task. Provides natural backpressure when one

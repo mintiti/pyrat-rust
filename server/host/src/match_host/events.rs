@@ -7,7 +7,6 @@
 use tokio::sync::mpsc;
 use tracing::warn;
 
-use crate::session::messages::DisconnectReason;
 use pyrat::Direction;
 use pyrat_protocol::{HashedTurnState, Info, MatchConfig};
 use pyrat_wire::Player;
@@ -60,11 +59,6 @@ pub enum MatchEvent {
     },
     /// A bot timed out on an action this turn.
     BotTimeout { player: Player, turn: u16 },
-    /// A bot disconnected during play.
-    BotDisconnected {
-        player: Player,
-        reason: DisconnectReason,
-    },
 
     // ── End ──────────────────────────────────────
     /// The match ended.

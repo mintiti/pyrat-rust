@@ -19,7 +19,7 @@ pub use embedded::{EmbeddedBot, EmbeddedCtx, EmbeddedPlayer};
 pub use pyrat_bot_api::{InfoParams, Options};
 pub use tcp::{accept_players, AcceptError, TcpPlayer};
 
-use crate::game_loop::MatchEvent;
+use crate::match_host::MatchEvent;
 
 /// Identity of a player in this match.
 ///

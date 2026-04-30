@@ -21,7 +21,6 @@ mod result;
 
 pub use config::{PlayingConfig, SetupTiming};
 pub use error::MatchError;
-pub(crate) use events::emit;
 pub use events::MatchEvent;
 pub use phases::{Collected, Created, Finished, Match, Playing, Ready, StepResult, Thinking};
 pub use policy::{ActionOutcome, DefaultFaultPolicy, FaultPolicy, StrictFaultPolicy};

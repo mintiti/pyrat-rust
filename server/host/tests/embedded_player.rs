@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use pyrat::{Coordinates, Direction, GameBuilder, MudMap};
-use pyrat_host::game_loop::MatchEvent;
+use pyrat_host::match_host::MatchEvent;
 use pyrat_host::player::{
     EmbeddedBot, EmbeddedCtx, EmbeddedPlayer, EventSink, InfoParams, Options, Player, PlayerError,
     PlayerIdentity,

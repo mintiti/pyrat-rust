@@ -9,7 +9,7 @@
 use std::time::Duration;
 
 use pyrat::Direction;
-use pyrat_host::game_loop::MatchEvent;
+use pyrat_host::match_host::MatchEvent;
 use pyrat_host::player::{accept_players, AcceptError, EventSink, Player, PlayerError, TcpPlayer};
 use pyrat_protocol::{
     extract_host_msg, serialize_bot_msg, BotMsg, HostMsg, Info, OptionDef, OptionType,

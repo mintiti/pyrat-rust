@@ -217,7 +217,7 @@ fn emit_bot_info(
         turn,
         state_hash,
     };
-    event_sink.emit(crate::game_loop::MatchEvent::BotInfo {
+    event_sink.emit(crate::match_host::MatchEvent::BotInfo {
         sender,
         turn,
         state_hash,
@@ -365,7 +365,7 @@ impl Player for EmbeddedPlayer {
                         state_hash,
                     });
                     self.event_sink
-                        .emit(crate::game_loop::MatchEvent::BotProvisional {
+                        .emit(crate::match_host::MatchEvent::BotProvisional {
                             sender: player,
                             turn,
                             state_hash,

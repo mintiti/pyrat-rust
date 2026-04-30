@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use pyrat::{Coordinates, Direction, GameBuilder, GameState};
-use pyrat_host::game_loop::build_match_config;
+use pyrat_host::match_config::build_match_config;
 use pyrat_host::match_host::{
     Match, MatchError, MatchEvent, PlayingConfig, SetupTiming, StepResult, StrictFaultPolicy,
 };
