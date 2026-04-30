@@ -6,7 +6,19 @@ use std::time::Duration;
 
 use tracing::{debug, info, warn};
 
-use super::config::BotConfig;
+/// How to launch a bot subprocess.
+///
+/// Launching is optional — tests and GUIs that manage bots externally never
+/// provide this.
+#[derive(Debug, Clone)]
+pub struct BotConfig {
+    /// Shell command to spawn the bot. Empty string = manual start (skipped).
+    pub run_command: String,
+    /// Working directory for the spawned process.
+    pub working_dir: std::path::PathBuf,
+    /// Agent identifier the bot uses to identify itself on connect.
+    pub agent_id: String,
+}
 
 /// Error returned when bot launching fails.
 #[derive(Debug, thiserror::Error)]

@@ -1,6 +1,9 @@
 pub mod game_loop;
+pub mod launch;
+pub mod match_config;
 pub mod match_host;
 pub mod player;
+pub mod probe;
 pub mod session;
 pub mod snapshot;
 pub mod stub;
