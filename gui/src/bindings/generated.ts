@@ -156,7 +156,7 @@ export type Coord = { x: number; y: number }
  * Movement direction — specta-friendly mirror of pyrat_wire::Direction.
  */
 export type Direction = "Up" | "Right" | "Down" | "Left" | "Stay"
-export type DiscoveredBot = { agent_id: string; name: string; run_command: string;
+export type DiscoveredBot = { agent_id: string; name: string; run_command: string; 
 /**
  * Absolute path to the directory containing bot.toml.
  */
@@ -164,20 +164,20 @@ working_dir: string; description: string; developer: string; language: string; t
 /**
  * Per-player option overrides + match flags, bundled so start_match stays under specta's 10-arg limit.
  */
-export type MatchBotOptions = { player1?: BotOptionValue[]; player2?: BotOptionValue[];
+export type MatchBotOptions = { player1?: BotOptionValue[]; player2?: BotOptionValue[]; 
 /**
  * When true, run in analysis (step-by-step) mode instead of auto-play.
  */
 step_mode?: boolean }
-export type MatchConfigParams = {
+export type MatchConfigParams = { 
 /**
  * Named preset, or "custom" for manual configuration.
  */
-preset: string; width: number; height: number; max_turns: number; wall_density: number; mud_density: number; mud_range: number; connected: boolean; symmetric: boolean; cheese_count: number; cheese_symmetric: boolean;
+preset: string; width: number; height: number; max_turns: number; wall_density: number; mud_density: number; mud_range: number; connected: boolean; symmetric: boolean; cheese_count: number; cheese_symmetric: boolean; 
 /**
  * "corners" or "random".
  */
-player_start: string;
+player_start: string; 
 /**
  * Seed for RNG. None = OS entropy.
  */

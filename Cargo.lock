@@ -3032,7 +3032,9 @@ dependencies = [
 name = "pyrat-gui"
 version = "0.1.0"
 dependencies = [
+ "fastrand",
  "pyrat-host",
+ "pyrat-protocol",
  "pyrat-rust",
  "serde",
  "serde_json",

@@ -235,6 +235,11 @@ pub async fn accept_players(
                         continue;
                     }
 
+                    tracing::info!(
+                        agent_id = %handshaked.agent_id,
+                        slot = ?assigned_slot,
+                        "accept_players: peer welcomed"
+                    );
                     let identity = PlayerIdentity {
                         name: handshaked.name,
                         author: handshaked.author,

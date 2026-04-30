@@ -8,6 +8,7 @@ mod events;
 mod json_store;
 mod match_config;
 mod match_runner;
+mod random_bot;
 mod state;
 
 use bot_discovery::{discover_bots, load_scan_paths, save_scan_paths};

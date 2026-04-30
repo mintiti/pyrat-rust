@@ -223,6 +223,7 @@ impl Match<Created> {
                 .send(msg)
                 .await
                 .map_err(|e| MatchError::from_player(slot, e))?;
+            tracing::info!(?slot, "match: configure sent");
         }
 
         // Recv Ready from each, verify hash.
@@ -252,9 +253,11 @@ impl Match<Created> {
                     })
                 },
             }
+            tracing::info!(?slot, "match: ready received");
         }
 
         // Send GoPreprocess to both, recv PreprocessingDone.
+        tracing::info!("match: preprocessing started");
         emit(self.ctx.event_tx.as_ref(), MatchEvent::PreprocessingStarted);
         for slot_idx in 0..2 {
             let slot = slot_for(slot_idx);
@@ -283,8 +286,10 @@ impl Match<Created> {
                     })
                 },
             }
+            tracing::info!(?slot, "match: preprocessing done");
         }
 
+        tracing::info!("match: setup complete");
         emit(self.ctx.event_tx.as_ref(), MatchEvent::SetupComplete);
 
         Ok(Match {
@@ -847,6 +852,28 @@ impl Match<Collected> {
         let turn = self.state.turn;
         let resolved = self.resolve_outcomes(outcomes, bot_synced_hash, turn)?;
         self.apply_resolved(turn, bot_synced_hash, resolved).await
+    }
+
+    /// Drop the collected outcomes without applying them. Used by GUI
+    /// analysis-mode when the user repositions the cursor mid-turn: the
+    /// already-stopped bots' actions are abandoned and the match returns to
+    /// [`Playing`] for a fresh `start_turn` / `start_turn_with`.
+    ///
+    /// No engine mutation happens — `process_turn` is only called by
+    /// [`advance`](Self::advance) / [`advance_with`](Self::advance_with).
+    /// The next `start_turn` sees `pending_advance: None` (the bots are
+    /// already synced at `bot_synced_hash` since `stop_and_collect`
+    /// consumed their committed Action).
+    pub fn discard(self) -> Match<Playing> {
+        let Self { ctx, state } = self;
+        Match {
+            ctx,
+            state: Playing {
+                turn: state.turn,
+                bot_synced_hash: state.bot_synced_hash,
+                pending_advance: None,
+            },
+        }
     }
 
     /// Override the bots' actions with caller-supplied directions, skipping
