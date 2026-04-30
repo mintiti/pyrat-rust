@@ -7,7 +7,6 @@
 //! All position and direction fields use engine types (`Coordinates`, `Direction`).
 //! The codec is the only place that touches wire representations.
 
-use std::hash::{Hash, Hasher};
 use std::ops::Deref;
 
 use pyrat::{Coordinates, Direction};
@@ -141,9 +140,8 @@ pub struct TurnState {
 /// A [`TurnState`] paired with a 64-bit fingerprint of its
 /// position-defining fields.
 ///
-/// The hash is computed once at construction time. Two states that a bot would
-/// analyze differently will hash differently. The hash is not collision-resistant;
-/// it's a correlation tag, not a trust boundary.
+/// The hash is the engine's Zobrist hash (`pyrat::GameState::state_hash`).
+/// It's a correlation tag for protocol sync, not a trust boundary.
 #[derive(Debug, Clone)]
 pub struct HashedTurnState {
     inner: TurnState,
@@ -151,35 +149,12 @@ pub struct HashedTurnState {
 }
 
 impl HashedTurnState {
-    /// Wrap a turn state, computing the hash from its fields via
-    /// `DefaultHasher`.
-    ///
-    /// **Being phased out.** New protocol code computes the canonical
-    /// hash via the engine's Zobrist (`pyrat::GameState::state_hash`) and
-    /// pairs it with a `TurnState` using
-    /// [`with_unverified_hash`](Self::with_unverified_hash). The two hash
-    /// algorithms differ; using `new` for protocol sync against a peer that
-    /// uses the engine hash will desync every turn. Kept here so legacy
-    /// host/SDK call sites keep compiling until they migrate (slice-by-slice
-    /// per the host-restructure plan).
-    pub fn new(ts: TurnState) -> Self {
-        let state_hash = Self::compute_hash(&ts);
-        Self {
-            inner: ts,
-            state_hash,
-        }
-    }
-
     /// Wrap a turn state with a hash supplied by the producer, without
     /// recomputing it.
     ///
     /// The caller vouches that `state_hash` matches the fields in `ts`. The
-    /// wrapper does not verify this. Name chosen to advertise the trust:
-    /// mismatches are only caught by the setup-phase hash handshake in
-    /// consumers.
-    ///
-    /// New protocol code uses this constructor with the engine's Zobrist
-    /// hash (`game.state_hash()`), making it the canonical sync hash.
+    /// wrapper does not verify this. Mismatches are only caught by the
+    /// setup-phase hash handshake in consumers.
     pub fn with_unverified_hash(ts: TurnState, state_hash: u64) -> Self {
         Self {
             inner: ts,
@@ -197,26 +172,6 @@ impl HashedTurnState {
     /// Use `state_hash()` before calling this if you need the hash.
     pub fn into_inner(self) -> TurnState {
         self.inner
-    }
-
-    /// Deterministic hash of all game-position fields.
-    ///
-    /// Two states that a bot would analyze differently must hash differently.
-    /// If you add a field to [`TurnState`], update this function.
-    fn compute_hash(ts: &TurnState) -> u64 {
-        let mut h = std::collections::hash_map::DefaultHasher::new();
-        ts.turn.hash(&mut h);
-        ts.player1_position.hash(&mut h);
-        ts.player2_position.hash(&mut h);
-        // Hash scores as half-point u16 to avoid float instability
-        ((ts.player1_score * 2.0) as u16).hash(&mut h);
-        ((ts.player2_score * 2.0) as u16).hash(&mut h);
-        ts.player1_mud_turns.hash(&mut h);
-        ts.player2_mud_turns.hash(&mut h);
-        ts.cheese.hash(&mut h);
-        ts.player1_last_move.hash(&mut h);
-        ts.player2_last_move.hash(&mut h);
-        h.finish()
     }
 }
 
@@ -248,25 +203,6 @@ mod tests {
     }
 
     #[test]
-    fn hashed_turn_state_new_computes_deterministic_hash() {
-        let a = HashedTurnState::new(sample_turn_state());
-        let b = HashedTurnState::new(sample_turn_state());
-        assert_eq!(a.state_hash(), b.state_hash());
-    }
-
-    /// Pinned hash for `sample_turn_state()` — catches silent changes to the
-    /// hasher, field ordering, or score quantization. If this test fails after
-    /// an intentional change, recompute the expected value once and update it.
-    #[test]
-    fn hashed_turn_state_golden_value() {
-        let got = HashedTurnState::new(sample_turn_state()).state_hash();
-        assert_eq!(
-            got, 0x7006_86d9_8688_95f5,
-            "update expected value if the hash algorithm changed intentionally"
-        );
-    }
-
-    #[test]
     fn hashed_turn_state_with_unverified_hash_stores_provided_hash() {
         let ts = sample_turn_state();
         let hts = HashedTurnState::with_unverified_hash(ts, 0xDEAD_BEEF);
@@ -274,19 +210,8 @@ mod tests {
     }
 
     #[test]
-    fn different_states_produce_different_hashes() {
-        let ts_a = sample_turn_state();
-        let mut ts_b = sample_turn_state();
-        ts_b.player1_position = Coordinates::new(5, 5);
-
-        let a = HashedTurnState::new(ts_a);
-        let b = HashedTurnState::new(ts_b);
-        assert_ne!(a.state_hash(), b.state_hash());
-    }
-
-    #[test]
     fn deref_accesses_inner_fields() {
-        let hts = HashedTurnState::new(sample_turn_state());
+        let hts = HashedTurnState::with_unverified_hash(sample_turn_state(), 0);
         assert_eq!(hts.turn, 42);
         assert_eq!(hts.player1_position, Coordinates::new(10, 7));
     }
@@ -305,27 +230,5 @@ mod tests {
             assert_eq!(wire_to_engine_direction(w), e);
             assert_eq!(engine_to_wire_direction(e), w);
         }
-    }
-
-    /// Verify that `Coordinates` hashes identically to the `(u8, u8)` tuple
-    /// it replaced, and engine `Direction` hashes identically to the raw `u8`
-    /// discriminant used previously. This ensures no hash compatibility break.
-    #[test]
-    fn hash_compatibility_with_old_tuple_representation() {
-        use std::collections::hash_map::DefaultHasher;
-
-        // Coordinates vs (u8, u8)
-        let mut h1 = DefaultHasher::new();
-        let mut h2 = DefaultHasher::new();
-        Coordinates::new(10, 7).hash(&mut h1);
-        (10u8, 7u8).hash(&mut h2);
-        assert_eq!(h1.finish(), h2.finish());
-
-        // Engine Direction vs raw u8 discriminant
-        let mut h1 = DefaultHasher::new();
-        let mut h2 = DefaultHasher::new();
-        Direction::Up.hash(&mut h1);
-        0u8.hash(&mut h2);
-        assert_eq!(h1.finish(), h2.finish());
     }
 }
