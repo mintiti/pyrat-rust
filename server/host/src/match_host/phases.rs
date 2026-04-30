@@ -93,9 +93,18 @@ struct PendingAdvance {
 
 // ── Match<S> ──────────────────────────────────────────
 
-/// Owner of a match's lifecycle. Holds the engine state, both players, the
-/// per-player option assignments, and the event sink.
+/// Owner of a match's lifecycle. Holds the carry-along context (engine
+/// state, players, configs, event sink) and the current phase marker.
+/// Phase transitions consume `Match<S>` and produce `Match<T>` carrying
+/// the same `ctx` — a 2-field copy instead of rebuilding every field.
 pub struct Match<S> {
+    ctx: MatchCtx,
+    state: S,
+}
+
+/// Per-match carry-along context. Threaded unchanged through every
+/// typestate transition; only `state: S` varies per phase.
+pub(super) struct MatchCtx {
     game: GameState,
     players: [Box<dyn Player>; 2],
     match_config: MatchConfig,
@@ -104,11 +113,10 @@ pub struct Match<S> {
     setup_timing: SetupTiming,
     playing_config: PlayingConfig,
     event_sink: EventSink,
-    /// Internal sender backing `event_sink`, so the Match can call the
-    /// `emit(Option<&Sender>, …)` helper directly without going through the
-    /// public `EventSink::emit` (which exposes only the sink shape).
+    /// Internal sender backing `event_sink`, so methods can call the
+    /// `emit(Option<&Sender>, …)` helper directly without going through
+    /// the public `EventSink::emit` (which exposes only the sink shape).
     event_tx: Option<tokio::sync::mpsc::UnboundedSender<MatchEvent>>,
-    state: S,
 }
 
 /// Outcome of `Match<Playing>::step`.
@@ -140,14 +148,16 @@ impl Match<Created> {
             None => EventSink::noop(),
         };
         Self {
-            game,
-            players,
-            match_config,
-            options,
-            setup_timing,
-            playing_config,
-            event_sink,
-            event_tx,
+            ctx: MatchCtx {
+                game,
+                players,
+                match_config,
+                options,
+                setup_timing,
+                playing_config,
+                event_sink,
+                event_tx,
+            },
             state: Created,
         }
     }
@@ -156,17 +166,17 @@ impl Match<Created> {
     /// `EmbeddedPlayer::accept` / `accept_players` so observer-facing
     /// messages reach the same channel as the events Match emits internally.
     pub fn event_sink(&self) -> &EventSink {
-        &self.event_sink
+        &self.ctx.event_sink
     }
 }
 
 impl<S> Match<S> {
     pub fn game(&self) -> &GameState {
-        &self.game
+        &self.ctx.game
     }
 
     pub fn match_config(&self) -> &MatchConfig {
-        &self.match_config
+        &self.ctx.match_config
     }
 }
 
@@ -180,8 +190,8 @@ impl Match<Finished> {
     /// drive the typestate by hand should call this when they reach
     /// [`Finished`] so dispatcher tasks shut down cleanly.
     pub async fn finalize(self) -> MatchResult {
-        let Self { players, state, .. } = self;
-        let [p1, p2] = players;
+        let Self { ctx, state } = self;
+        let [p1, p2] = ctx.players;
         let _ = p1.close().await;
         let _ = p2.close().await;
         state.result
@@ -195,21 +205,21 @@ impl Match<Created> {
     /// hash verification), GoPreprocess, and PreprocessingDone. Returns
     /// `Match<Ready>` carrying the engine hash both bots agreed to.
     pub async fn setup(mut self) -> Result<Match<Ready>, MatchError> {
-        let expected_hash = self.game.state_hash();
-        let configure_timeout = self.setup_timing.configure_timeout;
-        let preprocessing_timeout = self.setup_timing.preprocessing_timeout;
+        let expected_hash = self.ctx.game.state_hash();
+        let configure_timeout = self.ctx.setup_timing.configure_timeout;
+        let preprocessing_timeout = self.ctx.setup_timing.preprocessing_timeout;
 
         // Send Configure to both bots in slot order. The same MatchConfig
         // body goes to both — Match doesn't read or rewrite
         // `controlled_players` (kept for legacy callers; removed in slice 9).
         for slot_idx in 0..2 {
-            let opts = std::mem::take(&mut self.options[slot_idx]);
+            let opts = std::mem::take(&mut self.ctx.options[slot_idx]);
             let msg = HostMsg::Configure {
                 options: opts,
-                match_config: Box::new(self.match_config.clone()),
+                match_config: Box::new(self.ctx.match_config.clone()),
             };
             let slot = slot_for(slot_idx);
-            self.players[slot_idx]
+            self.ctx.players[slot_idx]
                 .send(msg)
                 .await
                 .map_err(|e| MatchError::from_player(slot, e))?;
@@ -219,7 +229,7 @@ impl Match<Created> {
         for slot_idx in 0..2 {
             let slot = slot_for(slot_idx);
             let msg = recv_with_timeout(
-                self.players[slot_idx].as_mut(),
+                self.ctx.players[slot_idx].as_mut(),
                 slot,
                 configure_timeout,
                 MatchError::SetupTimeout(slot),
@@ -245,10 +255,10 @@ impl Match<Created> {
         }
 
         // Send GoPreprocess to both, recv PreprocessingDone.
-        emit(self.event_tx.as_ref(), MatchEvent::PreprocessingStarted);
+        emit(self.ctx.event_tx.as_ref(), MatchEvent::PreprocessingStarted);
         for slot_idx in 0..2 {
             let slot = slot_for(slot_idx);
-            self.players[slot_idx]
+            self.ctx.players[slot_idx]
                 .send(HostMsg::GoPreprocess {
                     state_hash: expected_hash,
                 })
@@ -258,7 +268,7 @@ impl Match<Created> {
         for slot_idx in 0..2 {
             let slot = slot_for(slot_idx);
             let msg = recv_with_timeout(
-                self.players[slot_idx].as_mut(),
+                self.ctx.players[slot_idx].as_mut(),
                 slot,
                 preprocessing_timeout,
                 MatchError::PreprocessingTimeout(slot),
@@ -275,17 +285,10 @@ impl Match<Created> {
             }
         }
 
-        emit(self.event_tx.as_ref(), MatchEvent::SetupComplete);
+        emit(self.ctx.event_tx.as_ref(), MatchEvent::SetupComplete);
 
         Ok(Match {
-            game: self.game,
-            players: self.players,
-            match_config: self.match_config,
-            options: self.options,
-            setup_timing: self.setup_timing,
-            playing_config: self.playing_config,
-            event_sink: self.event_sink,
-            event_tx: self.event_tx,
+            ctx: self.ctx,
             state: Ready {
                 bot_synced_hash: expected_hash,
             },
@@ -315,20 +318,13 @@ impl Match<Ready> {
     pub fn start(self) -> Match<Playing> {
         let bot_synced_hash = self.state.bot_synced_hash;
         emit(
-            self.event_tx.as_ref(),
+            self.ctx.event_tx.as_ref(),
             MatchEvent::MatchStarted {
-                config: self.match_config.clone(),
+                config: self.ctx.match_config.clone(),
             },
         );
         Match {
-            game: self.game,
-            players: self.players,
-            match_config: self.match_config,
-            options: self.options,
-            setup_timing: self.setup_timing,
-            playing_config: self.playing_config,
-            event_sink: self.event_sink,
-            event_tx: self.event_tx,
+            ctx: self.ctx,
             state: Playing {
                 turn: 0,
                 bot_synced_hash,
@@ -368,14 +364,7 @@ impl Match<Playing> {
         let go_hash = self.dispatch_go_live().await?;
         let turn = self.state.turn;
         Ok(Match {
-            game: self.game,
-            players: self.players,
-            match_config: self.match_config,
-            options: self.options,
-            setup_timing: self.setup_timing,
-            playing_config: self.playing_config,
-            event_sink: self.event_sink,
-            event_tx: self.event_tx,
+            ctx: self.ctx,
             state: Thinking {
                 turn,
                 bot_synced_hash: go_hash,
@@ -384,7 +373,7 @@ impl Match<Playing> {
     }
 
     /// Analysis-mode: inject an arbitrary [`TurnState`]. Drops any pending
-    /// Advance (the injection IS the new sync), rebuilds `self.game` from
+    /// Advance (the injection IS the new sync), rebuilds `self.ctx.game` from
     /// the snapshot via Foundation F4, and sends `GoState` to both bots.
     /// Transitions to [`Thinking`] like [`Self::start_turn`].
     pub async fn start_turn_with(mut self, ts: TurnState) -> Result<Match<Thinking>, MatchError> {
@@ -392,16 +381,16 @@ impl Match<Playing> {
         self.state.pending_advance = None;
 
         // F4: rebuild engine from snapshot, recomputing the Zobrist.
-        let new_game = crate::snapshot::rebuild_engine_state(&self.match_config, &ts)
+        let new_game = crate::snapshot::rebuild_engine_state(&self.ctx.match_config, &ts)
             .map_err(MatchError::Internal)?;
-        self.game = new_game;
-        let go_hash = self.game.state_hash();
-        let new_turn = self.game.turn;
+        self.ctx.game = new_game;
+        let go_hash = self.ctx.game.state_hash();
+        let new_turn = self.ctx.game.turn;
 
-        let limits = build_search_limits(&self.playing_config);
+        let limits = build_search_limits(&self.ctx.playing_config);
         for slot_idx in 0..2 {
             let slot = slot_for(slot_idx);
-            self.players[slot_idx]
+            self.ctx.players[slot_idx]
                 .send(HostMsg::GoState {
                     turn_state: Box::new(ts.clone()),
                     state_hash: go_hash,
@@ -412,14 +401,7 @@ impl Match<Playing> {
         }
 
         Ok(Match {
-            game: self.game,
-            players: self.players,
-            match_config: self.match_config,
-            options: self.options,
-            setup_timing: self.setup_timing,
-            playing_config: self.playing_config,
-            event_sink: self.event_sink,
-            event_tx: self.event_tx,
+            ctx: self.ctx,
             state: Thinking {
                 turn: new_turn,
                 bot_synced_hash: go_hash,
@@ -439,10 +421,10 @@ impl Match<Playing> {
         }
 
         let go_hash = self.state.bot_synced_hash;
-        let limits = build_search_limits(&self.playing_config);
+        let limits = build_search_limits(&self.ctx.playing_config);
         for slot_idx in 0..2 {
             let slot = slot_for(slot_idx);
-            self.players[slot_idx]
+            self.ctx.players[slot_idx]
                 .send(HostMsg::Go {
                     state_hash: go_hash,
                     limits: limits.clone(),
@@ -459,7 +441,7 @@ impl Match<Playing> {
     async fn run_advance(&mut self, pa: PendingAdvance) -> Result<(), MatchError> {
         for slot_idx in 0..2 {
             let slot = slot_for(slot_idx);
-            self.players[slot_idx]
+            self.ctx.players[slot_idx]
                 .send(HostMsg::Advance {
                     p1_dir: pa.p1_action,
                     p2_dir: pa.p2_action,
@@ -485,7 +467,7 @@ impl Match<Playing> {
     ) -> Result<(), MatchError> {
         let mut resync_used = false;
         loop {
-            let msg = recv_required(self.players[slot_idx].as_mut(), slot).await?;
+            let msg = recv_required(self.ctx.players[slot_idx].as_mut(), slot).await?;
             match msg {
                 BotMsg::SyncOk { hash } => {
                     if hash != pa.new_hash {
@@ -508,10 +490,11 @@ impl Match<Playing> {
                         expected = pa.new_hash,
                         "bot requested Resync"
                     );
-                    let turn_state = build_turn_state_owned(&self.game, pa.p1_action, pa.p2_action);
-                    self.players[slot_idx]
+                    let turn_state =
+                        build_turn_state_owned(&self.ctx.game, pa.p1_action, pa.p2_action);
+                    self.ctx.players[slot_idx]
                         .send(HostMsg::FullState {
-                            match_config: Box::new(self.match_config.clone()),
+                            match_config: Box::new(self.ctx.match_config.clone()),
                             turn_state: Box::new(turn_state),
                         })
                         .await
@@ -553,14 +536,14 @@ impl<S> Match<S> {
     ) -> Result<[ActionOutcome; 2], MatchError> {
         let mut outcomes: [Option<ActionOutcome>; 2] = [None, None];
 
-        let move_timeout = self.playing_config.move_timeout;
+        let move_timeout = self.ctx.playing_config.move_timeout;
         let infinite = move_timeout.is_zero();
         let deadline = if infinite {
             None
         } else {
             Some(Instant::now() + move_timeout)
         };
-        let grace = self.playing_config.network_grace;
+        let grace = self.ctx.playing_config.network_grace;
 
         let mut stop_sent = false;
         let mut effective_deadline = deadline;
@@ -570,7 +553,7 @@ impl<S> Match<S> {
             }
 
             let outcome = poll_either(
-                &mut self.players,
+                &mut self.ctx.players,
                 &mut outcomes,
                 expected_hash,
                 turn,
@@ -613,7 +596,7 @@ impl<S> Match<S> {
 
         self.send_stop_to_unfilled(&outcomes).await;
 
-        let grace = self.playing_config.network_grace;
+        let grace = self.ctx.playing_config.network_grace;
         let deadline = Some(Instant::now() + grace);
 
         loop {
@@ -622,7 +605,7 @@ impl<S> Match<S> {
             }
 
             let outcome = poll_either(
-                &mut self.players,
+                &mut self.ctx.players,
                 &mut outcomes,
                 expected_hash,
                 turn,
@@ -648,7 +631,7 @@ impl<S> Match<S> {
                 continue;
             }
             let slot = slot_for(slot_idx);
-            if let Err(e) = self.players[slot_idx].send(HostMsg::Stop).await {
+            if let Err(e) = self.ctx.players[slot_idx].send(HostMsg::Stop).await {
                 warn!(?slot, error = %e, "Stop send failed");
             }
         }
@@ -668,7 +651,7 @@ impl<S> Match<S> {
         for (slot_idx, outcome) in resolved.iter().enumerate() {
             if matches!(outcome, ActionOutcome::TimedOut) {
                 emit(
-                    self.event_tx.as_ref(),
+                    self.ctx.event_tx.as_ref(),
                     MatchEvent::BotTimeout {
                         player: slot_for(slot_idx),
                         turn,
@@ -691,7 +674,7 @@ impl<S> Match<S> {
         expected_hash: u64,
         turn: u16,
     ) -> Result<Resolved, MatchError> {
-        let policy = self.playing_config.fault_policy.clone();
+        let policy = self.ctx.playing_config.fault_policy.clone();
 
         let mut directions = [Direction::Stay; 2];
         let mut think_ms = [0u32; 2];
@@ -702,7 +685,7 @@ impl<S> Match<S> {
 
             let provisional = match outcome {
                 ActionOutcome::TimedOut => {
-                    self.players[slot_idx].take_provisional(turn, expected_hash)
+                    self.ctx.players[slot_idx].take_provisional(turn, expected_hash)
                 },
                 _ => None,
             };
@@ -737,14 +720,15 @@ impl<S> Match<S> {
         resolved: Resolved,
     ) -> Result<StepResult, MatchError> {
         let result = self
+            .ctx
             .game
             .process_turn(resolved.p1_action, resolved.p2_action);
-        let new_hash = self.game.state_hash();
+        let new_hash = self.ctx.game.state_hash();
 
         emit(
-            self.event_tx.as_ref(),
+            self.ctx.event_tx.as_ref(),
             MatchEvent::TurnPlayed {
-                state: build_turn_state(&self.game, resolved.p1_action, resolved.p2_action),
+                state: build_turn_state(&self.ctx.game, resolved.p1_action, resolved.p2_action),
                 p1_action: resolved.p1_action,
                 p2_action: resolved.p2_action,
                 p1_think_ms: resolved.p1_think_ms,
@@ -753,10 +737,10 @@ impl<S> Match<S> {
         );
 
         if result.game_over {
-            let match_result = MatchResult::from_game(&self.game);
+            let match_result = MatchResult::from_game(&self.ctx.game);
             for slot_idx in 0..2 {
                 let slot = slot_for(slot_idx);
-                if let Err(e) = self.players[slot_idx]
+                if let Err(e) = self.ctx.players[slot_idx]
                     .send(HostMsg::GameOver {
                         result: match_result.result,
                         player1_score: match_result.player1_score,
@@ -768,34 +752,20 @@ impl<S> Match<S> {
                 }
             }
             emit(
-                self.event_tx.as_ref(),
+                self.ctx.event_tx.as_ref(),
                 MatchEvent::MatchOver {
                     result: match_result.clone(),
                 },
             );
             Ok(StepResult::GameOver(Match {
-                game: self.game,
-                players: self.players,
-                match_config: self.match_config,
-                options: self.options,
-                setup_timing: self.setup_timing,
-                playing_config: self.playing_config,
-                event_sink: self.event_sink,
-                event_tx: self.event_tx,
+                ctx: self.ctx,
                 state: Finished {
                     result: match_result,
                 },
             }))
         } else {
             Ok(StepResult::Continue(Match {
-                game: self.game,
-                players: self.players,
-                match_config: self.match_config,
-                options: self.options,
-                setup_timing: self.setup_timing,
-                playing_config: self.playing_config,
-                event_sink: self.event_sink,
-                event_tx: self.event_tx,
+                ctx: self.ctx,
                 state: Playing {
                     turn: turn_just_played,
                     bot_synced_hash,
@@ -842,14 +812,7 @@ impl Match<Thinking> {
             .collect_outcomes_after_stop(bot_synced_hash, turn)
             .await?;
         Ok(Match {
-            game: self.game,
-            players: self.players,
-            match_config: self.match_config,
-            options: self.options,
-            setup_timing: self.setup_timing,
-            playing_config: self.playing_config,
-            event_sink: self.event_sink,
-            event_tx: self.event_tx,
+            ctx: self.ctx,
             state: Collected {
                 turn,
                 bot_synced_hash,
