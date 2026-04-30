@@ -391,7 +391,9 @@ impl Player for TcpPlayer {
                     continue;
                 },
                 BotMsg::Info(info) => {
-                    self.check_slot(info.player)?;
+                    // Sideband; `info.player` is the analysis subject, not
+                    // a sender claim. Bots may analyze either player, so no
+                    // slot check here. See protocol.md:202-212.
                     let turn = info.turn;
                     let state_hash = info.state_hash;
                     self.event_sink.emit(MatchEvent::BotInfo {
@@ -402,12 +404,11 @@ impl Player for TcpPlayer {
                     });
                     continue;
                 },
-                BotMsg::RenderCommands { player, .. } => {
-                    self.check_slot(player)?;
-                    // RenderCommands is a sideband target; legacy MatchEvent
-                    // lacks a dedicated variant, so today we drop it after
-                    // slot validation. Wiring a MatchEvent::BotRenderCommands
-                    // is a separate concern (out of slice 4 scope).
+                BotMsg::RenderCommands { .. } => {
+                    // Sideband; `player` field is the analysis subject, not
+                    // a sender claim. No slot check. Today we drop it
+                    // (no `MatchEvent::BotRenderCommands` variant yet);
+                    // wiring that is a separate concern.
                     continue;
                 },
                 BotMsg::Action { player, .. } => {

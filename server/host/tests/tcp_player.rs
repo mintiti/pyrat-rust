@@ -520,6 +520,73 @@ async fn tcp_player_info_routes_to_event_sink() {
     assert!(got_info, "expected BotInfo in event sink");
 }
 
+/// Info is observer-facing analysis sideband — `info.player` is the analysis
+/// subject, not a sender claim. A bot may legitimately analyze the opponent's
+/// position. Cross-slot Info must reach the event sink without erroring `recv`.
+/// Regression: slice 4's `check_slot` over-applied the rule to sideband.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tcp_player_info_with_other_slot_routes_to_event_sink() {
+    let (events_tx, mut events_rx) = mpsc::unbounded_channel::<MatchEvent>();
+    let (mut player, mut bot) = one_tcp_player(EventSink::new(events_tx)).await;
+
+    // Player1 connection sends Info tagged for Player2 (analysis of opponent).
+    bot.send(BotMsg::Info(Info {
+        player: PlayerSlot::Player2,
+        multipv: 1,
+        target: None,
+        depth: 3,
+        nodes: 100,
+        score: Some(0.5),
+        pv: vec![],
+        message: "opp analysis".into(),
+        turn: 7,
+        state_hash: 0xDEAD,
+    }))
+    .await;
+    bot.send(BotMsg::PreprocessingDone).await;
+    let got = timeout(Duration::from_secs(2), player.recv())
+        .await
+        .expect("recv timeout")
+        .expect("recv ok")
+        .expect("recv some");
+    assert!(matches!(got, BotMsg::PreprocessingDone), "{got:?}");
+
+    let mut got_info = false;
+    while let Ok(event) = events_rx.try_recv() {
+        if let MatchEvent::BotInfo { sender, info, .. } = event {
+            // sender = connection's slot; info.player = analysis subject.
+            assert_eq!(sender, PlayerSlot::Player1);
+            assert_eq!(info.player, PlayerSlot::Player2);
+            assert_eq!(info.message, "opp analysis");
+            got_info = true;
+        }
+    }
+    assert!(got_info, "expected BotInfo in event sink");
+}
+
+/// RenderCommands is observer-facing sideband (same classification as Info).
+/// Cross-slot must not error `recv`. Today the event isn't yet wired to a
+/// `MatchEvent::BotRenderCommands` variant, so the asserted shape is just
+/// "`recv` returns the next game-driving message cleanly."
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tcp_player_render_commands_with_other_slot_does_not_error() {
+    let (mut player, mut bot) = one_tcp_player(EventSink::noop()).await;
+
+    bot.send(BotMsg::RenderCommands {
+        player: PlayerSlot::Player2,
+        turn: 5,
+        state_hash: 0xBEEF,
+    })
+    .await;
+    bot.send(BotMsg::PreprocessingDone).await;
+    let got = timeout(Duration::from_secs(2), player.recv())
+        .await
+        .expect("recv timeout")
+        .expect("recv ok")
+        .expect("recv some");
+    assert!(matches!(got, BotMsg::PreprocessingDone), "{got:?}");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tcp_player_close_drops_session_task() {
     let (player, mut bot) = one_tcp_player(EventSink::noop()).await;
