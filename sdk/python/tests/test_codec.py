@@ -28,7 +28,6 @@ def _full_match_config() -> dict:
         "cheese": [(0, 0), (2, 2), (4, 3)],
         "player1_start": (0, 0),
         "player2_start": (4, 3),
-        "controlled_players": [0, 1],
         "timing": 1,  # Clock
         "move_timeout_ms": 250,
         "preprocessing_timeout_ms": 5_000,

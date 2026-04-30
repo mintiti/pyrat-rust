@@ -24,7 +24,6 @@ def _make_config(**overrides) -> dict:
         "cheese": [(1, 1)],
         "player1_start": (0, 0),
         "player2_start": (2, 2),
-        "controlled_players": [],
         "timing": 0,
         "move_timeout_ms": 1000,
         "preprocessing_timeout_ms": 1000,

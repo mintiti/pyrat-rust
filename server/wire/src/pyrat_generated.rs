@@ -491,28 +491,22 @@ pub mod pyrat {
             since = "2.0.0",
             note = "Use associated constants instead. This will no longer be generated in 2021."
         )]
-        pub const ENUM_MAX_HOST_MESSAGE: u8 = 16;
+        pub const ENUM_MAX_HOST_MESSAGE: u8 = 10;
         #[deprecated(
             since = "2.0.0",
             note = "Use associated constants instead. This will no longer be generated in 2021."
         )]
         #[allow(non_camel_case_types)]
-        pub const ENUM_VALUES_HOST_MESSAGE: [HostMessage; 17] = [
+        pub const ENUM_VALUES_HOST_MESSAGE: [HostMessage; 11] = [
             HostMessage::NONE,
-            HostMessage::SetOption,
-            HostMessage::MatchConfig,
-            HostMessage::StartPreprocessing,
-            HostMessage::TurnState,
-            HostMessage::Stop,
-            HostMessage::Timeout,
-            HostMessage::GameOver,
-            HostMessage::Ping,
             HostMessage::Welcome,
             HostMessage::Configure,
             HostMessage::GoPreprocess,
             HostMessage::Advance,
             HostMessage::Go,
             HostMessage::GoState,
+            HostMessage::Stop,
+            HostMessage::GameOver,
             HostMessage::FullState,
             HostMessage::ProtocolError,
         ];
@@ -523,41 +517,29 @@ pub mod pyrat {
         #[allow(non_upper_case_globals)]
         impl HostMessage {
             pub const NONE: Self = Self(0);
-            pub const SetOption: Self = Self(1);
-            pub const MatchConfig: Self = Self(2);
-            pub const StartPreprocessing: Self = Self(3);
-            pub const TurnState: Self = Self(4);
-            pub const Stop: Self = Self(5);
-            pub const Timeout: Self = Self(6);
-            pub const GameOver: Self = Self(7);
-            pub const Ping: Self = Self(8);
-            pub const Welcome: Self = Self(9);
-            pub const Configure: Self = Self(10);
-            pub const GoPreprocess: Self = Self(11);
-            pub const Advance: Self = Self(12);
-            pub const Go: Self = Self(13);
-            pub const GoState: Self = Self(14);
-            pub const FullState: Self = Self(15);
-            pub const ProtocolError: Self = Self(16);
+            pub const Welcome: Self = Self(1);
+            pub const Configure: Self = Self(2);
+            pub const GoPreprocess: Self = Self(3);
+            pub const Advance: Self = Self(4);
+            pub const Go: Self = Self(5);
+            pub const GoState: Self = Self(6);
+            pub const Stop: Self = Self(7);
+            pub const GameOver: Self = Self(8);
+            pub const FullState: Self = Self(9);
+            pub const ProtocolError: Self = Self(10);
 
             pub const ENUM_MIN: u8 = 0;
-            pub const ENUM_MAX: u8 = 16;
+            pub const ENUM_MAX: u8 = 10;
             pub const ENUM_VALUES: &'static [Self] = &[
                 Self::NONE,
-                Self::SetOption,
-                Self::MatchConfig,
-                Self::StartPreprocessing,
-                Self::TurnState,
-                Self::Stop,
-                Self::Timeout,
-                Self::GameOver,
-                Self::Ping,
                 Self::Welcome,
                 Self::Configure,
                 Self::GoPreprocess,
                 Self::Advance,
                 Self::Go,
                 Self::GoState,
+                Self::Stop,
+                Self::GameOver,
                 Self::FullState,
                 Self::ProtocolError,
             ];
@@ -565,20 +547,14 @@ pub mod pyrat {
             pub fn variant_name(self) -> Option<&'static str> {
                 match self {
                     Self::NONE => Some("NONE"),
-                    Self::SetOption => Some("SetOption"),
-                    Self::MatchConfig => Some("MatchConfig"),
-                    Self::StartPreprocessing => Some("StartPreprocessing"),
-                    Self::TurnState => Some("TurnState"),
-                    Self::Stop => Some("Stop"),
-                    Self::Timeout => Some("Timeout"),
-                    Self::GameOver => Some("GameOver"),
-                    Self::Ping => Some("Ping"),
                     Self::Welcome => Some("Welcome"),
                     Self::Configure => Some("Configure"),
                     Self::GoPreprocess => Some("GoPreprocess"),
                     Self::Advance => Some("Advance"),
                     Self::Go => Some("Go"),
                     Self::GoState => Some("GoState"),
+                    Self::Stop => Some("Stop"),
+                    Self::GameOver => Some("GameOver"),
                     Self::FullState => Some("FullState"),
                     Self::ProtocolError => Some("ProtocolError"),
                     _ => None,
@@ -647,19 +623,18 @@ pub mod pyrat {
             since = "2.0.0",
             note = "Use associated constants instead. This will no longer be generated in 2021."
         )]
-        pub const ENUM_MAX_BOT_MESSAGE: u8 = 10;
+        pub const ENUM_MAX_BOT_MESSAGE: u8 = 9;
         #[deprecated(
             since = "2.0.0",
             note = "Use associated constants instead. This will no longer be generated in 2021."
         )]
         #[allow(non_camel_case_types)]
-        pub const ENUM_VALUES_BOT_MESSAGE: [BotMessage; 11] = [
+        pub const ENUM_VALUES_BOT_MESSAGE: [BotMessage; 10] = [
             BotMessage::NONE,
             BotMessage::Identify,
             BotMessage::Ready,
             BotMessage::PreprocessingDone,
             BotMessage::Action,
-            BotMessage::Pong,
             BotMessage::Info,
             BotMessage::RenderCommands,
             BotMessage::Provisional,
@@ -677,22 +652,20 @@ pub mod pyrat {
             pub const Ready: Self = Self(2);
             pub const PreprocessingDone: Self = Self(3);
             pub const Action: Self = Self(4);
-            pub const Pong: Self = Self(5);
-            pub const Info: Self = Self(6);
-            pub const RenderCommands: Self = Self(7);
-            pub const Provisional: Self = Self(8);
-            pub const SyncOk: Self = Self(9);
-            pub const Resync: Self = Self(10);
+            pub const Info: Self = Self(5);
+            pub const RenderCommands: Self = Self(6);
+            pub const Provisional: Self = Self(7);
+            pub const SyncOk: Self = Self(8);
+            pub const Resync: Self = Self(9);
 
             pub const ENUM_MIN: u8 = 0;
-            pub const ENUM_MAX: u8 = 10;
+            pub const ENUM_MAX: u8 = 9;
             pub const ENUM_VALUES: &'static [Self] = &[
                 Self::NONE,
                 Self::Identify,
                 Self::Ready,
                 Self::PreprocessingDone,
                 Self::Action,
-                Self::Pong,
                 Self::Info,
                 Self::RenderCommands,
                 Self::Provisional,
@@ -707,7 +680,6 @@ pub mod pyrat {
                     Self::Ready => Some("Ready"),
                     Self::PreprocessingDone => Some("PreprocessingDone"),
                     Self::Action => Some("Action"),
-                    Self::Pong => Some("Pong"),
                     Self::Info => Some("Info"),
                     Self::RenderCommands => Some("RenderCommands"),
                     Self::Provisional => Some("Provisional"),
@@ -1414,148 +1386,6 @@ pub mod pyrat {
                 ds.finish()
             }
         }
-        pub enum SetOptionOffset {}
-        #[derive(Copy, Clone, PartialEq)]
-
-        pub struct SetOption<'a> {
-            pub _tab: ::flatbuffers::Table<'a>,
-        }
-
-        impl<'a> ::flatbuffers::Follow<'a> for SetOption<'a> {
-            type Inner = SetOption<'a>;
-            #[inline]
-            unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-                Self {
-                    _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
-                }
-            }
-        }
-
-        impl<'a> SetOption<'a> {
-            pub const VT_NAME: ::flatbuffers::VOffsetT = 4;
-            pub const VT_VALUE: ::flatbuffers::VOffsetT = 6;
-
-            #[inline]
-            pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-                SetOption { _tab: table }
-            }
-            #[allow(unused_mut)]
-            pub fn create<
-                'bldr: 'args,
-                'args: 'mut_bldr,
-                'mut_bldr,
-                A: ::flatbuffers::Allocator + 'bldr,
-            >(
-                _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-                args: &'args SetOptionArgs<'args>,
-            ) -> ::flatbuffers::WIPOffset<SetOption<'bldr>> {
-                let mut builder = SetOptionBuilder::new(_fbb);
-                if let Some(x) = args.value {
-                    builder.add_value(x);
-                }
-                if let Some(x) = args.name {
-                    builder.add_name(x);
-                }
-                builder.finish()
-            }
-
-            #[inline]
-            pub fn name(&self) -> Option<&'a str> {
-                // Safety:
-                // Created from valid Table for this object
-                // which contains a valid value in this slot
-                unsafe {
-                    self._tab
-                        .get::<::flatbuffers::ForwardsUOffset<&str>>(SetOption::VT_NAME, None)
-                }
-            }
-            #[inline]
-            pub fn value(&self) -> Option<&'a str> {
-                // Safety:
-                // Created from valid Table for this object
-                // which contains a valid value in this slot
-                unsafe {
-                    self._tab
-                        .get::<::flatbuffers::ForwardsUOffset<&str>>(SetOption::VT_VALUE, None)
-                }
-            }
-        }
-
-        impl ::flatbuffers::Verifiable for SetOption<'_> {
-            #[inline]
-            fn run_verifier(
-                v: &mut ::flatbuffers::Verifier,
-                pos: usize,
-            ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-                v.visit_table(pos)?
-                    .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
-                        "name",
-                        Self::VT_NAME,
-                        false,
-                    )?
-                    .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
-                        "value",
-                        Self::VT_VALUE,
-                        false,
-                    )?
-                    .finish();
-                Ok(())
-            }
-        }
-        pub struct SetOptionArgs<'a> {
-            pub name: Option<::flatbuffers::WIPOffset<&'a str>>,
-            pub value: Option<::flatbuffers::WIPOffset<&'a str>>,
-        }
-        impl<'a> Default for SetOptionArgs<'a> {
-            #[inline]
-            fn default() -> Self {
-                SetOptionArgs {
-                    name: None,
-                    value: None,
-                }
-            }
-        }
-
-        pub struct SetOptionBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-            fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-            start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
-        }
-        impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> SetOptionBuilder<'a, 'b, A> {
-            #[inline]
-            pub fn add_name(&mut self, name: ::flatbuffers::WIPOffset<&'b str>) {
-                self.fbb_
-                    .push_slot_always::<::flatbuffers::WIPOffset<_>>(SetOption::VT_NAME, name);
-            }
-            #[inline]
-            pub fn add_value(&mut self, value: ::flatbuffers::WIPOffset<&'b str>) {
-                self.fbb_
-                    .push_slot_always::<::flatbuffers::WIPOffset<_>>(SetOption::VT_VALUE, value);
-            }
-            #[inline]
-            pub fn new(
-                _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-            ) -> SetOptionBuilder<'a, 'b, A> {
-                let start = _fbb.start_table();
-                SetOptionBuilder {
-                    fbb_: _fbb,
-                    start_: start,
-                }
-            }
-            #[inline]
-            pub fn finish(self) -> ::flatbuffers::WIPOffset<SetOption<'a>> {
-                let o = self.fbb_.end_table(self.start_);
-                ::flatbuffers::WIPOffset::new(o.value())
-            }
-        }
-
-        impl ::core::fmt::Debug for SetOption<'_> {
-            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                let mut ds = f.debug_struct("SetOption");
-                ds.field("name", &self.name());
-                ds.field("value", &self.value());
-                ds.finish()
-            }
-        }
         pub enum OptionAssignmentOffset {}
         #[derive(Copy, Clone, PartialEq)]
 
@@ -1732,10 +1562,9 @@ pub mod pyrat {
             pub const VT_CHEESE: ::flatbuffers::VOffsetT = 14;
             pub const VT_PLAYER1_START: ::flatbuffers::VOffsetT = 16;
             pub const VT_PLAYER2_START: ::flatbuffers::VOffsetT = 18;
-            pub const VT_CONTROLLED_PLAYERS: ::flatbuffers::VOffsetT = 20;
-            pub const VT_TIMING: ::flatbuffers::VOffsetT = 22;
-            pub const VT_MOVE_TIMEOUT_MS: ::flatbuffers::VOffsetT = 24;
-            pub const VT_PREPROCESSING_TIMEOUT_MS: ::flatbuffers::VOffsetT = 26;
+            pub const VT_TIMING: ::flatbuffers::VOffsetT = 20;
+            pub const VT_MOVE_TIMEOUT_MS: ::flatbuffers::VOffsetT = 22;
+            pub const VT_PREPROCESSING_TIMEOUT_MS: ::flatbuffers::VOffsetT = 24;
 
             #[inline]
             pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -1754,9 +1583,6 @@ pub mod pyrat {
                 let mut builder = MatchConfigBuilder::new(_fbb);
                 builder.add_preprocessing_timeout_ms(args.preprocessing_timeout_ms);
                 builder.add_move_timeout_ms(args.move_timeout_ms);
-                if let Some(x) = args.controlled_players {
-                    builder.add_controlled_players(x);
-                }
                 if let Some(x) = args.player2_start {
                     builder.add_player2_start(x);
                 }
@@ -1864,19 +1690,6 @@ pub mod pyrat {
                 unsafe { self._tab.get::<Vec2>(MatchConfig::VT_PLAYER2_START, None) }
             }
             #[inline]
-            pub fn controlled_players(&self) -> Option<::flatbuffers::Vector<'a, Player>> {
-                // Safety:
-                // Created from valid Table for this object
-                // which contains a valid value in this slot
-                unsafe {
-                    self._tab
-                        .get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, Player>>>(
-                            MatchConfig::VT_CONTROLLED_PLAYERS,
-                            None,
-                        )
-                }
-            }
-            #[inline]
             pub fn timing(&self) -> TimingMode {
                 // Safety:
                 // Created from valid Table for this object
@@ -1918,19 +1731,30 @@ pub mod pyrat {
                 pos: usize,
             ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
                 v.visit_table(pos)?
-     .visit_field::<u8>("width", Self::VT_WIDTH, false)?
-     .visit_field::<u8>("height", Self::VT_HEIGHT, false)?
-     .visit_field::<u16>("max_turns", Self::VT_MAX_TURNS, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<Wall>>>>("walls", Self::VT_WALLS, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<Mud>>>>("mud", Self::VT_MUD, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, Vec2>>>("cheese", Self::VT_CHEESE, false)?
-     .visit_field::<Vec2>("player1_start", Self::VT_PLAYER1_START, false)?
-     .visit_field::<Vec2>("player2_start", Self::VT_PLAYER2_START, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, Player>>>("controlled_players", Self::VT_CONTROLLED_PLAYERS, false)?
-     .visit_field::<TimingMode>("timing", Self::VT_TIMING, false)?
-     .visit_field::<u32>("move_timeout_ms", Self::VT_MOVE_TIMEOUT_MS, false)?
-     .visit_field::<u32>("preprocessing_timeout_ms", Self::VT_PREPROCESSING_TIMEOUT_MS, false)?
-     .finish();
+                    .visit_field::<u8>("width", Self::VT_WIDTH, false)?
+                    .visit_field::<u8>("height", Self::VT_HEIGHT, false)?
+                    .visit_field::<u16>("max_turns", Self::VT_MAX_TURNS, false)?
+                    .visit_field::<::flatbuffers::ForwardsUOffset<
+                        ::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<Wall>>,
+                    >>("walls", Self::VT_WALLS, false)?
+                    .visit_field::<::flatbuffers::ForwardsUOffset<
+                        ::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<Mud>>,
+                    >>("mud", Self::VT_MUD, false)?
+                    .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, Vec2>>>(
+                        "cheese",
+                        Self::VT_CHEESE,
+                        false,
+                    )?
+                    .visit_field::<Vec2>("player1_start", Self::VT_PLAYER1_START, false)?
+                    .visit_field::<Vec2>("player2_start", Self::VT_PLAYER2_START, false)?
+                    .visit_field::<TimingMode>("timing", Self::VT_TIMING, false)?
+                    .visit_field::<u32>("move_timeout_ms", Self::VT_MOVE_TIMEOUT_MS, false)?
+                    .visit_field::<u32>(
+                        "preprocessing_timeout_ms",
+                        Self::VT_PREPROCESSING_TIMEOUT_MS,
+                        false,
+                    )?
+                    .finish();
                 Ok(())
             }
         }
@@ -1951,8 +1775,6 @@ pub mod pyrat {
             pub cheese: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, Vec2>>>,
             pub player1_start: Option<&'a Vec2>,
             pub player2_start: Option<&'a Vec2>,
-            pub controlled_players:
-                Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, Player>>>,
             pub timing: TimingMode,
             pub move_timeout_ms: u32,
             pub preprocessing_timeout_ms: u32,
@@ -1969,7 +1791,6 @@ pub mod pyrat {
                     cheese: None,
                     player1_start: None,
                     player2_start: None,
-                    controlled_players: None,
                     timing: TimingMode::Wait,
                     move_timeout_ms: 0,
                     preprocessing_timeout_ms: 0,
@@ -2036,16 +1857,6 @@ pub mod pyrat {
                     .push_slot_always::<&Vec2>(MatchConfig::VT_PLAYER2_START, player2_start);
             }
             #[inline]
-            pub fn add_controlled_players(
-                &mut self,
-                controlled_players: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b, Player>>,
-            ) {
-                self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
-                    MatchConfig::VT_CONTROLLED_PLAYERS,
-                    controlled_players,
-                );
-            }
-            #[inline]
             pub fn add_timing(&mut self, timing: TimingMode) {
                 self.fbb_
                     .push_slot::<TimingMode>(MatchConfig::VT_TIMING, timing, TimingMode::Wait);
@@ -2091,7 +1902,6 @@ pub mod pyrat {
                 ds.field("cheese", &self.cheese());
                 ds.field("player1_start", &self.player1_start());
                 ds.field("player2_start", &self.player2_start());
-                ds.field("controlled_players", &self.controlled_players());
                 ds.field("timing", &self.timing());
                 ds.field("move_timeout_ms", &self.move_timeout_ms());
                 ds.field("preprocessing_timeout_ms", &self.preprocessing_timeout_ms());
@@ -2636,114 +2446,6 @@ pub mod pyrat {
                 ds.finish()
             }
         }
-        pub enum StartPreprocessingOffset {}
-        #[derive(Copy, Clone, PartialEq)]
-
-        pub struct StartPreprocessing<'a> {
-            pub _tab: ::flatbuffers::Table<'a>,
-        }
-
-        impl<'a> ::flatbuffers::Follow<'a> for StartPreprocessing<'a> {
-            type Inner = StartPreprocessing<'a>;
-            #[inline]
-            unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-                Self {
-                    _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
-                }
-            }
-        }
-
-        impl<'a> StartPreprocessing<'a> {
-            pub const VT_STATE_HASH: ::flatbuffers::VOffsetT = 4;
-
-            #[inline]
-            pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-                StartPreprocessing { _tab: table }
-            }
-            #[allow(unused_mut)]
-            pub fn create<
-                'bldr: 'args,
-                'args: 'mut_bldr,
-                'mut_bldr,
-                A: ::flatbuffers::Allocator + 'bldr,
-            >(
-                _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-                args: &'args StartPreprocessingArgs,
-            ) -> ::flatbuffers::WIPOffset<StartPreprocessing<'bldr>> {
-                let mut builder = StartPreprocessingBuilder::new(_fbb);
-                builder.add_state_hash(args.state_hash);
-                builder.finish()
-            }
-
-            #[inline]
-            pub fn state_hash(&self) -> u64 {
-                // Safety:
-                // Created from valid Table for this object
-                // which contains a valid value in this slot
-                unsafe {
-                    self._tab
-                        .get::<u64>(StartPreprocessing::VT_STATE_HASH, Some(0))
-                        .unwrap()
-                }
-            }
-        }
-
-        impl ::flatbuffers::Verifiable for StartPreprocessing<'_> {
-            #[inline]
-            fn run_verifier(
-                v: &mut ::flatbuffers::Verifier,
-                pos: usize,
-            ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-                v.visit_table(pos)?
-                    .visit_field::<u64>("state_hash", Self::VT_STATE_HASH, false)?
-                    .finish();
-                Ok(())
-            }
-        }
-        pub struct StartPreprocessingArgs {
-            pub state_hash: u64,
-        }
-        impl<'a> Default for StartPreprocessingArgs {
-            #[inline]
-            fn default() -> Self {
-                StartPreprocessingArgs { state_hash: 0 }
-            }
-        }
-
-        pub struct StartPreprocessingBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-            fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-            start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
-        }
-        impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> StartPreprocessingBuilder<'a, 'b, A> {
-            #[inline]
-            pub fn add_state_hash(&mut self, state_hash: u64) {
-                self.fbb_
-                    .push_slot::<u64>(StartPreprocessing::VT_STATE_HASH, state_hash, 0);
-            }
-            #[inline]
-            pub fn new(
-                _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-            ) -> StartPreprocessingBuilder<'a, 'b, A> {
-                let start = _fbb.start_table();
-                StartPreprocessingBuilder {
-                    fbb_: _fbb,
-                    start_: start,
-                }
-            }
-            #[inline]
-            pub fn finish(self) -> ::flatbuffers::WIPOffset<StartPreprocessing<'a>> {
-                let o = self.fbb_.end_table(self.start_);
-                ::flatbuffers::WIPOffset::new(o.value())
-            }
-        }
-
-        impl ::core::fmt::Debug for StartPreprocessing<'_> {
-            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                let mut ds = f.debug_struct("StartPreprocessing");
-                ds.field("state_hash", &self.state_hash());
-                ds.finish()
-            }
-        }
         pub enum AdvanceOffset {}
         #[derive(Copy, Clone, PartialEq)]
 
@@ -3074,7 +2776,6 @@ pub mod pyrat {
             pub const VT_CHEESE: ::flatbuffers::VOffsetT = 18;
             pub const VT_PLAYER1_LAST_MOVE: ::flatbuffers::VOffsetT = 20;
             pub const VT_PLAYER2_LAST_MOVE: ::flatbuffers::VOffsetT = 22;
-            pub const VT_STATE_HASH: ::flatbuffers::VOffsetT = 24;
 
             #[inline]
             pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -3091,7 +2792,6 @@ pub mod pyrat {
                 args: &'args TurnStateArgs<'args>,
             ) -> ::flatbuffers::WIPOffset<TurnState<'bldr>> {
                 let mut builder = TurnStateBuilder::new(_fbb);
-                builder.add_state_hash(args.state_hash);
                 if let Some(x) = args.cheese {
                     builder.add_cheese(x);
                 }
@@ -3211,17 +2911,6 @@ pub mod pyrat {
                         .unwrap()
                 }
             }
-            #[inline]
-            pub fn state_hash(&self) -> u64 {
-                // Safety:
-                // Created from valid Table for this object
-                // which contains a valid value in this slot
-                unsafe {
-                    self._tab
-                        .get::<u64>(TurnState::VT_STATE_HASH, Some(0))
-                        .unwrap()
-                }
-            }
         }
 
         impl ::flatbuffers::Verifiable for TurnState<'_> {
@@ -3253,7 +2942,6 @@ pub mod pyrat {
                         Self::VT_PLAYER2_LAST_MOVE,
                         false,
                     )?
-                    .visit_field::<u64>("state_hash", Self::VT_STATE_HASH, false)?
                     .finish();
                 Ok(())
             }
@@ -3269,7 +2957,6 @@ pub mod pyrat {
             pub cheese: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, Vec2>>>,
             pub player1_last_move: Direction,
             pub player2_last_move: Direction,
-            pub state_hash: u64,
         }
         impl<'a> Default for TurnStateArgs<'a> {
             #[inline]
@@ -3285,7 +2972,6 @@ pub mod pyrat {
                     cheese: None,
                     player1_last_move: Direction::Up,
                     player2_last_move: Direction::Up,
-                    state_hash: 0,
                 }
             }
         }
@@ -3354,11 +3040,6 @@ pub mod pyrat {
                 );
             }
             #[inline]
-            pub fn add_state_hash(&mut self, state_hash: u64) {
-                self.fbb_
-                    .push_slot::<u64>(TurnState::VT_STATE_HASH, state_hash, 0);
-            }
-            #[inline]
             pub fn new(
                 _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
             ) -> TurnStateBuilder<'a, 'b, A> {
@@ -3388,7 +3069,6 @@ pub mod pyrat {
                 ds.field("cheese", &self.cheese());
                 ds.field("player1_last_move", &self.player1_last_move());
                 ds.field("player2_last_move", &self.player2_last_move());
-                ds.field("state_hash", &self.state_hash());
                 ds.finish()
             }
         }
@@ -3921,119 +3601,6 @@ pub mod pyrat {
                 ds.finish()
             }
         }
-        pub enum TimeoutOffset {}
-        #[derive(Copy, Clone, PartialEq)]
-
-        pub struct Timeout<'a> {
-            pub _tab: ::flatbuffers::Table<'a>,
-        }
-
-        impl<'a> ::flatbuffers::Follow<'a> for Timeout<'a> {
-            type Inner = Timeout<'a>;
-            #[inline]
-            unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-                Self {
-                    _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
-                }
-            }
-        }
-
-        impl<'a> Timeout<'a> {
-            pub const VT_DEFAULT_MOVE: ::flatbuffers::VOffsetT = 4;
-
-            #[inline]
-            pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-                Timeout { _tab: table }
-            }
-            #[allow(unused_mut)]
-            pub fn create<
-                'bldr: 'args,
-                'args: 'mut_bldr,
-                'mut_bldr,
-                A: ::flatbuffers::Allocator + 'bldr,
-            >(
-                _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-                args: &'args TimeoutArgs,
-            ) -> ::flatbuffers::WIPOffset<Timeout<'bldr>> {
-                let mut builder = TimeoutBuilder::new(_fbb);
-                builder.add_default_move(args.default_move);
-                builder.finish()
-            }
-
-            #[inline]
-            pub fn default_move(&self) -> Direction {
-                // Safety:
-                // Created from valid Table for this object
-                // which contains a valid value in this slot
-                unsafe {
-                    self._tab
-                        .get::<Direction>(Timeout::VT_DEFAULT_MOVE, Some(Direction::Up))
-                        .unwrap()
-                }
-            }
-        }
-
-        impl ::flatbuffers::Verifiable for Timeout<'_> {
-            #[inline]
-            fn run_verifier(
-                v: &mut ::flatbuffers::Verifier,
-                pos: usize,
-            ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-                v.visit_table(pos)?
-                    .visit_field::<Direction>("default_move", Self::VT_DEFAULT_MOVE, false)?
-                    .finish();
-                Ok(())
-            }
-        }
-        pub struct TimeoutArgs {
-            pub default_move: Direction,
-        }
-        impl<'a> Default for TimeoutArgs {
-            #[inline]
-            fn default() -> Self {
-                TimeoutArgs {
-                    default_move: Direction::Up,
-                }
-            }
-        }
-
-        pub struct TimeoutBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-            fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-            start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
-        }
-        impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> TimeoutBuilder<'a, 'b, A> {
-            #[inline]
-            pub fn add_default_move(&mut self, default_move: Direction) {
-                self.fbb_.push_slot::<Direction>(
-                    Timeout::VT_DEFAULT_MOVE,
-                    default_move,
-                    Direction::Up,
-                );
-            }
-            #[inline]
-            pub fn new(
-                _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-            ) -> TimeoutBuilder<'a, 'b, A> {
-                let start = _fbb.start_table();
-                TimeoutBuilder {
-                    fbb_: _fbb,
-                    start_: start,
-                }
-            }
-            #[inline]
-            pub fn finish(self) -> ::flatbuffers::WIPOffset<Timeout<'a>> {
-                let o = self.fbb_.end_table(self.start_);
-                ::flatbuffers::WIPOffset::new(o.value())
-            }
-        }
-
-        impl ::core::fmt::Debug for Timeout<'_> {
-            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                let mut ds = f.debug_struct("Timeout");
-                ds.field("default_move", &self.default_move());
-                ds.finish()
-            }
-        }
         pub enum GameOverOffset {}
         #[derive(Copy, Clone, PartialEq)]
 
@@ -4188,89 +3755,6 @@ pub mod pyrat {
                 ds.finish()
             }
         }
-        pub enum PingOffset {}
-        #[derive(Copy, Clone, PartialEq)]
-
-        pub struct Ping<'a> {
-            pub _tab: ::flatbuffers::Table<'a>,
-        }
-
-        impl<'a> ::flatbuffers::Follow<'a> for Ping<'a> {
-            type Inner = Ping<'a>;
-            #[inline]
-            unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-                Self {
-                    _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
-                }
-            }
-        }
-
-        impl<'a> Ping<'a> {
-            #[inline]
-            pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-                Ping { _tab: table }
-            }
-            #[allow(unused_mut)]
-            pub fn create<
-                'bldr: 'args,
-                'args: 'mut_bldr,
-                'mut_bldr,
-                A: ::flatbuffers::Allocator + 'bldr,
-            >(
-                _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-                _args: &'args PingArgs,
-            ) -> ::flatbuffers::WIPOffset<Ping<'bldr>> {
-                let mut builder = PingBuilder::new(_fbb);
-                builder.finish()
-            }
-        }
-
-        impl ::flatbuffers::Verifiable for Ping<'_> {
-            #[inline]
-            fn run_verifier(
-                v: &mut ::flatbuffers::Verifier,
-                pos: usize,
-            ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-                v.visit_table(pos)?.finish();
-                Ok(())
-            }
-        }
-        pub struct PingArgs {}
-        impl<'a> Default for PingArgs {
-            #[inline]
-            fn default() -> Self {
-                PingArgs {}
-            }
-        }
-
-        pub struct PingBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-            fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-            start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
-        }
-        impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> PingBuilder<'a, 'b, A> {
-            #[inline]
-            pub fn new(
-                _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-            ) -> PingBuilder<'a, 'b, A> {
-                let start = _fbb.start_table();
-                PingBuilder {
-                    fbb_: _fbb,
-                    start_: start,
-                }
-            }
-            #[inline]
-            pub fn finish(self) -> ::flatbuffers::WIPOffset<Ping<'a>> {
-                let o = self.fbb_.end_table(self.start_);
-                ::flatbuffers::WIPOffset::new(o.value())
-            }
-        }
-
-        impl ::core::fmt::Debug for Ping<'_> {
-            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                let mut ds = f.debug_struct("Ping");
-                ds.finish()
-            }
-        }
         pub enum HostPacketOffset {}
         #[derive(Copy, Clone, PartialEq)]
 
@@ -4338,126 +3822,6 @@ pub mod pyrat {
                         )
                 }
             }
-            #[inline]
-            #[allow(non_snake_case)]
-            pub fn message_as_set_option(&self) -> Option<SetOption<'a>> {
-                if self.message_type() == HostMessage::SetOption {
-                    self.message().map(|t| {
-                        // Safety:
-                        // Created from a valid Table for this object
-                        // Which contains a valid union in this slot
-                        unsafe { SetOption::init_from_table(t) }
-                    })
-                } else {
-                    None
-                }
-            }
-
-            #[inline]
-            #[allow(non_snake_case)]
-            pub fn message_as_match_config(&self) -> Option<MatchConfig<'a>> {
-                if self.message_type() == HostMessage::MatchConfig {
-                    self.message().map(|t| {
-                        // Safety:
-                        // Created from a valid Table for this object
-                        // Which contains a valid union in this slot
-                        unsafe { MatchConfig::init_from_table(t) }
-                    })
-                } else {
-                    None
-                }
-            }
-
-            #[inline]
-            #[allow(non_snake_case)]
-            pub fn message_as_start_preprocessing(&self) -> Option<StartPreprocessing<'a>> {
-                if self.message_type() == HostMessage::StartPreprocessing {
-                    self.message().map(|t| {
-                        // Safety:
-                        // Created from a valid Table for this object
-                        // Which contains a valid union in this slot
-                        unsafe { StartPreprocessing::init_from_table(t) }
-                    })
-                } else {
-                    None
-                }
-            }
-
-            #[inline]
-            #[allow(non_snake_case)]
-            pub fn message_as_turn_state(&self) -> Option<TurnState<'a>> {
-                if self.message_type() == HostMessage::TurnState {
-                    self.message().map(|t| {
-                        // Safety:
-                        // Created from a valid Table for this object
-                        // Which contains a valid union in this slot
-                        unsafe { TurnState::init_from_table(t) }
-                    })
-                } else {
-                    None
-                }
-            }
-
-            #[inline]
-            #[allow(non_snake_case)]
-            pub fn message_as_stop(&self) -> Option<Stop<'a>> {
-                if self.message_type() == HostMessage::Stop {
-                    self.message().map(|t| {
-                        // Safety:
-                        // Created from a valid Table for this object
-                        // Which contains a valid union in this slot
-                        unsafe { Stop::init_from_table(t) }
-                    })
-                } else {
-                    None
-                }
-            }
-
-            #[inline]
-            #[allow(non_snake_case)]
-            pub fn message_as_timeout(&self) -> Option<Timeout<'a>> {
-                if self.message_type() == HostMessage::Timeout {
-                    self.message().map(|t| {
-                        // Safety:
-                        // Created from a valid Table for this object
-                        // Which contains a valid union in this slot
-                        unsafe { Timeout::init_from_table(t) }
-                    })
-                } else {
-                    None
-                }
-            }
-
-            #[inline]
-            #[allow(non_snake_case)]
-            pub fn message_as_game_over(&self) -> Option<GameOver<'a>> {
-                if self.message_type() == HostMessage::GameOver {
-                    self.message().map(|t| {
-                        // Safety:
-                        // Created from a valid Table for this object
-                        // Which contains a valid union in this slot
-                        unsafe { GameOver::init_from_table(t) }
-                    })
-                } else {
-                    None
-                }
-            }
-
-            #[inline]
-            #[allow(non_snake_case)]
-            pub fn message_as_ping(&self) -> Option<Ping<'a>> {
-                if self.message_type() == HostMessage::Ping {
-                    self.message().map(|t| {
-                        // Safety:
-                        // Created from a valid Table for this object
-                        // Which contains a valid union in this slot
-                        unsafe { Ping::init_from_table(t) }
-                    })
-                } else {
-                    None
-                }
-            }
-
             #[inline]
             #[allow(non_snake_case)]
             pub fn message_as_welcome(&self) -> Option<Welcome<'a>> {
@@ -4550,6 +3914,36 @@ pub mod pyrat {
 
             #[inline]
             #[allow(non_snake_case)]
+            pub fn message_as_stop(&self) -> Option<Stop<'a>> {
+                if self.message_type() == HostMessage::Stop {
+                    self.message().map(|t| {
+                        // Safety:
+                        // Created from a valid Table for this object
+                        // Which contains a valid union in this slot
+                        unsafe { Stop::init_from_table(t) }
+                    })
+                } else {
+                    None
+                }
+            }
+
+            #[inline]
+            #[allow(non_snake_case)]
+            pub fn message_as_game_over(&self) -> Option<GameOver<'a>> {
+                if self.message_type() == HostMessage::GameOver {
+                    self.message().map(|t| {
+                        // Safety:
+                        // Created from a valid Table for this object
+                        // Which contains a valid union in this slot
+                        unsafe { GameOver::init_from_table(t) }
+                    })
+                } else {
+                    None
+                }
+            }
+
+            #[inline]
+            #[allow(non_snake_case)]
             pub fn message_as_full_state(&self) -> Option<FullState<'a>> {
                 if self.message_type() == HostMessage::FullState {
                     self.message().map(|t| {
@@ -4588,20 +3982,14 @@ pub mod pyrat {
                 v.visit_table(pos)?
      .visit_union::<HostMessage, _>("message_type", Self::VT_MESSAGE_TYPE, "message", Self::VT_MESSAGE, false, |key, v, pos| {
         match key {
-          HostMessage::SetOption => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<SetOption>>("HostMessage::SetOption", pos),
-          HostMessage::MatchConfig => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<MatchConfig>>("HostMessage::MatchConfig", pos),
-          HostMessage::StartPreprocessing => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<StartPreprocessing>>("HostMessage::StartPreprocessing", pos),
-          HostMessage::TurnState => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<TurnState>>("HostMessage::TurnState", pos),
-          HostMessage::Stop => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Stop>>("HostMessage::Stop", pos),
-          HostMessage::Timeout => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Timeout>>("HostMessage::Timeout", pos),
-          HostMessage::GameOver => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<GameOver>>("HostMessage::GameOver", pos),
-          HostMessage::Ping => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Ping>>("HostMessage::Ping", pos),
           HostMessage::Welcome => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Welcome>>("HostMessage::Welcome", pos),
           HostMessage::Configure => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Configure>>("HostMessage::Configure", pos),
           HostMessage::GoPreprocess => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<GoPreprocess>>("HostMessage::GoPreprocess", pos),
           HostMessage::Advance => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Advance>>("HostMessage::Advance", pos),
           HostMessage::Go => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Go>>("HostMessage::Go", pos),
           HostMessage::GoState => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<GoState>>("HostMessage::GoState", pos),
+          HostMessage::Stop => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Stop>>("HostMessage::Stop", pos),
+          HostMessage::GameOver => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<GameOver>>("HostMessage::GameOver", pos),
           HostMessage::FullState => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<FullState>>("HostMessage::FullState", pos),
           HostMessage::ProtocolError => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<ProtocolError>>("HostMessage::ProtocolError", pos),
           _ => Ok(()),
@@ -4670,86 +4058,6 @@ pub mod pyrat {
                 let mut ds = f.debug_struct("HostPacket");
                 ds.field("message_type", &self.message_type());
                 match self.message_type() {
-                    HostMessage::SetOption => {
-                        if let Some(x) = self.message_as_set_option() {
-                            ds.field("message", &x)
-                        } else {
-                            ds.field(
-                                "message",
-                                &"InvalidFlatbuffer: Union discriminant does not match value.",
-                            )
-                        }
-                    },
-                    HostMessage::MatchConfig => {
-                        if let Some(x) = self.message_as_match_config() {
-                            ds.field("message", &x)
-                        } else {
-                            ds.field(
-                                "message",
-                                &"InvalidFlatbuffer: Union discriminant does not match value.",
-                            )
-                        }
-                    },
-                    HostMessage::StartPreprocessing => {
-                        if let Some(x) = self.message_as_start_preprocessing() {
-                            ds.field("message", &x)
-                        } else {
-                            ds.field(
-                                "message",
-                                &"InvalidFlatbuffer: Union discriminant does not match value.",
-                            )
-                        }
-                    },
-                    HostMessage::TurnState => {
-                        if let Some(x) = self.message_as_turn_state() {
-                            ds.field("message", &x)
-                        } else {
-                            ds.field(
-                                "message",
-                                &"InvalidFlatbuffer: Union discriminant does not match value.",
-                            )
-                        }
-                    },
-                    HostMessage::Stop => {
-                        if let Some(x) = self.message_as_stop() {
-                            ds.field("message", &x)
-                        } else {
-                            ds.field(
-                                "message",
-                                &"InvalidFlatbuffer: Union discriminant does not match value.",
-                            )
-                        }
-                    },
-                    HostMessage::Timeout => {
-                        if let Some(x) = self.message_as_timeout() {
-                            ds.field("message", &x)
-                        } else {
-                            ds.field(
-                                "message",
-                                &"InvalidFlatbuffer: Union discriminant does not match value.",
-                            )
-                        }
-                    },
-                    HostMessage::GameOver => {
-                        if let Some(x) = self.message_as_game_over() {
-                            ds.field("message", &x)
-                        } else {
-                            ds.field(
-                                "message",
-                                &"InvalidFlatbuffer: Union discriminant does not match value.",
-                            )
-                        }
-                    },
-                    HostMessage::Ping => {
-                        if let Some(x) = self.message_as_ping() {
-                            ds.field("message", &x)
-                        } else {
-                            ds.field(
-                                "message",
-                                &"InvalidFlatbuffer: Union discriminant does not match value.",
-                            )
-                        }
-                    },
                     HostMessage::Welcome => {
                         if let Some(x) = self.message_as_welcome() {
                             ds.field("message", &x)
@@ -4802,6 +4110,26 @@ pub mod pyrat {
                     },
                     HostMessage::GoState => {
                         if let Some(x) = self.message_as_go_state() {
+                            ds.field("message", &x)
+                        } else {
+                            ds.field(
+                                "message",
+                                &"InvalidFlatbuffer: Union discriminant does not match value.",
+                            )
+                        }
+                    },
+                    HostMessage::Stop => {
+                        if let Some(x) = self.message_as_stop() {
+                            ds.field("message", &x)
+                        } else {
+                            ds.field(
+                                "message",
+                                &"InvalidFlatbuffer: Union discriminant does not match value.",
+                            )
+                        }
+                    },
+                    HostMessage::GameOver => {
+                        if let Some(x) = self.message_as_game_over() {
                             ds.field("message", &x)
                         } else {
                             ds.field(
@@ -5255,9 +4583,8 @@ pub mod pyrat {
             pub const VT_DIRECTION: ::flatbuffers::VOffsetT = 4;
             pub const VT_PLAYER: ::flatbuffers::VOffsetT = 6;
             pub const VT_TURN: ::flatbuffers::VOffsetT = 8;
-            pub const VT_PROVISIONAL: ::flatbuffers::VOffsetT = 10;
-            pub const VT_THINK_MS: ::flatbuffers::VOffsetT = 12;
-            pub const VT_STATE_HASH: ::flatbuffers::VOffsetT = 14;
+            pub const VT_THINK_MS: ::flatbuffers::VOffsetT = 10;
+            pub const VT_STATE_HASH: ::flatbuffers::VOffsetT = 12;
 
             #[inline]
             pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -5277,7 +4604,6 @@ pub mod pyrat {
                 builder.add_state_hash(args.state_hash);
                 builder.add_think_ms(args.think_ms);
                 builder.add_turn(args.turn);
-                builder.add_provisional(args.provisional);
                 builder.add_player(args.player);
                 builder.add_direction(args.direction);
                 builder.finish()
@@ -5313,17 +4639,6 @@ pub mod pyrat {
                 unsafe { self._tab.get::<u16>(Action::VT_TURN, Some(0)).unwrap() }
             }
             #[inline]
-            pub fn provisional(&self) -> bool {
-                // Safety:
-                // Created from valid Table for this object
-                // which contains a valid value in this slot
-                unsafe {
-                    self._tab
-                        .get::<bool>(Action::VT_PROVISIONAL, Some(false))
-                        .unwrap()
-                }
-            }
-            #[inline]
             pub fn think_ms(&self) -> u32 {
                 // Safety:
                 // Created from valid Table for this object
@@ -5353,7 +4668,6 @@ pub mod pyrat {
                     .visit_field::<Direction>("direction", Self::VT_DIRECTION, false)?
                     .visit_field::<Player>("player", Self::VT_PLAYER, false)?
                     .visit_field::<u16>("turn", Self::VT_TURN, false)?
-                    .visit_field::<bool>("provisional", Self::VT_PROVISIONAL, false)?
                     .visit_field::<u32>("think_ms", Self::VT_THINK_MS, false)?
                     .visit_field::<u64>("state_hash", Self::VT_STATE_HASH, false)?
                     .finish();
@@ -5364,7 +4678,6 @@ pub mod pyrat {
             pub direction: Direction,
             pub player: Player,
             pub turn: u16,
-            pub provisional: bool,
             pub think_ms: u32,
             pub state_hash: u64,
         }
@@ -5375,7 +4688,6 @@ pub mod pyrat {
                     direction: Direction::Up,
                     player: Player::Player1,
                     turn: 0,
-                    provisional: false,
                     think_ms: 0,
                     state_hash: 0,
                 }
@@ -5400,11 +4712,6 @@ pub mod pyrat {
             #[inline]
             pub fn add_turn(&mut self, turn: u16) {
                 self.fbb_.push_slot::<u16>(Action::VT_TURN, turn, 0);
-            }
-            #[inline]
-            pub fn add_provisional(&mut self, provisional: bool) {
-                self.fbb_
-                    .push_slot::<bool>(Action::VT_PROVISIONAL, provisional, false);
             }
             #[inline]
             pub fn add_think_ms(&mut self, think_ms: u32) {
@@ -5438,7 +4745,6 @@ pub mod pyrat {
                 ds.field("direction", &self.direction());
                 ds.field("player", &self.player());
                 ds.field("turn", &self.turn());
-                ds.field("provisional", &self.provisional());
                 ds.field("think_ms", &self.think_ms());
                 ds.field("state_hash", &self.state_hash());
                 ds.finish()
@@ -5821,89 +5127,6 @@ pub mod pyrat {
             fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                 let mut ds = f.debug_struct("Resync");
                 ds.field("my_hash", &self.my_hash());
-                ds.finish()
-            }
-        }
-        pub enum PongOffset {}
-        #[derive(Copy, Clone, PartialEq)]
-
-        pub struct Pong<'a> {
-            pub _tab: ::flatbuffers::Table<'a>,
-        }
-
-        impl<'a> ::flatbuffers::Follow<'a> for Pong<'a> {
-            type Inner = Pong<'a>;
-            #[inline]
-            unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-                Self {
-                    _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
-                }
-            }
-        }
-
-        impl<'a> Pong<'a> {
-            #[inline]
-            pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-                Pong { _tab: table }
-            }
-            #[allow(unused_mut)]
-            pub fn create<
-                'bldr: 'args,
-                'args: 'mut_bldr,
-                'mut_bldr,
-                A: ::flatbuffers::Allocator + 'bldr,
-            >(
-                _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-                _args: &'args PongArgs,
-            ) -> ::flatbuffers::WIPOffset<Pong<'bldr>> {
-                let mut builder = PongBuilder::new(_fbb);
-                builder.finish()
-            }
-        }
-
-        impl ::flatbuffers::Verifiable for Pong<'_> {
-            #[inline]
-            fn run_verifier(
-                v: &mut ::flatbuffers::Verifier,
-                pos: usize,
-            ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-                v.visit_table(pos)?.finish();
-                Ok(())
-            }
-        }
-        pub struct PongArgs {}
-        impl<'a> Default for PongArgs {
-            #[inline]
-            fn default() -> Self {
-                PongArgs {}
-            }
-        }
-
-        pub struct PongBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-            fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-            start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
-        }
-        impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> PongBuilder<'a, 'b, A> {
-            #[inline]
-            pub fn new(
-                _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-            ) -> PongBuilder<'a, 'b, A> {
-                let start = _fbb.start_table();
-                PongBuilder {
-                    fbb_: _fbb,
-                    start_: start,
-                }
-            }
-            #[inline]
-            pub fn finish(self) -> ::flatbuffers::WIPOffset<Pong<'a>> {
-                let o = self.fbb_.end_table(self.start_);
-                ::flatbuffers::WIPOffset::new(o.value())
-            }
-        }
-
-        impl ::core::fmt::Debug for Pong<'_> {
-            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                let mut ds = f.debug_struct("Pong");
                 ds.finish()
             }
         }
@@ -6471,21 +5694,6 @@ pub mod pyrat {
 
             #[inline]
             #[allow(non_snake_case)]
-            pub fn message_as_pong(&self) -> Option<Pong<'a>> {
-                if self.message_type() == BotMessage::Pong {
-                    self.message().map(|t| {
-                        // Safety:
-                        // Created from a valid Table for this object
-                        // Which contains a valid union in this slot
-                        unsafe { Pong::init_from_table(t) }
-                    })
-                } else {
-                    None
-                }
-            }
-
-            #[inline]
-            #[allow(non_snake_case)]
             pub fn message_as_info(&self) -> Option<Info<'a>> {
                 if self.message_type() == BotMessage::Info {
                     self.message().map(|t| {
@@ -6573,7 +5781,6 @@ pub mod pyrat {
           BotMessage::Ready => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Ready>>("BotMessage::Ready", pos),
           BotMessage::PreprocessingDone => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<PreprocessingDone>>("BotMessage::PreprocessingDone", pos),
           BotMessage::Action => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Action>>("BotMessage::Action", pos),
-          BotMessage::Pong => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Pong>>("BotMessage::Pong", pos),
           BotMessage::Info => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Info>>("BotMessage::Info", pos),
           BotMessage::RenderCommands => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<RenderCommands>>("BotMessage::RenderCommands", pos),
           BotMessage::Provisional => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Provisional>>("BotMessage::Provisional", pos),
@@ -6677,16 +5884,6 @@ pub mod pyrat {
                     },
                     BotMessage::Action => {
                         if let Some(x) = self.message_as_action() {
-                            ds.field("message", &x)
-                        } else {
-                            ds.field(
-                                "message",
-                                &"InvalidFlatbuffer: Union discriminant does not match value.",
-                            )
-                        }
-                    },
-                    BotMessage::Pong => {
-                        if let Some(x) = self.message_as_pong() {
                             ds.field("message", &x)
                         } else {
                             ds.field(

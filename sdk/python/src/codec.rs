@@ -373,12 +373,6 @@ fn match_config_to_pydict<'py>(py: Python<'py>, cfg: &MatchConfig) -> PyResult<B
     d.set_item("player1_start", (cfg.player1_start.x, cfg.player1_start.y))?;
     d.set_item("player2_start", (cfg.player2_start.x, cfg.player2_start.y))?;
 
-    let controlled = PyList::empty(py);
-    for p in &cfg.controlled_players {
-        controlled.append(player_to_int(*p))?;
-    }
-    d.set_item("controlled_players", controlled)?;
-
     d.set_item("timing", timing_to_int(cfg.timing))?;
     d.set_item("move_timeout_ms", cfg.move_timeout_ms)?;
     d.set_item("preprocessing_timeout_ms", cfg.preprocessing_timeout_ms)?;
@@ -429,16 +423,6 @@ fn pydict_to_match_config(dict: &Bound<'_, PyDict>) -> PyResult<MatchConfig> {
         .ok_or_else(|| PyValueError::new_err("missing field: player2_start"))?
         .extract()?;
 
-    let controlled_any = dict
-        .get_item("controlled_players")?
-        .ok_or_else(|| PyValueError::new_err("missing field: controlled_players"))?;
-    let controlled_list = controlled_any.downcast::<PyList>()?;
-    let mut controlled_players = Vec::with_capacity(controlled_list.len());
-    for item in controlled_list.iter() {
-        let raw: u8 = item.extract()?;
-        controlled_players.push(int_to_player(raw)?);
-    }
-
     Ok(MatchConfig {
         width: get_u8(dict, "width")?,
         height: get_u8(dict, "height")?,
@@ -448,7 +432,6 @@ fn pydict_to_match_config(dict: &Bound<'_, PyDict>) -> PyResult<MatchConfig> {
         cheese,
         player1_start: Coordinates::new(p1x, p1y),
         player2_start: Coordinates::new(p2x, p2y),
-        controlled_players,
         timing: int_to_timing(get_int(dict, "timing")?)?,
         move_timeout_ms: get_u32(dict, "move_timeout_ms")?,
         preprocessing_timeout_ms: get_u32(dict, "preprocessing_timeout_ms")?,

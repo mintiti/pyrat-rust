@@ -6,8 +6,6 @@ use pyrat_protocol::{MatchConfig, MudEntry};
 use pyrat_wire::TimingMode;
 
 /// Build a `MatchConfig` from engine state + timing parameters.
-///
-/// `controlled_players` is left empty — the setup phase fills it per session.
 pub fn build_match_config(
     game: &GameState,
     timing: TimingMode,
@@ -40,7 +38,6 @@ pub fn build_match_config(
         cheese,
         player1_start: game.player1_position(),
         player2_start: game.player2_position(),
-        controlled_players: vec![],
         timing,
         move_timeout_ms,
         preprocessing_timeout_ms,
@@ -72,10 +69,6 @@ mod tests {
         assert_eq!(cfg.player2_start, Coordinates::new(2, 2));
         assert_eq!(cfg.cheese, vec![Coordinates::new(1, 1)]);
         assert!(cfg.walls.is_empty(), "open maze should have no walls");
-        assert!(
-            cfg.controlled_players.is_empty(),
-            "controlled_players left for setup"
-        );
         assert_eq!(cfg.timing, TimingMode::Wait);
         assert_eq!(cfg.move_timeout_ms, 500);
         assert_eq!(cfg.preprocessing_timeout_ms, 3000);

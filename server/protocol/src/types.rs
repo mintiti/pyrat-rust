@@ -89,8 +89,9 @@ pub struct MudEntry {
 
 /// Match configuration sent to bots during the Lobby phase.
 ///
-/// Contains the maze layout, player positions, cheese, timing, and
-/// which players this connection controls.
+/// Contains the maze layout, player positions, cheese, and timing.
+/// The slot a connection controls comes from `Welcome.player_slot`,
+/// not from this struct.
 #[derive(Debug, Clone)]
 pub struct MatchConfig {
     pub width: u8,
@@ -101,7 +102,6 @@ pub struct MatchConfig {
     pub cheese: Vec<Coordinates>,
     pub player1_start: Coordinates,
     pub player2_start: Coordinates,
-    pub controlled_players: Vec<Player>,
     pub timing: TimingMode,
     pub move_timeout_ms: u32,
     pub preprocessing_timeout_ms: u32,

@@ -84,28 +84,19 @@ pub fn extract_match_config(mc: &wire::MatchConfig<'_>) -> MatchConfig {
             .unwrap_or_default(),
         player1_start: vec2_opt(mc.player1_start()),
         player2_start: vec2_opt(mc.player2_start()),
-        controlled_players: mc
-            .controlled_players()
-            .map(|ps| ps.iter().collect())
-            .unwrap_or_default(),
         timing: mc.timing(),
         move_timeout_ms: mc.move_timeout_ms(),
         preprocessing_timeout_ms: mc.preprocessing_timeout_ms(),
     }
 }
 
-/// Extract a [`HashedTurnState`] from a wire `TurnState` table.
+/// Extract a [`TurnState`] from a wire `TurnState` table.
 ///
-/// Trusts the wire-provided `state_hash` rather than recomputing it.
-/// The host computed the hash from the same fields; recomputing would be
-/// wasteful and would couple the consumer to the hash algorithm.
-///
-/// The hash is a correlation tag, not a trust boundary. Host/SDK agreement
-/// on initial state is verified once at the setup-phase handshake (see the
-/// SDK's `compute_initial_hash`); per-turn hashes ride along on the wire
-/// after that.
-pub fn extract_turn_state(ts: &wire::TurnState<'_>) -> HashedTurnState {
-    let owned = TurnState {
+/// The wire table carries no hash — the parent message (`GoState`,
+/// `FullState`) provides one when needed, or the bot recomputes it
+/// after rebuilding engine state.
+pub fn extract_turn_state(ts: &wire::TurnState<'_>) -> TurnState {
+    TurnState {
         turn: ts.turn(),
         player1_position: vec2_opt(ts.player1_position()),
         player2_position: vec2_opt(ts.player2_position()),
@@ -119,8 +110,7 @@ pub fn extract_turn_state(ts: &wire::TurnState<'_>) -> HashedTurnState {
             .unwrap_or_default(),
         player1_last_move: wire_to_engine_direction(ts.player1_last_move()),
         player2_last_move: wire_to_engine_direction(ts.player2_last_move()),
-    };
-    HashedTurnState::with_unverified_hash(owned, ts.state_hash())
+    }
 }
 
 /// Extract an [`Info`] from a wire `Info` table.
@@ -189,10 +179,6 @@ pub enum CodecError {
     UnknownHostVariant(HostMessage),
     #[error("unknown BotMessage variant: {0:?}")]
     UnknownBotVariant(BotMessage),
-    #[error("legacy HostMessage variant {0:?} is not accepted on the new protocol path")]
-    LegacyHostVariant(HostMessage),
-    #[error("legacy BotMessage variant {0:?} is not accepted on the new protocol path")]
-    LegacyBotVariant(BotMessage),
     #[error("required inner table missing: {0}")]
     MissingTable(&'static str),
 }
@@ -276,16 +262,14 @@ pub fn extract_go_state(
         .limits()
         .ok_or(CodecError::MissingTable("GoState.limits"))
         .map(|l| extract_search_limits(&l))?;
-    let hts = extract_turn_state(&ts);
-    // GoState.state_hash overrides any per-TurnState field — they should agree,
-    // but the outer field is authoritative per protocol spec.
-    let hts = HashedTurnState::with_unverified_hash(hts.into_inner(), w.state_hash());
-    Ok((hts, limits))
+    let owned = extract_turn_state(&ts);
+    Ok((
+        HashedTurnState::with_unverified_hash(owned, w.state_hash()),
+        limits,
+    ))
 }
 
-pub fn extract_full_state(
-    w: &wire::FullState<'_>,
-) -> Result<(MatchConfig, HashedTurnState), CodecError> {
+pub fn extract_full_state(w: &wire::FullState<'_>) -> Result<(MatchConfig, TurnState), CodecError> {
     let mc = w
         .match_config()
         .ok_or(CodecError::MissingTable("FullState.match_config"))?;
@@ -348,11 +332,6 @@ pub fn extract_render_commands(w: &wire::RenderCommands<'_>) -> (wire::Player, u
 // ── Top-level dispatchers ───────────────────────────
 
 /// Decode a `HostPacket` envelope into an owned [`HostMsg`].
-///
-/// Returns [`CodecError::LegacyHostVariant`] for legacy-only message types
-/// (SetOption, MatchConfig-as-union, StartPreprocessing, TurnState-as-union,
-/// Timeout, Ping). The new TcpPlayer / Match path never receives those —
-/// the legacy session layer handles them through its own state machine.
 pub fn extract_host_msg(packet: &wire::HostPacket<'_>) -> Result<HostMsg, CodecError> {
     match packet.message_type() {
         HostMessage::Welcome => packet
@@ -411,10 +390,10 @@ pub fn extract_host_msg(packet: &wire::HostPacket<'_>) -> Result<HostMsg, CodecE
             let w = packet
                 .message_as_full_state()
                 .ok_or(CodecError::MissingPayload)?;
-            let (match_config, hts) = extract_full_state(&w)?;
+            let (match_config, turn_state) = extract_full_state(&w)?;
             Ok(HostMsg::FullState {
                 match_config: Box::new(match_config),
-                turn_state: Box::new(hts.into_inner()),
+                turn_state: Box::new(turn_state),
             })
         },
         HostMessage::ProtocolError => packet
@@ -434,22 +413,12 @@ pub fn extract_host_msg(packet: &wire::HostPacket<'_>) -> Result<HostMsg, CodecE
                     player2_score: go.player2_score,
                 }
             }),
-        legacy @ (HostMessage::SetOption
-        | HostMessage::MatchConfig
-        | HostMessage::StartPreprocessing
-        | HostMessage::TurnState
-        | HostMessage::Timeout
-        | HostMessage::Ping) => Err(CodecError::LegacyHostVariant(legacy)),
         HostMessage::NONE => Err(CodecError::MissingPayload),
         other => Err(CodecError::UnknownHostVariant(other)),
     }
 }
 
 /// Decode a `BotPacket` envelope into an owned [`BotMsg`].
-///
-/// Returns [`CodecError::LegacyBotVariant`] for legacy-only Pong (the new
-/// protocol's transport doesn't use Ping/Pong; liveness is handled at the
-/// transport layer).
 pub fn extract_bot_msg(packet: &wire::BotPacket<'_>) -> Result<BotMsg, CodecError> {
     match packet.message_type() {
         BotMessage::Identify => packet
@@ -517,7 +486,6 @@ pub fn extract_bot_msg(packet: &wire::BotPacket<'_>) -> Result<BotMsg, CodecErro
                 state_hash,
             })
         },
-        legacy @ BotMessage::Pong => Err(CodecError::LegacyBotVariant(legacy)),
         BotMessage::NONE => Err(CodecError::MissingPayload),
         other => Err(CodecError::UnknownBotVariant(other)),
     }
@@ -562,7 +530,6 @@ fn serialize_match_config<'a>(
 
     let cheese_vec: Vec<Vec2> = cfg.cheese.iter().map(|c| Vec2::new(c.x, c.y)).collect();
     let cheese = fbb.create_vector(&cheese_vec);
-    let players = fbb.create_vector(&cfg.controlled_players);
 
     wire::MatchConfig::create(
         fbb,
@@ -575,7 +542,6 @@ fn serialize_match_config<'a>(
             cheese: Some(cheese),
             player1_start: Some(&Vec2::new(cfg.player1_start.x, cfg.player1_start.y)),
             player2_start: Some(&Vec2::new(cfg.player2_start.x, cfg.player2_start.y)),
-            controlled_players: Some(players),
             timing: cfg.timing,
             move_timeout_ms: cfg.move_timeout_ms,
             preprocessing_timeout_ms: cfg.preprocessing_timeout_ms,
@@ -586,7 +552,6 @@ fn serialize_match_config<'a>(
 fn serialize_turn_state<'a>(
     fbb: &mut FlatBufferBuilder<'a>,
     ts: &TurnState,
-    state_hash: u64,
 ) -> WIPOffset<wire::TurnState<'a>> {
     let cheese_vec: Vec<Vec2> = ts.cheese.iter().map(|c| Vec2::new(c.x, c.y)).collect();
     let cheese = fbb.create_vector(&cheese_vec);
@@ -603,7 +568,6 @@ fn serialize_turn_state<'a>(
             cheese: Some(cheese),
             player1_last_move: engine_to_wire_direction(ts.player1_last_move),
             player2_last_move: engine_to_wire_direction(ts.player2_last_move),
-            state_hash,
         },
     )
 }
@@ -730,7 +694,7 @@ pub fn serialize_host_msg(msg: &HostMsg) -> Vec<u8> {
             state_hash,
             limits,
         } => {
-            let ts = serialize_turn_state(&mut fbb, turn_state, *state_hash);
+            let ts = serialize_turn_state(&mut fbb, turn_state);
             let lim = serialize_search_limits(&mut fbb, limits);
             let off = wire::GoState::create(
                 &mut fbb,
@@ -751,12 +715,7 @@ pub fn serialize_host_msg(msg: &HostMsg) -> Vec<u8> {
             turn_state,
         } => {
             let mc = serialize_match_config(&mut fbb, match_config);
-            // FullState's TurnState carries its own hash; recompute via the
-            // engine on the host side and pass through. For serialization we
-            // use 0 here — callers should construct a HashedTurnState before
-            // calling this function in practice. Slice 5 wires this through
-            // properly (Match holds the canonical hash).
-            let ts = serialize_turn_state(&mut fbb, turn_state, 0);
+            let ts = serialize_turn_state(&mut fbb, turn_state);
             let off = wire::FullState::create(
                 &mut fbb,
                 &wire::FullStateArgs {
@@ -879,7 +838,6 @@ pub fn serialize_bot_msg(msg: &BotMsg) -> Vec<u8> {
                     direction: engine_to_wire_direction(*direction),
                     player: *player,
                     turn: *turn,
-                    provisional: false,
                     think_ms: *think_ms,
                     state_hash: *state_hash,
                 },
@@ -938,10 +896,7 @@ pub fn serialize_bot_msg(msg: &BotMsg) -> Vec<u8> {
 mod tests {
     use super::*;
     use flatbuffers::FlatBufferBuilder;
-    use pyrat_wire::{
-        Direction as WireDir, GameResult, HostMessage, HostPacket, HostPacketArgs, Player,
-        TimingMode,
-    };
+    use pyrat_wire::{Direction as WireDir, GameResult, HostPacket, Player, TimingMode};
 
     // ── MatchConfig ─────────────────────────────────
 
@@ -971,8 +926,6 @@ mod tests {
         let cheese_vec = vec![Vec2::new(10, 7), Vec2::new(5, 3)];
         let cheese = fbb.create_vector(&cheese_vec);
 
-        let players = fbb.create_vector(&[Player::Player1]);
-
         let mc = wire::MatchConfig::create(
             &mut fbb,
             &wire::MatchConfigArgs {
@@ -984,7 +937,6 @@ mod tests {
                 cheese: Some(cheese),
                 player1_start: Some(&Vec2::new(20, 14)),
                 player2_start: Some(&Vec2::new(0, 0)),
-                controlled_players: Some(players),
                 timing: TimingMode::Wait,
                 move_timeout_ms: 1000,
                 preprocessing_timeout_ms: 5000,
@@ -1007,7 +959,6 @@ mod tests {
         assert_eq!(cfg.cheese[0], Coordinates::new(10, 7));
         assert_eq!(cfg.player1_start, Coordinates::new(20, 14));
         assert_eq!(cfg.player2_start, Coordinates::new(0, 0));
-        assert_eq!(cfg.controlled_players, vec![Player::Player1]);
         assert_eq!(cfg.move_timeout_ms, 1000);
         assert_eq!(cfg.preprocessing_timeout_ms, 5000);
     }
@@ -1034,25 +985,23 @@ mod tests {
                 cheese: Some(cheese),
                 player1_last_move: WireDir::Up,
                 player2_last_move: WireDir::Right,
-                state_hash: 0xFEED_FACE_1234_5678,
             },
         );
         fbb.finish(ts, None);
         let buf = fbb.finished_data();
         let ts = flatbuffers::root::<wire::TurnState>(buf).unwrap();
 
-        let hts = extract_turn_state(&ts);
-        assert_eq!(hts.turn, 42);
-        assert_eq!(hts.player1_position, Coordinates::new(10, 7));
-        assert_eq!(hts.player2_position, Coordinates::new(0, 0));
-        assert!((hts.player1_score - 3.0).abs() < f32::EPSILON);
-        assert!((hts.player2_score - 2.5).abs() < f32::EPSILON);
-        assert_eq!(hts.player1_mud_turns, 0);
-        assert_eq!(hts.player2_mud_turns, 2);
-        assert_eq!(hts.cheese.len(), 2);
-        assert_eq!(hts.player1_last_move, pyrat::Direction::Up);
-        assert_eq!(hts.player2_last_move, pyrat::Direction::Right);
-        assert_eq!(hts.state_hash(), 0xFEED_FACE_1234_5678);
+        let owned = extract_turn_state(&ts);
+        assert_eq!(owned.turn, 42);
+        assert_eq!(owned.player1_position, Coordinates::new(10, 7));
+        assert_eq!(owned.player2_position, Coordinates::new(0, 0));
+        assert!((owned.player1_score - 3.0).abs() < f32::EPSILON);
+        assert!((owned.player2_score - 2.5).abs() < f32::EPSILON);
+        assert_eq!(owned.player1_mud_turns, 0);
+        assert_eq!(owned.player2_mud_turns, 2);
+        assert_eq!(owned.cheese.len(), 2);
+        assert_eq!(owned.player1_last_move, pyrat::Direction::Up);
+        assert_eq!(owned.player2_last_move, pyrat::Direction::Right);
     }
 
     // ── Info ────────────────────────────────────────
@@ -1233,104 +1182,6 @@ mod tests {
 
     // ── Cross-crate envelope test ───────────────────
 
-    /// Build a full `HostPacket` envelope containing a `MatchConfig`,
-    /// as the host serializer would produce. Extract through the shared
-    /// function and verify fields match.
-    #[test]
-    fn extract_match_config_from_host_packet_envelope() {
-        let mut fbb = FlatBufferBuilder::new();
-
-        let cheese_vec = vec![Vec2::new(2, 2)];
-        let cheese = fbb.create_vector(&cheese_vec);
-        let players = fbb.create_vector(&[Player::Player1]);
-
-        let mc = wire::MatchConfig::create(
-            &mut fbb,
-            &wire::MatchConfigArgs {
-                width: 5,
-                height: 5,
-                max_turns: 100,
-                walls: None,
-                mud: None,
-                cheese: Some(cheese),
-                player1_start: Some(&Vec2::new(4, 4)),
-                player2_start: Some(&Vec2::new(0, 0)),
-                controlled_players: Some(players),
-                timing: TimingMode::Wait,
-                move_timeout_ms: 500,
-                preprocessing_timeout_ms: 3000,
-            },
-        );
-
-        let packet = HostPacket::create(
-            &mut fbb,
-            &HostPacketArgs {
-                message_type: HostMessage::MatchConfig,
-                message: Some(mc.as_union_value()),
-            },
-        );
-        fbb.finish(packet, None);
-        let buf = fbb.finished_data();
-
-        // Parse the envelope, then extract the inner table.
-        let packet = flatbuffers::root::<HostPacket>(buf).unwrap();
-        assert_eq!(packet.message_type(), HostMessage::MatchConfig);
-        let mc = packet.message_as_match_config().unwrap();
-
-        let cfg = extract_match_config(&mc);
-        assert_eq!(cfg.width, 5);
-        assert_eq!(cfg.height, 5);
-        assert_eq!(cfg.cheese.len(), 1);
-        assert_eq!(cfg.cheese[0], Coordinates::new(2, 2));
-        assert_eq!(cfg.player1_start, Coordinates::new(4, 4));
-        assert_eq!(cfg.move_timeout_ms, 500);
-    }
-
-    /// Build a full `HostPacket` envelope containing a `TurnState`,
-    /// extract through the shared function, verify hash is trusted from wire.
-    #[test]
-    fn extract_turn_state_from_host_packet_envelope() {
-        let mut fbb = FlatBufferBuilder::new();
-
-        let cheese_vec = vec![Vec2::new(2, 2)];
-        let cheese = fbb.create_vector(&cheese_vec);
-
-        let ts = wire::TurnState::create(
-            &mut fbb,
-            &wire::TurnStateArgs {
-                turn: 10,
-                player1_position: Some(&Vec2::new(1, 1)),
-                player2_position: Some(&Vec2::new(3, 3)),
-                player1_score: 1.0,
-                player2_score: 0.0,
-                player1_mud_turns: 0,
-                player2_mud_turns: 0,
-                cheese: Some(cheese),
-                player1_last_move: WireDir::Right,
-                player2_last_move: WireDir::Left,
-                state_hash: 0xABCD_EF01,
-            },
-        );
-
-        let packet = HostPacket::create(
-            &mut fbb,
-            &HostPacketArgs {
-                message_type: HostMessage::TurnState,
-                message: Some(ts.as_union_value()),
-            },
-        );
-        fbb.finish(packet, None);
-        let buf = fbb.finished_data();
-
-        let packet = flatbuffers::root::<HostPacket>(buf).unwrap();
-        let ts = packet.message_as_turn_state().unwrap();
-
-        let hts = extract_turn_state(&ts);
-        assert_eq!(hts.turn, 10);
-        assert_eq!(hts.player1_position, Coordinates::new(1, 1));
-        assert_eq!(hts.state_hash(), 0xABCD_EF01);
-    }
-
     // ── Round-trip tests for new HostMsg / BotMsg variants ──
 
     use pyrat_wire::BotPacket;
@@ -1349,7 +1200,6 @@ mod tests {
             cheese: vec![Coordinates::new(3, 3)],
             player1_start: Coordinates::new(0, 0),
             player2_start: Coordinates::new(6, 4),
-            controlled_players: vec![Player::Player1, Player::Player2],
             timing: TimingMode::Wait,
             move_timeout_ms: 250,
             preprocessing_timeout_ms: 5000,
@@ -1434,7 +1284,6 @@ mod tests {
                 );
                 assert_eq!(match_config.width, 7);
                 assert_eq!(match_config.cheese.len(), 1);
-                assert_eq!(match_config.controlled_players.len(), 2);
                 assert_eq!(match_config.mud[0].turns, 3);
             },
             other => panic!("expected Configure, got {other:?}"),
@@ -1793,36 +1642,5 @@ mod tests {
         if let BotMsg::Action { state_hash, .. } = out {
             assert_eq!(state_hash, h);
         }
-    }
-
-    #[test]
-    fn legacy_host_variant_decode_errors() {
-        // Build a HostPacket with a legacy SetOption — extract_host_msg
-        // should reject it as legacy.
-        let mut fbb = FlatBufferBuilder::new();
-        let name = fbb.create_string("Threads");
-        let val = fbb.create_string("4");
-        let so = wire::SetOption::create(
-            &mut fbb,
-            &wire::SetOptionArgs {
-                name: Some(name),
-                value: Some(val),
-            },
-        );
-        let packet = HostPacket::create(
-            &mut fbb,
-            &HostPacketArgs {
-                message_type: HostMessage::SetOption,
-                message: Some(so.as_union_value()),
-            },
-        );
-        fbb.finish(packet, None);
-        let buf = fbb.finished_data();
-        let packet = flatbuffers::root::<HostPacket>(buf).unwrap();
-        let err = extract_host_msg(&packet).unwrap_err();
-        assert!(
-            matches!(err, CodecError::LegacyHostVariant(HostMessage::SetOption)),
-            "expected LegacyHostVariant, got {err:?}"
-        );
     }
 }

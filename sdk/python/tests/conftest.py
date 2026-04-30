@@ -52,7 +52,6 @@ def minimal_match_config(**overrides: Any) -> dict[str, Any]:
         "cheese": [(1, 1)],
         "player1_start": (0, 0),
         "player2_start": (2, 2),
-        "controlled_players": [],
         "timing": 0,  # Wait
         "move_timeout_ms": 1000,
         "preprocessing_timeout_ms": 1000,

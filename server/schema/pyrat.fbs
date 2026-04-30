@@ -65,14 +65,6 @@ table OptionDef {
 
 // ── Host → Bot ──────────────────────────────────────
 
-// Legacy: standalone HostMessage variant. Replaced by Configure (which
-// carries OptionAssignment inline). Retained while legacy host paths
-// (run_setup/run_playing) still build; deleted in the cleanup slice.
-table SetOption {
-  name: string;
-  value: string;
-}
-
 // One option=value assignment, used inside Configure.
 table OptionAssignment {
   name: string;
@@ -88,9 +80,6 @@ table MatchConfig {
   cheese: [Vec2];
   player1_start: Vec2;
   player2_start: Vec2;
-  // controlled_players: deprecated — new SDK uses Welcome.player_slot.
-  // Kept for legacy compat through the host restructure; removed in cleanup.
-  controlled_players: [Player];
   timing: TimingMode;
   move_timeout_ms: uint32;
   preprocessing_timeout_ms: uint32;
@@ -102,7 +91,6 @@ table Welcome {
 }
 
 // Lobby phase: server batches options + match config into one message.
-// Replaces the legacy SetOption stream + standalone MatchConfig sequence.
 table Configure {
   options: [OptionAssignment];
   match_config: MatchConfig;
@@ -119,12 +107,6 @@ table SearchLimits {
 
 // Playing phase: begin preprocessing.
 table GoPreprocess {
-  state_hash: uint64;
-}
-
-// Legacy: standalone HostMessage variant. Replaced by GoPreprocess.
-// Retained for legacy build; deleted in cleanup.
-table StartPreprocessing {
   state_hash: uint64;
 }
 
@@ -156,12 +138,12 @@ table TurnState {
   cheese: [Vec2];
   player1_last_move: Direction;
   player2_last_move: Direction;
-  state_hash: uint64;
 }
 
 // Playing phase: stateless start-thinking. Carries full TurnState — no
 // prior sync required. Used for analysis-mode injection, restart, and
-// reconnection recovery.
+// reconnection recovery. The parent's `state_hash` field is the
+// authoritative hash for the carried TurnState.
 table GoState {
   turn_state: TurnState;
   state_hash: uint64;
@@ -185,36 +167,21 @@ table ProtocolError {
 
 table Stop {}
 
-// Legacy: replaced by Stop (which now covers both deadline-fired timeout
-// and consumer-triggered stop). Retained for legacy build; deleted in
-// cleanup.
-table Timeout {
-  default_move: Direction;
-}
-
 table GameOver {
   result: GameResult;
   player1_score: float32;
   player2_score: float32;
 }
 
-table Ping {}
-
 union HostMessage {
-  SetOption,
-  MatchConfig,
-  StartPreprocessing,
-  TurnState,
-  Stop,
-  Timeout,
-  GameOver,
-  Ping,
   Welcome,
   Configure,
   GoPreprocess,
   Advance,
   Go,
   GoState,
+  Stop,
+  GameOver,
   FullState,
   ProtocolError,
 }
@@ -233,11 +200,9 @@ table Identify {
 }
 
 // Lobby phase: bot acknowledges Configure with its initial state hash.
-// This IS the initial sync — no separate exchange needed. New protocol:
-// state_hash is required. Default 0 lets legacy (no-hash) Ready frames
-// still parse for the legacy build.
+// This IS the initial sync — no separate exchange needed.
 table Ready {
-  state_hash: uint64 = 0;
+  state_hash: uint64;
 }
 
 table PreprocessingDone {}
@@ -246,14 +211,10 @@ table Action {
   direction: Direction;
   player: Player;
   turn: uint16;
-  // Legacy: bool flag indicating "this is provisional, not committed".
-  // New protocol uses a separate Provisional message. Default false retained
-  // for legacy frames; new producers send a Provisional table instead.
-  provisional: bool = false;
   think_ms: uint32 = 0;
-  // New protocol: which game state this move was computed for. Default 0
-  // for legacy frames. Used by host for stale-action detection.
-  state_hash: uint64 = 0;
+  // The state hash this move was computed for. Used by host for
+  // stale-action detection.
+  state_hash: uint64;
 }
 
 // Playing phase: provisional best-so-far action (sideband). Host stores
@@ -278,8 +239,6 @@ table SyncOk {
 table Resync {
   my_hash: uint64;
 }
-
-table Pong {}
 
 table Info {
   player: Player;
@@ -308,7 +267,6 @@ union BotMessage {
   Ready,
   PreprocessingDone,
   Action,
-  Pong,
   Info,
   RenderCommands,
   Provisional,

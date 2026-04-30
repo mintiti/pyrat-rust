@@ -630,7 +630,6 @@ mod tests {
             cheese: vec![Coordinates::new(1, 1)],
             player1_start: Coordinates::new(0, 0),
             player2_start: Coordinates::new(2, 2),
-            controlled_players: vec![],
             timing: TimingMode::Wait,
             move_timeout_ms: 100,
             preprocessing_timeout_ms: 100,
