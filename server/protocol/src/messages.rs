@@ -3,15 +3,6 @@
 //! `HostMsg` is what the host sends to a player. `BotMsg` is what a player
 //! sends back. The Match drives the protocol by sending and receiving these
 //! messages through the Player trait's `send`/`recv` methods.
-//!
-//! These enums define the *new* protocol from the protocol spec. They are
-//! distinct from the host-internal `HostCommand`/`SessionMsg` channel types,
-//! which will eventually be replaced.
-//!
-//! Consumed today by `EmbeddedPlayer` (in `pyrat-host`) for the in-process
-//! Player trait implementation. The TCP path still uses the legacy
-//! `HostCommand`/`SessionMsg` types in `pyrat-host`; those will be replaced
-//! when `TcpPlayer` lands.
 
 use pyrat::Direction;
 use pyrat_wire::{GameResult, Player};

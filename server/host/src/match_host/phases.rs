@@ -228,8 +228,7 @@ impl Match<Created> {
         }
 
         // Send Configure to both bots in slot order. The same MatchConfig
-        // body goes to both — Match doesn't read or rewrite
-        // `controlled_players` (kept for legacy callers; removed in slice 9).
+        // body goes to both; per-slot identity comes from `Welcome.player_slot`.
         for slot_idx in 0..2 {
             let opts = std::mem::take(&mut self.ctx.options[slot_idx]);
             let msg = HostMsg::Configure {

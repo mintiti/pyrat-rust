@@ -608,9 +608,6 @@ fn serialize_info<'a>(fbb: &mut FlatBufferBuilder<'a>, info: &Info) -> WIPOffset
 
 /// Encode a [`HostMsg`] as a complete length-unprefixed `HostPacket` byte
 /// buffer (caller wraps in transport framing).
-///
-/// Panics on legacy variants (which have no `HostMsg` representation) — those
-/// can only originate from legacy host code paths and never reach this function.
 pub fn serialize_host_msg(msg: &HostMsg) -> Vec<u8> {
     let mut fbb = FlatBufferBuilder::new();
     let (msg_type, offset) = match msg {

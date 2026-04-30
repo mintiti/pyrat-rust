@@ -1,8 +1,10 @@
-//! Integration tests for the slice 5 [`Match`] typestate.
+//! Integration tests for the [`Match`] typestate.
 //!
 //! These exercise the full Match lifecycle: setup (Configure → Ready →
 //! GoPreprocess → PreprocessingDone), playing (Advance → SyncOk → Go →
-//! Action), Resync recovery, and ReadyHashMismatch failure paths.
+//! Action), Resync recovery, ReadyHashMismatch failure paths, the
+//! FaultPolicy seam (Default vs Strict), and the analysis sub-states
+//! (`Thinking` / `Collected`) for GUI step-mode.
 //!
 //! The happy path uses two `EmbeddedPlayer<StayBot>` instances boxed as
 //! `dyn Player`. The lie-based tests (Resync, hash mismatch) use a small

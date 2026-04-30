@@ -1,5 +1,7 @@
-//! Linear match lifecycle: `Match<S>` drives two [`Player`](crate::player::Player)
-//! handles through Created → Ready → Playing → Finished.
+//! Match lifecycle: `Match<S>` drives two [`Player`](crate::player::Player)
+//! handles through Created → Ready → Playing → Finished, with
+//! `Thinking` / `Collected` sub-states branching off `Playing` for analysis
+//! mode (GUI step-by-step control).
 //!
 //! Each phase is a distinct type. Transitions consume `self` and return the
 //! next phase, so calling `step()` before `setup()` is a compile error. The
@@ -8,9 +10,6 @@
 //! one place. Sideband (Info, Provisional, RenderCommands) is forwarded to
 //! the [`EventSink`](crate::player::EventSink) by each Player; the Match
 //! itself never inspects it.
-//!
-//! Slice 5 covers the linear lifecycle only. Analysis sub-states
-//! (`Thinking`, `Collected`) for GUI step-mode are added in slice 7.
 
 mod config;
 mod error;
