@@ -174,9 +174,9 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     let p1 = p1.ok_or("player1 did not connect")?;
     let p2 = p2.ok_or("player2 did not connect")?;
 
-    // `Match` never sees Identify (the handshake is consumed by `accept_players`),
-    // so it can't emit `BotIdentified`. Surface it here from the player identities
-    // so JSON records and tracing spans get populated.
+    // Populate tracing span fields from the post-Welcome identities.
+    // `BotIdentified` is emitted by `Match::setup`; we just need name lookup
+    // for the span here.
     for player in [&p1, &p2] {
         let id = PlayerTrait::identity(player);
         match id.slot {
@@ -188,11 +188,6 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             },
             _ => {},
         }
-        let _ = event_tx.send(MatchEvent::BotIdentified {
-            player: id.slot,
-            name: id.name.clone(),
-            author: id.author.clone(),
-        });
     }
 
     let event_consumer = tokio::spawn(async move {

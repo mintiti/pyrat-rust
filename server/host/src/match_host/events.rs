@@ -24,6 +24,7 @@ pub enum MatchEvent {
         player: Player,
         name: String,
         author: String,
+        agent_id: String,
     },
     /// All bots have been sent GoPreprocess — preprocessing is underway.
     PreprocessingStarted,

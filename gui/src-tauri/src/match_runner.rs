@@ -214,16 +214,6 @@ pub async fn run_match(
     let p1 = slots[0].take().ok_or("missing player1")?;
     let p2 = slots[1].take().ok_or("missing player2")?;
 
-    // Match never sees Identify (consumed by accept_players / EmbeddedPlayer::accept),
-    // so surface BotIdentified manually for record/UI consumers.
-    for player in [p1.identity(), p2.identity()] {
-        let _ = event_tx.send(MatchEvent::BotIdentified {
-            player: player.slot,
-            name: player.name.clone(),
-            author: player.author.clone(),
-        });
-    }
-
     let forwarder = tokio::spawn(forward_events(event_rx, app.clone(), match_id));
 
     let p1_opts = players[0].options.clone();

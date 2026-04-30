@@ -209,6 +209,24 @@ impl Match<Created> {
         let configure_timeout = self.ctx.setup_timing.configure_timeout;
         let preprocessing_timeout = self.ctx.setup_timing.preprocessing_timeout;
 
+        // Emit BotIdentified for each slot. Identities are post-Welcome —
+        // every player handed to Match::new has already completed the
+        // Identify→Welcome handshake. This is the single canonical emission
+        // point; consumers (headless, GUI, bot-check) listen on the event
+        // stream rather than reaching into PlayerIdentity themselves.
+        for slot_idx in 0..2 {
+            let id = self.ctx.players[slot_idx].identity();
+            emit(
+                self.ctx.event_tx.as_ref(),
+                MatchEvent::BotIdentified {
+                    player: id.slot,
+                    name: id.name.clone(),
+                    author: id.author.clone(),
+                    agent_id: id.agent_id.clone(),
+                },
+            );
+        }
+
         // Send Configure to both bots in slot order. The same MatchConfig
         // body goes to both — Match doesn't read or rewrite
         // `controlled_players` (kept for legacy callers; removed in slice 9).

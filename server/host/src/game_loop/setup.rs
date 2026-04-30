@@ -108,6 +108,7 @@ pub async fn run_setup(
                                         player: p,
                                         name: name.clone(),
                                         author: author.clone(),
+                                        agent_id: agent_id.clone(),
                                     });
                                 }
                                 handles.insert(session_id, SessionHandle {

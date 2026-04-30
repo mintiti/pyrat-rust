@@ -23,6 +23,7 @@ struct PlayerRecord {
     player: String,
     name: String,
     author: String,
+    agent_id: String,
 }
 
 #[derive(Serialize)]
@@ -77,6 +78,7 @@ pub fn build(seed: Option<u64>, events: Vec<MatchEvent>, match_result: &MatchRes
                 player,
                 name,
                 author,
+                agent_id,
             } => {
                 let player_name = if player == Player::Player1 {
                     "Player1"
@@ -87,6 +89,7 @@ pub fn build(seed: Option<u64>, events: Vec<MatchEvent>, match_result: &MatchRes
                     player: player_name.to_string(),
                     name,
                     author,
+                    agent_id,
                 });
             },
             MatchEvent::TurnPlayed {
