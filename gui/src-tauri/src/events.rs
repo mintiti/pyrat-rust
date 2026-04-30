@@ -70,14 +70,6 @@ pub struct MatchErrorEvent {
     pub message: String,
 }
 
-/// Emitted when a bot disconnects mid-game.
-#[derive(Serialize, Deserialize, Debug, Clone, Type, Event)]
-pub struct BotDisconnectedEvent {
-    pub match_id: u32,
-    pub player: PlayerSide,
-    pub reason: String,
-}
-
 /// Bot debug/analysis info forwarded from the host event stream.
 #[derive(Serialize, Deserialize, Debug, Clone, Type, Event)]
 pub struct BotInfoEvent {

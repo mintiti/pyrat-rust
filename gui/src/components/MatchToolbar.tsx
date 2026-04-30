@@ -8,9 +8,7 @@ import {
 	IconPlayerPlay,
 	IconPlayerTrackNext,
 } from "@tabler/icons-react";
-import { useAtomValue } from "jotai";
 import { useState } from "react";
-import { botsAtom, resolveBotName } from "../stores/botConfigAtom";
 import {
 	useCursorDepth,
 	useIsAtTip,
@@ -21,14 +19,6 @@ import ConfirmModal from "./common/ConfirmModal";
 
 type Props = {
 	onNewMatch: () => void;
-};
-
-const DISCONNECT_REASONS: Record<string, string> = {
-	PeerClosed: "process exited",
-	FrameError: "communication error",
-	ChannelClosed: "connection dropped",
-	HandshakeTimeout: "failed to connect",
-	DrainComplete: "disconnected after game",
 };
 
 const SPEED_OPTIONS = [
@@ -46,12 +36,8 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 	const playbackSpeed = useMatchStore((s) => s.playbackSpeed);
 	const error = useMatchStore((s) => s.error);
 	const analysisError = useMatchStore((s) => s.analysisError);
-	const disconnection = useMatchStore((s) => s.disconnection);
-	const player1BotId = useMatchStore((s) => s.player1BotId);
-	const player2BotId = useMatchStore((s) => s.player2BotId);
 	const mode = useMatchStore((s) => s.mode);
 	const mainlineDepth = useMatchStore((s) => s.mainlineDepth);
-	const bots = useAtomValue(botsAtom);
 
 	const {
 		goToStart,
@@ -200,17 +186,6 @@ export default function MatchToolbar({ onNewMatch }: Props) {
 				</Group>
 			)}
 			<Group gap="sm">
-				{disconnection && (
-					<Badge color="yellow" variant="filled" size="lg">
-						{resolveBotName(
-							disconnection.player === "Player1" ? player1BotId : player2BotId,
-							bots,
-							disconnection.player === "Player1" ? "Rat" : "Python",
-						)}{" "}
-						disconnected:{" "}
-						{DISCONNECT_REASONS[disconnection.reason] ?? disconnection.reason}
-					</Badge>
-				)}
 				{analysisError && (
 					<Badge color="yellow" variant="filled" size="lg">
 						{analysisError}

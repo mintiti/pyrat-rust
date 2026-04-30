@@ -6,7 +6,6 @@ import { commands } from "../bindings";
 import type {
 	AnalysisActions,
 	AnalysisPosition,
-	BotDisconnectedEvent,
 	BotInfoEvent,
 	Coord,
 	Direction,
@@ -134,7 +133,6 @@ interface MatchState {
 	result: MatchOverEvent | null;
 	error: string | null;
 	analysisError: string | null;
-	disconnection: BotDisconnectedEvent | null;
 
 	// Game tree
 	root: GameNode | null;
@@ -178,7 +176,6 @@ interface MatchState {
 	onSetupComplete: (matchId: number) => void;
 	onError: (message: string) => void;
 	onAnalysisError: (message: string) => void;
-	onDisconnect: (e: BotDisconnectedEvent) => void;
 
 	// Actions
 	beginConnecting: () => void;
@@ -265,7 +262,6 @@ const IDLE_MATCH = {
 	result: null as MatchOverEvent | null,
 	error: null as string | null,
 	analysisError: null as string | null,
-	disconnection: null as BotDisconnectedEvent | null,
 	player1Options: {} as Record<string, string>,
 	player2Options: {} as Record<string, string>,
 	matchPhase: "idle" as MatchPhase,
@@ -434,16 +430,11 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		set({ analysisError: message });
 	},
 
-	onDisconnect: (e) => {
-		set({ disconnection: e });
-	},
-
 	// ── Actions ─────────────────────────────────────────────
 	beginConnecting: () => {
 		set({
 			error: null,
 			result: null,
-			disconnection: null,
 			matchPhase: "connecting",
 		});
 	},

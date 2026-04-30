@@ -25,8 +25,8 @@ use tauri_specta::Event;
 
 use crate::commands::{AnalysisPosition, Coord, PlayerState};
 use crate::events::{
-    BotDisconnectedEvent, BotInfoEvent, Direction as SpectaDirection, MatchOverEvent, MatchWinner,
-    PlayerSide, PreprocessingStartedEvent, SetupCompleteEvent, TurnPlayedEvent,
+    BotInfoEvent, Direction as SpectaDirection, MatchOverEvent, MatchWinner, PlayerSide,
+    PreprocessingStartedEvent, SetupCompleteEvent, TurnPlayedEvent,
 };
 use crate::random_bot::RandomBot;
 use crate::state::{AnalysisCmd, AnalysisResp, AnalysisRx};
@@ -500,14 +500,6 @@ async fn forward_events(
                     player2_action: engine_to_specta(p2_action),
                 };
                 let _ = payload.emit(&app);
-            },
-            MatchEvent::BotDisconnected { player, reason } => {
-                let _ = BotDisconnectedEvent {
-                    match_id,
-                    player: player_side(player),
-                    reason: format!("{reason:?}"),
-                }
-                .emit(&app);
             },
             MatchEvent::MatchOver { result } => {
                 let winner = match result.result {

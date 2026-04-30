@@ -102,7 +102,6 @@ async probeBot(runCommand: string, workingDir: string, agentId: string) : Promis
 
 
 export const events = __makeEvents__<{
-botDisconnectedEvent: BotDisconnectedEvent,
 botInfoEvent: BotInfoEvent,
 matchErrorEvent: MatchErrorEvent,
 matchOverEvent: MatchOverEvent,
@@ -111,7 +110,6 @@ preprocessingStartedEvent: PreprocessingStartedEvent,
 setupCompleteEvent: SetupCompleteEvent,
 turnPlayedEvent: TurnPlayedEvent
 }>({
-botDisconnectedEvent: "bot-disconnected-event",
 botInfoEvent: "bot-info-event",
 matchErrorEvent: "match-error-event",
 matchOverEvent: "match-over-event",
@@ -136,10 +134,6 @@ export type AnalysisActions = { player1: Direction; player2: Direction }
  * Arbitrary game-tree position for cursor-follows-analysis.
  */
 export type AnalysisPosition = { turn: number; player1: PlayerState; player2: PlayerState; cheese: Coord[]; player1_last_move: Direction; player2_last_move: Direction }
-/**
- * Emitted when a bot disconnects mid-game.
- */
-export type BotDisconnectedEvent = { match_id: number; player: PlayerSide; reason: string }
 /**
  * Bot debug/analysis info forwarded from the host event stream.
  */
