@@ -2993,6 +2993,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "pyrat-host",
+ "pyrat-protocol",
  "pyrat-rust",
  "serde",
  "serde_json",

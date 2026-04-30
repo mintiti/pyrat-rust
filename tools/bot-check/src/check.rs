@@ -1,18 +1,21 @@
-use std::collections::HashMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 
-use pyrat::game::builder::GameConfig;
-use pyrat_host::game_loop::{
-    accept_connections, build_match_config, launch_bots, run_one_turn, run_setup, BotConfig,
-    MatchEvent, MatchSetup, PlayerEntry, PlayingConfig, PlayingState, SetupTiming, TurnOutcome,
+use pyrat::{Direction, GameBuilder};
+use pyrat_protocol::HashedTurnState;
+
+use pyrat_host::launch::{launch_bots, BotConfig};
+use pyrat_host::match_config::build_match_config;
+use pyrat_host::match_host::{
+    Match, MatchError, MatchEvent, PlayingConfig, SetupTiming, StepResult,
 };
-use pyrat_host::session::messages::SessionMsg;
-use pyrat_host::session::SessionConfig;
-use pyrat_host::stub::spawn_stub_bot;
+use pyrat_host::player::{
+    accept_players, AcceptError, EmbeddedBot, EmbeddedCtx, EmbeddedPlayer, EventSink, Options,
+    PlayerIdentity,
+};
 use pyrat_host::wire::{Player, TimingMode};
 
 use crate::manifest::BotManifest;
@@ -93,7 +96,26 @@ impl PhaseResult {
     }
 }
 
+// ── In-tool opponent ─────────────────────────────────
+
+/// Stay-only opponent. Combined with `with_max_turns(1)`, the match always
+/// terminates on the turn limit, exercising the full setup → start → step →
+/// finalize lifecycle in seconds.
+struct CheckOpponent;
+
+impl Options for CheckOpponent {}
+
+impl EmbeddedBot for CheckOpponent {
+    fn think(&mut self, _state: &HashedTurnState, _ctx: &EmbeddedCtx) -> Direction {
+        Direction::Stay
+    }
+}
+
 // ── Check flow ───────────────────────────────────────
+
+const CANDIDATE_SLOT: Player = Player::Player1;
+const OPPONENT_SLOT: Player = Player::Player2;
+const OPPONENT_AGENT_ID: &str = "__check_opponent__";
 
 pub async fn run_check(bot_dir: &Path) -> CheckReport {
     let bot_dir = match bot_dir.canonicalize() {
@@ -135,7 +157,17 @@ pub async fn run_check(bot_dir: &Path) -> CheckReport {
     // ── Phase 2: Launch bot ──────────────────────
     let t = Instant::now();
 
-    let mut game = match GameConfig::classic(7, 5, 3).create(Some(42)) {
+    // Single-turn match: candidate connects, configures, preprocesses, plays
+    // turn 1, sees GameOver from max-turn-limit, shuts down. Full lifecycle
+    // exercised in seconds.
+    let game = match GameBuilder::new(7, 5)
+        .with_classic_maze()
+        .with_corner_positions()
+        .with_random_cheese(3, true)
+        .with_max_turns(1)
+        .build()
+        .create(Some(42))
+    {
         Ok(g) => g,
         Err(e) => {
             phases.push(PhaseResult::fail(
@@ -182,202 +214,203 @@ pub async fn run_check(bot_dir: &Path) -> CheckReport {
 
     phases.push(PhaseResult::pass("launch", "process spawned", t.elapsed()));
 
-    // ── Phase 3: Setup handshake ─────────────────
+    // ── Phase 3: Connect (TCP accept) ────────────
     let t = Instant::now();
 
-    let (game_tx, mut game_rx) = mpsc::channel::<SessionMsg>(64);
-    let session_config = SessionConfig::default();
-    tokio::spawn(accept_connections(
-        listener,
-        game_tx.clone(),
-        session_config,
-    ));
+    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
+    let event_sink = EventSink::new(event_tx.clone());
 
-    // Spawn stub bot as Player 2.
-    let stub_session_id = pyrat_host::session::SessionId::STUB;
-    let _stub_handle = spawn_stub_bot(stub_session_id, "__stub__".into(), "Stub".into(), game_tx);
+    let accept_result = accept_players(
+        &listener,
+        &[(CANDIDATE_SLOT, agent_id.clone())],
+        event_sink.clone(),
+        Duration::from_secs(30),
+    )
+    .await;
 
-    let setup = MatchSetup {
-        players: vec![
-            PlayerEntry {
-                player: Player::Player1,
-                agent_id: agent_id.clone(),
-            },
-            PlayerEntry {
-                player: Player::Player2,
-                agent_id: "__stub__".into(),
-            },
-        ],
-        match_config,
-        bot_options: HashMap::new(),
-        timing: SetupTiming {
-            startup_timeout: Duration::from_secs(30),
-            preprocessing_timeout: Duration::from_secs(5),
+    let mut accepted = match accept_result {
+        Ok(slots) => slots,
+        Err(e) => {
+            let detail = match &e {
+                AcceptError::Timeout => format!(
+                    "Bot did not connect and identify within 30s. \
+                     Check that run_command starts and connects to $PYRAT_HOST_PORT. ({e})"
+                ),
+                _ => format!("accept failed: {e}"),
+            };
+            phases.push(PhaseResult::fail("connect", detail, t.elapsed()));
+            return finish_report(&bot_name, &agent_id, phases);
         },
     };
 
-    let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
+    let candidate = match accepted[0].take() {
+        Some(p) => p,
+        None => {
+            phases.push(PhaseResult::fail(
+                "connect",
+                "candidate slot did not receive a connection",
+                t.elapsed(),
+            ));
+            return finish_report(&bot_name, &agent_id, phases);
+        },
+    };
 
-    // NOTE: The host silently drops connections with unrecognized agent_ids, so if
-    // the bot connects with a wrong ID the startup timeout fires with a generic message.
-    // Fixing this properly requires a MatchEvent::ConnectionRejected variant in pyrat-host.
-    let setup_result = match run_setup(&setup, &mut game_rx, Some(&event_tx)).await {
-        Ok(r) => r,
+    phases.push(PhaseResult::pass(
+        "connect",
+        "TCP accepted, Identify received",
+        t.elapsed(),
+    ));
+
+    // ── Build the embedded opponent (post-Welcome) ──
+    let opponent_identity = PlayerIdentity {
+        name: "Check Opponent".into(),
+        author: "pyrat-check".into(),
+        agent_id: OPPONENT_AGENT_ID.into(),
+        slot: OPPONENT_SLOT,
+    };
+    let opponent =
+        match EmbeddedPlayer::accept(CheckOpponent, opponent_identity, event_sink.clone()).await {
+            Ok(p) => p,
+            Err(e) => {
+                phases.push(PhaseResult::fail(
+                    "connect",
+                    format!("failed to build embedded opponent: {e}"),
+                    Duration::ZERO,
+                ));
+                return finish_report(&bot_name, &agent_id, phases);
+            },
+        };
+
+    // ── Phase 4: Setup handshake (Configure → Ready → Preprocess) ──
+    let t = Instant::now();
+
+    let m = Match::new(
+        game,
+        [Box::new(candidate), Box::new(opponent)],
+        match_config,
+        [Vec::new(), Vec::new()],
+        SetupTiming {
+            configure_timeout: Duration::from_secs(5),
+            preprocessing_timeout: Duration::from_secs(5),
+        },
+        PlayingConfig {
+            move_timeout: Duration::from_secs(3),
+            ..PlayingConfig::default()
+        },
+        Some(event_tx.clone()),
+    );
+
+    let m = match m.setup().await {
+        Ok(m) => m,
         Err(e) => {
-            let detail = match &e {
-                pyrat_host::game_loop::SetupError::StartupTimeout { .. } => {
-                    format!("Bot did not connect and identify within 30s. Check that run_command starts and connects to $PYRAT_HOST_PORT. ({e})")
-                },
-                pyrat_host::game_loop::SetupError::BotDisconnected { .. } => {
-                    format!(
-                        "Bot disconnected during setup. Check for panics in startup code. ({e})"
-                    )
-                },
-                pyrat_host::game_loop::SetupError::PreprocessingTimeout { .. } => {
-                    format!("Bot didn't finish preprocessing within 5s. ({e})")
-                },
-                pyrat_host::game_loop::SetupError::AllDisconnected => {
-                    format!("All sessions disconnected during setup. ({e})")
-                },
-            };
+            let detail = format_setup_error(&e);
             phases.push(PhaseResult::fail("handshake", detail, t.elapsed()));
             return finish_report(&bot_name, &agent_id, phases);
         },
     };
 
-    let handshake_duration = t.elapsed();
+    phases.push(PhaseResult::pass(
+        "handshake",
+        "configure + ready + preprocess",
+        t.elapsed(),
+    ));
 
-    // Scan events for BotIdentified to get bot's reported name.
-    let mut identified_name = None;
-    while let Ok(event) = event_rx.try_recv() {
-        if let MatchEvent::BotIdentified {
-            player: Player::Player1,
-            ref name,
-            ..
-        } = event
-        {
-            identified_name = Some(name.clone());
-        }
-    }
-
-    let detail = format!(
-        "connect + identify + config + preprocess ({:.1}s)",
-        handshake_duration.as_secs_f64()
-    );
-    phases.push(PhaseResult::pass("handshake", detail, handshake_duration));
-
-    // ── Phase 4: Play 1 turn ─────────────────────
+    // ── Phase 5: Play one turn (turn loop, max_turns=1 ends it) ──
     let t = Instant::now();
+    let m = m.start();
 
-    let playing_config = PlayingConfig {
-        move_timeout: Duration::from_secs(3),
-        ..PlayingConfig::default()
-    };
-
-    let mut playing_state = PlayingState::new(&setup_result.sessions);
-
-    match run_one_turn(
-        &mut playing_state,
-        &mut game,
-        &setup_result.sessions,
-        &mut game_rx,
-        &playing_config,
-        Some(&event_tx),
-    )
-    .await
-    {
-        Ok(outcome) => {
-            // Check if the bot timed out.
-            let mut timed_out = false;
-            let mut action_name = None;
-            while let Ok(event) = event_rx.try_recv() {
-                match &event {
-                    MatchEvent::BotTimeout {
-                        player: Player::Player1,
-                        ..
-                    } => {
-                        timed_out = true;
-                    },
-                    MatchEvent::TurnPlayed { p1_action, .. } => {
-                        action_name = Some(format!("{p1_action:?}"));
-                    },
-                    _ => {},
-                }
-            }
-
-            if timed_out {
-                phases.push(PhaseResult::warn(
-                    "play",
-                    "turn 1 completed, but bot timed out (host used STAY as default)",
-                    t.elapsed(),
-                ));
-            } else {
-                let action = action_name.as_deref().unwrap_or("?");
-                let outcome_str = match outcome {
-                    TurnOutcome::Continue => "",
-                    TurnOutcome::GameOver(_) => " (game over)",
-                };
-                phases.push(PhaseResult::pass(
-                    "play",
-                    format!("turn 1 completed, action: {action}{outcome_str}"),
-                    t.elapsed(),
-                ));
-            }
-        },
-        Err(e) => {
+    let finished = match m.step().await {
+        Ok(StepResult::Continue(_)) => {
+            // max_turns=1 means the engine stops after turn 1; we should
+            // never see Continue. If we do, that's a bug in the test setup.
             phases.push(PhaseResult::fail(
                 "play",
-                format!("Bot disconnected during first turn. ({e})"),
+                "expected GameOver after turn 1 (max_turns=1)",
                 t.elapsed(),
             ));
-            return finish_report(
-                identified_name.as_deref().unwrap_or(&bot_name),
-                &agent_id,
-                phases,
-            );
+            return finish_report(&bot_name, &agent_id, phases);
         },
-    }
+        Ok(StepResult::GameOver(finished)) => finished,
+        Err(e) => {
+            let detail = format_play_error(&e);
+            phases.push(PhaseResult::fail("play", detail, t.elapsed()));
+            return finish_report(&bot_name, &agent_id, phases);
+        },
+    };
 
-    // ── Phase 5: Shutdown ────────────────────────
-    let t = Instant::now();
-    for s in &setup_result.sessions {
-        let _ = s
-            .cmd_tx
-            .send(pyrat_host::session::messages::HostCommand::Shutdown)
-            .await;
-    }
-
-    // Drain disconnect messages with 2s deadline.
-    let session_count = setup_result.sessions.len();
-    let mut disconnected = 0usize;
-    let drain_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-    while disconnected < session_count {
-        tokio::select! {
-            msg = game_rx.recv() => {
-                match msg {
-                    Some(SessionMsg::Disconnected { .. }) => { disconnected += 1; }
-                    Some(_) => {}
-                    None => break,
-                }
-            }
-            _ = tokio::time::sleep_until(drain_deadline) => {
-                break;
-            }
+    // Inspect collected events for candidate-specific signals.
+    let mut candidate_timed_out = false;
+    let mut candidate_action: Option<String> = None;
+    let mut identified_name: Option<String> = None;
+    while let Ok(event) = event_rx.try_recv() {
+        match event {
+            MatchEvent::BotIdentified {
+                player, ref name, ..
+            } if player == CANDIDATE_SLOT => {
+                identified_name = Some(name.clone());
+            },
+            MatchEvent::BotTimeout { player, .. } if player == CANDIDATE_SLOT => {
+                candidate_timed_out = true;
+            },
+            MatchEvent::TurnPlayed { p1_action, .. } => {
+                candidate_action = Some(format!("{p1_action:?}"));
+            },
+            _ => {},
         }
     }
-    // _bot_processes RAII guard kills the subprocess on drop.
-    let shutdown_detail = if disconnected == session_count {
-        "clean"
+
+    if candidate_timed_out {
+        phases.push(PhaseResult::warn(
+            "play",
+            "turn 1 completed, but bot timed out (host fell back to provisional / Stay)",
+            t.elapsed(),
+        ));
     } else {
-        "timed out waiting for disconnect"
-    };
-    phases.push(PhaseResult::pass("shutdown", shutdown_detail, t.elapsed()));
+        let action = candidate_action.as_deref().unwrap_or("?");
+        phases.push(PhaseResult::pass(
+            "play",
+            format!("turn 1 completed, action: {action} (game over by max-turn limit)"),
+            t.elapsed(),
+        ));
+    }
+
+    // ── Phase 6: Shutdown ────────────────────────
+    let t = Instant::now();
+    let _result = finished.finalize().await;
+    phases.push(PhaseResult::pass("shutdown", "clean", t.elapsed()));
+    // _bot_processes RAII guard kills the candidate subprocess on drop.
 
     finish_report(
         identified_name.as_deref().unwrap_or(&bot_name),
         &agent_id,
         phases,
     )
+}
+
+fn format_setup_error(e: &MatchError) -> String {
+    match e {
+        MatchError::SetupTimeout(_) => format!(
+            "Setup did not complete within the timeout (5s configure / 5s preprocess). \
+             Check for hangs in startup or preprocess. ({e})"
+        ),
+        MatchError::ReadyHashMismatch { .. } => format!(
+            "Bot reported a state hash that doesn't match the host's. \
+             SDK and engine state out of sync. ({e})"
+        ),
+        MatchError::BotDisconnected(_) => {
+            format!("Bot disconnected during setup. Check for panics in startup code. ({e})")
+        },
+        _ => format!("setup failed: {e}"),
+    }
+}
+
+fn format_play_error(e: &MatchError) -> String {
+    match e {
+        MatchError::BotDisconnected(_) => {
+            format!("Bot disconnected during play. ({e})")
+        },
+        _ => format!("play failed: {e}"),
+    }
 }
 
 fn finish_report(bot_name: &str, agent_id: &str, phases: Vec<PhaseResult>) -> CheckReport {

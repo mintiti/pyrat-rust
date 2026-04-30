@@ -9,7 +9,8 @@ use tracing::{info, warn};
 use pyrat::game::game_logic::GameState;
 use pyrat::{Coordinates, Direction as EngineDirection};
 
-use pyrat_host::game_loop::{build_match_config, launch_bots, BotConfig};
+use pyrat_host::launch::{launch_bots, BotConfig};
+use pyrat_host::match_config::build_match_config;
 use pyrat_host::match_host::{
     Collected, Match, MatchError, MatchEvent, Playing, PlayingConfig, SetupTiming, StepResult,
     Thinking,

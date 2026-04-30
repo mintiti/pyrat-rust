@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-use pyrat_host::game_loop;
+use pyrat_host::probe;
 use pyrat_host::wire::OptionType;
 
 // ---------------------------------------------------------------------------
@@ -87,7 +87,7 @@ pub async fn probe_bot(
     working_dir: String,
     agent_id: String,
 ) -> Result<BotProbeResult, String> {
-    let result = game_loop::probe_bot(run_command, working_dir, agent_id)
+    let result = probe::probe_bot(run_command, working_dir, agent_id)
         .await
         .map_err(|e| e.to_string())?;
 

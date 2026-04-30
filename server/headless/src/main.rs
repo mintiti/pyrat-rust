@@ -10,7 +10,8 @@ use tracing::{info, info_span, warn, Instrument};
 
 use pyrat::game::builder::GameConfig;
 
-use pyrat_host::game_loop::{build_match_config, launch_bots, BotConfig};
+use pyrat_host::launch::{launch_bots, BotConfig};
+use pyrat_host::match_config::build_match_config;
 use pyrat_host::match_host::{Match, MatchEvent, MatchResult, PlayingConfig, SetupTiming};
 use pyrat_host::player::{accept_players, EventSink, Player as PlayerTrait};
 use pyrat_host::wire::{GameResult, Player, TimingMode};
