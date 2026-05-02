@@ -6,7 +6,6 @@ import { commands } from "../bindings";
 import type {
 	AnalysisActions,
 	AnalysisPosition,
-	BotDisconnectedEvent,
 	BotInfoEvent,
 	Coord,
 	Direction,
@@ -106,6 +105,27 @@ function mainlinePath(n: number): number[] {
 	return new Array(n).fill(0);
 }
 
+/**
+ * BFS the tree for the first node matching `(turn, stateHash)`. Used to route
+ * sideband events (BotInfo) to the correct node in analysis mode, where the
+ * cursor may sit on an injected branch with the same turn number as the
+ * mainline. Returns null if no node matches — the event is dropped silently.
+ */
+function findNodeByTurnAndHash(
+	root: GameNode,
+	turn: number,
+	stateHash: string,
+): GameNode | null {
+	const queue: GameNode[] = [root];
+	while (queue.length > 0) {
+		const node = queue.shift();
+		if (!node) break;
+		if (node.turn === turn && node.stateHash === stateHash) return node;
+		queue.push(...node.children);
+	}
+	return null;
+}
+
 /** Build an AnalysisPosition from a tree node (for cursor-follows-analysis). */
 export function buildAnalysisPosition(
 	root: GameNode,
@@ -134,7 +154,6 @@ interface MatchState {
 	result: MatchOverEvent | null;
 	error: string | null;
 	analysisError: string | null;
-	disconnection: BotDisconnectedEvent | null;
 
 	// Game tree
 	root: GameNode | null;
@@ -178,7 +197,6 @@ interface MatchState {
 	onSetupComplete: (matchId: number) => void;
 	onError: (message: string) => void;
 	onAnalysisError: (message: string) => void;
-	onDisconnect: (e: BotDisconnectedEvent) => void;
 
 	// Actions
 	beginConnecting: () => void;
@@ -247,8 +265,16 @@ function flushBotInfo() {
 				if (!state.root) return;
 				for (const e of batch) {
 					if (state.pausedSenders[e.sender]) continue;
-					const node = getNodeAtPath(state.root, mainlinePath(e.turn));
-					if (node) accumulateBotInfo(node.botInfo, e);
+					// Route by (turn, state_hash): in analysis mode the cursor
+					// can sit on a non-mainline branch with the same turn
+					// number, so mainline routing would attach info to the
+					// wrong node. Fall back to the mainline turn if no
+					// matching node exists yet (e.g. info arrived before the
+					// turn was even applied) so we don't lose early frames.
+					const target =
+						findNodeByTurnAndHash(state.root, e.turn, e.state_hash) ??
+						getNodeAtPath(state.root, mainlinePath(e.turn));
+					if (target) accumulateBotInfo(target.botInfo, e);
 				}
 			}),
 		);
@@ -265,7 +291,6 @@ const IDLE_MATCH = {
 	result: null as MatchOverEvent | null,
 	error: null as string | null,
 	analysisError: null as string | null,
-	disconnection: null as BotDisconnectedEvent | null,
 	player1Options: {} as Record<string, string>,
 	player2Options: {} as Record<string, string>,
 	matchPhase: "idle" as MatchPhase,
@@ -434,16 +459,11 @@ export const useMatchStore = create<MatchState>((set, get) => ({
 		set({ analysisError: message });
 	},
 
-	onDisconnect: (e) => {
-		set({ disconnection: e });
-	},
-
 	// ── Actions ─────────────────────────────────────────────
 	beginConnecting: () => {
 		set({
 			error: null,
 			result: null,
-			disconnection: null,
 			matchPhase: "connecting",
 		});
 	},

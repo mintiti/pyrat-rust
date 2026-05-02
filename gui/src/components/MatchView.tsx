@@ -56,7 +56,6 @@ export default function MatchView({ onNewMatch }: Props) {
 		onMatchOver,
 		onBotInfo,
 		onError,
-		onDisconnect,
 		advanceCursor,
 		goToStart,
 		goToEnd,
@@ -95,10 +94,6 @@ export default function MatchView({ onNewMatch }: Props) {
 			events.matchErrorEvent.listen((e) => {
 				if (e.payload.match_id !== matchIdRef.current) return;
 				onError(e.payload.message);
-			}),
-			events.botDisconnectedEvent.listen((e) => {
-				if (e.payload.match_id !== matchIdRef.current) return;
-				onDisconnect(e.payload);
 			}),
 			events.botInfoEvent.listen((e) => {
 				if (e.payload.match_id !== matchIdRef.current) return;

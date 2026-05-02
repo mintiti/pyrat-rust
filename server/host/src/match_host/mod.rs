@@ -1,0 +1,26 @@
+//! Match lifecycle: `Match<S>` drives two [`Player`](crate::player::Player)
+//! handles through Created → Ready → Playing → Finished, with
+//! `Thinking` / `Collected` sub-states branching off `Playing` for analysis
+//! mode (GUI step-by-step control).
+//!
+//! Each phase is a distinct type. Transitions consume `self` and return the
+//! next phase, so calling `step()` before `setup()` is a compile error. The
+//! Match owns the engine state, both players, the per-player option
+//! assignments, and the event sink — every protocol message flows through
+//! one place. Sideband (Info, Provisional, RenderCommands) is forwarded to
+//! the [`EventSink`](crate::player::EventSink) by each Player; the Match
+//! itself never inspects it.
+
+mod config;
+mod error;
+mod events;
+mod phases;
+mod policy;
+mod result;
+
+pub use config::{PlayingConfig, SetupTiming};
+pub use error::MatchError;
+pub use events::MatchEvent;
+pub use phases::{Collected, Created, Finished, Match, Playing, Ready, StepResult, Thinking};
+pub use policy::{ActionOutcome, DefaultFaultPolicy, FaultPolicy, StrictFaultPolicy};
+pub use result::MatchResult;

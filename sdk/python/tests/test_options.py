@@ -3,18 +3,10 @@
 from __future__ import annotations
 
 import pytest
-from conftest import (
-    MockConnection,
-    build_host_packet,
-    build_set_option,
-    make_lifecycle_frames,
-)
+from conftest import MockConnection, make_lifecycle_frames
 
+from pyrat_sdk._engine import parse_bot_frame
 from pyrat_sdk._wire import codec
-from pyrat_sdk._wire.protocol.BotMessage import BotMessage
-from pyrat_sdk._wire.protocol.BotPacket import BotPacket
-from pyrat_sdk._wire.protocol.HostMessage import HostMessage
-from pyrat_sdk._wire.protocol.Identify import Identify
 from pyrat_sdk.bot import _run_lifecycle, _validate_direction
 from pyrat_sdk.options import (
     Check,
@@ -103,7 +95,6 @@ class TestValidation:
             s.validate_default()
 
     def test_spin_bool_rejected(self):
-        """bool is a subclass of int — should still be rejected."""
         with pytest.raises(TypeError, match="must be int"):
             s = Spin(default=True, min=0, max=1)
             s.name = "bad"
@@ -206,22 +197,23 @@ class TestCollection:
         by_name = {w["name"]: w for w in wire}
 
         depth = by_name["depth"]
-        assert depth["wire_type"] == 1
-        assert depth["default_str"] == "3"
+        assert depth["option_type"] == 1  # Spin
+        assert depth["default_value"] == "3"
         assert depth["min"] == 1
         assert depth["max"] == 10
+        assert depth["choices"] == []
 
         avoid_mud = by_name["avoid_mud"]
-        assert avoid_mud["wire_type"] == 0
-        assert avoid_mud["default_str"] == "true"
+        assert avoid_mud["option_type"] == 0  # Check
+        assert avoid_mud["default_value"] == "true"
 
         strategy = by_name["strategy"]
-        assert strategy["wire_type"] == 2
+        assert strategy["option_type"] == 2  # Combo
         assert strategy["choices"] == ["greedy", "defensive", "random"]
 
         model_path = by_name["model_path"]
-        assert model_path["wire_type"] == 3
-        assert model_path["default_str"] == ""
+        assert model_path["option_type"] == 3  # String
+        assert model_path["default_value"] == ""
 
     def test_inheritance_override(self):
         opts = collect_options(ChildBot)
@@ -256,7 +248,7 @@ class TestApplySetOption:
 
 
 # ══════════════════════════════════════════════════════════
-# 6. Codec roundtrip
+# 6. Codec roundtrip — Identify
 # ══════════════════════════════════════════════════════════
 
 
@@ -264,50 +256,23 @@ class TestCodecRoundtrip:
     def test_encode_identify_with_options(self):
         opts = collect_options(FakeBot)
         wire = options_to_wire(opts)
-        buf = codec.encode_identify("TestBot", "Tester", "", wire)
+        msg = parse_bot_frame(codec.encode_identify("TestBot", "Tester", "agent", wire))
 
-        # Decode the BotPacket to get to the Identify table.
-        packet = BotPacket.GetRootAs(buf)
-        assert packet.MessageType() == BotMessage.Identify
-
-        ident = Identify()
-        ident.Init(packet.Message().Bytes, packet.Message().Pos)
-
-        assert ident.Name() == b"TestBot"
-        assert ident.Author() == b"Tester"
-        assert not ident.OptionsIsNone()
-        assert ident.OptionsLength() == len(wire)
-
-        # Verify each OptionDef.
-        seen = set()
-        for i in range(ident.OptionsLength()):
-            od = ident.Options(i)
-            name = od.Name()
-            if isinstance(name, bytes):
-                name = name.decode("utf-8")
-            seen.add(name)
-
-        assert seen == {"depth", "avoid_mud", "strategy", "model_path"}
+        assert msg["kind"] == "Identify"
+        assert msg["name"] == "TestBot"
+        assert msg["author"] == "Tester"
+        assert msg["agent_id"] == "agent"
+        assert {o["name"] for o in msg["options"]} == {
+            "depth",
+            "avoid_mud",
+            "strategy",
+            "model_path",
+        }
 
     def test_encode_identify_without_options(self):
-        buf = codec.encode_identify("Plain", "Nobody", "")
-
-        packet = BotPacket.GetRootAs(buf)
-        ident = Identify()
-        ident.Init(packet.Message().Bytes, packet.Message().Pos)
-
-        assert ident.OptionsIsNone()
-
-    def test_extract_set_option(self):
-        buf = build_host_packet(
-            HostMessage.SetOption,
-            lambda b: build_set_option(b, "depth", "7"),
-        )
-        msg_type, table = codec.decode_host_packet(buf)
-        assert msg_type == HostMessage.SetOption
-        name, value = codec.extract_set_option(table)
-        assert name == "depth"
-        assert value == "7"
+        msg = parse_bot_frame(codec.encode_identify("Plain", "Nobody"))
+        assert msg["kind"] == "Identify"
+        assert msg["options"] == []
 
 
 # ══════════════════════════════════════════════════════════
@@ -316,11 +281,11 @@ class TestCodecRoundtrip:
 
 
 class TestLifecycleIntegration:
-    def test_set_option_applied(self):
+    def test_configure_options_applied(self):
         bot = FakeBot()
-        assert bot.depth == 3  # default
+        assert bot.depth == 3
 
-        frames = make_lifecycle_frames(set_options=[("depth", "7")])
+        frames = make_lifecycle_frames(configure_options=[("depth", "7")])
         conn = MockConnection(frames)
         _run_lifecycle(
             conn,
@@ -331,7 +296,7 @@ class TestLifecycleIntegration:
         )
         assert bot.depth == 7
 
-    def test_defaults_preserved_without_set_option(self):
+    def test_defaults_preserved_without_configure_options(self):
         bot = FakeBot()
         frames = make_lifecycle_frames()
         conn = MockConnection(frames)
@@ -347,14 +312,14 @@ class TestLifecycleIntegration:
         assert bot.strategy == "greedy"
 
     def test_turn_fn_called(self):
-        """TurnState frame before GameOver triggers turn_fn."""
+        """Each Go frame in the lifecycle invokes turn_fn once."""
         bot = PlainBot()
         calls = []
 
         def turn_fn(state, ctx, conn):
             calls.append(state.turn)
 
-        frames = make_lifecycle_frames(turn_states=2)
+        frames = make_lifecycle_frames(turn_count=2)
         conn = MockConnection(frames)
         _run_lifecycle(
             conn,
@@ -363,28 +328,9 @@ class TestLifecycleIntegration:
             preprocess_fn=lambda state, ctx: None,
             turn_fn=turn_fn,
         )
-        assert calls == [1, 2]
-
-    def test_ping_gets_pong(self):
-        """Ping frame triggers a Pong response."""
-        bot = PlainBot()
-        frames = make_lifecycle_frames(include_ping=True)
-        conn = MockConnection(frames)
-        _run_lifecycle(
-            conn,
-            "",
-            bot=bot,
-            preprocess_fn=lambda state, ctx: None,
-            turn_fn=lambda state, ctx, c: None,
-        )
-        # Find the Pong in sent frames (after Identify, Ready, PreprocessingDone).
-        pong_found = False
-        for frame in conn.sent:
-            packet = BotPacket.GetRootAs(frame)
-            if packet.MessageType() == BotMessage.Pong:
-                pong_found = True
-                break
-        assert pong_found
+        # State stays at turn 0 across consecutive Go frames (no Advance between
+        # them in this simple lifecycle), so we only check the count.
+        assert len(calls) == 2
 
 
 # ══════════════════════════════════════════════════════════
@@ -395,7 +341,6 @@ class TestLifecycleIntegration:
 class TestHandleTurn:
     def test_think_raises_sends_stay(self):
         """If think() raises, STAY is sent."""
-        from pyrat_sdk._wire.protocol.Action import Action
         from pyrat_sdk.bot import Bot
 
         class CrashBot(Bot):
@@ -406,7 +351,7 @@ class TestHandleTurn:
                 raise RuntimeError("boom")
 
         bot = CrashBot()
-        frames = make_lifecycle_frames(turn_states=1)
+        frames = make_lifecycle_frames(turn_count=1)
         conn = MockConnection(frames)
         _run_lifecycle(
             conn,
@@ -415,13 +360,11 @@ class TestHandleTurn:
             preprocess_fn=bot.preprocess,
             turn_fn=bot._handle_turn,
         )
-        # Last sent frame should be an Action with STAY (4).
-        action_frame = conn.sent[-1]
-        packet = BotPacket.GetRootAs(action_frame)
-        assert packet.MessageType() == BotMessage.Action
-        action = Action()
-        action.Init(packet.Message().Bytes, packet.Message().Pos)
-        assert action.Direction() == 4  # STAY
+
+        # Find the Action frame.
+        actions = [parse_bot_frame(f) for f in conn.sent]
+        action = next(a for a in actions if a.get("kind") == "Action")
+        assert action["direction"] == 4  # STAY
 
 
 class TestValidateDirection:

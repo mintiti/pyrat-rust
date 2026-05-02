@@ -1,29 +1,40 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use tokio::sync::mpsc;
+use tokio::net::TcpListener;
+use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use pyrat::game::game_logic::GameState;
 use pyrat::{Coordinates, Direction as EngineDirection};
-use pyrat_host::game_loop::{
-    build_match_config, determine_result, run_playing, run_setup, HashedTurnState, Info,
-    MatchEvent, MatchSetup, PlayerEntry, PlayingConfig, PlayingState, SetupTiming, TurnState,
+
+use pyrat_host::launch::{launch_bots, BotConfig};
+use pyrat_host::match_config::build_match_config;
+use pyrat_host::match_host::{
+    Collected, Match, MatchError, MatchEvent, Playing, PlayingConfig, SetupTiming, StepResult,
+    Thinking,
 };
-use pyrat_host::session::messages::{HostCommand, SessionId, SessionMsg};
-use pyrat_host::stub::spawn_stub_bot;
+use pyrat_host::player::{
+    accept_players, EmbeddedPlayer, EventSink, Player as PlayerTrait, PlayerIdentity,
+};
 use pyrat_host::wire::{GameResult, Player, TimingMode};
+use pyrat_protocol::TurnState;
 
 use tauri_specta::Event;
 
 use crate::commands::{AnalysisPosition, Coord, PlayerState};
 use crate::events::{
-    BotDisconnectedEvent, BotInfoEvent, Direction as SpectaDirection, MatchOverEvent, MatchWinner,
-    PlayerSide, PreprocessingStartedEvent, SetupCompleteEvent, TurnPlayedEvent,
+    BotInfoEvent, Direction as SpectaDirection, MatchOverEvent, MatchWinner, PlayerSide,
+    PreprocessingStartedEvent, SetupCompleteEvent, TurnPlayedEvent,
 };
-use crate::state::AnalysisRx;
+use crate::random_bot::RandomBot;
+use crate::state::{AnalysisCmd, AnalysisResp, AnalysisRx};
+
+const STUB_SENTINEL: &str = "__random__";
+const MOVE_TIMEOUT_MS: u32 = 3000;
+const PREPROCESSING_TIMEOUT_MS: u32 = 10000;
+const STARTUP_TIMEOUT_MS: u64 = 30000;
 
 pub fn engine_to_specta(d: EngineDirection) -> SpectaDirection {
     match d {
@@ -53,9 +64,6 @@ fn player_side(p: Player) -> PlayerSide {
     }
 }
 
-/// Sentinel command value that means "use the built-in random stub bot".
-const STUB_SENTINEL: &str = "__random__";
-
 /// Per-player config passed from the command layer.
 pub struct PlayerSetup {
     pub command: String,
@@ -64,342 +72,383 @@ pub struct PlayerSetup {
     pub options: Vec<(String, String)>,
 }
 
-/// Run a full match, emitting Tauri events for each phase.
+/// Run a match, emitting Tauri events for each phase.
 ///
-/// When `cmd_rx` is `Some`, runs in analysis (step) mode instead of auto-play.
+/// `cmd_rx = None` runs auto-mode (`Match::run`). `cmd_rx = Some` enters
+/// analysis-mode and dispatches per-command typestate transitions.
 pub async fn run_match(
     app: tauri::AppHandle,
-    mut game: GameState,
+    game: GameState,
     players: [PlayerSetup; 2],
     cancel: CancellationToken,
     match_id: u32,
     cmd_rx: Option<AnalysisRx>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let [ref p1, ref p2] = players;
-    let p1_is_stub = p1.command == STUB_SENTINEL;
-    let p2_is_stub = p2.command == STUB_SENTINEL;
+    let p1_is_stub = players[0].command == STUB_SENTINEL;
+    let p2_is_stub = players[1].command == STUB_SENTINEL;
 
-    // Disambiguate agent_ids when both players use the same bot,
-    // otherwise the host treats them as a hivemind (one process, both slots).
-    let (p1_agent_id, p2_agent_id) = if p1.agent_id == p2.agent_id {
-        (format!("{}/1", p1.agent_id), format!("{}/2", p2.agent_id))
+    // Disambiguate agent_ids when both slots use the same bot — accept_players
+    // rejects duplicate agent_ids as HivemindNotSupported.
+    let (p1_agent_id, p2_agent_id) = if players[0].agent_id == players[1].agent_id {
+        (
+            format!("{}/1", players[0].agent_id),
+            format!("{}/2", players[1].agent_id),
+        )
     } else {
-        (p1.agent_id.clone(), p2.agent_id.clone())
+        (players[0].agent_id.clone(), players[1].agent_id.clone())
     };
 
-    // 1. Build match config
-    // In step (analysis) mode, use 0 timeout so bots loop on should_stop() indefinitely
-    let move_timeout = if cmd_rx.is_some() { 0 } else { 3000 };
-    let match_config = build_match_config(&game, TimingMode::Wait, move_timeout, 10000);
+    let match_config = build_match_config(
+        &game,
+        TimingMode::Wait,
+        MOVE_TIMEOUT_MS,
+        PREPROCESSING_TIMEOUT_MS,
+    );
 
-    let mut bot_options: HashMap<String, Vec<(String, String)>> = HashMap::new();
-    if !p1.options.is_empty() {
-        bot_options.insert(p1_agent_id.clone(), p1.options.clone());
-    }
-    if !p2.options.is_empty() {
-        bot_options.insert(p2_agent_id.clone(), p2.options.clone());
-    }
-
-    let setup = MatchSetup {
-        players: vec![
-            PlayerEntry {
-                player: Player::Player1,
-                agent_id: p1_agent_id.clone(),
-            },
-            PlayerEntry {
-                player: Player::Player2,
-                agent_id: p2_agent_id.clone(),
-            },
-        ],
-        match_config,
-        bot_options,
-        timing: SetupTiming {
-            startup_timeout: Duration::from_secs(30),
-            preprocessing_timeout: Duration::from_secs(10),
-        },
-    };
-
-    // 2. Create channels
     let (event_tx, event_rx) = mpsc::unbounded_channel::<MatchEvent>();
-    let (game_tx, mut game_rx) = mpsc::channel::<SessionMsg>(64);
+    let event_sink = EventSink::new(event_tx.clone());
 
-    // 3. Spawn stub bots and/or real bot infrastructure
-    let mut _stub_handles = Vec::new();
-    let mut _accept_handle = None;
+    // Bind listener + launch real bots (if any), accept TCP players first; then
+    // fill remaining slots with EmbeddedPlayer<RandomBot>. `_bot_processes`
+    // owns child handles for the rest of the function so the bots stay alive.
     let mut _bot_processes = None;
-
-    let mut next_session_id: u64 = 1;
-
-    if p1_is_stub {
-        let sid = SessionId(next_session_id);
-        next_session_id += 1;
-        _stub_handles.push(spawn_stub_bot(
-            sid,
-            p1_agent_id.clone(),
-            "Random Bot".into(),
-            game_tx.clone(),
-        ));
-    }
-
-    if p2_is_stub {
-        let sid = SessionId(next_session_id);
-        let _ = next_session_id;
-        _stub_handles.push(spawn_stub_bot(
-            sid,
-            p2_agent_id.clone(),
-            "Random Bot".into(),
-            game_tx.clone(),
-        ));
-    }
+    let mut tcp_slots: [Option<Box<dyn PlayerTrait>>; 2] = [None, None];
 
     if !p1_is_stub || !p2_is_stub {
-        use pyrat_host::game_loop::{accept_connections, launch_bots, BotConfig};
-        use pyrat_host::session::SessionConfig;
-        use tokio::net::TcpListener;
-
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let port = listener.local_addr()?.port();
         info!(port, "listening for bot connections");
 
         let default_cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
         let mut bot_configs = Vec::new();
+        let mut expected = Vec::new();
 
         if !p1_is_stub {
             bot_configs.push(BotConfig {
-                run_command: p1.command.clone(),
-                working_dir: p1
+                run_command: players[0].command.clone(),
+                working_dir: players[0]
                     .working_dir
                     .as_deref()
                     .map(PathBuf::from)
                     .unwrap_or_else(|| default_cwd.clone()),
                 agent_id: p1_agent_id.clone(),
             });
+            expected.push((Player::Player1, p1_agent_id.clone()));
         }
         if !p2_is_stub {
             bot_configs.push(BotConfig {
-                run_command: p2.command.clone(),
-                working_dir: p2
+                run_command: players[1].command.clone(),
+                working_dir: players[1]
                     .working_dir
                     .as_deref()
                     .map(PathBuf::from)
                     .unwrap_or(default_cwd),
-                agent_id: p2_agent_id,
+                agent_id: p2_agent_id.clone(),
             });
+            expected.push((Player::Player2, p2_agent_id.clone()));
         }
 
-        _bot_processes = Some(launch_bots(&bot_configs, port)?);
-        let session_config = SessionConfig::default();
-        _accept_handle = Some(tokio::spawn(accept_connections(
-            listener,
-            game_tx.clone(),
-            session_config,
-        )));
+        let mut launched = launch_bots(&bot_configs, port)?;
+
+        // Drain bot stderr so the OS pipe buffer doesn't fill and block the
+        // bot mid-write, and so we actually see panics / SDK errors. Mirrors
+        // the pattern in headless main.rs.
+        for (agent_id, stderr) in launched.take_stderr_handles() {
+            tokio::task::spawn_blocking(move || {
+                use std::io::BufRead;
+                let reader = std::io::BufReader::new(stderr);
+                let mut count = 0usize;
+                const MAX_LINES: usize = 200;
+                for line in reader.lines() {
+                    match line {
+                        Ok(text) if count < MAX_LINES => {
+                            warn!(%agent_id, "{text}");
+                            count += 1;
+                        },
+                        Ok(_) if count == MAX_LINES => {
+                            warn!(%agent_id, "stderr truncated after {MAX_LINES} lines");
+                            count += 1;
+                        },
+                        Ok(_) => {},
+                        Err(_) => break,
+                    }
+                }
+            });
+        }
+        launched.start_exit_monitor(tracing::Span::current());
+        _bot_processes = Some(launched);
+
+        let accepted = accept_players(
+            &listener,
+            &expected,
+            event_sink.clone(),
+            Duration::from_millis(STARTUP_TIMEOUT_MS),
+        )
+        .await?;
+        let [a, b] = accepted;
+        if let Some(t) = a {
+            tcp_slots[0] = Some(Box::new(t) as Box<dyn PlayerTrait>);
+        }
+        if let Some(t) = b {
+            tcp_slots[1] = Some(Box::new(t) as Box<dyn PlayerTrait>);
+        }
     }
 
-    // 4. Spawn event forwarder — converts MatchEvents to Tauri events
+    let mut slots: [Option<Box<dyn PlayerTrait>>; 2] = [None, None];
+    for (i, slot, agent_id, is_stub) in [
+        (0usize, Player::Player1, p1_agent_id.clone(), p1_is_stub),
+        (1usize, Player::Player2, p2_agent_id.clone(), p2_is_stub),
+    ] {
+        if is_stub {
+            let identity = PlayerIdentity {
+                name: "Random Bot".into(),
+                author: "stub".into(),
+                agent_id,
+                slot,
+            };
+            let p = EmbeddedPlayer::accept(RandomBot, identity, event_sink.clone()).await?;
+            slots[i] = Some(Box::new(p) as Box<dyn PlayerTrait>);
+        } else {
+            slots[i] = tcp_slots[i].take();
+        }
+    }
+    let p1 = slots[0].take().ok_or("missing player1")?;
+    let p2 = slots[1].take().ok_or("missing player2")?;
+
     let forwarder = tokio::spawn(forward_events(event_rx, app.clone(), match_id));
 
-    // 5. Run match logic with cancellation support
+    let p1_opts = players[0].options.clone();
+    let p2_opts = players[1].options.clone();
+
+    let m = Match::new(
+        game,
+        [p1, p2],
+        match_config,
+        [p1_opts, p2_opts],
+        SetupTiming {
+            configure_timeout: Duration::from_secs(5),
+            preprocessing_timeout: Duration::from_millis(u64::from(PREPROCESSING_TIMEOUT_MS)),
+        },
+        PlayingConfig {
+            move_timeout: Duration::from_millis(u64::from(MOVE_TIMEOUT_MS)),
+            ..PlayingConfig::default()
+        },
+        Some(event_tx.clone()),
+    );
+
     let result = tokio::select! {
         biased;
-        _ = cancel.cancelled() => Err("Match cancelled".into()),
+        _ = cancel.cancelled() => Err::<(), Box<dyn std::error::Error + Send + Sync>>("Match cancelled".into()),
         r = async {
             match cmd_rx {
-                Some(mut rx) => run_analysis_inner(&mut game, &setup, &mut game_rx, &event_tx, &mut rx).await,
-                None => run_match_inner(&mut game, &setup, &mut game_rx, &event_tx).await,
+                None => m.run().await.map(|_| ()).map_err(boxed),
+                Some(rx) => run_analysis(m, rx).await,
             }
         } => r,
     };
 
-    // 6. Cleanup — runs on both cancel and normal completion
-    if let Some(h) = _accept_handle {
-        h.abort();
-    }
-    for h in _stub_handles {
-        h.abort();
-    }
     drop(event_tx);
     let _ = forwarder.await;
-
+    drop(_bot_processes);
     result
 }
 
-/// The actual match logic (setup + playing + shutdown), separated so
-/// `tokio::select!` can race it against cancellation.
-async fn run_match_inner(
-    game: &mut GameState,
-    setup: &MatchSetup,
-    game_rx: &mut mpsc::Receiver<SessionMsg>,
-    event_tx: &mpsc::UnboundedSender<MatchEvent>,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let setup_result = run_setup(setup, game_rx, Some(event_tx)).await?;
-
-    let playing_config = PlayingConfig {
-        move_timeout: Duration::from_secs(3),
-        ..PlayingConfig::default()
-    };
-    let _match_result = run_playing(
-        game,
-        &setup_result.sessions,
-        game_rx,
-        &playing_config,
-        Some(event_tx),
-    )
-    .await?;
-
-    shutdown_sessions(&setup_result.sessions, game_rx).await;
-    Ok(())
+fn boxed(e: MatchError) -> Box<dyn std::error::Error + Send + Sync> {
+    Box::new(e) as Box<dyn std::error::Error + Send + Sync>
 }
 
 // ── Analysis (step) mode ────────────────────────────
 
-use crate::state::{AnalysisCmd, AnalysisResp};
-use pyrat_host::game_loop::SessionHandle;
-
-enum AnalysisPhase {
-    Idle,
-    Collecting {
-        turn: u16,
-        p1_action: Option<EngineDirection>,
-        p2_action: Option<EngineDirection>,
-        deadline: Option<tokio::time::Instant>,
-    },
+enum AnalysisState {
+    Playing(Match<Playing>),
+    Thinking(Match<Thinking>),
+    Collected(Match<Collected>),
+    Finished,
 }
 
-/// Analysis mode: setup then enter command loop for turn-by-turn control.
-async fn run_analysis_inner(
-    game: &mut GameState,
-    setup: &MatchSetup,
-    game_rx: &mut mpsc::Receiver<SessionMsg>,
-    event_tx: &mpsc::UnboundedSender<MatchEvent>,
-    cmd_rx: &mut AnalysisRx,
+async fn run_analysis(
+    m: Match<pyrat_host::match_host::Created>,
+    mut cmd_rx: AnalysisRx,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let setup_result = run_setup(setup, game_rx, Some(event_tx)).await?;
-    let sessions = &setup_result.sessions;
-    let mut playing = PlayingState::new(sessions);
-    let mut phase = AnalysisPhase::Idle;
+    let ready = m.setup().await.map_err(boxed)?;
+    let mut state = AnalysisState::Playing(ready.start());
 
-    loop {
-        let (collecting, has_deadline, deadline) = match &phase {
-            AnalysisPhase::Idle => (false, false, tokio::time::Instant::now()),
-            AnalysisPhase::Collecting { deadline, .. } => {
-                let has = deadline.is_some();
-                let dl = deadline
-                    .unwrap_or_else(|| tokio::time::Instant::now() + Duration::from_secs(86400));
-                (true, has, dl)
-            },
-        };
-
-        tokio::select! {
-            biased;
-
-            cmd = cmd_rx.recv() => {
-                let Some((cmd, reply)) = cmd else { break; };
-                match cmd {
-                    AnalysisCmd::StartTurn { position } => {
-                        // If collecting, stop + drain first
-                        if collecting {
-                            send_stop(sessions, &mut playing).await;
-                            drain_rx(game_rx);
-                        }
-
-                        // Build turn state: from explicit position or from live game state
-                        let turn_state = match position {
-                            Some(pos) => build_turn_state_from_position(pos),
-                            None => playing.build_turn_state(game),
-                        };
-                        let turn = turn_state.turn;
-                        send_turn_state(sessions, &mut playing, &turn_state).await;
-
-                        phase = AnalysisPhase::Collecting {
-                            turn,
-                            p1_action: None,
-                            p2_action: None,
-                            deadline: None,
-                        };
-                        let _ = reply.send(AnalysisResp::TurnStarted);
-                    }
-
-                    AnalysisCmd::StopTurn => {
-                        let (p1, p2) = finish_collecting(
-                            sessions, &mut playing, game_rx, &mut phase, event_tx,
-                        ).await;
-                        let _ = reply.send(AnalysisResp::Actions { p1, p2 });
-                    }
-
-                    AnalysisCmd::Advance { actions } => {
-                        // Stop + collect if currently collecting
-                        let (collected_p1, collected_p2) = if collecting {
-                            finish_collecting(
-                                sessions, &mut playing, game_rx, &mut phase, event_tx,
-                            ).await
-                        } else {
-                            (EngineDirection::Stay, EngineDirection::Stay)
-                        };
-
-                        // Provided actions override collected ones
-                        let (p1, p2) = if let Some([a1, a2]) = actions {
-                            (a1, a2)
-                        } else {
-                            (collected_p1, collected_p2)
-                        };
-
-                        // Step the engine
-                        let result = game.process_turn(p1, p2);
-                        playing.record_actions(p1, p2);
-
-                        // Emit TurnPlayed
-                        let turn_state = playing.build_turn_state(game);
-                        emit_event(event_tx, MatchEvent::TurnPlayed {
-                            state: turn_state.clone(),
-                            p1_action: p1,
-                            p2_action: p2,
-                            p1_think_ms: 0,
-                            p2_think_ms: 0,
-                        });
-
-                        if result.game_over {
-                            let match_result = determine_result(game);
-                            send_game_over(sessions, &mut playing, &match_result).await;
-                            emit_event(event_tx, MatchEvent::MatchOver {
-                                result: match_result,
-                            });
-                            let _ = reply.send(AnalysisResp::Advanced {
-                                p1, p2, game_over: true,
-                            });
-                            break;
-                        }
-
-                        phase = AnalysisPhase::Idle;
-                        let _ = reply.send(AnalysisResp::Advanced {
-                            p1, p2, game_over: false,
-                        });
-                    }
-                }
-            }
-
-            msg = game_rx.recv(), if collecting => {
-                let Some(msg) = msg else { break; };
-                handle_bot_msg(msg, &mut phase, &mut playing, event_tx);
-            }
-
-            _ = tokio::time::sleep_until(deadline), if collecting && has_deadline => {
-                // Deadline hit: send Stop to all sessions, remove deadline
-                send_stop(sessions, &mut playing).await;
-                if let AnalysisPhase::Collecting { deadline: ref mut dl, .. } = phase {
-                    *dl = None;
-                }
-            }
+    while let Some((cmd, reply)) = cmd_rx.recv().await {
+        state = step_analysis(state, cmd, reply).await?;
+        if matches!(state, AnalysisState::Finished) {
+            break;
         }
     }
 
-    shutdown_sessions(sessions, game_rx).await;
+    // Caller closed the channel without reaching GameOver. Drop runs Player
+    // close on Drop; Thinking gets a graceful stop_and_collect first so
+    // bot dispatchers see Stop and don't dangle.
+    if let AnalysisState::Thinking(t) = state {
+        let _ = t.stop_and_collect().await;
+    }
     Ok(())
 }
 
-/// Build a HashedTurnState from an arbitrary game-tree position (cursor-follows-analysis).
-fn build_turn_state_from_position(pos: AnalysisPosition) -> HashedTurnState {
-    HashedTurnState::new(TurnState {
+async fn step_analysis(
+    state: AnalysisState,
+    cmd: AnalysisCmd,
+    reply: oneshot::Sender<AnalysisResp>,
+) -> Result<AnalysisState, Box<dyn std::error::Error + Send + Sync>> {
+    match (state, cmd) {
+        // ── StartTurn ─────────────────────────────────
+        (AnalysisState::Playing(p), AnalysisCmd::StartTurn { position }) => {
+            let next = start_turn(p, position).await?;
+            let _ = reply.send(AnalysisResp::TurnStarted);
+            Ok(AnalysisState::Thinking(next))
+        },
+        (AnalysisState::Thinking(t), AnalysisCmd::StartTurn { position }) => {
+            // Abort the in-flight turn (stop bots, drop their actions), restart.
+            let collected = t.stop_and_collect().await.map_err(boxed)?;
+            let p = collected.discard();
+            let next = start_turn(p, position).await?;
+            let _ = reply.send(AnalysisResp::TurnStarted);
+            Ok(AnalysisState::Thinking(next))
+        },
+        (AnalysisState::Collected(c), AnalysisCmd::StartTurn { position }) => {
+            let p = c.discard();
+            let next = start_turn(p, position).await?;
+            let _ = reply.send(AnalysisResp::TurnStarted);
+            Ok(AnalysisState::Thinking(next))
+        },
+
+        // ── StopTurn ──────────────────────────────────
+        (AnalysisState::Thinking(t), AnalysisCmd::StopTurn) => {
+            let collected = t.stop_and_collect().await.map_err(boxed)?;
+            let (p1, p2) = outcome_directions(collected.outcomes());
+            let _ = reply.send(AnalysisResp::Actions { p1, p2 });
+            Ok(AnalysisState::Collected(collected))
+        },
+        (state, AnalysisCmd::StopTurn) => {
+            // Not in Thinking — no actions to collect. Mirror legacy's permissive
+            // behavior with Stay/Stay rather than erroring out.
+            let _ = reply.send(AnalysisResp::Actions {
+                p1: EngineDirection::Stay,
+                p2: EngineDirection::Stay,
+            });
+            Ok(state)
+        },
+
+        // ── Advance ───────────────────────────────────
+        (AnalysisState::Collected(c), AnalysisCmd::Advance { actions }) => {
+            advance_collected(c, actions, reply).await
+        },
+        (AnalysisState::Thinking(t), AnalysisCmd::Advance { actions }) => {
+            // Implicit stop_and_collect, then advance.
+            let collected = t.stop_and_collect().await.map_err(boxed)?;
+            advance_collected(collected, actions, reply).await
+        },
+        (AnalysisState::Playing(p), AnalysisCmd::Advance { actions }) => {
+            // Advance from Playing without collecting: synthesize a Thinking
+            // → Collected → advance_with cycle. Required when the user
+            // "plays this move" without first asking the bots to think.
+            let (a1, a2) = match actions {
+                Some([a1, a2]) => (a1, a2),
+                None => (EngineDirection::Stay, EngineDirection::Stay),
+            };
+            let thinking = p.start_turn().await.map_err(boxed)?;
+            let collected = thinking.stop_and_collect().await.map_err(boxed)?;
+            apply_advance_with(collected, a1, a2, reply).await
+        },
+
+        (state @ AnalysisState::Finished, _) => Ok(state),
+    }
+}
+
+async fn start_turn(
+    p: Match<Playing>,
+    position: Option<AnalysisPosition>,
+) -> Result<Match<Thinking>, Box<dyn std::error::Error + Send + Sync>> {
+    match position {
+        None => p.start_turn().await.map_err(boxed),
+        Some(pos) => p
+            .start_turn_with(turn_state_from_position(pos))
+            .await
+            .map_err(boxed),
+    }
+}
+
+async fn advance_collected(
+    c: Match<Collected>,
+    actions: Option<[EngineDirection; 2]>,
+    reply: oneshot::Sender<AnalysisResp>,
+) -> Result<AnalysisState, Box<dyn std::error::Error + Send + Sync>> {
+    match actions {
+        Some([a1, a2]) => apply_advance_with(c, a1, a2, reply).await,
+        None => {
+            let (p1, p2) = outcome_directions(c.outcomes());
+            match c.advance().await.map_err(boxed)? {
+                StepResult::Continue(next) => {
+                    let _ = reply.send(AnalysisResp::Advanced {
+                        p1,
+                        p2,
+                        game_over: false,
+                    });
+                    Ok(AnalysisState::Playing(next))
+                },
+                StepResult::GameOver(finished) => {
+                    let _ = reply.send(AnalysisResp::Advanced {
+                        p1,
+                        p2,
+                        game_over: true,
+                    });
+                    let _ = finished.finalize().await;
+                    Ok(AnalysisState::Finished)
+                },
+            }
+        },
+    }
+}
+
+async fn apply_advance_with(
+    c: Match<Collected>,
+    p1: EngineDirection,
+    p2: EngineDirection,
+    reply: oneshot::Sender<AnalysisResp>,
+) -> Result<AnalysisState, Box<dyn std::error::Error + Send + Sync>> {
+    match c.advance_with(p1, p2).await.map_err(boxed)? {
+        StepResult::Continue(next) => {
+            let _ = reply.send(AnalysisResp::Advanced {
+                p1,
+                p2,
+                game_over: false,
+            });
+            Ok(AnalysisState::Playing(next))
+        },
+        StepResult::GameOver(finished) => {
+            let _ = reply.send(AnalysisResp::Advanced {
+                p1,
+                p2,
+                game_over: true,
+            });
+            let _ = finished.finalize().await;
+            Ok(AnalysisState::Finished)
+        },
+    }
+}
+
+/// Map per-slot `ActionOutcome` to a `(Direction, Direction)` for the
+/// frontend. `TimedOut` / `Disconnected` surface as `Stay` since the GUI
+/// just wants "what did the bot say" and FaultPolicy hasn't run yet.
+fn outcome_directions(
+    outcomes: &[pyrat_host::match_host::ActionOutcome; 2],
+) -> (EngineDirection, EngineDirection) {
+    use pyrat_host::match_host::ActionOutcome;
+    let dir = |o: &ActionOutcome| match o {
+        ActionOutcome::Committed { direction, .. } => *direction,
+        _ => EngineDirection::Stay,
+    };
+    (dir(&outcomes[0]), dir(&outcomes[1]))
+}
+
+/// Build a `pyrat_protocol::TurnState` for `Match::start_turn_with` from the
+/// frontend's cursor-follows-analysis position.
+fn turn_state_from_position(pos: AnalysisPosition) -> TurnState {
+    TurnState {
         turn: pos.turn,
         player1_position: Coordinates::new(pos.player1.position.x, pos.player1.position.y),
         player2_position: Coordinates::new(pos.player2.position.x, pos.player2.position.y),
@@ -414,310 +463,11 @@ fn build_turn_state_from_position(pos: AnalysisPosition) -> HashedTurnState {
             .collect(),
         player1_last_move: specta_to_engine(pos.player1_last_move),
         player2_last_move: specta_to_engine(pos.player2_last_move),
-    })
-}
-
-/// Send HostCommand::Stop to all connected sessions.
-async fn send_stop(sessions: &[SessionHandle], playing: &mut PlayingState) {
-    for s in sessions {
-        if !playing.disconnected().contains(&s.session_id)
-            && s.cmd_tx.send(HostCommand::Stop).await.is_err()
-        {
-            playing.disconnected_mut().insert(s.session_id);
-        }
     }
 }
 
-/// Send a TurnState to all connected sessions.
-async fn send_turn_state(
-    sessions: &[SessionHandle],
-    playing: &mut PlayingState,
-    turn_state: &HashedTurnState,
-) {
-    for s in sessions {
-        if !playing.disconnected().contains(&s.session_id)
-            && s.cmd_tx
-                .send(HostCommand::TurnState(Box::new(turn_state.clone())))
-                .await
-                .is_err()
-        {
-            playing.disconnected_mut().insert(s.session_id);
-        }
-    }
-}
+// ── Event forwarding ────────────────────────────────
 
-/// Send GameOver to all connected sessions.
-async fn send_game_over(
-    sessions: &[SessionHandle],
-    playing: &mut PlayingState,
-    result: &pyrat_host::game_loop::MatchResult,
-) {
-    for s in sessions {
-        if !playing.disconnected().contains(&s.session_id)
-            && s.cmd_tx
-                .send(HostCommand::GameOver {
-                    result: result.result,
-                    player1_score: result.player1_score,
-                    player2_score: result.player2_score,
-                })
-                .await
-                .is_err()
-        {
-            playing.disconnected_mut().insert(s.session_id);
-        }
-    }
-}
-
-/// Non-blocking drain of game_rx (discard all pending messages).
-fn drain_rx(game_rx: &mut mpsc::Receiver<SessionMsg>) {
-    while game_rx.try_recv().is_ok() {}
-}
-
-/// Stop bots, collect both actions (with 2s safety timeout), transition to Idle.
-async fn finish_collecting(
-    sessions: &[SessionHandle],
-    playing: &mut PlayingState,
-    game_rx: &mut mpsc::Receiver<SessionMsg>,
-    phase: &mut AnalysisPhase,
-    event_tx: &mpsc::UnboundedSender<MatchEvent>,
-) -> (EngineDirection, EngineDirection) {
-    // Extract current action slots
-    let (mut p1, mut p2) = match phase {
-        AnalysisPhase::Collecting {
-            p1_action,
-            p2_action,
-            ..
-        } => (*p1_action, *p2_action),
-        AnalysisPhase::Idle => {
-            return (EngineDirection::Stay, EngineDirection::Stay);
-        },
-    };
-
-    // Pre-fill Stay for disconnected players
-    for sid in playing.disconnected().clone() {
-        if let Some(players) = playing.session_players().get(&sid) {
-            for &player in players {
-                fill_action(player, EngineDirection::Stay, &mut p1, &mut p2);
-            }
-        }
-    }
-
-    // Always send Stop so bots terminate their search loops — even when both
-    // provisional actions are already present.  Without this, a bot blocked in
-    // block_in_place(think()) never sees `should_stop() == true` and can't
-    // process the next TurnState.
-    send_stop(sessions, playing).await;
-
-    if let (Some(a1), Some(a2)) = (p1, p2) {
-        *phase = AnalysisPhase::Idle;
-        return (a1, a2);
-    }
-
-    // Drain until both actions arrive (2s safety timeout)
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-    loop {
-        if p1.is_some() && p2.is_some() {
-            break;
-        }
-        tokio::select! {
-            msg = game_rx.recv() => {
-                let Some(msg) = msg else { break; };
-                match msg {
-                    SessionMsg::Action { player, direction, .. } => {
-                        fill_action(player, direction, &mut p1, &mut p2);
-                    }
-                    SessionMsg::Info { session_id, info } => {
-                        if let Some(players) = playing.session_players().get(&session_id) {
-                            if let Some(&sender) = players.first() {
-                                emit_event(event_tx, MatchEvent::BotInfo {
-                                    sender,
-                                    turn: info.turn,
-                                    state_hash: info.state_hash,
-                                    info,
-                                });
-                            }
-                        }
-                    }
-                    SessionMsg::Disconnected { session_id, reason } => {
-                        playing.disconnected_mut().insert(session_id);
-                        if let Some(players) = playing.session_players().get(&session_id) {
-                            for &player in players {
-                                fill_action(player, EngineDirection::Stay, &mut p1, &mut p2);
-                                emit_event(event_tx, MatchEvent::BotDisconnected { player, reason });
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-            _ = tokio::time::sleep_until(deadline) => {
-                debug!("finish_collecting safety timeout — filling missing with Stay");
-                break;
-            }
-        }
-    }
-
-    *phase = AnalysisPhase::Idle;
-    (
-        p1.unwrap_or(EngineDirection::Stay),
-        p2.unwrap_or(EngineDirection::Stay),
-    )
-}
-
-/// Handle a bot message during the Collecting phase.
-fn handle_bot_msg(
-    msg: SessionMsg,
-    phase: &mut AnalysisPhase,
-    playing: &mut PlayingState,
-    event_tx: &mpsc::UnboundedSender<MatchEvent>,
-) {
-    let (current_turn, p1_action, p2_action) = match phase {
-        AnalysisPhase::Collecting {
-            turn,
-            p1_action,
-            p2_action,
-            ..
-        } => (*turn, p1_action, p2_action),
-        _ => return,
-    };
-
-    match msg {
-        SessionMsg::Action {
-            player,
-            direction,
-            turn,
-            ..
-        } => {
-            if turn != current_turn {
-                debug!(turn, current_turn, "stale action ignored in analysis");
-                return;
-            }
-            fill_action(player, direction, p1_action, p2_action);
-        },
-        SessionMsg::Info { session_id, info } => {
-            if let Some(players) = playing.session_players().get(&session_id) {
-                if let Some(&sender) = players.first() {
-                    emit_event(
-                        event_tx,
-                        MatchEvent::BotInfo {
-                            sender,
-                            turn: info.turn,
-                            state_hash: info.state_hash,
-                            info,
-                        },
-                    );
-                }
-            }
-        },
-        SessionMsg::Disconnected {
-            session_id, reason, ..
-        } => {
-            debug!(
-                session = session_id.0,
-                ?reason,
-                "session disconnected during analysis"
-            );
-            playing.disconnected_mut().insert(session_id);
-            if let Some(players) = playing.session_players().get(&session_id) {
-                for &player in players {
-                    fill_action(player, EngineDirection::Stay, p1_action, p2_action);
-                    emit_event(event_tx, MatchEvent::BotDisconnected { player, reason });
-                }
-            }
-        },
-        _ => {},
-    }
-}
-
-/// Insert a direction for the given player, first-wins.
-fn fill_action(
-    player: Player,
-    direction: EngineDirection,
-    p1: &mut Option<EngineDirection>,
-    p2: &mut Option<EngineDirection>,
-) {
-    match player {
-        Player::Player1 => {
-            if p1.is_none() {
-                *p1 = Some(direction);
-            }
-        },
-        Player::Player2 => {
-            if p2.is_none() {
-                *p2 = Some(direction);
-            }
-        },
-        _ => {
-            warn!(player = player.0, "unknown player in action");
-        },
-    }
-}
-
-fn emit_event(tx: &mpsc::UnboundedSender<MatchEvent>, event: MatchEvent) {
-    if tx.send(event).is_err() {
-        warn!("event receiver dropped — event lost");
-    }
-}
-
-// ── Shared helpers ──────────────────────────────────
-
-/// Send Shutdown to all sessions and drain disconnects with 2s timeout.
-async fn shutdown_sessions(sessions: &[SessionHandle], game_rx: &mut mpsc::Receiver<SessionMsg>) {
-    let session_count = sessions.len();
-    for s in sessions {
-        let _ = s.cmd_tx.send(HostCommand::Shutdown).await;
-    }
-
-    let mut disconnected = 0usize;
-    let drain_deadline = tokio::time::Instant::now() + Duration::from_secs(2);
-    while disconnected < session_count {
-        tokio::select! {
-            msg = game_rx.recv() => {
-                match msg {
-                    Some(SessionMsg::Disconnected { .. }) => { disconnected += 1; }
-                    Some(_) => {}
-                    None => break,
-                }
-            }
-            _ = tokio::time::sleep_until(drain_deadline) => {
-                warn!(
-                    remaining = session_count - disconnected,
-                    "shutdown drain timed out"
-                );
-                break;
-            }
-        }
-    }
-}
-
-/// Build a `BotInfoEvent` from a `MatchEvent::BotInfo` payload.
-fn build_bot_info_event(
-    match_id: u32,
-    sender: Player,
-    turn: u16,
-    state_hash: u64,
-    info: &Info,
-) -> BotInfoEvent {
-    BotInfoEvent {
-        match_id,
-        sender: player_side(sender),
-        subject: player_side(info.player),
-        turn,
-        state_hash: format!("{state_hash:016x}"),
-        multipv: info.multipv,
-        target: info.target.map(Coord::from),
-        depth: info.depth,
-        nodes: info.nodes,
-        score: info.score,
-        pv: info.pv.iter().map(|&d| engine_to_specta(d)).collect(),
-        message: info.message.clone(),
-    }
-}
-
-/// Receives MatchEvents from the host and emits them as Tauri events.
-///
-/// All events are forwarded immediately. The frontend handles batching
-/// via rAF + startTransition.
 async fn forward_events(
     mut event_rx: mpsc::UnboundedReceiver<MatchEvent>,
     app: tauri::AppHandle,
@@ -751,24 +501,15 @@ async fn forward_events(
                 };
                 let _ = payload.emit(&app);
             },
-            MatchEvent::BotDisconnected { player, reason } => {
-                let _ = BotDisconnectedEvent {
-                    match_id,
-                    player: player_side(player),
-                    reason: format!("{reason:?}"),
-                }
-                .emit(&app);
-            },
             MatchEvent::MatchOver { result } => {
-                let winner = if result.result == GameResult::Player1 {
-                    MatchWinner::Player1
-                } else if result.result == GameResult::Player2 {
-                    MatchWinner::Player2
-                } else if result.result == GameResult::Draw {
-                    MatchWinner::Draw
-                } else {
-                    warn!(result = ?result.result, "unexpected GameResult variant");
-                    MatchWinner::Draw
+                let winner = match result.result {
+                    GameResult::Player1 => MatchWinner::Player1,
+                    GameResult::Player2 => MatchWinner::Player2,
+                    GameResult::Draw => MatchWinner::Draw,
+                    unknown => {
+                        warn!(result = ?unknown, "unexpected GameResult variant");
+                        MatchWinner::Draw
+                    },
                 };
                 let _ = MatchOverEvent {
                     match_id,
@@ -791,7 +532,20 @@ async fn forward_events(
                 state_hash,
                 info,
             } => {
-                let payload = build_bot_info_event(match_id, sender, turn, state_hash, &info);
+                let payload = BotInfoEvent {
+                    match_id,
+                    sender: player_side(sender),
+                    subject: player_side(info.player),
+                    turn,
+                    state_hash: format!("{state_hash:016x}"),
+                    multipv: info.multipv,
+                    target: info.target.map(Coord::from),
+                    depth: info.depth,
+                    nodes: info.nodes,
+                    score: info.score,
+                    pv: info.pv.iter().map(|&d| engine_to_specta(d)).collect(),
+                    message: info.message.clone(),
+                };
                 let _ = payload.emit(&app);
             },
             _ => {},

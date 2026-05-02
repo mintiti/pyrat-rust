@@ -52,14 +52,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use pyrat_protocol::{BotMsg, HostMsg, SearchLimits};
 use pyrat_wire::framing::{FrameReader, FrameWriter};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
 
-use wire::{
-    build_action_full, build_identify, build_pong, build_preprocessing_done, build_ready,
-    extract_host_msg, HostMsg,
-};
+use wire::{parse_host_frame, serialize};
 
 /// Run a single-player bot. Blocks until the game ends.
 ///
@@ -81,19 +79,24 @@ pub fn run(mut bot: impl Bot, name: &str, author: &str) {
 }
 
 /// Run a hivemind bot controlling both players. Blocks until the game ends.
-pub fn run_hivemind(mut bot: impl Hivemind, name: &str, author: &str) {
-    let std_stream = connect();
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-        .expect("failed to build tokio runtime");
-    rt.block_on(run_async(
-        &mut bot::HivemindRunner(&mut bot),
-        name,
-        author,
-        std_stream,
-    ));
+///
+/// **Currently unsupported under the new wire protocol.** The host's
+/// `accept_players` rejects duplicate `agent_id`, and `TcpPlayer` rejects
+/// off-slot `Action` messages — a hivemind bot would be refused at the
+/// handshake. Hivemind support is tracked as a follow-up brief
+/// (concrete two-connection / multi-slot design); this entry point will
+/// come back once that lands.
+#[deprecated(
+    note = "hivemind is not supported under the new wire protocol; tracked as a follow-up brief"
+)]
+pub fn run_hivemind(_bot: impl Hivemind, _name: &str, _author: &str) -> ! {
+    eprintln!(
+        "[pyrat-sdk] run_hivemind is not supported under the new wire protocol. \
+         The host rejects duplicate agent_id at accept_players, and TcpPlayer \
+         rejects off-slot Action messages. Hivemind support is deferred — see \
+         the follow-up brief. Exiting."
+    );
+    std::process::exit(2);
 }
 
 /// Connect to the host. The std→tokio conversion happens inside `run_async`.
@@ -130,11 +133,16 @@ async fn run_async(
     let mut writer = FrameWriter::with_default_max(write);
     let agent_id = get_agent_id();
 
-    let identify = build_identify(name, author, &agent_id, &bot.option_defs());
+    // Send Identify and wait for Welcome → Configure → GoPreprocess.
+    let identify = serialize(&BotMsg::Identify {
+        name: name.to_string(),
+        author: author.to_string(),
+        agent_id,
+        options: bot.option_defs(),
+    });
     send_frame(&mut writer, &identify).await;
-    send_frame(&mut writer, &build_ready()).await;
 
-    let mut state = setup_phase(bot, &mut reader).await;
+    let mut state = setup_phase(bot, &mut reader, &mut writer).await;
 
     // Repurpose the async writer as a persistent writer task behind a channel.
     // This avoids the O_NONBLOCK sharing bug from try_clone()'d TcpStreams.
@@ -146,19 +154,11 @@ async fn run_async(
     let game_over = Arc::new(AtomicBool::new(false));
     let (msg_tx, msg_rx) = tokio::sync::mpsc::unbounded_channel();
 
-    // Spawn persistent reader task — reads frames, sets stop flag, handles Ping.
-    let pong_sender = info_sender.clone();
+    // Spawn persistent reader task — reads frames, sets stop flag, forwards to turn loop.
     let reader_stopped = stopped.clone();
     let reader_game_over = game_over.clone();
     tokio::spawn(async move {
-        reader_task(
-            reader,
-            msg_tx,
-            reader_stopped,
-            reader_game_over,
-            pong_sender,
-        )
-        .await;
+        reader_task(reader, msg_tx, reader_stopped, reader_game_over).await;
     });
 
     turn_loop(bot, &mut state, msg_rx, &info_sender, stopped, game_over).await;
@@ -181,12 +181,22 @@ async fn writer_task<W: AsyncWrite + Unpin>(
 
 // ── Setup phase ──────────────────────────────────────
 
-async fn setup_phase<O: options::Options, R: AsyncRead + Unpin>(
+/// Run the new-protocol handshake:
+///
+///   <- Welcome { player_slot }
+///   <- Configure { options, match_config }
+///   -> Ready { state_hash }
+///   <- GoPreprocess { state_hash }
+///
+/// Returns once GoPreprocess is received. The caller drives preprocess()
+/// from the turn loop using the returned state.
+async fn setup_phase<O: options::Options, R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     bot: &mut O,
     reader: &mut FrameReader<R>,
+    writer: &mut FrameWriter<W>,
 ) -> state::GameState {
-    let mut game_state: Option<state::GameState> = None;
-    let host_hash;
+    let mut slot: Option<Player> = None;
+    let mut state_opt: Option<state::GameState> = None;
 
     loop {
         let frame = match reader.read_frame().await {
@@ -197,22 +207,51 @@ async fn setup_phase<O: options::Options, R: AsyncRead + Unpin>(
             },
         };
 
-        match extract_host_msg(frame) {
-            Ok(HostMsg::SetOption { name, value }) => {
-                if let Err(e) = bot.apply_option(&name, &value) {
-                    eprintln!("[sdk] warning: SetOption {name}={value}: {e}");
-                }
+        match parse_host_frame(frame) {
+            Ok(HostMsg::Welcome { player_slot }) => {
+                slot = Some(player_slot);
             },
-            Ok(HostMsg::MatchConfig(cfg)) => match state::GameState::from_config(&cfg) {
-                Ok(s) => game_state = Some(s),
-                Err(e) => {
-                    eprintln!("[sdk] error building game state: {e}");
+            Ok(HostMsg::Configure {
+                options,
+                match_config,
+            }) => {
+                let player_slot = slot.unwrap_or_else(|| {
+                    eprintln!("[sdk] Configure received before Welcome");
                     std::process::exit(1);
-                },
+                });
+                for (name, value) in &options {
+                    if let Err(e) = bot.apply_option(name, value) {
+                        eprintln!("[sdk] warning: option {name}={value}: {e}");
+                    }
+                }
+                let s =
+                    state::GameState::from_config(player_slot, &match_config).unwrap_or_else(|e| {
+                        eprintln!("[sdk] error building game state: {e}");
+                        std::process::exit(1);
+                    });
+                let ready = serialize(&BotMsg::Ready {
+                    state_hash: s.state_hash(),
+                });
+                send_frame(writer, &ready).await;
+                state_opt = Some(s);
             },
-            Ok(HostMsg::StartPreprocessing { state_hash }) => {
-                host_hash = state_hash;
-                break;
+            Ok(HostMsg::GoPreprocess { state_hash }) => {
+                let Some(s) = state_opt else {
+                    eprintln!("[sdk] GoPreprocess received before Configure");
+                    std::process::exit(1);
+                };
+                if s.state_hash() != state_hash {
+                    eprintln!(
+                        "[sdk] GoPreprocess hash mismatch (host={state_hash:#018x}, sdk={:#018x})",
+                        s.state_hash()
+                    );
+                    std::process::exit(1);
+                }
+                return s;
+            },
+            Ok(HostMsg::ProtocolError { reason }) => {
+                eprintln!("[sdk] host reported protocol error: {reason}");
+                std::process::exit(1);
             },
             Ok(other) => {
                 eprintln!(
@@ -225,37 +264,17 @@ async fn setup_phase<O: options::Options, R: AsyncRead + Unpin>(
             },
         }
     }
-
-    let Some(mut state) = game_state else {
-        eprintln!("[sdk] MatchConfig never received before StartPreprocessing");
-        std::process::exit(1);
-    };
-
-    // Verify initial state hash: host and SDK must agree on the game state.
-    let sdk_hash = state.compute_initial_hash();
-    if host_hash != sdk_hash {
-        panic!(
-            "[sdk] host and SDK disagree on initial game state hash \
-             (host={host_hash:#018x}, sdk={sdk_hash:#018x})"
-        );
-    }
-    // Set the verified hash so preprocessing Context carries the correct value.
-    state.set_state_hash(host_hash);
-
-    state
 }
 
 // ── Reader task ──────────────────────────────────────
 
 /// Persistent reader — owns the socket read half, forwards messages to the
-/// turn loop via a channel, sets the stop flag on Stop/Timeout, and handles
-/// Ping directly so the host doesn't time out during long think() calls.
+/// turn loop via a channel, sets the stop flag on Stop/GameOver.
 async fn reader_task<R: AsyncRead + Unpin>(
     mut reader: FrameReader<R>,
     msg_tx: tokio::sync::mpsc::UnboundedSender<HostMsg>,
     stopped: Arc<AtomicBool>,
     game_over: Arc<AtomicBool>,
-    pong_sender: bot::InfoSender,
 ) {
     loop {
         let frame = match reader.read_frame().await {
@@ -270,15 +289,9 @@ async fn reader_task<R: AsyncRead + Unpin>(
                 break;
             },
         };
-        match extract_host_msg(frame) {
-            Ok(HostMsg::Ping) => {
-                pong_sender.send(&build_pong());
-            },
+        match parse_host_frame(frame) {
             Ok(msg) => {
-                if matches!(
-                    &msg,
-                    HostMsg::Stop | HostMsg::Timeout { .. } | HostMsg::GameOver { .. }
-                ) {
+                if matches!(&msg, HostMsg::Stop | HostMsg::GameOver { .. }) {
                     stopped.store(true, Ordering::Relaxed);
                 }
                 if matches!(&msg, HostMsg::GameOver { .. }) {
@@ -304,14 +317,15 @@ async fn turn_loop<T: bot::Runner>(
     stopped: Arc<AtomicBool>,
     game_over: Arc<AtomicBool>,
 ) {
-    // Preprocessing
+    // Preprocessing: GoPreprocess was already received in setup. Run preprocess()
+    // immediately and signal completion.
     {
         let deadline =
             Instant::now() + Duration::from_millis(state.preprocessing_timeout_ms().into());
         let ctx = Context::new(
             deadline,
             Instant::now(),
-            Player::Player1, // doesn't matter for preprocess
+            state.my_player(),
             0,
             state.state_hash(),
             Some(info_sender.clone()),
@@ -321,69 +335,147 @@ async fn turn_loop<T: bot::Runner>(
         tokio::task::block_in_place(|| {
             bot.runner_preprocess(state, &ctx);
         });
-        info_sender.send(&build_preprocessing_done());
+        info_sender.send(&serialize(&BotMsg::PreprocessingDone));
     }
 
     // Play turns
     while let Some(msg) = msg_rx.recv().await {
         match msg {
-            HostMsg::TurnState(ts) => {
-                state.update(ts);
-
-                let raw_ms = u64::from(state.move_timeout_ms());
-                let think_start = Instant::now();
-                let deadline = if raw_ms == 0 {
-                    think_start + Duration::from_secs(86400)
+            HostMsg::Advance {
+                p1_dir,
+                p2_dir,
+                turn: _,
+                new_hash,
+            } => {
+                let computed = state.apply_advance(p1_dir, p2_dir);
+                if computed == new_hash {
+                    info_sender.send(&serialize(&BotMsg::SyncOk { hash: computed }));
                 } else {
-                    think_start
-                        + Duration::from_millis(raw_ms.saturating_sub(MOVE_SAFETY_MARGIN_MS))
-                };
-
-                let turn = state.turn();
-                let my_player = state.my_player();
-                let state_hash = state.state_hash();
-
-                stopped.store(false, Ordering::Relaxed);
-                let ctx = Context::new(
-                    deadline,
-                    think_start,
-                    my_player,
-                    turn,
-                    state_hash,
-                    Some(info_sender.clone()),
-                    stopped.clone(),
-                    game_over.clone(),
-                );
-
-                let actions = tokio::task::block_in_place(|| {
-                    match catch_unwind(AssertUnwindSafe(|| bot.runner_think(state, &ctx))) {
-                        Ok(a) => a,
-                        Err(panic) => {
-                            let msg = panic_message(&panic);
-                            eprintln!("[sdk] think() panicked: {msg}");
-                            T::runner_stay(state)
-                        },
-                    }
-                });
-
-                // Clamp to 1: the host rejects think_ms == 0 (indistinguishable from missing field).
-                let think_ms = (think_start.elapsed().as_millis() as u32).max(1);
-                for (player, direction) in actions {
-                    info_sender.send(&build_action_full(player, direction, turn, false, think_ms));
+                    info_sender.send(&serialize(&BotMsg::Resync { my_hash: computed }));
                 }
             },
-            HostMsg::Timeout { .. } => {
-                eprintln!("[sdk] timeout received");
+            HostMsg::FullState {
+                match_config,
+                turn_state,
+            } => match state.load_full_state(&match_config, &turn_state) {
+                Ok(hash) => {
+                    info_sender.send(&serialize(&BotMsg::SyncOk { hash }));
+                },
+                Err(e) => {
+                    eprintln!("[sdk] failed to load FullState: {e}");
+                    break;
+                },
             },
-            HostMsg::GameOver(go) => {
-                bot.runner_on_game_over(go.result, (go.player1_score, go.player2_score));
+            HostMsg::Go { state_hash, limits } => {
+                think_and_send(
+                    bot,
+                    state,
+                    info_sender,
+                    &stopped,
+                    &game_over,
+                    state_hash,
+                    limits,
+                );
+            },
+            HostMsg::GoState {
+                turn_state,
+                state_hash,
+                limits,
+            } => {
+                let computed = state.load_turn_state(&turn_state);
+                if computed != state_hash {
+                    // SDK's local engine diverges from the host snapshot. Sending an
+                    // Action tagged with the host hash would let the host accept a
+                    // move computed against the wrong state. Abort the bot instead;
+                    // the host will see the disconnect and surface a clean error.
+                    eprintln!(
+                        "[sdk] GoState hash mismatch (host={state_hash:#018x}, sdk={computed:#018x}); aborting"
+                    );
+                    break;
+                }
+                think_and_send(
+                    bot,
+                    state,
+                    info_sender,
+                    &stopped,
+                    &game_over,
+                    state_hash,
+                    limits,
+                );
+            },
+            HostMsg::Stop => {
+                // reader_task already set stopped=true; nothing else to do.
+            },
+            HostMsg::GameOver {
+                result,
+                player1_score,
+                player2_score,
+            } => {
+                bot.runner_on_game_over(result, (player1_score, player2_score));
                 break;
             },
-            HostMsg::Stop => {},
+            HostMsg::ProtocolError { reason } => {
+                eprintln!("[sdk] host reported protocol error: {reason}");
+                break;
+            },
             other => {
                 eprintln!("[sdk] unexpected message during play: {}", msg_name(&other));
             },
         }
+    }
+}
+
+fn think_and_send<T: bot::Runner>(
+    bot: &mut T,
+    state: &mut state::GameState,
+    info_sender: &bot::InfoSender,
+    stopped: &Arc<AtomicBool>,
+    game_over: &Arc<AtomicBool>,
+    state_hash: u64,
+    limits: SearchLimits,
+) {
+    let raw_ms = u64::from(limits.timeout_ms.unwrap_or_else(|| state.move_timeout_ms()));
+    let think_start = Instant::now();
+    let deadline = if raw_ms == 0 {
+        think_start + Duration::from_secs(86400)
+    } else {
+        think_start + Duration::from_millis(raw_ms.saturating_sub(MOVE_SAFETY_MARGIN_MS))
+    };
+
+    let turn = state.turn();
+    stopped.store(false, Ordering::Relaxed);
+    let ctx = Context::new(
+        deadline,
+        think_start,
+        state.my_player(),
+        turn,
+        state_hash,
+        Some(info_sender.clone()),
+        stopped.clone(),
+        game_over.clone(),
+    );
+
+    let actions = tokio::task::block_in_place(|| {
+        match catch_unwind(AssertUnwindSafe(|| bot.runner_think(state, &ctx))) {
+            Ok(a) => a,
+            Err(panic) => {
+                let msg = panic_message(&panic);
+                eprintln!("[sdk] think() panicked: {msg}");
+                T::runner_stay(state)
+            },
+        }
+    });
+
+    // Clamp to 1: the host rejects think_ms == 0 (indistinguishable from missing field).
+    let think_ms = (think_start.elapsed().as_millis() as u32).max(1);
+    for (player, direction) in actions {
+        info_sender.send(&serialize(&BotMsg::Action {
+            direction,
+            player,
+            turn,
+            state_hash,
+            think_ms,
+        }));
     }
 }
 
@@ -398,14 +490,16 @@ async fn send_frame<W: AsyncWrite + Unpin>(writer: &mut FrameWriter<W>, data: &[
 
 fn msg_name(msg: &HostMsg) -> &'static str {
     match msg {
-        HostMsg::SetOption { .. } => "SetOption",
-        HostMsg::MatchConfig(_) => "MatchConfig",
-        HostMsg::StartPreprocessing { .. } => "StartPreprocessing",
-        HostMsg::TurnState(_) => "TurnState",
-        HostMsg::Timeout { .. } => "Timeout",
-        HostMsg::GameOver(_) => "GameOver",
-        HostMsg::Ping => "Ping",
+        HostMsg::Welcome { .. } => "Welcome",
+        HostMsg::Configure { .. } => "Configure",
+        HostMsg::GoPreprocess { .. } => "GoPreprocess",
+        HostMsg::Advance { .. } => "Advance",
+        HostMsg::Go { .. } => "Go",
+        HostMsg::GoState { .. } => "GoState",
         HostMsg::Stop => "Stop",
+        HostMsg::FullState { .. } => "FullState",
+        HostMsg::ProtocolError { .. } => "ProtocolError",
+        HostMsg::GameOver { .. } => "GameOver",
     }
 }
 
@@ -422,69 +516,37 @@ fn panic_message(panic: &Box<dyn std::any::Any + Send>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use pyrat_wire::{self as wire, HostMessage};
+    use pyrat::Coordinates;
+    use pyrat_protocol::{MatchConfig, TurnState};
+    use pyrat_wire::TimingMode;
     use std::sync::atomic::Ordering;
     use tokio::sync::mpsc;
-
-    use crate::wire::HostMsg;
-
-    fn build_host_packet<F>(msg_type: HostMessage, build_msg: F) -> Vec<u8>
-    where
-        F: FnOnce(
-            &mut flatbuffers::FlatBufferBuilder,
-        ) -> flatbuffers::WIPOffset<flatbuffers::UnionWIPOffset>,
-    {
-        let mut fbb = flatbuffers::FlatBufferBuilder::new();
-        let msg_offset = build_msg(&mut fbb);
-        let packet = wire::HostPacket::create(
-            &mut fbb,
-            &wire::HostPacketArgs {
-                message_type: msg_type,
-                message: Some(msg_offset),
-            },
-        );
-        fbb.finish(packet, None);
-        fbb.finished_data().to_vec()
-    }
 
     fn dummy_info_sender() -> (bot::InfoSender, mpsc::UnboundedReceiver<Vec<u8>>) {
         let (tx, rx) = mpsc::unbounded_channel();
         (bot::InfoSender::new(tx), rx)
     }
 
-    /// Write length-prefixed frames to a tokio duplex writer.
-    async fn write_frames(
-        mut writer: pyrat_wire::framing::FrameWriter<tokio::io::DuplexStream>,
-        frames: Vec<Vec<u8>>,
-    ) {
-        for frame in &frames {
-            writer.write_frame(frame).await.unwrap();
-        }
-        // drop writer → EOF → reader_task exits
-    }
-
+    /// Stop sent from the host: reader_task forwards it and sets `stopped`,
+    /// but does NOT set `game_over` (only GameOver and Disconnect do).
     #[tokio::test]
     async fn reader_stop_sets_flag_and_forwards() {
-        let frame = build_host_packet(HostMessage::Stop, |fbb| {
-            wire::Stop::create(fbb, &wire::StopArgs {}).as_union_value()
-        });
+        let frame = pyrat_protocol::serialize_host_msg(&HostMsg::Stop);
 
         let (client, server) = tokio::io::duplex(4096);
         let reader = pyrat_wire::framing::FrameReader::with_default_max(client);
         let mut fw = pyrat_wire::framing::FrameWriter::with_default_max(server);
 
-        let (info_sender, _write_rx) = dummy_info_sender();
         let stopped = Arc::new(AtomicBool::new(false));
         let game_over = Arc::new(AtomicBool::new(false));
         let (msg_tx, mut msg_rx) = mpsc::unbounded_channel();
 
-        // Write Stop but keep writer alive — no Disconnect yet.
         fw.write_frame(&frame).await.unwrap();
 
         let r_stopped = stopped.clone();
         let r_game_over = game_over.clone();
         tokio::spawn(async move {
-            reader_task(reader, msg_tx, r_stopped, r_game_over, info_sender).await;
+            reader_task(reader, msg_tx, r_stopped, r_game_over).await;
         });
 
         match msg_rx.recv().await {
@@ -493,125 +555,32 @@ mod tests {
         }
 
         assert!(stopped.load(Ordering::Relaxed));
-        // Stop is non-terminal — only GameOver and Disconnected set game_over.
         assert!(!game_over.load(Ordering::Relaxed));
 
-        drop(fw); // Let reader_task exit cleanly.
+        drop(fw);
     }
 
-    #[tokio::test]
-    async fn reader_timeout_sets_flag_and_forwards() {
-        let frame = build_host_packet(HostMessage::Timeout, |fbb| {
-            wire::Timeout::create(
-                fbb,
-                &wire::TimeoutArgs {
-                    default_move: wire::Direction::Stay,
-                },
-            )
-            .as_union_value()
-        });
-
-        let (client, server) = tokio::io::duplex(4096);
-        let reader = pyrat_wire::framing::FrameReader::with_default_max(client);
-        let fw = pyrat_wire::framing::FrameWriter::with_default_max(server);
-
-        let (info_sender, _write_rx) = dummy_info_sender();
-        let stopped = Arc::new(AtomicBool::new(false));
-        let game_over = Arc::new(AtomicBool::new(false));
-        let (msg_tx, mut msg_rx) = mpsc::unbounded_channel();
-
-        tokio::spawn(write_frames(fw, vec![frame]));
-        reader_task(
-            reader,
-            msg_tx,
-            stopped.clone(),
-            game_over.clone(),
-            info_sender,
-        )
-        .await;
-
-        assert!(stopped.load(Ordering::Relaxed));
-        // game_over is also true here because the writer dropped after
-        // sending the Timeout frame, triggering a Disconnected → game_over.
-        // That's fine — Disconnected is game-ending regardless.
-        match msg_rx.recv().await {
-            Some(HostMsg::Timeout { .. }) => {},
-            other => panic!("expected Timeout, got {other:#?}"),
-        }
-    }
-
+    /// Disconnect ends the read loop and sets `game_over`.
     #[tokio::test]
     async fn reader_clean_disconnect() {
         let (client, server) = tokio::io::duplex(4096);
-        drop(server); // EOF on the read side
+        drop(server);
         let reader = pyrat_wire::framing::FrameReader::with_default_max(client);
 
-        let (info_sender, _write_rx) = dummy_info_sender();
         let stopped = Arc::new(AtomicBool::new(false));
         let game_over = Arc::new(AtomicBool::new(false));
         let (msg_tx, mut msg_rx) = mpsc::unbounded_channel();
 
-        reader_task(
-            reader,
-            msg_tx,
-            stopped.clone(),
-            game_over.clone(),
-            info_sender,
-        )
-        .await;
+        reader_task(reader, msg_tx, stopped.clone(), game_over.clone()).await;
 
         assert!(!stopped.load(Ordering::Relaxed));
-        assert!(game_over.load(Ordering::Relaxed)); // Disconnect is game-ending
+        assert!(game_over.load(Ordering::Relaxed));
         assert!(msg_rx.recv().await.is_none());
     }
 
-    #[tokio::test]
-    async fn reader_ping_sends_pong_not_forwarded() {
-        let frame = build_host_packet(HostMessage::Ping, |fbb| {
-            wire::Ping::create(fbb, &wire::PingArgs {}).as_union_value()
-        });
-
-        let (client, server) = tokio::io::duplex(4096);
-        let reader = pyrat_wire::framing::FrameReader::with_default_max(client);
-        let fw = pyrat_wire::framing::FrameWriter::with_default_max(server);
-
-        let (info_sender, mut write_rx) = dummy_info_sender();
-        let stopped = Arc::new(AtomicBool::new(false));
-        let game_over = Arc::new(AtomicBool::new(false));
-        let (msg_tx, mut msg_rx) = mpsc::unbounded_channel();
-
-        tokio::spawn(write_frames(fw, vec![frame]));
-        reader_task(
-            reader,
-            msg_tx,
-            stopped.clone(),
-            game_over.clone(),
-            info_sender,
-        )
-        .await;
-
-        // No messages forwarded — channel is closed, recv returns None.
-        assert!(msg_rx.recv().await.is_none());
-        assert!(!stopped.load(Ordering::Relaxed));
-
-        // Read the Pong from the write channel.
-        let pong_buf = write_rx
-            .recv()
-            .await
-            .expect("expected Pong frame in channel");
-        let packet = flatbuffers::root::<wire::BotPacket>(&pong_buf).unwrap();
-        assert_eq!(packet.message_type(), wire::BotMessage::Pong);
-    }
-
-    // ── InfoSender regression test ─────────────────────
-
-    /// Verifies that many rapid Info writes all arrive intact through the
-    /// channel-based InfoSender + async writer task.
-    ///
-    /// This is the fix for the O_NONBLOCK sharing bug: try_clone()'d
-    /// TcpStreams share the file description, so set_nonblocking(true) on
-    /// one side also makes the clone non-blocking. write_all() then fails
-    /// with EAGAIN or produces partial writes that corrupt framing.
+    /// InfoSender survives many rapid writes without losing frames.
+    /// Regression for the O_NONBLOCK sharing bug fixed by routing through
+    /// an mpsc channel.
     #[tokio::test]
     async fn info_sender_writes_survive_nonblocking_socket() {
         let (client, server) = tokio::io::duplex(4096);
@@ -627,33 +596,25 @@ mod tests {
             let frame = format!("frame-{i}").into_bytes();
             info_sender.send(&frame);
         }
-        // Drop sender → writer task drains remaining frames → closes writer → EOF.
         drop(info_sender);
 
         let mut received = Vec::new();
         while let Ok(frame) = reader.read_frame().await {
             received.push(frame.to_vec());
         }
-        assert_eq!(received.len(), N, "expected all {N} frames to arrive");
+        assert_eq!(received.len(), N);
         for (i, frame) in received.iter().enumerate() {
             assert_eq!(frame, &format!("frame-{i}").into_bytes());
         }
     }
 
-    // ── Turn-loop regression tests ──────────────────────
-
-    /// Reproduces the stopped-flag race: reader_task sets stopped=true for a
-    /// queued GameOver, but turn_loop resets it to false when processing a
-    /// TurnState that sits between the Timeout and GameOver in the channel.
-    ///
-    /// With the bug: think() spins for the full move timeout (~95 ms).
-    /// With the fix: think() sees the game is over and exits immediately.
+    /// turn_loop must not clobber the `stopped` flag set by a queued GameOver.
+    /// Reproduces the case where reader_task processed a GameOver while
+    /// turn_loop was draining a TurnState that arrived just before it.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn turn_state_does_not_clobber_game_over_stopped_flag() {
-        use pyrat_protocol::{GameOver, HashedTurnState, MatchConfig, TurnState};
+    async fn go_state_does_not_clobber_game_over_stopped_flag() {
         use std::sync::atomic::AtomicU32;
 
-        // Bot that spins in think(), counting iterations until should_stop().
         struct SpinBot(Arc<AtomicU32>);
         impl crate::options::Options for SpinBot {}
         impl bot::Bot for SpinBot {
@@ -670,60 +631,57 @@ mod tests {
             }
         }
 
-        // Minimal game state with a short move timeout.
         let cfg = MatchConfig {
             width: 3,
             height: 3,
             max_turns: 10,
             walls: vec![],
             mud: vec![],
-            cheese: vec![pyrat::Coordinates::new(1, 1)],
-            player1_start: pyrat::Coordinates::new(0, 0),
-            player2_start: pyrat::Coordinates::new(2, 2),
-            controlled_players: vec![Player::Player1],
-            timing: wire::TimingMode::Wait,
+            cheese: vec![Coordinates::new(1, 1)],
+            player1_start: Coordinates::new(0, 0),
+            player2_start: Coordinates::new(2, 2),
+            timing: TimingMode::Wait,
             move_timeout_ms: 100,
             preprocessing_timeout_ms: 100,
         };
-        let mut state = crate::state::GameState::from_config(&cfg).unwrap();
+        let mut state = crate::state::GameState::from_config(Player::Player1, &cfg).unwrap();
 
         let (msg_tx, msg_rx) = mpsc::unbounded_channel();
 
-        // Simulate: reader_task already processed Timeout + GameOver.
+        // reader_task already saw GameOver → both flags set.
         let stopped = Arc::new(AtomicBool::new(true));
         let game_over = Arc::new(AtomicBool::new(true));
 
         let (info_sender, _write_rx) = dummy_info_sender();
         let iterations = Arc::new(AtomicU32::new(0));
 
-        // Channel contents: TurnState → GameOver.
-        // This mirrors the real race: bot was slow on the previous turn, got timed
-        // out, and by the time the turn_loop drains the queue it finds a new
-        // TurnState followed immediately by GameOver.
+        // Channel: GoState → GameOver. The bot would normally think on GoState,
+        // but with game_over set, should_stop returns true immediately.
         msg_tx
-            .send(HostMsg::TurnState(HashedTurnState::with_unverified_hash(
-                TurnState {
+            .send(HostMsg::GoState {
+                turn_state: Box::new(TurnState {
                     turn: 2,
-                    player1_position: pyrat::Coordinates::new(0, 0),
-                    player2_position: pyrat::Coordinates::new(2, 2),
+                    player1_position: Coordinates::new(0, 0),
+                    player2_position: Coordinates::new(2, 2),
                     player1_score: 0.0,
                     player2_score: 0.0,
                     player1_mud_turns: 0,
                     player2_mud_turns: 0,
-                    cheese: vec![pyrat::Coordinates::new(1, 1)],
+                    cheese: vec![Coordinates::new(1, 1)],
                     player1_last_move: pyrat::Direction::Stay,
                     player2_last_move: pyrat::Direction::Stay,
-                },
-                0,
-            )))
+                }),
+                state_hash: 0,
+                limits: SearchLimits::default(),
+            })
             .unwrap();
 
         msg_tx
-            .send(HostMsg::GameOver(GameOver {
+            .send(HostMsg::GameOver {
                 result: GameResult::Draw,
                 player1_score: 0.0,
                 player2_score: 0.0,
-            }))
+            })
             .unwrap();
 
         let mut bot = SpinBot(iterations.clone());
@@ -744,9 +702,6 @@ mod tests {
 
         assert!(result.is_ok(), "turn_loop should complete within timeout");
 
-        // With the bug: stopped is reset to false by TurnState processing,
-        // so think() spins for ~95ms producing ~95 iterations.
-        // With the fix: think() exits immediately, 0 iterations.
         let iters = iterations.load(Ordering::Relaxed);
         assert_eq!(
             iters, 0,

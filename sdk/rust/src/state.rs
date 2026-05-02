@@ -1,104 +1,78 @@
 //! Game state with perspective mapping and convenience methods.
 //!
-//! [`GameState`] wraps a [`GameView`] (static maze topology) plus per-turn
-//! dynamic data. Perspective mapping translates player1/player2 to my/opponent
-//! based on `controlled_players[0]`.
+//! [`GameState`] owns a real engine `GameState` mirror. The host advances its
+//! canonical state turn-by-turn; the SDK applies the same Advance deltas so
+//! the two stay in sync. Verification is via `state_hash()` (Zobrist), which
+//! the engine maintains incrementally on `process_turn`.
+//!
+//! Perspective mapping translates player1/player2 to my/opponent based on the
+//! slot assigned by `HostMsg::Welcome` during the handshake.
 
 use std::collections::HashMap;
 
-use pyrat::{Coordinates, Direction};
+use pyrat::{Coordinates, Direction, GameBuilder, MudMap};
 use pyrat_engine_interface::pathfinding::FullPathResult;
-use pyrat_engine_interface::GameView;
+use pyrat_engine_interface::Maze;
 use pyrat_wire::Player;
 
 use crate::GameSim;
-use pyrat_protocol::{HashedTurnState, MatchConfig, TurnState};
+use pyrat_protocol::{MatchConfig, TurnState};
 
-/// SDK-facing game state. Built once from `MatchConfig`, updated each turn.
+/// SDK-facing game state. Built from `MatchConfig`, advanced each turn.
 pub struct GameState {
-    view: GameView,
+    engine: pyrat::GameState,
     my_player: Player,
-    controlled_players: Vec<Player>,
 
-    // Per-turn dynamic state
-    turn: u16,
-    player1_position: Coordinates,
-    player2_position: Coordinates,
-    player1_score: f32,
-    player2_score: f32,
-    player1_mud_turns: u8,
-    player2_mud_turns: u8,
+    // The protocol carries last_move per player; engine GameState doesn't track it.
     player1_last_move: Direction,
     player2_last_move: Direction,
-    cheese: Vec<Coordinates>,
-    state_hash: u64,
 
-    // Static config
-    max_turns: u16,
+    // Static config from MatchConfig (not part of the engine state).
     move_timeout_ms: u32,
     preprocessing_timeout_ms: u32,
 }
 
 impl GameState {
     /// Build from match configuration received during setup.
-    pub fn from_config(cfg: &MatchConfig) -> Result<Self, String> {
-        let walls: Vec<(Coordinates, Coordinates)> = cfg.walls.clone();
-        let mud: Vec<(Coordinates, Coordinates, u8)> =
-            cfg.mud.iter().map(|m| (m.pos1, m.pos2, m.turns)).collect();
-
-        let view = GameView::from_config(
-            cfg.width,
-            cfg.height,
-            cfg.max_turns,
-            &walls,
-            &mud,
-            cfg.cheese.clone(),
-            cfg.player1_start,
-            cfg.player2_start,
-        )?;
-
-        let my_player = cfg
-            .controlled_players
-            .first()
-            .copied()
-            .unwrap_or(Player::Player1);
-
+    ///
+    /// `slot` is the player slot assigned by [`HostMsg::Welcome`].
+    pub fn from_config(slot: Player, cfg: &MatchConfig) -> Result<Self, String> {
+        let engine = build_engine(cfg)?;
         Ok(Self {
-            view,
-            my_player,
-            controlled_players: cfg.controlled_players.clone(),
-            turn: 0,
-            player1_position: cfg.player1_start,
-            player2_position: cfg.player2_start,
-            player1_score: 0.0,
-            player2_score: 0.0,
-            player1_mud_turns: 0,
-            player2_mud_turns: 0,
+            engine,
+            my_player: slot,
             player1_last_move: Direction::Stay,
             player2_last_move: Direction::Stay,
-            cheese: cfg.cheese.clone(),
-            state_hash: 0,
-            max_turns: cfg.max_turns,
             move_timeout_ms: cfg.move_timeout_ms,
             preprocessing_timeout_ms: cfg.preprocessing_timeout_ms,
         })
     }
 
-    /// Update dynamic state from a TurnState message.
-    pub fn update(&mut self, hts: HashedTurnState) {
-        let hash = hts.state_hash();
-        let ts = hts.into_inner();
-        self.turn = ts.turn;
-        self.player1_position = ts.player1_position;
-        self.player2_position = ts.player2_position;
-        self.player1_score = ts.player1_score;
-        self.player2_score = ts.player2_score;
-        self.player1_mud_turns = ts.player1_mud_turns;
-        self.player2_mud_turns = ts.player2_mud_turns;
+    /// Apply an Advance delta. Updates the engine via `process_turn`, which
+    /// keeps `state_hash` consistent via Zobrist deltas. Returns the new hash.
+    pub fn apply_advance(&mut self, p1: Direction, p2: Direction) -> u64 {
+        self.engine.process_turn(p1, p2);
+        self.player1_last_move = p1;
+        self.player2_last_move = p2;
+        self.engine.state_hash()
+    }
+
+    /// Reload the engine from a `TurnState` (received via GoState or FullState).
+    /// Recomputes the hash from scratch and returns it.
+    pub fn load_turn_state(&mut self, ts: &TurnState) -> u64 {
+        apply_turn_state(&mut self.engine, ts);
         self.player1_last_move = ts.player1_last_move;
         self.player2_last_move = ts.player2_last_move;
-        self.cheese = ts.cheese;
-        self.state_hash = hash;
+        self.engine.state_hash()
+    }
+
+    /// Reload from a fresh `MatchConfig` and `TurnState` (FullState recovery).
+    /// Rebuilds the engine and recomputes the hash. Returns the new hash.
+    pub fn load_full_state(&mut self, cfg: &MatchConfig, ts: &TurnState) -> Result<u64, String> {
+        self.engine = build_engine(cfg)?;
+        self.move_timeout_ms = cfg.move_timeout_ms;
+        self.preprocessing_timeout_ms = cfg.preprocessing_timeout_ms;
+        Ok(self.load_turn_state(ts))
     }
 
     // ── Perspective helpers ─────────────────────────
@@ -119,38 +93,33 @@ impl GameState {
 
     // ── Perspective-mapped accessors ─────────────────
 
-    /// Which player this bot controls (first in controlled_players).
+    /// Which player this bot controls (assigned by `Welcome`).
     pub fn my_player(&self) -> Player {
         self.my_player
     }
 
-    /// All controlled players (usually just one, two for hivemind).
-    pub fn controlled_players(&self) -> &[Player] {
-        &self.controlled_players
-    }
-
     pub fn my_position(&self) -> Coordinates {
-        self.pick(self.player1_position, self.player2_position)
+        self.pick(self.player1_position(), self.player2_position())
     }
 
     pub fn opponent_position(&self) -> Coordinates {
-        self.pick_opponent(self.player1_position, self.player2_position)
+        self.pick_opponent(self.player1_position(), self.player2_position())
     }
 
     pub fn my_score(&self) -> f32 {
-        self.pick(self.player1_score, self.player2_score)
+        self.pick(self.player1_score(), self.player2_score())
     }
 
     pub fn opponent_score(&self) -> f32 {
-        self.pick_opponent(self.player1_score, self.player2_score)
+        self.pick_opponent(self.player1_score(), self.player2_score())
     }
 
     pub fn my_mud_turns(&self) -> u8 {
-        self.pick(self.player1_mud_turns, self.player2_mud_turns)
+        self.pick(self.player1_mud_turns(), self.player2_mud_turns())
     }
 
     pub fn opponent_mud_turns(&self) -> u8 {
-        self.pick_opponent(self.player1_mud_turns, self.player2_mud_turns)
+        self.pick_opponent(self.player1_mud_turns(), self.player2_mud_turns())
     }
 
     pub fn my_last_move(&self) -> Direction {
@@ -164,27 +133,27 @@ impl GameState {
     // ── Raw (objective) accessors ────────────────────
 
     pub fn player1_position(&self) -> Coordinates {
-        self.player1_position
+        self.engine.player1.current_pos
     }
 
     pub fn player2_position(&self) -> Coordinates {
-        self.player2_position
+        self.engine.player2.current_pos
     }
 
     pub fn player1_score(&self) -> f32 {
-        self.player1_score
+        self.engine.player1.score
     }
 
     pub fn player2_score(&self) -> f32 {
-        self.player2_score
+        self.engine.player2.score
     }
 
     pub fn player1_mud_turns(&self) -> u8 {
-        self.player1_mud_turns
+        self.engine.player1.mud_timer
     }
 
     pub fn player2_mud_turns(&self) -> u8 {
-        self.player2_mud_turns
+        self.engine.player2.mud_timer
     }
 
     pub fn player1_last_move(&self) -> Direction {
@@ -196,15 +165,15 @@ impl GameState {
     }
 
     pub fn turn(&self) -> u16 {
-        self.turn
+        self.engine.turn
     }
 
     pub fn max_turns(&self) -> u16 {
-        self.max_turns
+        self.engine.max_turns
     }
 
-    pub fn cheese(&self) -> &[Coordinates] {
-        &self.cheese
+    pub fn cheese(&self) -> Vec<Coordinates> {
+        self.engine.cheese_positions()
     }
 
     pub fn move_timeout_ms(&self) -> u32 {
@@ -216,61 +185,45 @@ impl GameState {
     }
 
     pub fn state_hash(&self) -> u64 {
-        self.state_hash
+        self.engine.state_hash()
     }
 
-    /// Set the state hash (used after verification in setup phase).
-    pub(crate) fn set_state_hash(&mut self, hash: u64) {
-        self.state_hash = hash;
-    }
-
-    /// Compute the initial state hash from turn-0 fields.
-    ///
-    /// Delegates to `HashedTurnState::new` so the hash algorithm is defined in
-    /// one place. The SDK uses this to verify agreement with the host.
-    pub fn compute_initial_hash(&self) -> u64 {
-        let ts = TurnState {
-            turn: 0,
-            player1_position: self.player1_position,
-            player2_position: self.player2_position,
-            player1_score: 0.0,
-            player2_score: 0.0,
-            player1_mud_turns: 0,
-            player2_mud_turns: 0,
-            cheese: self.cheese.clone(),
-            player1_last_move: Direction::Stay,
-            player2_last_move: Direction::Stay,
-        };
-        HashedTurnState::new(ts).state_hash()
-    }
-
-    // ── Convenience (delegate to GameView/pathfinding) ──
+    // ── Convenience (delegate to a borrowed Maze) ────
 
     pub fn width(&self) -> u8 {
-        self.view.width()
+        self.engine.width
     }
 
     pub fn height(&self) -> u8 {
-        self.view.height()
+        self.engine.height
+    }
+
+    fn maze(&self) -> Maze<'_> {
+        Maze::new(
+            &self.engine.move_table,
+            &self.engine.mud,
+            self.engine.width,
+            self.engine.height,
+        )
     }
 
     /// Directions from `pos` that don't hit a wall or boundary.
     /// Defaults to `my_position()` if `pos` is `None`.
     pub fn effective_moves(&self, pos: Option<Coordinates>) -> Vec<Direction> {
-        self.view
+        self.maze()
             .effective_moves(pos.unwrap_or_else(|| self.my_position()))
     }
 
     /// Cost (in turns) of moving in `dir` from `pos`.
     /// Defaults to `my_position()` if `pos` is `None`.
     pub fn move_cost(&self, dir: Direction, pos: Option<Coordinates>) -> Option<u8> {
-        self.view
+        self.maze()
             .move_cost(pos.unwrap_or_else(|| self.my_position()), dir)
     }
 
     /// Shortest path with full direction sequence between two cells.
     pub fn shortest_path(&self, from: Coordinates, to: Coordinates) -> Option<FullPathResult> {
-        pyrat_engine_interface::shortest_path_full(from, to, &self.view.maze())
+        pyrat_engine_interface::shortest_path_full(from, to, &self.maze())
     }
 
     /// Nearest cheese from `pos`. Returns the full path to the closest cheese.
@@ -287,45 +240,75 @@ impl GameState {
     /// direction sequence. Defaults to `my_position()` if `pos` is `None`.
     pub fn nearest_cheeses(&self, pos: Option<Coordinates>) -> Vec<FullPathResult> {
         let from = pos.unwrap_or_else(|| self.my_position());
-        pyrat_engine_interface::nearest_cheeses_full(from, &self.cheese, &self.view.maze())
+        let cheese = self.engine.cheese_positions();
+        pyrat_engine_interface::nearest_cheeses_full(from, &cheese, &self.maze())
     }
 
     /// Weighted distances from `pos` to all reachable cells.
     /// Defaults to `my_position()` if `pos` is `None`.
     pub fn distances_from(&self, pos: Option<Coordinates>) -> HashMap<Coordinates, u32> {
-        self.view
-            .distances_from(pos.unwrap_or_else(|| self.my_position()))
+        pyrat_engine_interface::distances_from(
+            pos.unwrap_or_else(|| self.my_position()),
+            &self.maze(),
+        )
     }
 
     /// Clone the game into a mutable simulation state.
     pub fn to_sim(&self) -> GameSim {
-        let mut game = self.view.snapshot();
+        self.engine.clone()
+    }
+}
 
-        // Patch dynamic state to match current turn
-        game.player1.current_pos = self.player1_position;
-        game.player1.score = self.player1_score;
-        game.player1.mud_timer = self.player1_mud_turns;
+fn build_engine(cfg: &MatchConfig) -> Result<pyrat::GameState, String> {
+    let mut wall_map: HashMap<Coordinates, Vec<Coordinates>> = HashMap::new();
+    for (a, b) in &cfg.walls {
+        wall_map.entry(*a).or_default().push(*b);
+        wall_map.entry(*b).or_default().push(*a);
+    }
 
-        game.player2.current_pos = self.player2_position;
-        game.player2.score = self.player2_score;
-        game.player2.mud_timer = self.player2_mud_turns;
+    let mut mud_map = MudMap::new();
+    for m in &cfg.mud {
+        mud_map.insert(m.pos1, m.pos2, m.turns);
+    }
 
-        // Remove collected cheese (preserves initial_cheese_count for win threshold)
-        for pos in game.cheese_positions() {
-            if !self.cheese.contains(&pos) {
-                game.cheese.take_cheese(pos);
-            }
+    GameBuilder::new(cfg.width, cfg.height)
+        .with_max_turns(cfg.max_turns)
+        .with_custom_maze(wall_map, mud_map)
+        .with_custom_positions(cfg.player1_start, cfg.player2_start)
+        .with_custom_cheese(cfg.cheese.clone())
+        .build()
+        .create(None)
+        .map_err(|e| e.to_string())
+}
+
+fn apply_turn_state(engine: &mut pyrat::GameState, ts: &TurnState) {
+    engine.player1.current_pos = ts.player1_position;
+    engine.player1.score = ts.player1_score;
+    engine.player1.mud_timer = ts.player1_mud_turns;
+
+    engine.player2.current_pos = ts.player2_position;
+    engine.player2.score = ts.player2_score;
+    engine.player2.mud_timer = ts.player2_mud_turns;
+
+    engine.turn = ts.turn;
+
+    // Reset cheese to the TurnState's set: take any not present in `ts.cheese`,
+    // restore any present in `ts.cheese` but absent from the engine. Both
+    // directions are necessary because GoState can rewind to an earlier
+    // analysis position with cheese the SDK has already collected.
+    let current = engine.cheese_positions();
+    for pos in &current {
+        if !ts.cheese.contains(pos) {
+            engine.cheese.take_cheese(*pos);
         }
-
-        game.turn = self.turn;
-
-        game
+    }
+    for pos in &ts.cheese {
+        if !current.contains(pos) {
+            engine.cheese.restore_cheese(*pos);
+        }
     }
 
-    /// Read-only access to the underlying `GameView`.
-    pub fn view(&self) -> &GameView {
-        &self.view
-    }
+    engine.recompute_state_hash();
 }
 
 #[cfg(test)]
@@ -344,65 +327,43 @@ mod tests {
             cheese: vec![Coordinates::new(2, 2), Coordinates::new(4, 4)],
             player1_start: Coordinates::new(0, 0),
             player2_start: Coordinates::new(4, 4),
-            controlled_players: vec![Player::Player1],
             timing: TimingMode::Wait,
             move_timeout_ms: 1000,
             preprocessing_timeout_ms: 5000,
         }
     }
 
-    fn test_turn_state() -> HashedTurnState {
-        HashedTurnState::with_unverified_hash(
-            TurnState {
-                turn: 5,
-                player1_position: Coordinates::new(1, 1),
-                player2_position: Coordinates::new(3, 3),
-                player1_score: 1.0,
-                player2_score: 0.5,
-                player1_mud_turns: 0,
-                player2_mud_turns: 2,
-                cheese: vec![Coordinates::new(4, 4)],
-                player1_last_move: Direction::Right,
-                player2_last_move: Direction::Left,
-            },
-            0xABCD,
-        )
-    }
-
-    #[test]
-    fn compute_initial_hash_matches_hashed_turn_state() {
-        let cfg = test_config();
-        let state = GameState::from_config(&cfg).unwrap();
-
-        let expected = HashedTurnState::new(TurnState {
-            turn: 0,
-            player1_position: cfg.player1_start,
-            player2_position: cfg.player2_start,
-            player1_score: 0.0,
-            player2_score: 0.0,
+    fn test_turn_state() -> TurnState {
+        TurnState {
+            turn: 5,
+            player1_position: Coordinates::new(1, 1),
+            player2_position: Coordinates::new(3, 3),
+            player1_score: 1.0,
+            player2_score: 0.5,
             player1_mud_turns: 0,
-            player2_mud_turns: 0,
-            cheese: cfg.cheese.clone(),
-            player1_last_move: Direction::Stay,
-            player2_last_move: Direction::Stay,
-        })
-        .state_hash();
-
-        assert_eq!(state.compute_initial_hash(), expected);
+            player2_mud_turns: 2,
+            cheese: vec![Coordinates::new(4, 4)],
+            player1_last_move: Direction::Right,
+            player2_last_move: Direction::Left,
+        }
     }
 
     #[test]
-    fn from_config_and_update() {
+    fn from_config_starts_at_turn_zero() {
         let cfg = test_config();
-        let mut state = GameState::from_config(&cfg).unwrap();
+        let state = GameState::from_config(Player::Player1, &cfg).unwrap();
 
         assert_eq!(state.turn(), 0);
         assert_eq!(state.my_position(), Coordinates::new(0, 0));
         assert_eq!(state.opponent_position(), Coordinates::new(4, 4));
         assert_eq!(state.cheese().len(), 2);
+    }
 
-        let ts = test_turn_state();
-        state.update(ts);
+    #[test]
+    fn load_turn_state_replaces_dynamic_fields() {
+        let cfg = test_config();
+        let mut state = GameState::from_config(Player::Player1, &cfg).unwrap();
+        state.load_turn_state(&test_turn_state());
 
         assert_eq!(state.turn(), 5);
         assert_eq!(state.my_position(), Coordinates::new(1, 1));
@@ -414,19 +375,14 @@ mod tests {
         assert_eq!(state.my_last_move(), Direction::Right);
         assert_eq!(state.opponent_last_move(), Direction::Left);
         assert_eq!(state.cheese().len(), 1);
-        assert_eq!(state.state_hash(), 0xABCD);
     }
 
     #[test]
     fn perspective_player2() {
-        let mut cfg = test_config();
-        cfg.controlled_players = vec![Player::Player2];
-        let mut state = GameState::from_config(&cfg).unwrap();
+        let cfg = test_config();
+        let mut state = GameState::from_config(Player::Player2, &cfg).unwrap();
+        state.load_turn_state(&test_turn_state());
 
-        let ts = test_turn_state();
-        state.update(ts);
-
-        // Perspective is flipped
         assert_eq!(state.my_player(), Player::Player2);
         assert_eq!(state.my_position(), Coordinates::new(3, 3));
         assert_eq!(state.opponent_position(), Coordinates::new(1, 1));
@@ -438,8 +394,8 @@ mod tests {
 
     #[test]
     fn raw_accessors() {
-        let mut state = GameState::from_config(&test_config()).unwrap();
-        state.update(test_turn_state());
+        let mut state = GameState::from_config(Player::Player1, &test_config()).unwrap();
+        state.load_turn_state(&test_turn_state());
 
         assert_eq!(state.player1_position(), Coordinates::new(1, 1));
         assert_eq!(state.player2_position(), Coordinates::new(3, 3));
@@ -448,10 +404,9 @@ mod tests {
     }
 
     #[test]
-    fn effective_moves() {
-        let state = GameState::from_config(&test_config()).unwrap();
+    fn effective_moves_from_corner() {
+        let state = GameState::from_config(Player::Player1, &test_config()).unwrap();
         let moves = state.effective_moves(None);
-        // From (0,0) on a 5x5 open grid: Right and Up
         assert!(moves.contains(&Direction::Right));
         assert!(moves.contains(&Direction::Up));
         assert!(!moves.contains(&Direction::Left));
@@ -460,19 +415,17 @@ mod tests {
 
     #[test]
     fn nearest_cheese_works() {
-        let state = GameState::from_config(&test_config()).unwrap();
-        let result = state.nearest_cheese(None);
-        assert!(result.is_some());
-        let r = result.unwrap();
-        // From (0,0), nearest cheese is (2,2) at distance 4
-        assert_eq!(r.target, Coordinates::new(2, 2));
-        assert_eq!(r.cost, 4);
-        assert!(!r.path.is_empty());
+        let state = GameState::from_config(Player::Player1, &test_config()).unwrap();
+        let result = state.nearest_cheese(None).unwrap();
+        // From (0,0), nearest cheese is (2,2) at distance 4.
+        assert_eq!(result.target, Coordinates::new(2, 2));
+        assert_eq!(result.cost, 4);
+        assert!(!result.path.is_empty());
     }
 
     #[test]
     fn to_sim_make_unmake() {
-        let state = GameState::from_config(&test_config()).unwrap();
+        let state = GameState::from_config(Player::Player1, &test_config()).unwrap();
         let mut sim = state.to_sim();
 
         let p1_before = sim.player1_position();
@@ -484,9 +437,9 @@ mod tests {
     }
 
     #[test]
-    fn to_sim_reflects_current_state() {
-        let mut state = GameState::from_config(&test_config()).unwrap();
-        state.update(test_turn_state());
+    fn to_sim_reflects_loaded_state() {
+        let mut state = GameState::from_config(Player::Player1, &test_config()).unwrap();
+        state.load_turn_state(&test_turn_state());
 
         let sim = state.to_sim();
         assert_eq!(sim.player1_position(), Coordinates::new(1, 1));
@@ -499,49 +452,158 @@ mod tests {
     #[test]
     fn to_sim_preserves_total_cheese() {
         let cfg = test_config();
-        let mut state = GameState::from_config(&cfg).unwrap();
+        let mut state = GameState::from_config(Player::Player1, &cfg).unwrap();
         let original_cheese_count = cfg.cheese.len();
 
-        // Simulate mid-game: one cheese collected, player has some score
-        state.update(HashedTurnState::with_unverified_hash(
-            TurnState {
-                turn: 10,
-                player1_position: Coordinates::new(2, 2),
-                player2_position: Coordinates::new(0, 0),
-                player1_score: 1.0,
-                player2_score: 0.0,
-                player1_mud_turns: 0,
-                player2_mud_turns: 0,
-                cheese: vec![Coordinates::new(4, 4)], // one cheese collected
-                player1_last_move: Direction::Stay,
-                player2_last_move: Direction::Stay,
-            },
-            0,
-        ));
+        // Mid-game: one cheese collected, p1 has score.
+        state.load_turn_state(&TurnState {
+            turn: 10,
+            player1_position: Coordinates::new(2, 2),
+            player2_position: Coordinates::new(0, 0),
+            player1_score: 1.0,
+            player2_score: 0.0,
+            player1_mud_turns: 0,
+            player2_mud_turns: 0,
+            cheese: vec![Coordinates::new(4, 4)],
+            player1_last_move: Direction::Stay,
+            player2_last_move: Direction::Stay,
+        });
 
         let sim = state.to_sim();
-
-        // total_cheese must reflect the original count, not remaining
         assert_eq!(
             sim.cheese.total_cheese() as usize,
             original_cheese_count,
-            "to_sim() must preserve initial_cheese_count"
+            "load_turn_state must preserve initial_cheese_count"
         );
         assert_eq!(sim.cheese_positions().len(), 1);
-
-        // score=1 with 2 total cheese => threshold is 1.0, not over yet
         assert!(
             !sim.check_game_over(),
-            "game should NOT be over: score 1.0 does not exceed half of 2 total cheese"
+            "score 1.0 doesn't exceed half of 2 total cheese"
         );
     }
 
     #[test]
     fn distances_from_works() {
-        let state = GameState::from_config(&test_config()).unwrap();
+        let state = GameState::from_config(Player::Player1, &test_config()).unwrap();
         let dists = state.distances_from(Some(Coordinates::new(0, 0)));
         assert_eq!(dists[&Coordinates::new(0, 0)], 0);
         assert_eq!(dists[&Coordinates::new(1, 0)], 1);
         assert_eq!(dists[&Coordinates::new(4, 4)], 8);
+    }
+
+    /// The hash the SDK derives from MatchConfig must match the host's hash
+    /// (both engines compute the same Zobrist of the same maze + initial state).
+    #[test]
+    fn initial_hash_is_stable() {
+        let cfg = test_config();
+        let a = GameState::from_config(Player::Player1, &cfg).unwrap();
+        let b = GameState::from_config(Player::Player1, &cfg).unwrap();
+        assert_eq!(a.state_hash(), b.state_hash());
+        assert_ne!(a.state_hash(), 0, "initial hash is non-trivial");
+    }
+
+    /// `apply_advance` must agree with `load_turn_state` for the same
+    /// resulting position — i.e., process_turn's incremental Zobrist update
+    /// matches a from-scratch recompute.
+    #[test]
+    fn apply_advance_matches_load_turn_state() {
+        let cfg = MatchConfig {
+            width: 5,
+            height: 5,
+            max_turns: 300,
+            walls: vec![],
+            mud: vec![],
+            cheese: vec![Coordinates::new(2, 2)],
+            player1_start: Coordinates::new(0, 0),
+            player2_start: Coordinates::new(4, 4),
+            timing: TimingMode::Wait,
+            move_timeout_ms: 1000,
+            preprocessing_timeout_ms: 5000,
+        };
+
+        // Path A: advance one turn via process_turn.
+        let mut a = GameState::from_config(Player::Player1, &cfg).unwrap();
+        let advanced = a.apply_advance(Direction::Right, Direction::Left);
+
+        // Path B: load the equivalent TurnState directly, recompute hash.
+        let mut b = GameState::from_config(Player::Player1, &cfg).unwrap();
+        let loaded = b.load_turn_state(&TurnState {
+            turn: 1,
+            player1_position: Coordinates::new(1, 0),
+            player2_position: Coordinates::new(3, 4),
+            player1_score: 0.0,
+            player2_score: 0.0,
+            player1_mud_turns: 0,
+            player2_mud_turns: 0,
+            cheese: vec![Coordinates::new(2, 2)],
+            player1_last_move: Direction::Right,
+            player2_last_move: Direction::Left,
+        });
+
+        assert_eq!(advanced, loaded);
+    }
+
+    /// Regression: GoState rewinding to a turn with cheese the SDK has
+    /// already collected must restore that cheese (not just remove
+    /// not-in-snapshot entries) so the recomputed hash matches the host.
+    /// Before the fix, `load_turn_state` only did the take-direction; rewinds
+    /// silently diverged.
+    #[test]
+    fn load_turn_state_restores_cheese_collected_then_rewound() {
+        let cfg = MatchConfig {
+            width: 5,
+            height: 5,
+            max_turns: 300,
+            walls: vec![],
+            mud: vec![],
+            cheese: vec![Coordinates::new(2, 0), Coordinates::new(3, 0)],
+            player1_start: Coordinates::new(0, 0),
+            player2_start: Coordinates::new(4, 4),
+            timing: TimingMode::Wait,
+            move_timeout_ms: 1000,
+            preprocessing_timeout_ms: 5000,
+        };
+
+        // Path A: stay at the initial state — this is the host's "rewound"
+        // hash we want the SDK to match.
+        let baseline = GameState::from_config(Player::Player1, &cfg)
+            .unwrap()
+            .state_hash();
+
+        // Path B: SDK collects one cheese, then GoState rewinds to the
+        // initial position with both cheese present.
+        let mut sdk = GameState::from_config(Player::Player1, &cfg).unwrap();
+        // Walk P1 onto (2,0) — collects the cheese there.
+        sdk.apply_advance(Direction::Right, Direction::Stay);
+        sdk.apply_advance(Direction::Right, Direction::Stay);
+        assert_eq!(
+            sdk.engine.cheese.remaining_cheese(),
+            1,
+            "SDK should have collected one cheese"
+        );
+
+        // GoState payload: rewind to turn 0 with both cheese back.
+        let recomputed = sdk.load_turn_state(&TurnState {
+            turn: 0,
+            player1_position: Coordinates::new(0, 0),
+            player2_position: Coordinates::new(4, 4),
+            player1_score: 0.0,
+            player2_score: 0.0,
+            player1_mud_turns: 0,
+            player2_mud_turns: 0,
+            cheese: vec![Coordinates::new(2, 0), Coordinates::new(3, 0)],
+            player1_last_move: Direction::Stay,
+            player2_last_move: Direction::Stay,
+        });
+
+        assert_eq!(
+            recomputed, baseline,
+            "rewound state hash must match the host's initial hash"
+        );
+        assert_eq!(
+            sdk.engine.cheese.remaining_cheese(),
+            2,
+            "both cheese must be restored after rewind"
+        );
     }
 }

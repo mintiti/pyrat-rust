@@ -491,22 +491,24 @@ pub mod pyrat {
             since = "2.0.0",
             note = "Use associated constants instead. This will no longer be generated in 2021."
         )]
-        pub const ENUM_MAX_HOST_MESSAGE: u8 = 8;
+        pub const ENUM_MAX_HOST_MESSAGE: u8 = 10;
         #[deprecated(
             since = "2.0.0",
             note = "Use associated constants instead. This will no longer be generated in 2021."
         )]
         #[allow(non_camel_case_types)]
-        pub const ENUM_VALUES_HOST_MESSAGE: [HostMessage; 9] = [
+        pub const ENUM_VALUES_HOST_MESSAGE: [HostMessage; 11] = [
             HostMessage::NONE,
-            HostMessage::SetOption,
-            HostMessage::MatchConfig,
-            HostMessage::StartPreprocessing,
-            HostMessage::TurnState,
+            HostMessage::Welcome,
+            HostMessage::Configure,
+            HostMessage::GoPreprocess,
+            HostMessage::Advance,
+            HostMessage::Go,
+            HostMessage::GoState,
             HostMessage::Stop,
-            HostMessage::Timeout,
             HostMessage::GameOver,
-            HostMessage::Ping,
+            HostMessage::FullState,
+            HostMessage::ProtocolError,
         ];
 
         #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -515,40 +517,46 @@ pub mod pyrat {
         #[allow(non_upper_case_globals)]
         impl HostMessage {
             pub const NONE: Self = Self(0);
-            pub const SetOption: Self = Self(1);
-            pub const MatchConfig: Self = Self(2);
-            pub const StartPreprocessing: Self = Self(3);
-            pub const TurnState: Self = Self(4);
-            pub const Stop: Self = Self(5);
-            pub const Timeout: Self = Self(6);
-            pub const GameOver: Self = Self(7);
-            pub const Ping: Self = Self(8);
+            pub const Welcome: Self = Self(1);
+            pub const Configure: Self = Self(2);
+            pub const GoPreprocess: Self = Self(3);
+            pub const Advance: Self = Self(4);
+            pub const Go: Self = Self(5);
+            pub const GoState: Self = Self(6);
+            pub const Stop: Self = Self(7);
+            pub const GameOver: Self = Self(8);
+            pub const FullState: Self = Self(9);
+            pub const ProtocolError: Self = Self(10);
 
             pub const ENUM_MIN: u8 = 0;
-            pub const ENUM_MAX: u8 = 8;
+            pub const ENUM_MAX: u8 = 10;
             pub const ENUM_VALUES: &'static [Self] = &[
                 Self::NONE,
-                Self::SetOption,
-                Self::MatchConfig,
-                Self::StartPreprocessing,
-                Self::TurnState,
+                Self::Welcome,
+                Self::Configure,
+                Self::GoPreprocess,
+                Self::Advance,
+                Self::Go,
+                Self::GoState,
                 Self::Stop,
-                Self::Timeout,
                 Self::GameOver,
-                Self::Ping,
+                Self::FullState,
+                Self::ProtocolError,
             ];
             /// Returns the variant's name or "" if unknown.
             pub fn variant_name(self) -> Option<&'static str> {
                 match self {
                     Self::NONE => Some("NONE"),
-                    Self::SetOption => Some("SetOption"),
-                    Self::MatchConfig => Some("MatchConfig"),
-                    Self::StartPreprocessing => Some("StartPreprocessing"),
-                    Self::TurnState => Some("TurnState"),
+                    Self::Welcome => Some("Welcome"),
+                    Self::Configure => Some("Configure"),
+                    Self::GoPreprocess => Some("GoPreprocess"),
+                    Self::Advance => Some("Advance"),
+                    Self::Go => Some("Go"),
+                    Self::GoState => Some("GoState"),
                     Self::Stop => Some("Stop"),
-                    Self::Timeout => Some("Timeout"),
                     Self::GameOver => Some("GameOver"),
-                    Self::Ping => Some("Ping"),
+                    Self::FullState => Some("FullState"),
+                    Self::ProtocolError => Some("ProtocolError"),
                     _ => None,
                 }
             }
@@ -615,21 +623,23 @@ pub mod pyrat {
             since = "2.0.0",
             note = "Use associated constants instead. This will no longer be generated in 2021."
         )]
-        pub const ENUM_MAX_BOT_MESSAGE: u8 = 7;
+        pub const ENUM_MAX_BOT_MESSAGE: u8 = 9;
         #[deprecated(
             since = "2.0.0",
             note = "Use associated constants instead. This will no longer be generated in 2021."
         )]
         #[allow(non_camel_case_types)]
-        pub const ENUM_VALUES_BOT_MESSAGE: [BotMessage; 8] = [
+        pub const ENUM_VALUES_BOT_MESSAGE: [BotMessage; 10] = [
             BotMessage::NONE,
             BotMessage::Identify,
             BotMessage::Ready,
             BotMessage::PreprocessingDone,
             BotMessage::Action,
-            BotMessage::Pong,
             BotMessage::Info,
             BotMessage::RenderCommands,
+            BotMessage::Provisional,
+            BotMessage::SyncOk,
+            BotMessage::Resync,
         ];
 
         #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -642,21 +652,25 @@ pub mod pyrat {
             pub const Ready: Self = Self(2);
             pub const PreprocessingDone: Self = Self(3);
             pub const Action: Self = Self(4);
-            pub const Pong: Self = Self(5);
-            pub const Info: Self = Self(6);
-            pub const RenderCommands: Self = Self(7);
+            pub const Info: Self = Self(5);
+            pub const RenderCommands: Self = Self(6);
+            pub const Provisional: Self = Self(7);
+            pub const SyncOk: Self = Self(8);
+            pub const Resync: Self = Self(9);
 
             pub const ENUM_MIN: u8 = 0;
-            pub const ENUM_MAX: u8 = 7;
+            pub const ENUM_MAX: u8 = 9;
             pub const ENUM_VALUES: &'static [Self] = &[
                 Self::NONE,
                 Self::Identify,
                 Self::Ready,
                 Self::PreprocessingDone,
                 Self::Action,
-                Self::Pong,
                 Self::Info,
                 Self::RenderCommands,
+                Self::Provisional,
+                Self::SyncOk,
+                Self::Resync,
             ];
             /// Returns the variant's name or "" if unknown.
             pub fn variant_name(self) -> Option<&'static str> {
@@ -666,9 +680,11 @@ pub mod pyrat {
                     Self::Ready => Some("Ready"),
                     Self::PreprocessingDone => Some("PreprocessingDone"),
                     Self::Action => Some("Action"),
-                    Self::Pong => Some("Pong"),
                     Self::Info => Some("Info"),
                     Self::RenderCommands => Some("RenderCommands"),
+                    Self::Provisional => Some("Provisional"),
+                    Self::SyncOk => Some("SyncOk"),
+                    Self::Resync => Some("Resync"),
                     _ => None,
                 }
             }
@@ -1370,15 +1386,15 @@ pub mod pyrat {
                 ds.finish()
             }
         }
-        pub enum SetOptionOffset {}
+        pub enum OptionAssignmentOffset {}
         #[derive(Copy, Clone, PartialEq)]
 
-        pub struct SetOption<'a> {
+        pub struct OptionAssignment<'a> {
             pub _tab: ::flatbuffers::Table<'a>,
         }
 
-        impl<'a> ::flatbuffers::Follow<'a> for SetOption<'a> {
-            type Inner = SetOption<'a>;
+        impl<'a> ::flatbuffers::Follow<'a> for OptionAssignment<'a> {
+            type Inner = OptionAssignment<'a>;
             #[inline]
             unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
                 Self {
@@ -1387,13 +1403,13 @@ pub mod pyrat {
             }
         }
 
-        impl<'a> SetOption<'a> {
+        impl<'a> OptionAssignment<'a> {
             pub const VT_NAME: ::flatbuffers::VOffsetT = 4;
             pub const VT_VALUE: ::flatbuffers::VOffsetT = 6;
 
             #[inline]
             pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-                SetOption { _tab: table }
+                OptionAssignment { _tab: table }
             }
             #[allow(unused_mut)]
             pub fn create<
@@ -1403,9 +1419,9 @@ pub mod pyrat {
                 A: ::flatbuffers::Allocator + 'bldr,
             >(
                 _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-                args: &'args SetOptionArgs<'args>,
-            ) -> ::flatbuffers::WIPOffset<SetOption<'bldr>> {
-                let mut builder = SetOptionBuilder::new(_fbb);
+                args: &'args OptionAssignmentArgs<'args>,
+            ) -> ::flatbuffers::WIPOffset<OptionAssignment<'bldr>> {
+                let mut builder = OptionAssignmentBuilder::new(_fbb);
                 if let Some(x) = args.value {
                     builder.add_value(x);
                 }
@@ -1421,8 +1437,10 @@ pub mod pyrat {
                 // Created from valid Table for this object
                 // which contains a valid value in this slot
                 unsafe {
-                    self._tab
-                        .get::<::flatbuffers::ForwardsUOffset<&str>>(SetOption::VT_NAME, None)
+                    self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                        OptionAssignment::VT_NAME,
+                        None,
+                    )
                 }
             }
             #[inline]
@@ -1431,13 +1449,15 @@ pub mod pyrat {
                 // Created from valid Table for this object
                 // which contains a valid value in this slot
                 unsafe {
-                    self._tab
-                        .get::<::flatbuffers::ForwardsUOffset<&str>>(SetOption::VT_VALUE, None)
+                    self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(
+                        OptionAssignment::VT_VALUE,
+                        None,
+                    )
                 }
             }
         }
 
-        impl ::flatbuffers::Verifiable for SetOption<'_> {
+        impl ::flatbuffers::Verifiable for OptionAssignment<'_> {
             #[inline]
             fn run_verifier(
                 v: &mut ::flatbuffers::Verifier,
@@ -1458,55 +1478,59 @@ pub mod pyrat {
                 Ok(())
             }
         }
-        pub struct SetOptionArgs<'a> {
+        pub struct OptionAssignmentArgs<'a> {
             pub name: Option<::flatbuffers::WIPOffset<&'a str>>,
             pub value: Option<::flatbuffers::WIPOffset<&'a str>>,
         }
-        impl<'a> Default for SetOptionArgs<'a> {
+        impl<'a> Default for OptionAssignmentArgs<'a> {
             #[inline]
             fn default() -> Self {
-                SetOptionArgs {
+                OptionAssignmentArgs {
                     name: None,
                     value: None,
                 }
             }
         }
 
-        pub struct SetOptionBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
+        pub struct OptionAssignmentBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
             fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
             start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
         }
-        impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> SetOptionBuilder<'a, 'b, A> {
+        impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> OptionAssignmentBuilder<'a, 'b, A> {
             #[inline]
             pub fn add_name(&mut self, name: ::flatbuffers::WIPOffset<&'b str>) {
-                self.fbb_
-                    .push_slot_always::<::flatbuffers::WIPOffset<_>>(SetOption::VT_NAME, name);
+                self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+                    OptionAssignment::VT_NAME,
+                    name,
+                );
             }
             #[inline]
             pub fn add_value(&mut self, value: ::flatbuffers::WIPOffset<&'b str>) {
-                self.fbb_
-                    .push_slot_always::<::flatbuffers::WIPOffset<_>>(SetOption::VT_VALUE, value);
+                self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+                    OptionAssignment::VT_VALUE,
+                    value,
+                );
             }
             #[inline]
             pub fn new(
                 _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-            ) -> SetOptionBuilder<'a, 'b, A> {
+            ) -> OptionAssignmentBuilder<'a, 'b, A> {
                 let start = _fbb.start_table();
-                SetOptionBuilder {
+                OptionAssignmentBuilder {
                     fbb_: _fbb,
                     start_: start,
                 }
             }
             #[inline]
-            pub fn finish(self) -> ::flatbuffers::WIPOffset<SetOption<'a>> {
+            pub fn finish(self) -> ::flatbuffers::WIPOffset<OptionAssignment<'a>> {
                 let o = self.fbb_.end_table(self.start_);
                 ::flatbuffers::WIPOffset::new(o.value())
             }
         }
 
-        impl ::core::fmt::Debug for SetOption<'_> {
+        impl ::core::fmt::Debug for OptionAssignment<'_> {
             fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                let mut ds = f.debug_struct("SetOption");
+                let mut ds = f.debug_struct("OptionAssignment");
                 ds.field("name", &self.name());
                 ds.field("value", &self.value());
                 ds.finish()
@@ -1538,10 +1562,9 @@ pub mod pyrat {
             pub const VT_CHEESE: ::flatbuffers::VOffsetT = 14;
             pub const VT_PLAYER1_START: ::flatbuffers::VOffsetT = 16;
             pub const VT_PLAYER2_START: ::flatbuffers::VOffsetT = 18;
-            pub const VT_CONTROLLED_PLAYERS: ::flatbuffers::VOffsetT = 20;
-            pub const VT_TIMING: ::flatbuffers::VOffsetT = 22;
-            pub const VT_MOVE_TIMEOUT_MS: ::flatbuffers::VOffsetT = 24;
-            pub const VT_PREPROCESSING_TIMEOUT_MS: ::flatbuffers::VOffsetT = 26;
+            pub const VT_TIMING: ::flatbuffers::VOffsetT = 20;
+            pub const VT_MOVE_TIMEOUT_MS: ::flatbuffers::VOffsetT = 22;
+            pub const VT_PREPROCESSING_TIMEOUT_MS: ::flatbuffers::VOffsetT = 24;
 
             #[inline]
             pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -1560,9 +1583,6 @@ pub mod pyrat {
                 let mut builder = MatchConfigBuilder::new(_fbb);
                 builder.add_preprocessing_timeout_ms(args.preprocessing_timeout_ms);
                 builder.add_move_timeout_ms(args.move_timeout_ms);
-                if let Some(x) = args.controlled_players {
-                    builder.add_controlled_players(x);
-                }
                 if let Some(x) = args.player2_start {
                     builder.add_player2_start(x);
                 }
@@ -1670,19 +1690,6 @@ pub mod pyrat {
                 unsafe { self._tab.get::<Vec2>(MatchConfig::VT_PLAYER2_START, None) }
             }
             #[inline]
-            pub fn controlled_players(&self) -> Option<::flatbuffers::Vector<'a, Player>> {
-                // Safety:
-                // Created from valid Table for this object
-                // which contains a valid value in this slot
-                unsafe {
-                    self._tab
-                        .get::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'a, Player>>>(
-                            MatchConfig::VT_CONTROLLED_PLAYERS,
-                            None,
-                        )
-                }
-            }
-            #[inline]
             pub fn timing(&self) -> TimingMode {
                 // Safety:
                 // Created from valid Table for this object
@@ -1724,19 +1731,30 @@ pub mod pyrat {
                 pos: usize,
             ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
                 v.visit_table(pos)?
-     .visit_field::<u8>("width", Self::VT_WIDTH, false)?
-     .visit_field::<u8>("height", Self::VT_HEIGHT, false)?
-     .visit_field::<u16>("max_turns", Self::VT_MAX_TURNS, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<Wall>>>>("walls", Self::VT_WALLS, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<Mud>>>>("mud", Self::VT_MUD, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, Vec2>>>("cheese", Self::VT_CHEESE, false)?
-     .visit_field::<Vec2>("player1_start", Self::VT_PLAYER1_START, false)?
-     .visit_field::<Vec2>("player2_start", Self::VT_PLAYER2_START, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, Player>>>("controlled_players", Self::VT_CONTROLLED_PLAYERS, false)?
-     .visit_field::<TimingMode>("timing", Self::VT_TIMING, false)?
-     .visit_field::<u32>("move_timeout_ms", Self::VT_MOVE_TIMEOUT_MS, false)?
-     .visit_field::<u32>("preprocessing_timeout_ms", Self::VT_PREPROCESSING_TIMEOUT_MS, false)?
-     .finish();
+                    .visit_field::<u8>("width", Self::VT_WIDTH, false)?
+                    .visit_field::<u8>("height", Self::VT_HEIGHT, false)?
+                    .visit_field::<u16>("max_turns", Self::VT_MAX_TURNS, false)?
+                    .visit_field::<::flatbuffers::ForwardsUOffset<
+                        ::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<Wall>>,
+                    >>("walls", Self::VT_WALLS, false)?
+                    .visit_field::<::flatbuffers::ForwardsUOffset<
+                        ::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<Mud>>,
+                    >>("mud", Self::VT_MUD, false)?
+                    .visit_field::<::flatbuffers::ForwardsUOffset<::flatbuffers::Vector<'_, Vec2>>>(
+                        "cheese",
+                        Self::VT_CHEESE,
+                        false,
+                    )?
+                    .visit_field::<Vec2>("player1_start", Self::VT_PLAYER1_START, false)?
+                    .visit_field::<Vec2>("player2_start", Self::VT_PLAYER2_START, false)?
+                    .visit_field::<TimingMode>("timing", Self::VT_TIMING, false)?
+                    .visit_field::<u32>("move_timeout_ms", Self::VT_MOVE_TIMEOUT_MS, false)?
+                    .visit_field::<u32>(
+                        "preprocessing_timeout_ms",
+                        Self::VT_PREPROCESSING_TIMEOUT_MS,
+                        false,
+                    )?
+                    .finish();
                 Ok(())
             }
         }
@@ -1757,8 +1775,6 @@ pub mod pyrat {
             pub cheese: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, Vec2>>>,
             pub player1_start: Option<&'a Vec2>,
             pub player2_start: Option<&'a Vec2>,
-            pub controlled_players:
-                Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, Player>>>,
             pub timing: TimingMode,
             pub move_timeout_ms: u32,
             pub preprocessing_timeout_ms: u32,
@@ -1775,7 +1791,6 @@ pub mod pyrat {
                     cheese: None,
                     player1_start: None,
                     player2_start: None,
-                    controlled_players: None,
                     timing: TimingMode::Wait,
                     move_timeout_ms: 0,
                     preprocessing_timeout_ms: 0,
@@ -1842,16 +1857,6 @@ pub mod pyrat {
                     .push_slot_always::<&Vec2>(MatchConfig::VT_PLAYER2_START, player2_start);
             }
             #[inline]
-            pub fn add_controlled_players(
-                &mut self,
-                controlled_players: ::flatbuffers::WIPOffset<::flatbuffers::Vector<'b, Player>>,
-            ) {
-                self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
-                    MatchConfig::VT_CONTROLLED_PLAYERS,
-                    controlled_players,
-                );
-            }
-            #[inline]
             pub fn add_timing(&mut self, timing: TimingMode) {
                 self.fbb_
                     .push_slot::<TimingMode>(MatchConfig::VT_TIMING, timing, TimingMode::Wait);
@@ -1897,22 +1902,21 @@ pub mod pyrat {
                 ds.field("cheese", &self.cheese());
                 ds.field("player1_start", &self.player1_start());
                 ds.field("player2_start", &self.player2_start());
-                ds.field("controlled_players", &self.controlled_players());
                 ds.field("timing", &self.timing());
                 ds.field("move_timeout_ms", &self.move_timeout_ms());
                 ds.field("preprocessing_timeout_ms", &self.preprocessing_timeout_ms());
                 ds.finish()
             }
         }
-        pub enum StartPreprocessingOffset {}
+        pub enum WelcomeOffset {}
         #[derive(Copy, Clone, PartialEq)]
 
-        pub struct StartPreprocessing<'a> {
+        pub struct Welcome<'a> {
             pub _tab: ::flatbuffers::Table<'a>,
         }
 
-        impl<'a> ::flatbuffers::Follow<'a> for StartPreprocessing<'a> {
-            type Inner = StartPreprocessing<'a>;
+        impl<'a> ::flatbuffers::Follow<'a> for Welcome<'a> {
+            type Inner = Welcome<'a>;
             #[inline]
             unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
                 Self {
@@ -1921,12 +1925,12 @@ pub mod pyrat {
             }
         }
 
-        impl<'a> StartPreprocessing<'a> {
-            pub const VT_STATE_HASH: ::flatbuffers::VOffsetT = 4;
+        impl<'a> Welcome<'a> {
+            pub const VT_PLAYER_SLOT: ::flatbuffers::VOffsetT = 4;
 
             #[inline]
             pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-                StartPreprocessing { _tab: table }
+                Welcome { _tab: table }
             }
             #[allow(unused_mut)]
             pub fn create<
@@ -1936,9 +1940,439 @@ pub mod pyrat {
                 A: ::flatbuffers::Allocator + 'bldr,
             >(
                 _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-                args: &'args StartPreprocessingArgs,
-            ) -> ::flatbuffers::WIPOffset<StartPreprocessing<'bldr>> {
-                let mut builder = StartPreprocessingBuilder::new(_fbb);
+                args: &'args WelcomeArgs,
+            ) -> ::flatbuffers::WIPOffset<Welcome<'bldr>> {
+                let mut builder = WelcomeBuilder::new(_fbb);
+                builder.add_player_slot(args.player_slot);
+                builder.finish()
+            }
+
+            #[inline]
+            pub fn player_slot(&self) -> Player {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<Player>(Welcome::VT_PLAYER_SLOT, Some(Player::Player1))
+                        .unwrap()
+                }
+            }
+        }
+
+        impl ::flatbuffers::Verifiable for Welcome<'_> {
+            #[inline]
+            fn run_verifier(
+                v: &mut ::flatbuffers::Verifier,
+                pos: usize,
+            ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+                v.visit_table(pos)?
+                    .visit_field::<Player>("player_slot", Self::VT_PLAYER_SLOT, false)?
+                    .finish();
+                Ok(())
+            }
+        }
+        pub struct WelcomeArgs {
+            pub player_slot: Player,
+        }
+        impl<'a> Default for WelcomeArgs {
+            #[inline]
+            fn default() -> Self {
+                WelcomeArgs {
+                    player_slot: Player::Player1,
+                }
+            }
+        }
+
+        pub struct WelcomeBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
+            fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+            start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+        }
+        impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> WelcomeBuilder<'a, 'b, A> {
+            #[inline]
+            pub fn add_player_slot(&mut self, player_slot: Player) {
+                self.fbb_.push_slot::<Player>(
+                    Welcome::VT_PLAYER_SLOT,
+                    player_slot,
+                    Player::Player1,
+                );
+            }
+            #[inline]
+            pub fn new(
+                _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+            ) -> WelcomeBuilder<'a, 'b, A> {
+                let start = _fbb.start_table();
+                WelcomeBuilder {
+                    fbb_: _fbb,
+                    start_: start,
+                }
+            }
+            #[inline]
+            pub fn finish(self) -> ::flatbuffers::WIPOffset<Welcome<'a>> {
+                let o = self.fbb_.end_table(self.start_);
+                ::flatbuffers::WIPOffset::new(o.value())
+            }
+        }
+
+        impl ::core::fmt::Debug for Welcome<'_> {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                let mut ds = f.debug_struct("Welcome");
+                ds.field("player_slot", &self.player_slot());
+                ds.finish()
+            }
+        }
+        pub enum ConfigureOffset {}
+        #[derive(Copy, Clone, PartialEq)]
+
+        pub struct Configure<'a> {
+            pub _tab: ::flatbuffers::Table<'a>,
+        }
+
+        impl<'a> ::flatbuffers::Follow<'a> for Configure<'a> {
+            type Inner = Configure<'a>;
+            #[inline]
+            unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+                Self {
+                    _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+                }
+            }
+        }
+
+        impl<'a> Configure<'a> {
+            pub const VT_OPTIONS: ::flatbuffers::VOffsetT = 4;
+            pub const VT_MATCH_CONFIG: ::flatbuffers::VOffsetT = 6;
+
+            #[inline]
+            pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+                Configure { _tab: table }
+            }
+            #[allow(unused_mut)]
+            pub fn create<
+                'bldr: 'args,
+                'args: 'mut_bldr,
+                'mut_bldr,
+                A: ::flatbuffers::Allocator + 'bldr,
+            >(
+                _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+                args: &'args ConfigureArgs<'args>,
+            ) -> ::flatbuffers::WIPOffset<Configure<'bldr>> {
+                let mut builder = ConfigureBuilder::new(_fbb);
+                if let Some(x) = args.match_config {
+                    builder.add_match_config(x);
+                }
+                if let Some(x) = args.options {
+                    builder.add_options(x);
+                }
+                builder.finish()
+            }
+
+            #[inline]
+            pub fn options(
+                &self,
+            ) -> Option<
+                ::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<OptionAssignment<'a>>>,
+            > {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab.get::<::flatbuffers::ForwardsUOffset<
+                        ::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<OptionAssignment>>,
+                    >>(Configure::VT_OPTIONS, None)
+                }
+            }
+            #[inline]
+            pub fn match_config(&self) -> Option<MatchConfig<'a>> {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<::flatbuffers::ForwardsUOffset<MatchConfig>>(
+                            Configure::VT_MATCH_CONFIG,
+                            None,
+                        )
+                }
+            }
+        }
+
+        impl ::flatbuffers::Verifiable for Configure<'_> {
+            #[inline]
+            fn run_verifier(
+                v: &mut ::flatbuffers::Verifier,
+                pos: usize,
+            ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+                v.visit_table(pos)?
+                    .visit_field::<::flatbuffers::ForwardsUOffset<
+                        ::flatbuffers::Vector<'_, ::flatbuffers::ForwardsUOffset<OptionAssignment>>,
+                    >>("options", Self::VT_OPTIONS, false)?
+                    .visit_field::<::flatbuffers::ForwardsUOffset<MatchConfig>>(
+                        "match_config",
+                        Self::VT_MATCH_CONFIG,
+                        false,
+                    )?
+                    .finish();
+                Ok(())
+            }
+        }
+        pub struct ConfigureArgs<'a> {
+            pub options: Option<
+                ::flatbuffers::WIPOffset<
+                    ::flatbuffers::Vector<'a, ::flatbuffers::ForwardsUOffset<OptionAssignment<'a>>>,
+                >,
+            >,
+            pub match_config: Option<::flatbuffers::WIPOffset<MatchConfig<'a>>>,
+        }
+        impl<'a> Default for ConfigureArgs<'a> {
+            #[inline]
+            fn default() -> Self {
+                ConfigureArgs {
+                    options: None,
+                    match_config: None,
+                }
+            }
+        }
+
+        pub struct ConfigureBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
+            fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+            start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+        }
+        impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> ConfigureBuilder<'a, 'b, A> {
+            #[inline]
+            pub fn add_options(
+                &mut self,
+                options: ::flatbuffers::WIPOffset<
+                    ::flatbuffers::Vector<'b, ::flatbuffers::ForwardsUOffset<OptionAssignment<'b>>>,
+                >,
+            ) {
+                self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+                    Configure::VT_OPTIONS,
+                    options,
+                );
+            }
+            #[inline]
+            pub fn add_match_config(
+                &mut self,
+                match_config: ::flatbuffers::WIPOffset<MatchConfig<'b>>,
+            ) {
+                self.fbb_
+                    .push_slot_always::<::flatbuffers::WIPOffset<MatchConfig>>(
+                        Configure::VT_MATCH_CONFIG,
+                        match_config,
+                    );
+            }
+            #[inline]
+            pub fn new(
+                _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+            ) -> ConfigureBuilder<'a, 'b, A> {
+                let start = _fbb.start_table();
+                ConfigureBuilder {
+                    fbb_: _fbb,
+                    start_: start,
+                }
+            }
+            #[inline]
+            pub fn finish(self) -> ::flatbuffers::WIPOffset<Configure<'a>> {
+                let o = self.fbb_.end_table(self.start_);
+                ::flatbuffers::WIPOffset::new(o.value())
+            }
+        }
+
+        impl ::core::fmt::Debug for Configure<'_> {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                let mut ds = f.debug_struct("Configure");
+                ds.field("options", &self.options());
+                ds.field("match_config", &self.match_config());
+                ds.finish()
+            }
+        }
+        pub enum SearchLimitsOffset {}
+        #[derive(Copy, Clone, PartialEq)]
+
+        pub struct SearchLimits<'a> {
+            pub _tab: ::flatbuffers::Table<'a>,
+        }
+
+        impl<'a> ::flatbuffers::Follow<'a> for SearchLimits<'a> {
+            type Inner = SearchLimits<'a>;
+            #[inline]
+            unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+                Self {
+                    _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+                }
+            }
+        }
+
+        impl<'a> SearchLimits<'a> {
+            pub const VT_TIMEOUT_MS: ::flatbuffers::VOffsetT = 4;
+            pub const VT_DEPTH: ::flatbuffers::VOffsetT = 6;
+            pub const VT_NODES: ::flatbuffers::VOffsetT = 8;
+
+            #[inline]
+            pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+                SearchLimits { _tab: table }
+            }
+            #[allow(unused_mut)]
+            pub fn create<
+                'bldr: 'args,
+                'args: 'mut_bldr,
+                'mut_bldr,
+                A: ::flatbuffers::Allocator + 'bldr,
+            >(
+                _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+                args: &'args SearchLimitsArgs,
+            ) -> ::flatbuffers::WIPOffset<SearchLimits<'bldr>> {
+                let mut builder = SearchLimitsBuilder::new(_fbb);
+                builder.add_nodes(args.nodes);
+                builder.add_timeout_ms(args.timeout_ms);
+                builder.add_depth(args.depth);
+                builder.finish()
+            }
+
+            #[inline]
+            pub fn timeout_ms(&self) -> u32 {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<u32>(SearchLimits::VT_TIMEOUT_MS, Some(0))
+                        .unwrap()
+                }
+            }
+            #[inline]
+            pub fn depth(&self) -> u16 {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<u16>(SearchLimits::VT_DEPTH, Some(0))
+                        .unwrap()
+                }
+            }
+            #[inline]
+            pub fn nodes(&self) -> u32 {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<u32>(SearchLimits::VT_NODES, Some(0))
+                        .unwrap()
+                }
+            }
+        }
+
+        impl ::flatbuffers::Verifiable for SearchLimits<'_> {
+            #[inline]
+            fn run_verifier(
+                v: &mut ::flatbuffers::Verifier,
+                pos: usize,
+            ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+                v.visit_table(pos)?
+                    .visit_field::<u32>("timeout_ms", Self::VT_TIMEOUT_MS, false)?
+                    .visit_field::<u16>("depth", Self::VT_DEPTH, false)?
+                    .visit_field::<u32>("nodes", Self::VT_NODES, false)?
+                    .finish();
+                Ok(())
+            }
+        }
+        pub struct SearchLimitsArgs {
+            pub timeout_ms: u32,
+            pub depth: u16,
+            pub nodes: u32,
+        }
+        impl<'a> Default for SearchLimitsArgs {
+            #[inline]
+            fn default() -> Self {
+                SearchLimitsArgs {
+                    timeout_ms: 0,
+                    depth: 0,
+                    nodes: 0,
+                }
+            }
+        }
+
+        pub struct SearchLimitsBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
+            fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+            start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+        }
+        impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> SearchLimitsBuilder<'a, 'b, A> {
+            #[inline]
+            pub fn add_timeout_ms(&mut self, timeout_ms: u32) {
+                self.fbb_
+                    .push_slot::<u32>(SearchLimits::VT_TIMEOUT_MS, timeout_ms, 0);
+            }
+            #[inline]
+            pub fn add_depth(&mut self, depth: u16) {
+                self.fbb_.push_slot::<u16>(SearchLimits::VT_DEPTH, depth, 0);
+            }
+            #[inline]
+            pub fn add_nodes(&mut self, nodes: u32) {
+                self.fbb_.push_slot::<u32>(SearchLimits::VT_NODES, nodes, 0);
+            }
+            #[inline]
+            pub fn new(
+                _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+            ) -> SearchLimitsBuilder<'a, 'b, A> {
+                let start = _fbb.start_table();
+                SearchLimitsBuilder {
+                    fbb_: _fbb,
+                    start_: start,
+                }
+            }
+            #[inline]
+            pub fn finish(self) -> ::flatbuffers::WIPOffset<SearchLimits<'a>> {
+                let o = self.fbb_.end_table(self.start_);
+                ::flatbuffers::WIPOffset::new(o.value())
+            }
+        }
+
+        impl ::core::fmt::Debug for SearchLimits<'_> {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                let mut ds = f.debug_struct("SearchLimits");
+                ds.field("timeout_ms", &self.timeout_ms());
+                ds.field("depth", &self.depth());
+                ds.field("nodes", &self.nodes());
+                ds.finish()
+            }
+        }
+        pub enum GoPreprocessOffset {}
+        #[derive(Copy, Clone, PartialEq)]
+
+        pub struct GoPreprocess<'a> {
+            pub _tab: ::flatbuffers::Table<'a>,
+        }
+
+        impl<'a> ::flatbuffers::Follow<'a> for GoPreprocess<'a> {
+            type Inner = GoPreprocess<'a>;
+            #[inline]
+            unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+                Self {
+                    _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+                }
+            }
+        }
+
+        impl<'a> GoPreprocess<'a> {
+            pub const VT_STATE_HASH: ::flatbuffers::VOffsetT = 4;
+
+            #[inline]
+            pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+                GoPreprocess { _tab: table }
+            }
+            #[allow(unused_mut)]
+            pub fn create<
+                'bldr: 'args,
+                'args: 'mut_bldr,
+                'mut_bldr,
+                A: ::flatbuffers::Allocator + 'bldr,
+            >(
+                _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+                args: &'args GoPreprocessArgs,
+            ) -> ::flatbuffers::WIPOffset<GoPreprocess<'bldr>> {
+                let mut builder = GoPreprocessBuilder::new(_fbb);
                 builder.add_state_hash(args.state_hash);
                 builder.finish()
             }
@@ -1950,13 +2384,13 @@ pub mod pyrat {
                 // which contains a valid value in this slot
                 unsafe {
                     self._tab
-                        .get::<u64>(StartPreprocessing::VT_STATE_HASH, Some(0))
+                        .get::<u64>(GoPreprocess::VT_STATE_HASH, Some(0))
                         .unwrap()
                 }
             }
         }
 
-        impl ::flatbuffers::Verifiable for StartPreprocessing<'_> {
+        impl ::flatbuffers::Verifiable for GoPreprocess<'_> {
             #[inline]
             fn run_verifier(
                 v: &mut ::flatbuffers::Verifier,
@@ -1968,47 +2402,349 @@ pub mod pyrat {
                 Ok(())
             }
         }
-        pub struct StartPreprocessingArgs {
+        pub struct GoPreprocessArgs {
             pub state_hash: u64,
         }
-        impl<'a> Default for StartPreprocessingArgs {
+        impl<'a> Default for GoPreprocessArgs {
             #[inline]
             fn default() -> Self {
-                StartPreprocessingArgs { state_hash: 0 }
+                GoPreprocessArgs { state_hash: 0 }
             }
         }
 
-        pub struct StartPreprocessingBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
+        pub struct GoPreprocessBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
             fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
             start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
         }
-        impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> StartPreprocessingBuilder<'a, 'b, A> {
+        impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> GoPreprocessBuilder<'a, 'b, A> {
             #[inline]
             pub fn add_state_hash(&mut self, state_hash: u64) {
                 self.fbb_
-                    .push_slot::<u64>(StartPreprocessing::VT_STATE_HASH, state_hash, 0);
+                    .push_slot::<u64>(GoPreprocess::VT_STATE_HASH, state_hash, 0);
             }
             #[inline]
             pub fn new(
                 _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-            ) -> StartPreprocessingBuilder<'a, 'b, A> {
+            ) -> GoPreprocessBuilder<'a, 'b, A> {
                 let start = _fbb.start_table();
-                StartPreprocessingBuilder {
+                GoPreprocessBuilder {
                     fbb_: _fbb,
                     start_: start,
                 }
             }
             #[inline]
-            pub fn finish(self) -> ::flatbuffers::WIPOffset<StartPreprocessing<'a>> {
+            pub fn finish(self) -> ::flatbuffers::WIPOffset<GoPreprocess<'a>> {
                 let o = self.fbb_.end_table(self.start_);
                 ::flatbuffers::WIPOffset::new(o.value())
             }
         }
 
-        impl ::core::fmt::Debug for StartPreprocessing<'_> {
+        impl ::core::fmt::Debug for GoPreprocess<'_> {
             fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                let mut ds = f.debug_struct("StartPreprocessing");
+                let mut ds = f.debug_struct("GoPreprocess");
                 ds.field("state_hash", &self.state_hash());
+                ds.finish()
+            }
+        }
+        pub enum AdvanceOffset {}
+        #[derive(Copy, Clone, PartialEq)]
+
+        pub struct Advance<'a> {
+            pub _tab: ::flatbuffers::Table<'a>,
+        }
+
+        impl<'a> ::flatbuffers::Follow<'a> for Advance<'a> {
+            type Inner = Advance<'a>;
+            #[inline]
+            unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+                Self {
+                    _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+                }
+            }
+        }
+
+        impl<'a> Advance<'a> {
+            pub const VT_P1_DIR: ::flatbuffers::VOffsetT = 4;
+            pub const VT_P2_DIR: ::flatbuffers::VOffsetT = 6;
+            pub const VT_TURN: ::flatbuffers::VOffsetT = 8;
+            pub const VT_NEW_HASH: ::flatbuffers::VOffsetT = 10;
+
+            #[inline]
+            pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+                Advance { _tab: table }
+            }
+            #[allow(unused_mut)]
+            pub fn create<
+                'bldr: 'args,
+                'args: 'mut_bldr,
+                'mut_bldr,
+                A: ::flatbuffers::Allocator + 'bldr,
+            >(
+                _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+                args: &'args AdvanceArgs,
+            ) -> ::flatbuffers::WIPOffset<Advance<'bldr>> {
+                let mut builder = AdvanceBuilder::new(_fbb);
+                builder.add_new_hash(args.new_hash);
+                builder.add_turn(args.turn);
+                builder.add_p2_dir(args.p2_dir);
+                builder.add_p1_dir(args.p1_dir);
+                builder.finish()
+            }
+
+            #[inline]
+            pub fn p1_dir(&self) -> Direction {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<Direction>(Advance::VT_P1_DIR, Some(Direction::Up))
+                        .unwrap()
+                }
+            }
+            #[inline]
+            pub fn p2_dir(&self) -> Direction {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<Direction>(Advance::VT_P2_DIR, Some(Direction::Up))
+                        .unwrap()
+                }
+            }
+            #[inline]
+            pub fn turn(&self) -> u16 {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe { self._tab.get::<u16>(Advance::VT_TURN, Some(0)).unwrap() }
+            }
+            #[inline]
+            pub fn new_hash(&self) -> u64 {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe { self._tab.get::<u64>(Advance::VT_NEW_HASH, Some(0)).unwrap() }
+            }
+        }
+
+        impl ::flatbuffers::Verifiable for Advance<'_> {
+            #[inline]
+            fn run_verifier(
+                v: &mut ::flatbuffers::Verifier,
+                pos: usize,
+            ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+                v.visit_table(pos)?
+                    .visit_field::<Direction>("p1_dir", Self::VT_P1_DIR, false)?
+                    .visit_field::<Direction>("p2_dir", Self::VT_P2_DIR, false)?
+                    .visit_field::<u16>("turn", Self::VT_TURN, false)?
+                    .visit_field::<u64>("new_hash", Self::VT_NEW_HASH, false)?
+                    .finish();
+                Ok(())
+            }
+        }
+        pub struct AdvanceArgs {
+            pub p1_dir: Direction,
+            pub p2_dir: Direction,
+            pub turn: u16,
+            pub new_hash: u64,
+        }
+        impl<'a> Default for AdvanceArgs {
+            #[inline]
+            fn default() -> Self {
+                AdvanceArgs {
+                    p1_dir: Direction::Up,
+                    p2_dir: Direction::Up,
+                    turn: 0,
+                    new_hash: 0,
+                }
+            }
+        }
+
+        pub struct AdvanceBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
+            fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+            start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+        }
+        impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> AdvanceBuilder<'a, 'b, A> {
+            #[inline]
+            pub fn add_p1_dir(&mut self, p1_dir: Direction) {
+                self.fbb_
+                    .push_slot::<Direction>(Advance::VT_P1_DIR, p1_dir, Direction::Up);
+            }
+            #[inline]
+            pub fn add_p2_dir(&mut self, p2_dir: Direction) {
+                self.fbb_
+                    .push_slot::<Direction>(Advance::VT_P2_DIR, p2_dir, Direction::Up);
+            }
+            #[inline]
+            pub fn add_turn(&mut self, turn: u16) {
+                self.fbb_.push_slot::<u16>(Advance::VT_TURN, turn, 0);
+            }
+            #[inline]
+            pub fn add_new_hash(&mut self, new_hash: u64) {
+                self.fbb_
+                    .push_slot::<u64>(Advance::VT_NEW_HASH, new_hash, 0);
+            }
+            #[inline]
+            pub fn new(
+                _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+            ) -> AdvanceBuilder<'a, 'b, A> {
+                let start = _fbb.start_table();
+                AdvanceBuilder {
+                    fbb_: _fbb,
+                    start_: start,
+                }
+            }
+            #[inline]
+            pub fn finish(self) -> ::flatbuffers::WIPOffset<Advance<'a>> {
+                let o = self.fbb_.end_table(self.start_);
+                ::flatbuffers::WIPOffset::new(o.value())
+            }
+        }
+
+        impl ::core::fmt::Debug for Advance<'_> {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                let mut ds = f.debug_struct("Advance");
+                ds.field("p1_dir", &self.p1_dir());
+                ds.field("p2_dir", &self.p2_dir());
+                ds.field("turn", &self.turn());
+                ds.field("new_hash", &self.new_hash());
+                ds.finish()
+            }
+        }
+        pub enum GoOffset {}
+        #[derive(Copy, Clone, PartialEq)]
+
+        pub struct Go<'a> {
+            pub _tab: ::flatbuffers::Table<'a>,
+        }
+
+        impl<'a> ::flatbuffers::Follow<'a> for Go<'a> {
+            type Inner = Go<'a>;
+            #[inline]
+            unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+                Self {
+                    _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+                }
+            }
+        }
+
+        impl<'a> Go<'a> {
+            pub const VT_STATE_HASH: ::flatbuffers::VOffsetT = 4;
+            pub const VT_LIMITS: ::flatbuffers::VOffsetT = 6;
+
+            #[inline]
+            pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+                Go { _tab: table }
+            }
+            #[allow(unused_mut)]
+            pub fn create<
+                'bldr: 'args,
+                'args: 'mut_bldr,
+                'mut_bldr,
+                A: ::flatbuffers::Allocator + 'bldr,
+            >(
+                _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+                args: &'args GoArgs<'args>,
+            ) -> ::flatbuffers::WIPOffset<Go<'bldr>> {
+                let mut builder = GoBuilder::new(_fbb);
+                builder.add_state_hash(args.state_hash);
+                if let Some(x) = args.limits {
+                    builder.add_limits(x);
+                }
+                builder.finish()
+            }
+
+            #[inline]
+            pub fn state_hash(&self) -> u64 {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe { self._tab.get::<u64>(Go::VT_STATE_HASH, Some(0)).unwrap() }
+            }
+            #[inline]
+            pub fn limits(&self) -> Option<SearchLimits<'a>> {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<::flatbuffers::ForwardsUOffset<SearchLimits>>(Go::VT_LIMITS, None)
+                }
+            }
+        }
+
+        impl ::flatbuffers::Verifiable for Go<'_> {
+            #[inline]
+            fn run_verifier(
+                v: &mut ::flatbuffers::Verifier,
+                pos: usize,
+            ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+                v.visit_table(pos)?
+                    .visit_field::<u64>("state_hash", Self::VT_STATE_HASH, false)?
+                    .visit_field::<::flatbuffers::ForwardsUOffset<SearchLimits>>(
+                        "limits",
+                        Self::VT_LIMITS,
+                        false,
+                    )?
+                    .finish();
+                Ok(())
+            }
+        }
+        pub struct GoArgs<'a> {
+            pub state_hash: u64,
+            pub limits: Option<::flatbuffers::WIPOffset<SearchLimits<'a>>>,
+        }
+        impl<'a> Default for GoArgs<'a> {
+            #[inline]
+            fn default() -> Self {
+                GoArgs {
+                    state_hash: 0,
+                    limits: None,
+                }
+            }
+        }
+
+        pub struct GoBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
+            fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+            start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+        }
+        impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> GoBuilder<'a, 'b, A> {
+            #[inline]
+            pub fn add_state_hash(&mut self, state_hash: u64) {
+                self.fbb_.push_slot::<u64>(Go::VT_STATE_HASH, state_hash, 0);
+            }
+            #[inline]
+            pub fn add_limits(&mut self, limits: ::flatbuffers::WIPOffset<SearchLimits<'b>>) {
+                self.fbb_
+                    .push_slot_always::<::flatbuffers::WIPOffset<SearchLimits>>(
+                        Go::VT_LIMITS,
+                        limits,
+                    );
+            }
+            #[inline]
+            pub fn new(
+                _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+            ) -> GoBuilder<'a, 'b, A> {
+                let start = _fbb.start_table();
+                GoBuilder {
+                    fbb_: _fbb,
+                    start_: start,
+                }
+            }
+            #[inline]
+            pub fn finish(self) -> ::flatbuffers::WIPOffset<Go<'a>> {
+                let o = self.fbb_.end_table(self.start_);
+                ::flatbuffers::WIPOffset::new(o.value())
+            }
+        }
+
+        impl ::core::fmt::Debug for Go<'_> {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                let mut ds = f.debug_struct("Go");
+                ds.field("state_hash", &self.state_hash());
+                ds.field("limits", &self.limits());
                 ds.finish()
             }
         }
@@ -2040,7 +2776,6 @@ pub mod pyrat {
             pub const VT_CHEESE: ::flatbuffers::VOffsetT = 18;
             pub const VT_PLAYER1_LAST_MOVE: ::flatbuffers::VOffsetT = 20;
             pub const VT_PLAYER2_LAST_MOVE: ::flatbuffers::VOffsetT = 22;
-            pub const VT_STATE_HASH: ::flatbuffers::VOffsetT = 24;
 
             #[inline]
             pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -2057,7 +2792,6 @@ pub mod pyrat {
                 args: &'args TurnStateArgs<'args>,
             ) -> ::flatbuffers::WIPOffset<TurnState<'bldr>> {
                 let mut builder = TurnStateBuilder::new(_fbb);
-                builder.add_state_hash(args.state_hash);
                 if let Some(x) = args.cheese {
                     builder.add_cheese(x);
                 }
@@ -2177,17 +2911,6 @@ pub mod pyrat {
                         .unwrap()
                 }
             }
-            #[inline]
-            pub fn state_hash(&self) -> u64 {
-                // Safety:
-                // Created from valid Table for this object
-                // which contains a valid value in this slot
-                unsafe {
-                    self._tab
-                        .get::<u64>(TurnState::VT_STATE_HASH, Some(0))
-                        .unwrap()
-                }
-            }
         }
 
         impl ::flatbuffers::Verifiable for TurnState<'_> {
@@ -2219,7 +2942,6 @@ pub mod pyrat {
                         Self::VT_PLAYER2_LAST_MOVE,
                         false,
                     )?
-                    .visit_field::<u64>("state_hash", Self::VT_STATE_HASH, false)?
                     .finish();
                 Ok(())
             }
@@ -2235,7 +2957,6 @@ pub mod pyrat {
             pub cheese: Option<::flatbuffers::WIPOffset<::flatbuffers::Vector<'a, Vec2>>>,
             pub player1_last_move: Direction,
             pub player2_last_move: Direction,
-            pub state_hash: u64,
         }
         impl<'a> Default for TurnStateArgs<'a> {
             #[inline]
@@ -2251,7 +2972,6 @@ pub mod pyrat {
                     cheese: None,
                     player1_last_move: Direction::Up,
                     player2_last_move: Direction::Up,
-                    state_hash: 0,
                 }
             }
         }
@@ -2320,11 +3040,6 @@ pub mod pyrat {
                 );
             }
             #[inline]
-            pub fn add_state_hash(&mut self, state_hash: u64) {
-                self.fbb_
-                    .push_slot::<u64>(TurnState::VT_STATE_HASH, state_hash, 0);
-            }
-            #[inline]
             pub fn new(
                 _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
             ) -> TurnStateBuilder<'a, 'b, A> {
@@ -2354,7 +3069,452 @@ pub mod pyrat {
                 ds.field("cheese", &self.cheese());
                 ds.field("player1_last_move", &self.player1_last_move());
                 ds.field("player2_last_move", &self.player2_last_move());
+                ds.finish()
+            }
+        }
+        pub enum GoStateOffset {}
+        #[derive(Copy, Clone, PartialEq)]
+
+        pub struct GoState<'a> {
+            pub _tab: ::flatbuffers::Table<'a>,
+        }
+
+        impl<'a> ::flatbuffers::Follow<'a> for GoState<'a> {
+            type Inner = GoState<'a>;
+            #[inline]
+            unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+                Self {
+                    _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+                }
+            }
+        }
+
+        impl<'a> GoState<'a> {
+            pub const VT_TURN_STATE: ::flatbuffers::VOffsetT = 4;
+            pub const VT_STATE_HASH: ::flatbuffers::VOffsetT = 6;
+            pub const VT_LIMITS: ::flatbuffers::VOffsetT = 8;
+
+            #[inline]
+            pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+                GoState { _tab: table }
+            }
+            #[allow(unused_mut)]
+            pub fn create<
+                'bldr: 'args,
+                'args: 'mut_bldr,
+                'mut_bldr,
+                A: ::flatbuffers::Allocator + 'bldr,
+            >(
+                _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+                args: &'args GoStateArgs<'args>,
+            ) -> ::flatbuffers::WIPOffset<GoState<'bldr>> {
+                let mut builder = GoStateBuilder::new(_fbb);
+                builder.add_state_hash(args.state_hash);
+                if let Some(x) = args.limits {
+                    builder.add_limits(x);
+                }
+                if let Some(x) = args.turn_state {
+                    builder.add_turn_state(x);
+                }
+                builder.finish()
+            }
+
+            #[inline]
+            pub fn turn_state(&self) -> Option<TurnState<'a>> {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab.get::<::flatbuffers::ForwardsUOffset<TurnState>>(
+                        GoState::VT_TURN_STATE,
+                        None,
+                    )
+                }
+            }
+            #[inline]
+            pub fn state_hash(&self) -> u64 {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<u64>(GoState::VT_STATE_HASH, Some(0))
+                        .unwrap()
+                }
+            }
+            #[inline]
+            pub fn limits(&self) -> Option<SearchLimits<'a>> {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<::flatbuffers::ForwardsUOffset<SearchLimits>>(
+                            GoState::VT_LIMITS,
+                            None,
+                        )
+                }
+            }
+        }
+
+        impl ::flatbuffers::Verifiable for GoState<'_> {
+            #[inline]
+            fn run_verifier(
+                v: &mut ::flatbuffers::Verifier,
+                pos: usize,
+            ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+                v.visit_table(pos)?
+                    .visit_field::<::flatbuffers::ForwardsUOffset<TurnState>>(
+                        "turn_state",
+                        Self::VT_TURN_STATE,
+                        false,
+                    )?
+                    .visit_field::<u64>("state_hash", Self::VT_STATE_HASH, false)?
+                    .visit_field::<::flatbuffers::ForwardsUOffset<SearchLimits>>(
+                        "limits",
+                        Self::VT_LIMITS,
+                        false,
+                    )?
+                    .finish();
+                Ok(())
+            }
+        }
+        pub struct GoStateArgs<'a> {
+            pub turn_state: Option<::flatbuffers::WIPOffset<TurnState<'a>>>,
+            pub state_hash: u64,
+            pub limits: Option<::flatbuffers::WIPOffset<SearchLimits<'a>>>,
+        }
+        impl<'a> Default for GoStateArgs<'a> {
+            #[inline]
+            fn default() -> Self {
+                GoStateArgs {
+                    turn_state: None,
+                    state_hash: 0,
+                    limits: None,
+                }
+            }
+        }
+
+        pub struct GoStateBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
+            fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+            start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+        }
+        impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> GoStateBuilder<'a, 'b, A> {
+            #[inline]
+            pub fn add_turn_state(&mut self, turn_state: ::flatbuffers::WIPOffset<TurnState<'b>>) {
+                self.fbb_
+                    .push_slot_always::<::flatbuffers::WIPOffset<TurnState>>(
+                        GoState::VT_TURN_STATE,
+                        turn_state,
+                    );
+            }
+            #[inline]
+            pub fn add_state_hash(&mut self, state_hash: u64) {
+                self.fbb_
+                    .push_slot::<u64>(GoState::VT_STATE_HASH, state_hash, 0);
+            }
+            #[inline]
+            pub fn add_limits(&mut self, limits: ::flatbuffers::WIPOffset<SearchLimits<'b>>) {
+                self.fbb_
+                    .push_slot_always::<::flatbuffers::WIPOffset<SearchLimits>>(
+                        GoState::VT_LIMITS,
+                        limits,
+                    );
+            }
+            #[inline]
+            pub fn new(
+                _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+            ) -> GoStateBuilder<'a, 'b, A> {
+                let start = _fbb.start_table();
+                GoStateBuilder {
+                    fbb_: _fbb,
+                    start_: start,
+                }
+            }
+            #[inline]
+            pub fn finish(self) -> ::flatbuffers::WIPOffset<GoState<'a>> {
+                let o = self.fbb_.end_table(self.start_);
+                ::flatbuffers::WIPOffset::new(o.value())
+            }
+        }
+
+        impl ::core::fmt::Debug for GoState<'_> {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                let mut ds = f.debug_struct("GoState");
+                ds.field("turn_state", &self.turn_state());
                 ds.field("state_hash", &self.state_hash());
+                ds.field("limits", &self.limits());
+                ds.finish()
+            }
+        }
+        pub enum FullStateOffset {}
+        #[derive(Copy, Clone, PartialEq)]
+
+        pub struct FullState<'a> {
+            pub _tab: ::flatbuffers::Table<'a>,
+        }
+
+        impl<'a> ::flatbuffers::Follow<'a> for FullState<'a> {
+            type Inner = FullState<'a>;
+            #[inline]
+            unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+                Self {
+                    _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+                }
+            }
+        }
+
+        impl<'a> FullState<'a> {
+            pub const VT_MATCH_CONFIG: ::flatbuffers::VOffsetT = 4;
+            pub const VT_TURN_STATE: ::flatbuffers::VOffsetT = 6;
+
+            #[inline]
+            pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+                FullState { _tab: table }
+            }
+            #[allow(unused_mut)]
+            pub fn create<
+                'bldr: 'args,
+                'args: 'mut_bldr,
+                'mut_bldr,
+                A: ::flatbuffers::Allocator + 'bldr,
+            >(
+                _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+                args: &'args FullStateArgs<'args>,
+            ) -> ::flatbuffers::WIPOffset<FullState<'bldr>> {
+                let mut builder = FullStateBuilder::new(_fbb);
+                if let Some(x) = args.turn_state {
+                    builder.add_turn_state(x);
+                }
+                if let Some(x) = args.match_config {
+                    builder.add_match_config(x);
+                }
+                builder.finish()
+            }
+
+            #[inline]
+            pub fn match_config(&self) -> Option<MatchConfig<'a>> {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<::flatbuffers::ForwardsUOffset<MatchConfig>>(
+                            FullState::VT_MATCH_CONFIG,
+                            None,
+                        )
+                }
+            }
+            #[inline]
+            pub fn turn_state(&self) -> Option<TurnState<'a>> {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab.get::<::flatbuffers::ForwardsUOffset<TurnState>>(
+                        FullState::VT_TURN_STATE,
+                        None,
+                    )
+                }
+            }
+        }
+
+        impl ::flatbuffers::Verifiable for FullState<'_> {
+            #[inline]
+            fn run_verifier(
+                v: &mut ::flatbuffers::Verifier,
+                pos: usize,
+            ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+                v.visit_table(pos)?
+                    .visit_field::<::flatbuffers::ForwardsUOffset<MatchConfig>>(
+                        "match_config",
+                        Self::VT_MATCH_CONFIG,
+                        false,
+                    )?
+                    .visit_field::<::flatbuffers::ForwardsUOffset<TurnState>>(
+                        "turn_state",
+                        Self::VT_TURN_STATE,
+                        false,
+                    )?
+                    .finish();
+                Ok(())
+            }
+        }
+        pub struct FullStateArgs<'a> {
+            pub match_config: Option<::flatbuffers::WIPOffset<MatchConfig<'a>>>,
+            pub turn_state: Option<::flatbuffers::WIPOffset<TurnState<'a>>>,
+        }
+        impl<'a> Default for FullStateArgs<'a> {
+            #[inline]
+            fn default() -> Self {
+                FullStateArgs {
+                    match_config: None,
+                    turn_state: None,
+                }
+            }
+        }
+
+        pub struct FullStateBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
+            fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+            start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+        }
+        impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> FullStateBuilder<'a, 'b, A> {
+            #[inline]
+            pub fn add_match_config(
+                &mut self,
+                match_config: ::flatbuffers::WIPOffset<MatchConfig<'b>>,
+            ) {
+                self.fbb_
+                    .push_slot_always::<::flatbuffers::WIPOffset<MatchConfig>>(
+                        FullState::VT_MATCH_CONFIG,
+                        match_config,
+                    );
+            }
+            #[inline]
+            pub fn add_turn_state(&mut self, turn_state: ::flatbuffers::WIPOffset<TurnState<'b>>) {
+                self.fbb_
+                    .push_slot_always::<::flatbuffers::WIPOffset<TurnState>>(
+                        FullState::VT_TURN_STATE,
+                        turn_state,
+                    );
+            }
+            #[inline]
+            pub fn new(
+                _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+            ) -> FullStateBuilder<'a, 'b, A> {
+                let start = _fbb.start_table();
+                FullStateBuilder {
+                    fbb_: _fbb,
+                    start_: start,
+                }
+            }
+            #[inline]
+            pub fn finish(self) -> ::flatbuffers::WIPOffset<FullState<'a>> {
+                let o = self.fbb_.end_table(self.start_);
+                ::flatbuffers::WIPOffset::new(o.value())
+            }
+        }
+
+        impl ::core::fmt::Debug for FullState<'_> {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                let mut ds = f.debug_struct("FullState");
+                ds.field("match_config", &self.match_config());
+                ds.field("turn_state", &self.turn_state());
+                ds.finish()
+            }
+        }
+        pub enum ProtocolErrorOffset {}
+        #[derive(Copy, Clone, PartialEq)]
+
+        pub struct ProtocolError<'a> {
+            pub _tab: ::flatbuffers::Table<'a>,
+        }
+
+        impl<'a> ::flatbuffers::Follow<'a> for ProtocolError<'a> {
+            type Inner = ProtocolError<'a>;
+            #[inline]
+            unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+                Self {
+                    _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+                }
+            }
+        }
+
+        impl<'a> ProtocolError<'a> {
+            pub const VT_REASON: ::flatbuffers::VOffsetT = 4;
+
+            #[inline]
+            pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+                ProtocolError { _tab: table }
+            }
+            #[allow(unused_mut)]
+            pub fn create<
+                'bldr: 'args,
+                'args: 'mut_bldr,
+                'mut_bldr,
+                A: ::flatbuffers::Allocator + 'bldr,
+            >(
+                _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+                args: &'args ProtocolErrorArgs<'args>,
+            ) -> ::flatbuffers::WIPOffset<ProtocolError<'bldr>> {
+                let mut builder = ProtocolErrorBuilder::new(_fbb);
+                if let Some(x) = args.reason {
+                    builder.add_reason(x);
+                }
+                builder.finish()
+            }
+
+            #[inline]
+            pub fn reason(&self) -> Option<&'a str> {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<::flatbuffers::ForwardsUOffset<&str>>(ProtocolError::VT_REASON, None)
+                }
+            }
+        }
+
+        impl ::flatbuffers::Verifiable for ProtocolError<'_> {
+            #[inline]
+            fn run_verifier(
+                v: &mut ::flatbuffers::Verifier,
+                pos: usize,
+            ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+                v.visit_table(pos)?
+                    .visit_field::<::flatbuffers::ForwardsUOffset<&str>>(
+                        "reason",
+                        Self::VT_REASON,
+                        false,
+                    )?
+                    .finish();
+                Ok(())
+            }
+        }
+        pub struct ProtocolErrorArgs<'a> {
+            pub reason: Option<::flatbuffers::WIPOffset<&'a str>>,
+        }
+        impl<'a> Default for ProtocolErrorArgs<'a> {
+            #[inline]
+            fn default() -> Self {
+                ProtocolErrorArgs { reason: None }
+            }
+        }
+
+        pub struct ProtocolErrorBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
+            fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+            start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+        }
+        impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> ProtocolErrorBuilder<'a, 'b, A> {
+            #[inline]
+            pub fn add_reason(&mut self, reason: ::flatbuffers::WIPOffset<&'b str>) {
+                self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(
+                    ProtocolError::VT_REASON,
+                    reason,
+                );
+            }
+            #[inline]
+            pub fn new(
+                _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+            ) -> ProtocolErrorBuilder<'a, 'b, A> {
+                let start = _fbb.start_table();
+                ProtocolErrorBuilder {
+                    fbb_: _fbb,
+                    start_: start,
+                }
+            }
+            #[inline]
+            pub fn finish(self) -> ::flatbuffers::WIPOffset<ProtocolError<'a>> {
+                let o = self.fbb_.end_table(self.start_);
+                ::flatbuffers::WIPOffset::new(o.value())
+            }
+        }
+
+        impl ::core::fmt::Debug for ProtocolError<'_> {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                let mut ds = f.debug_struct("ProtocolError");
+                ds.field("reason", &self.reason());
                 ds.finish()
             }
         }
@@ -2438,119 +3598,6 @@ pub mod pyrat {
         impl ::core::fmt::Debug for Stop<'_> {
             fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                 let mut ds = f.debug_struct("Stop");
-                ds.finish()
-            }
-        }
-        pub enum TimeoutOffset {}
-        #[derive(Copy, Clone, PartialEq)]
-
-        pub struct Timeout<'a> {
-            pub _tab: ::flatbuffers::Table<'a>,
-        }
-
-        impl<'a> ::flatbuffers::Follow<'a> for Timeout<'a> {
-            type Inner = Timeout<'a>;
-            #[inline]
-            unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-                Self {
-                    _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
-                }
-            }
-        }
-
-        impl<'a> Timeout<'a> {
-            pub const VT_DEFAULT_MOVE: ::flatbuffers::VOffsetT = 4;
-
-            #[inline]
-            pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-                Timeout { _tab: table }
-            }
-            #[allow(unused_mut)]
-            pub fn create<
-                'bldr: 'args,
-                'args: 'mut_bldr,
-                'mut_bldr,
-                A: ::flatbuffers::Allocator + 'bldr,
-            >(
-                _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-                args: &'args TimeoutArgs,
-            ) -> ::flatbuffers::WIPOffset<Timeout<'bldr>> {
-                let mut builder = TimeoutBuilder::new(_fbb);
-                builder.add_default_move(args.default_move);
-                builder.finish()
-            }
-
-            #[inline]
-            pub fn default_move(&self) -> Direction {
-                // Safety:
-                // Created from valid Table for this object
-                // which contains a valid value in this slot
-                unsafe {
-                    self._tab
-                        .get::<Direction>(Timeout::VT_DEFAULT_MOVE, Some(Direction::Up))
-                        .unwrap()
-                }
-            }
-        }
-
-        impl ::flatbuffers::Verifiable for Timeout<'_> {
-            #[inline]
-            fn run_verifier(
-                v: &mut ::flatbuffers::Verifier,
-                pos: usize,
-            ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-                v.visit_table(pos)?
-                    .visit_field::<Direction>("default_move", Self::VT_DEFAULT_MOVE, false)?
-                    .finish();
-                Ok(())
-            }
-        }
-        pub struct TimeoutArgs {
-            pub default_move: Direction,
-        }
-        impl<'a> Default for TimeoutArgs {
-            #[inline]
-            fn default() -> Self {
-                TimeoutArgs {
-                    default_move: Direction::Up,
-                }
-            }
-        }
-
-        pub struct TimeoutBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-            fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-            start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
-        }
-        impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> TimeoutBuilder<'a, 'b, A> {
-            #[inline]
-            pub fn add_default_move(&mut self, default_move: Direction) {
-                self.fbb_.push_slot::<Direction>(
-                    Timeout::VT_DEFAULT_MOVE,
-                    default_move,
-                    Direction::Up,
-                );
-            }
-            #[inline]
-            pub fn new(
-                _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-            ) -> TimeoutBuilder<'a, 'b, A> {
-                let start = _fbb.start_table();
-                TimeoutBuilder {
-                    fbb_: _fbb,
-                    start_: start,
-                }
-            }
-            #[inline]
-            pub fn finish(self) -> ::flatbuffers::WIPOffset<Timeout<'a>> {
-                let o = self.fbb_.end_table(self.start_);
-                ::flatbuffers::WIPOffset::new(o.value())
-            }
-        }
-
-        impl ::core::fmt::Debug for Timeout<'_> {
-            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                let mut ds = f.debug_struct("Timeout");
-                ds.field("default_move", &self.default_move());
                 ds.finish()
             }
         }
@@ -2708,89 +3755,6 @@ pub mod pyrat {
                 ds.finish()
             }
         }
-        pub enum PingOffset {}
-        #[derive(Copy, Clone, PartialEq)]
-
-        pub struct Ping<'a> {
-            pub _tab: ::flatbuffers::Table<'a>,
-        }
-
-        impl<'a> ::flatbuffers::Follow<'a> for Ping<'a> {
-            type Inner = Ping<'a>;
-            #[inline]
-            unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-                Self {
-                    _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
-                }
-            }
-        }
-
-        impl<'a> Ping<'a> {
-            #[inline]
-            pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-                Ping { _tab: table }
-            }
-            #[allow(unused_mut)]
-            pub fn create<
-                'bldr: 'args,
-                'args: 'mut_bldr,
-                'mut_bldr,
-                A: ::flatbuffers::Allocator + 'bldr,
-            >(
-                _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-                _args: &'args PingArgs,
-            ) -> ::flatbuffers::WIPOffset<Ping<'bldr>> {
-                let mut builder = PingBuilder::new(_fbb);
-                builder.finish()
-            }
-        }
-
-        impl ::flatbuffers::Verifiable for Ping<'_> {
-            #[inline]
-            fn run_verifier(
-                v: &mut ::flatbuffers::Verifier,
-                pos: usize,
-            ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-                v.visit_table(pos)?.finish();
-                Ok(())
-            }
-        }
-        pub struct PingArgs {}
-        impl<'a> Default for PingArgs {
-            #[inline]
-            fn default() -> Self {
-                PingArgs {}
-            }
-        }
-
-        pub struct PingBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-            fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-            start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
-        }
-        impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> PingBuilder<'a, 'b, A> {
-            #[inline]
-            pub fn new(
-                _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-            ) -> PingBuilder<'a, 'b, A> {
-                let start = _fbb.start_table();
-                PingBuilder {
-                    fbb_: _fbb,
-                    start_: start,
-                }
-            }
-            #[inline]
-            pub fn finish(self) -> ::flatbuffers::WIPOffset<Ping<'a>> {
-                let o = self.fbb_.end_table(self.start_);
-                ::flatbuffers::WIPOffset::new(o.value())
-            }
-        }
-
-        impl ::core::fmt::Debug for Ping<'_> {
-            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                let mut ds = f.debug_struct("Ping");
-                ds.finish()
-            }
-        }
         pub enum HostPacketOffset {}
         #[derive(Copy, Clone, PartialEq)]
 
@@ -2860,13 +3824,13 @@ pub mod pyrat {
             }
             #[inline]
             #[allow(non_snake_case)]
-            pub fn message_as_set_option(&self) -> Option<SetOption<'a>> {
-                if self.message_type() == HostMessage::SetOption {
+            pub fn message_as_welcome(&self) -> Option<Welcome<'a>> {
+                if self.message_type() == HostMessage::Welcome {
                     self.message().map(|t| {
                         // Safety:
                         // Created from a valid Table for this object
                         // Which contains a valid union in this slot
-                        unsafe { SetOption::init_from_table(t) }
+                        unsafe { Welcome::init_from_table(t) }
                     })
                 } else {
                     None
@@ -2875,13 +3839,13 @@ pub mod pyrat {
 
             #[inline]
             #[allow(non_snake_case)]
-            pub fn message_as_match_config(&self) -> Option<MatchConfig<'a>> {
-                if self.message_type() == HostMessage::MatchConfig {
+            pub fn message_as_configure(&self) -> Option<Configure<'a>> {
+                if self.message_type() == HostMessage::Configure {
                     self.message().map(|t| {
                         // Safety:
                         // Created from a valid Table for this object
                         // Which contains a valid union in this slot
-                        unsafe { MatchConfig::init_from_table(t) }
+                        unsafe { Configure::init_from_table(t) }
                     })
                 } else {
                     None
@@ -2890,13 +3854,13 @@ pub mod pyrat {
 
             #[inline]
             #[allow(non_snake_case)]
-            pub fn message_as_start_preprocessing(&self) -> Option<StartPreprocessing<'a>> {
-                if self.message_type() == HostMessage::StartPreprocessing {
+            pub fn message_as_go_preprocess(&self) -> Option<GoPreprocess<'a>> {
+                if self.message_type() == HostMessage::GoPreprocess {
                     self.message().map(|t| {
                         // Safety:
                         // Created from a valid Table for this object
                         // Which contains a valid union in this slot
-                        unsafe { StartPreprocessing::init_from_table(t) }
+                        unsafe { GoPreprocess::init_from_table(t) }
                     })
                 } else {
                     None
@@ -2905,13 +3869,43 @@ pub mod pyrat {
 
             #[inline]
             #[allow(non_snake_case)]
-            pub fn message_as_turn_state(&self) -> Option<TurnState<'a>> {
-                if self.message_type() == HostMessage::TurnState {
+            pub fn message_as_advance(&self) -> Option<Advance<'a>> {
+                if self.message_type() == HostMessage::Advance {
                     self.message().map(|t| {
                         // Safety:
                         // Created from a valid Table for this object
                         // Which contains a valid union in this slot
-                        unsafe { TurnState::init_from_table(t) }
+                        unsafe { Advance::init_from_table(t) }
+                    })
+                } else {
+                    None
+                }
+            }
+
+            #[inline]
+            #[allow(non_snake_case)]
+            pub fn message_as_go(&self) -> Option<Go<'a>> {
+                if self.message_type() == HostMessage::Go {
+                    self.message().map(|t| {
+                        // Safety:
+                        // Created from a valid Table for this object
+                        // Which contains a valid union in this slot
+                        unsafe { Go::init_from_table(t) }
+                    })
+                } else {
+                    None
+                }
+            }
+
+            #[inline]
+            #[allow(non_snake_case)]
+            pub fn message_as_go_state(&self) -> Option<GoState<'a>> {
+                if self.message_type() == HostMessage::GoState {
+                    self.message().map(|t| {
+                        // Safety:
+                        // Created from a valid Table for this object
+                        // Which contains a valid union in this slot
+                        unsafe { GoState::init_from_table(t) }
                     })
                 } else {
                     None
@@ -2935,21 +3929,6 @@ pub mod pyrat {
 
             #[inline]
             #[allow(non_snake_case)]
-            pub fn message_as_timeout(&self) -> Option<Timeout<'a>> {
-                if self.message_type() == HostMessage::Timeout {
-                    self.message().map(|t| {
-                        // Safety:
-                        // Created from a valid Table for this object
-                        // Which contains a valid union in this slot
-                        unsafe { Timeout::init_from_table(t) }
-                    })
-                } else {
-                    None
-                }
-            }
-
-            #[inline]
-            #[allow(non_snake_case)]
             pub fn message_as_game_over(&self) -> Option<GameOver<'a>> {
                 if self.message_type() == HostMessage::GameOver {
                     self.message().map(|t| {
@@ -2965,13 +3944,28 @@ pub mod pyrat {
 
             #[inline]
             #[allow(non_snake_case)]
-            pub fn message_as_ping(&self) -> Option<Ping<'a>> {
-                if self.message_type() == HostMessage::Ping {
+            pub fn message_as_full_state(&self) -> Option<FullState<'a>> {
+                if self.message_type() == HostMessage::FullState {
                     self.message().map(|t| {
                         // Safety:
                         // Created from a valid Table for this object
                         // Which contains a valid union in this slot
-                        unsafe { Ping::init_from_table(t) }
+                        unsafe { FullState::init_from_table(t) }
+                    })
+                } else {
+                    None
+                }
+            }
+
+            #[inline]
+            #[allow(non_snake_case)]
+            pub fn message_as_protocol_error(&self) -> Option<ProtocolError<'a>> {
+                if self.message_type() == HostMessage::ProtocolError {
+                    self.message().map(|t| {
+                        // Safety:
+                        // Created from a valid Table for this object
+                        // Which contains a valid union in this slot
+                        unsafe { ProtocolError::init_from_table(t) }
                     })
                 } else {
                     None
@@ -2988,14 +3982,16 @@ pub mod pyrat {
                 v.visit_table(pos)?
      .visit_union::<HostMessage, _>("message_type", Self::VT_MESSAGE_TYPE, "message", Self::VT_MESSAGE, false, |key, v, pos| {
         match key {
-          HostMessage::SetOption => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<SetOption>>("HostMessage::SetOption", pos),
-          HostMessage::MatchConfig => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<MatchConfig>>("HostMessage::MatchConfig", pos),
-          HostMessage::StartPreprocessing => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<StartPreprocessing>>("HostMessage::StartPreprocessing", pos),
-          HostMessage::TurnState => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<TurnState>>("HostMessage::TurnState", pos),
+          HostMessage::Welcome => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Welcome>>("HostMessage::Welcome", pos),
+          HostMessage::Configure => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Configure>>("HostMessage::Configure", pos),
+          HostMessage::GoPreprocess => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<GoPreprocess>>("HostMessage::GoPreprocess", pos),
+          HostMessage::Advance => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Advance>>("HostMessage::Advance", pos),
+          HostMessage::Go => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Go>>("HostMessage::Go", pos),
+          HostMessage::GoState => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<GoState>>("HostMessage::GoState", pos),
           HostMessage::Stop => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Stop>>("HostMessage::Stop", pos),
-          HostMessage::Timeout => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Timeout>>("HostMessage::Timeout", pos),
           HostMessage::GameOver => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<GameOver>>("HostMessage::GameOver", pos),
-          HostMessage::Ping => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Ping>>("HostMessage::Ping", pos),
+          HostMessage::FullState => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<FullState>>("HostMessage::FullState", pos),
+          HostMessage::ProtocolError => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<ProtocolError>>("HostMessage::ProtocolError", pos),
           _ => Ok(()),
         }
      })?
@@ -3062,8 +4058,8 @@ pub mod pyrat {
                 let mut ds = f.debug_struct("HostPacket");
                 ds.field("message_type", &self.message_type());
                 match self.message_type() {
-                    HostMessage::SetOption => {
-                        if let Some(x) = self.message_as_set_option() {
+                    HostMessage::Welcome => {
+                        if let Some(x) = self.message_as_welcome() {
                             ds.field("message", &x)
                         } else {
                             ds.field(
@@ -3072,8 +4068,8 @@ pub mod pyrat {
                             )
                         }
                     },
-                    HostMessage::MatchConfig => {
-                        if let Some(x) = self.message_as_match_config() {
+                    HostMessage::Configure => {
+                        if let Some(x) = self.message_as_configure() {
                             ds.field("message", &x)
                         } else {
                             ds.field(
@@ -3082,8 +4078,8 @@ pub mod pyrat {
                             )
                         }
                     },
-                    HostMessage::StartPreprocessing => {
-                        if let Some(x) = self.message_as_start_preprocessing() {
+                    HostMessage::GoPreprocess => {
+                        if let Some(x) = self.message_as_go_preprocess() {
                             ds.field("message", &x)
                         } else {
                             ds.field(
@@ -3092,8 +4088,28 @@ pub mod pyrat {
                             )
                         }
                     },
-                    HostMessage::TurnState => {
-                        if let Some(x) = self.message_as_turn_state() {
+                    HostMessage::Advance => {
+                        if let Some(x) = self.message_as_advance() {
+                            ds.field("message", &x)
+                        } else {
+                            ds.field(
+                                "message",
+                                &"InvalidFlatbuffer: Union discriminant does not match value.",
+                            )
+                        }
+                    },
+                    HostMessage::Go => {
+                        if let Some(x) = self.message_as_go() {
+                            ds.field("message", &x)
+                        } else {
+                            ds.field(
+                                "message",
+                                &"InvalidFlatbuffer: Union discriminant does not match value.",
+                            )
+                        }
+                    },
+                    HostMessage::GoState => {
+                        if let Some(x) = self.message_as_go_state() {
                             ds.field("message", &x)
                         } else {
                             ds.field(
@@ -3112,16 +4128,6 @@ pub mod pyrat {
                             )
                         }
                     },
-                    HostMessage::Timeout => {
-                        if let Some(x) = self.message_as_timeout() {
-                            ds.field("message", &x)
-                        } else {
-                            ds.field(
-                                "message",
-                                &"InvalidFlatbuffer: Union discriminant does not match value.",
-                            )
-                        }
-                    },
                     HostMessage::GameOver => {
                         if let Some(x) = self.message_as_game_over() {
                             ds.field("message", &x)
@@ -3132,8 +4138,18 @@ pub mod pyrat {
                             )
                         }
                     },
-                    HostMessage::Ping => {
-                        if let Some(x) = self.message_as_ping() {
+                    HostMessage::FullState => {
+                        if let Some(x) = self.message_as_full_state() {
+                            ds.field("message", &x)
+                        } else {
+                            ds.field(
+                                "message",
+                                &"InvalidFlatbuffer: Union discriminant does not match value.",
+                            )
+                        }
+                    },
+                    HostMessage::ProtocolError => {
+                        if let Some(x) = self.message_as_protocol_error() {
                             ds.field("message", &x)
                         } else {
                             ds.field(
@@ -3377,6 +4393,8 @@ pub mod pyrat {
         }
 
         impl<'a> Ready<'a> {
+            pub const VT_STATE_HASH: ::flatbuffers::VOffsetT = 4;
+
             #[inline]
             pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
                 Ready { _tab: table }
@@ -3389,10 +4407,19 @@ pub mod pyrat {
                 A: ::flatbuffers::Allocator + 'bldr,
             >(
                 _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-                _args: &'args ReadyArgs,
+                args: &'args ReadyArgs,
             ) -> ::flatbuffers::WIPOffset<Ready<'bldr>> {
                 let mut builder = ReadyBuilder::new(_fbb);
+                builder.add_state_hash(args.state_hash);
                 builder.finish()
+            }
+
+            #[inline]
+            pub fn state_hash(&self) -> u64 {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe { self._tab.get::<u64>(Ready::VT_STATE_HASH, Some(0)).unwrap() }
             }
         }
 
@@ -3402,15 +4429,19 @@ pub mod pyrat {
                 v: &mut ::flatbuffers::Verifier,
                 pos: usize,
             ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-                v.visit_table(pos)?.finish();
+                v.visit_table(pos)?
+                    .visit_field::<u64>("state_hash", Self::VT_STATE_HASH, false)?
+                    .finish();
                 Ok(())
             }
         }
-        pub struct ReadyArgs {}
+        pub struct ReadyArgs {
+            pub state_hash: u64,
+        }
         impl<'a> Default for ReadyArgs {
             #[inline]
             fn default() -> Self {
-                ReadyArgs {}
+                ReadyArgs { state_hash: 0 }
             }
         }
 
@@ -3419,6 +4450,11 @@ pub mod pyrat {
             start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
         }
         impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> ReadyBuilder<'a, 'b, A> {
+            #[inline]
+            pub fn add_state_hash(&mut self, state_hash: u64) {
+                self.fbb_
+                    .push_slot::<u64>(Ready::VT_STATE_HASH, state_hash, 0);
+            }
             #[inline]
             pub fn new(
                 _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
@@ -3439,6 +4475,7 @@ pub mod pyrat {
         impl ::core::fmt::Debug for Ready<'_> {
             fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                 let mut ds = f.debug_struct("Ready");
+                ds.field("state_hash", &self.state_hash());
                 ds.finish()
             }
         }
@@ -3546,8 +4583,8 @@ pub mod pyrat {
             pub const VT_DIRECTION: ::flatbuffers::VOffsetT = 4;
             pub const VT_PLAYER: ::flatbuffers::VOffsetT = 6;
             pub const VT_TURN: ::flatbuffers::VOffsetT = 8;
-            pub const VT_PROVISIONAL: ::flatbuffers::VOffsetT = 10;
-            pub const VT_THINK_MS: ::flatbuffers::VOffsetT = 12;
+            pub const VT_THINK_MS: ::flatbuffers::VOffsetT = 10;
+            pub const VT_STATE_HASH: ::flatbuffers::VOffsetT = 12;
 
             #[inline]
             pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
@@ -3564,9 +4601,9 @@ pub mod pyrat {
                 args: &'args ActionArgs,
             ) -> ::flatbuffers::WIPOffset<Action<'bldr>> {
                 let mut builder = ActionBuilder::new(_fbb);
+                builder.add_state_hash(args.state_hash);
                 builder.add_think_ms(args.think_ms);
                 builder.add_turn(args.turn);
-                builder.add_provisional(args.provisional);
                 builder.add_player(args.player);
                 builder.add_direction(args.direction);
                 builder.finish()
@@ -3602,22 +4639,22 @@ pub mod pyrat {
                 unsafe { self._tab.get::<u16>(Action::VT_TURN, Some(0)).unwrap() }
             }
             #[inline]
-            pub fn provisional(&self) -> bool {
-                // Safety:
-                // Created from valid Table for this object
-                // which contains a valid value in this slot
-                unsafe {
-                    self._tab
-                        .get::<bool>(Action::VT_PROVISIONAL, Some(false))
-                        .unwrap()
-                }
-            }
-            #[inline]
             pub fn think_ms(&self) -> u32 {
                 // Safety:
                 // Created from valid Table for this object
                 // which contains a valid value in this slot
                 unsafe { self._tab.get::<u32>(Action::VT_THINK_MS, Some(0)).unwrap() }
+            }
+            #[inline]
+            pub fn state_hash(&self) -> u64 {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<u64>(Action::VT_STATE_HASH, Some(0))
+                        .unwrap()
+                }
             }
         }
 
@@ -3631,8 +4668,8 @@ pub mod pyrat {
                     .visit_field::<Direction>("direction", Self::VT_DIRECTION, false)?
                     .visit_field::<Player>("player", Self::VT_PLAYER, false)?
                     .visit_field::<u16>("turn", Self::VT_TURN, false)?
-                    .visit_field::<bool>("provisional", Self::VT_PROVISIONAL, false)?
                     .visit_field::<u32>("think_ms", Self::VT_THINK_MS, false)?
+                    .visit_field::<u64>("state_hash", Self::VT_STATE_HASH, false)?
                     .finish();
                 Ok(())
             }
@@ -3641,8 +4678,8 @@ pub mod pyrat {
             pub direction: Direction,
             pub player: Player,
             pub turn: u16,
-            pub provisional: bool,
             pub think_ms: u32,
+            pub state_hash: u64,
         }
         impl<'a> Default for ActionArgs {
             #[inline]
@@ -3651,8 +4688,8 @@ pub mod pyrat {
                     direction: Direction::Up,
                     player: Player::Player1,
                     turn: 0,
-                    provisional: false,
                     think_ms: 0,
+                    state_hash: 0,
                 }
             }
         }
@@ -3677,13 +4714,13 @@ pub mod pyrat {
                 self.fbb_.push_slot::<u16>(Action::VT_TURN, turn, 0);
             }
             #[inline]
-            pub fn add_provisional(&mut self, provisional: bool) {
-                self.fbb_
-                    .push_slot::<bool>(Action::VT_PROVISIONAL, provisional, false);
-            }
-            #[inline]
             pub fn add_think_ms(&mut self, think_ms: u32) {
                 self.fbb_.push_slot::<u32>(Action::VT_THINK_MS, think_ms, 0);
+            }
+            #[inline]
+            pub fn add_state_hash(&mut self, state_hash: u64) {
+                self.fbb_
+                    .push_slot::<u64>(Action::VT_STATE_HASH, state_hash, 0);
             }
             #[inline]
             pub fn new(
@@ -3708,20 +4745,20 @@ pub mod pyrat {
                 ds.field("direction", &self.direction());
                 ds.field("player", &self.player());
                 ds.field("turn", &self.turn());
-                ds.field("provisional", &self.provisional());
                 ds.field("think_ms", &self.think_ms());
+                ds.field("state_hash", &self.state_hash());
                 ds.finish()
             }
         }
-        pub enum PongOffset {}
+        pub enum ProvisionalOffset {}
         #[derive(Copy, Clone, PartialEq)]
 
-        pub struct Pong<'a> {
+        pub struct Provisional<'a> {
             pub _tab: ::flatbuffers::Table<'a>,
         }
 
-        impl<'a> ::flatbuffers::Follow<'a> for Pong<'a> {
-            type Inner = Pong<'a>;
+        impl<'a> ::flatbuffers::Follow<'a> for Provisional<'a> {
+            type Inner = Provisional<'a>;
             #[inline]
             unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
                 Self {
@@ -3730,10 +4767,15 @@ pub mod pyrat {
             }
         }
 
-        impl<'a> Pong<'a> {
+        impl<'a> Provisional<'a> {
+            pub const VT_DIRECTION: ::flatbuffers::VOffsetT = 4;
+            pub const VT_PLAYER: ::flatbuffers::VOffsetT = 6;
+            pub const VT_TURN: ::flatbuffers::VOffsetT = 8;
+            pub const VT_STATE_HASH: ::flatbuffers::VOffsetT = 10;
+
             #[inline]
             pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-                Pong { _tab: table }
+                Provisional { _tab: table }
             }
             #[allow(unused_mut)]
             pub fn create<
@@ -3743,56 +4785,348 @@ pub mod pyrat {
                 A: ::flatbuffers::Allocator + 'bldr,
             >(
                 _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-                _args: &'args PongArgs,
-            ) -> ::flatbuffers::WIPOffset<Pong<'bldr>> {
-                let mut builder = PongBuilder::new(_fbb);
+                args: &'args ProvisionalArgs,
+            ) -> ::flatbuffers::WIPOffset<Provisional<'bldr>> {
+                let mut builder = ProvisionalBuilder::new(_fbb);
+                builder.add_state_hash(args.state_hash);
+                builder.add_turn(args.turn);
+                builder.add_player(args.player);
+                builder.add_direction(args.direction);
                 builder.finish()
+            }
+
+            #[inline]
+            pub fn direction(&self) -> Direction {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<Direction>(Provisional::VT_DIRECTION, Some(Direction::Up))
+                        .unwrap()
+                }
+            }
+            #[inline]
+            pub fn player(&self) -> Player {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<Player>(Provisional::VT_PLAYER, Some(Player::Player1))
+                        .unwrap()
+                }
+            }
+            #[inline]
+            pub fn turn(&self) -> u16 {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe { self._tab.get::<u16>(Provisional::VT_TURN, Some(0)).unwrap() }
+            }
+            #[inline]
+            pub fn state_hash(&self) -> u64 {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<u64>(Provisional::VT_STATE_HASH, Some(0))
+                        .unwrap()
+                }
             }
         }
 
-        impl ::flatbuffers::Verifiable for Pong<'_> {
+        impl ::flatbuffers::Verifiable for Provisional<'_> {
             #[inline]
             fn run_verifier(
                 v: &mut ::flatbuffers::Verifier,
                 pos: usize,
             ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-                v.visit_table(pos)?.finish();
+                v.visit_table(pos)?
+                    .visit_field::<Direction>("direction", Self::VT_DIRECTION, false)?
+                    .visit_field::<Player>("player", Self::VT_PLAYER, false)?
+                    .visit_field::<u16>("turn", Self::VT_TURN, false)?
+                    .visit_field::<u64>("state_hash", Self::VT_STATE_HASH, false)?
+                    .finish();
                 Ok(())
             }
         }
-        pub struct PongArgs {}
-        impl<'a> Default for PongArgs {
+        pub struct ProvisionalArgs {
+            pub direction: Direction,
+            pub player: Player,
+            pub turn: u16,
+            pub state_hash: u64,
+        }
+        impl<'a> Default for ProvisionalArgs {
             #[inline]
             fn default() -> Self {
-                PongArgs {}
+                ProvisionalArgs {
+                    direction: Direction::Up,
+                    player: Player::Player1,
+                    turn: 0,
+                    state_hash: 0,
+                }
             }
         }
 
-        pub struct PongBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
+        pub struct ProvisionalBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
             fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
             start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
         }
-        impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> PongBuilder<'a, 'b, A> {
+        impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> ProvisionalBuilder<'a, 'b, A> {
+            #[inline]
+            pub fn add_direction(&mut self, direction: Direction) {
+                self.fbb_.push_slot::<Direction>(
+                    Provisional::VT_DIRECTION,
+                    direction,
+                    Direction::Up,
+                );
+            }
+            #[inline]
+            pub fn add_player(&mut self, player: Player) {
+                self.fbb_
+                    .push_slot::<Player>(Provisional::VT_PLAYER, player, Player::Player1);
+            }
+            #[inline]
+            pub fn add_turn(&mut self, turn: u16) {
+                self.fbb_.push_slot::<u16>(Provisional::VT_TURN, turn, 0);
+            }
+            #[inline]
+            pub fn add_state_hash(&mut self, state_hash: u64) {
+                self.fbb_
+                    .push_slot::<u64>(Provisional::VT_STATE_HASH, state_hash, 0);
+            }
             #[inline]
             pub fn new(
                 _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-            ) -> PongBuilder<'a, 'b, A> {
+            ) -> ProvisionalBuilder<'a, 'b, A> {
                 let start = _fbb.start_table();
-                PongBuilder {
+                ProvisionalBuilder {
                     fbb_: _fbb,
                     start_: start,
                 }
             }
             #[inline]
-            pub fn finish(self) -> ::flatbuffers::WIPOffset<Pong<'a>> {
+            pub fn finish(self) -> ::flatbuffers::WIPOffset<Provisional<'a>> {
                 let o = self.fbb_.end_table(self.start_);
                 ::flatbuffers::WIPOffset::new(o.value())
             }
         }
 
-        impl ::core::fmt::Debug for Pong<'_> {
+        impl ::core::fmt::Debug for Provisional<'_> {
             fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-                let mut ds = f.debug_struct("Pong");
+                let mut ds = f.debug_struct("Provisional");
+                ds.field("direction", &self.direction());
+                ds.field("player", &self.player());
+                ds.field("turn", &self.turn());
+                ds.field("state_hash", &self.state_hash());
+                ds.finish()
+            }
+        }
+        pub enum SyncOkOffset {}
+        #[derive(Copy, Clone, PartialEq)]
+
+        pub struct SyncOk<'a> {
+            pub _tab: ::flatbuffers::Table<'a>,
+        }
+
+        impl<'a> ::flatbuffers::Follow<'a> for SyncOk<'a> {
+            type Inner = SyncOk<'a>;
+            #[inline]
+            unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+                Self {
+                    _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+                }
+            }
+        }
+
+        impl<'a> SyncOk<'a> {
+            pub const VT_HASH: ::flatbuffers::VOffsetT = 4;
+
+            #[inline]
+            pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+                SyncOk { _tab: table }
+            }
+            #[allow(unused_mut)]
+            pub fn create<
+                'bldr: 'args,
+                'args: 'mut_bldr,
+                'mut_bldr,
+                A: ::flatbuffers::Allocator + 'bldr,
+            >(
+                _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+                args: &'args SyncOkArgs,
+            ) -> ::flatbuffers::WIPOffset<SyncOk<'bldr>> {
+                let mut builder = SyncOkBuilder::new(_fbb);
+                builder.add_hash(args.hash);
+                builder.finish()
+            }
+
+            #[inline]
+            pub fn hash(&self) -> u64 {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe { self._tab.get::<u64>(SyncOk::VT_HASH, Some(0)).unwrap() }
+            }
+        }
+
+        impl ::flatbuffers::Verifiable for SyncOk<'_> {
+            #[inline]
+            fn run_verifier(
+                v: &mut ::flatbuffers::Verifier,
+                pos: usize,
+            ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+                v.visit_table(pos)?
+                    .visit_field::<u64>("hash", Self::VT_HASH, false)?
+                    .finish();
+                Ok(())
+            }
+        }
+        pub struct SyncOkArgs {
+            pub hash: u64,
+        }
+        impl<'a> Default for SyncOkArgs {
+            #[inline]
+            fn default() -> Self {
+                SyncOkArgs { hash: 0 }
+            }
+        }
+
+        pub struct SyncOkBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
+            fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+            start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+        }
+        impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> SyncOkBuilder<'a, 'b, A> {
+            #[inline]
+            pub fn add_hash(&mut self, hash: u64) {
+                self.fbb_.push_slot::<u64>(SyncOk::VT_HASH, hash, 0);
+            }
+            #[inline]
+            pub fn new(
+                _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+            ) -> SyncOkBuilder<'a, 'b, A> {
+                let start = _fbb.start_table();
+                SyncOkBuilder {
+                    fbb_: _fbb,
+                    start_: start,
+                }
+            }
+            #[inline]
+            pub fn finish(self) -> ::flatbuffers::WIPOffset<SyncOk<'a>> {
+                let o = self.fbb_.end_table(self.start_);
+                ::flatbuffers::WIPOffset::new(o.value())
+            }
+        }
+
+        impl ::core::fmt::Debug for SyncOk<'_> {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                let mut ds = f.debug_struct("SyncOk");
+                ds.field("hash", &self.hash());
+                ds.finish()
+            }
+        }
+        pub enum ResyncOffset {}
+        #[derive(Copy, Clone, PartialEq)]
+
+        pub struct Resync<'a> {
+            pub _tab: ::flatbuffers::Table<'a>,
+        }
+
+        impl<'a> ::flatbuffers::Follow<'a> for Resync<'a> {
+            type Inner = Resync<'a>;
+            #[inline]
+            unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
+                Self {
+                    _tab: unsafe { ::flatbuffers::Table::new(buf, loc) },
+                }
+            }
+        }
+
+        impl<'a> Resync<'a> {
+            pub const VT_MY_HASH: ::flatbuffers::VOffsetT = 4;
+
+            #[inline]
+            pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
+                Resync { _tab: table }
+            }
+            #[allow(unused_mut)]
+            pub fn create<
+                'bldr: 'args,
+                'args: 'mut_bldr,
+                'mut_bldr,
+                A: ::flatbuffers::Allocator + 'bldr,
+            >(
+                _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
+                args: &'args ResyncArgs,
+            ) -> ::flatbuffers::WIPOffset<Resync<'bldr>> {
+                let mut builder = ResyncBuilder::new(_fbb);
+                builder.add_my_hash(args.my_hash);
+                builder.finish()
+            }
+
+            #[inline]
+            pub fn my_hash(&self) -> u64 {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe { self._tab.get::<u64>(Resync::VT_MY_HASH, Some(0)).unwrap() }
+            }
+        }
+
+        impl ::flatbuffers::Verifiable for Resync<'_> {
+            #[inline]
+            fn run_verifier(
+                v: &mut ::flatbuffers::Verifier,
+                pos: usize,
+            ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
+                v.visit_table(pos)?
+                    .visit_field::<u64>("my_hash", Self::VT_MY_HASH, false)?
+                    .finish();
+                Ok(())
+            }
+        }
+        pub struct ResyncArgs {
+            pub my_hash: u64,
+        }
+        impl<'a> Default for ResyncArgs {
+            #[inline]
+            fn default() -> Self {
+                ResyncArgs { my_hash: 0 }
+            }
+        }
+
+        pub struct ResyncBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
+            fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+            start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
+        }
+        impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> ResyncBuilder<'a, 'b, A> {
+            #[inline]
+            pub fn add_my_hash(&mut self, my_hash: u64) {
+                self.fbb_.push_slot::<u64>(Resync::VT_MY_HASH, my_hash, 0);
+            }
+            #[inline]
+            pub fn new(
+                _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
+            ) -> ResyncBuilder<'a, 'b, A> {
+                let start = _fbb.start_table();
+                ResyncBuilder {
+                    fbb_: _fbb,
+                    start_: start,
+                }
+            }
+            #[inline]
+            pub fn finish(self) -> ::flatbuffers::WIPOffset<Resync<'a>> {
+                let o = self.fbb_.end_table(self.start_);
+                ::flatbuffers::WIPOffset::new(o.value())
+            }
+        }
+
+        impl ::core::fmt::Debug for Resync<'_> {
+            fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                let mut ds = f.debug_struct("Resync");
+                ds.field("my_hash", &self.my_hash());
                 ds.finish()
             }
         }
@@ -4096,6 +5430,10 @@ pub mod pyrat {
         }
 
         impl<'a> RenderCommands<'a> {
+            pub const VT_PLAYER: ::flatbuffers::VOffsetT = 4;
+            pub const VT_TURN: ::flatbuffers::VOffsetT = 6;
+            pub const VT_STATE_HASH: ::flatbuffers::VOffsetT = 8;
+
             #[inline]
             pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
                 RenderCommands { _tab: table }
@@ -4108,10 +5446,47 @@ pub mod pyrat {
                 A: ::flatbuffers::Allocator + 'bldr,
             >(
                 _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-                _args: &'args RenderCommandsArgs,
+                args: &'args RenderCommandsArgs,
             ) -> ::flatbuffers::WIPOffset<RenderCommands<'bldr>> {
                 let mut builder = RenderCommandsBuilder::new(_fbb);
+                builder.add_state_hash(args.state_hash);
+                builder.add_turn(args.turn);
+                builder.add_player(args.player);
                 builder.finish()
+            }
+
+            #[inline]
+            pub fn player(&self) -> Player {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<Player>(RenderCommands::VT_PLAYER, Some(Player::Player1))
+                        .unwrap()
+                }
+            }
+            #[inline]
+            pub fn turn(&self) -> u16 {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<u16>(RenderCommands::VT_TURN, Some(0))
+                        .unwrap()
+                }
+            }
+            #[inline]
+            pub fn state_hash(&self) -> u64 {
+                // Safety:
+                // Created from valid Table for this object
+                // which contains a valid value in this slot
+                unsafe {
+                    self._tab
+                        .get::<u64>(RenderCommands::VT_STATE_HASH, Some(0))
+                        .unwrap()
+                }
             }
         }
 
@@ -4121,15 +5496,27 @@ pub mod pyrat {
                 v: &mut ::flatbuffers::Verifier,
                 pos: usize,
             ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-                v.visit_table(pos)?.finish();
+                v.visit_table(pos)?
+                    .visit_field::<Player>("player", Self::VT_PLAYER, false)?
+                    .visit_field::<u16>("turn", Self::VT_TURN, false)?
+                    .visit_field::<u64>("state_hash", Self::VT_STATE_HASH, false)?
+                    .finish();
                 Ok(())
             }
         }
-        pub struct RenderCommandsArgs {}
+        pub struct RenderCommandsArgs {
+            pub player: Player,
+            pub turn: u16,
+            pub state_hash: u64,
+        }
         impl<'a> Default for RenderCommandsArgs {
             #[inline]
             fn default() -> Self {
-                RenderCommandsArgs {}
+                RenderCommandsArgs {
+                    player: Player::Player1,
+                    turn: 0,
+                    state_hash: 0,
+                }
             }
         }
 
@@ -4138,6 +5525,20 @@ pub mod pyrat {
             start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
         }
         impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> RenderCommandsBuilder<'a, 'b, A> {
+            #[inline]
+            pub fn add_player(&mut self, player: Player) {
+                self.fbb_
+                    .push_slot::<Player>(RenderCommands::VT_PLAYER, player, Player::Player1);
+            }
+            #[inline]
+            pub fn add_turn(&mut self, turn: u16) {
+                self.fbb_.push_slot::<u16>(RenderCommands::VT_TURN, turn, 0);
+            }
+            #[inline]
+            pub fn add_state_hash(&mut self, state_hash: u64) {
+                self.fbb_
+                    .push_slot::<u64>(RenderCommands::VT_STATE_HASH, state_hash, 0);
+            }
             #[inline]
             pub fn new(
                 _fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
@@ -4158,6 +5559,9 @@ pub mod pyrat {
         impl ::core::fmt::Debug for RenderCommands<'_> {
             fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                 let mut ds = f.debug_struct("RenderCommands");
+                ds.field("player", &self.player());
+                ds.field("turn", &self.turn());
+                ds.field("state_hash", &self.state_hash());
                 ds.finish()
             }
         }
@@ -4290,21 +5694,6 @@ pub mod pyrat {
 
             #[inline]
             #[allow(non_snake_case)]
-            pub fn message_as_pong(&self) -> Option<Pong<'a>> {
-                if self.message_type() == BotMessage::Pong {
-                    self.message().map(|t| {
-                        // Safety:
-                        // Created from a valid Table for this object
-                        // Which contains a valid union in this slot
-                        unsafe { Pong::init_from_table(t) }
-                    })
-                } else {
-                    None
-                }
-            }
-
-            #[inline]
-            #[allow(non_snake_case)]
             pub fn message_as_info(&self) -> Option<Info<'a>> {
                 if self.message_type() == BotMessage::Info {
                     self.message().map(|t| {
@@ -4332,6 +5721,51 @@ pub mod pyrat {
                     None
                 }
             }
+
+            #[inline]
+            #[allow(non_snake_case)]
+            pub fn message_as_provisional(&self) -> Option<Provisional<'a>> {
+                if self.message_type() == BotMessage::Provisional {
+                    self.message().map(|t| {
+                        // Safety:
+                        // Created from a valid Table for this object
+                        // Which contains a valid union in this slot
+                        unsafe { Provisional::init_from_table(t) }
+                    })
+                } else {
+                    None
+                }
+            }
+
+            #[inline]
+            #[allow(non_snake_case)]
+            pub fn message_as_sync_ok(&self) -> Option<SyncOk<'a>> {
+                if self.message_type() == BotMessage::SyncOk {
+                    self.message().map(|t| {
+                        // Safety:
+                        // Created from a valid Table for this object
+                        // Which contains a valid union in this slot
+                        unsafe { SyncOk::init_from_table(t) }
+                    })
+                } else {
+                    None
+                }
+            }
+
+            #[inline]
+            #[allow(non_snake_case)]
+            pub fn message_as_resync(&self) -> Option<Resync<'a>> {
+                if self.message_type() == BotMessage::Resync {
+                    self.message().map(|t| {
+                        // Safety:
+                        // Created from a valid Table for this object
+                        // Which contains a valid union in this slot
+                        unsafe { Resync::init_from_table(t) }
+                    })
+                } else {
+                    None
+                }
+            }
         }
 
         impl ::flatbuffers::Verifiable for BotPacket<'_> {
@@ -4347,9 +5781,11 @@ pub mod pyrat {
           BotMessage::Ready => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Ready>>("BotMessage::Ready", pos),
           BotMessage::PreprocessingDone => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<PreprocessingDone>>("BotMessage::PreprocessingDone", pos),
           BotMessage::Action => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Action>>("BotMessage::Action", pos),
-          BotMessage::Pong => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Pong>>("BotMessage::Pong", pos),
           BotMessage::Info => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Info>>("BotMessage::Info", pos),
           BotMessage::RenderCommands => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<RenderCommands>>("BotMessage::RenderCommands", pos),
+          BotMessage::Provisional => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Provisional>>("BotMessage::Provisional", pos),
+          BotMessage::SyncOk => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<SyncOk>>("BotMessage::SyncOk", pos),
+          BotMessage::Resync => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<Resync>>("BotMessage::Resync", pos),
           _ => Ok(()),
         }
      })?
@@ -4456,16 +5892,6 @@ pub mod pyrat {
                             )
                         }
                     },
-                    BotMessage::Pong => {
-                        if let Some(x) = self.message_as_pong() {
-                            ds.field("message", &x)
-                        } else {
-                            ds.field(
-                                "message",
-                                &"InvalidFlatbuffer: Union discriminant does not match value.",
-                            )
-                        }
-                    },
                     BotMessage::Info => {
                         if let Some(x) = self.message_as_info() {
                             ds.field("message", &x)
@@ -4478,6 +5904,36 @@ pub mod pyrat {
                     },
                     BotMessage::RenderCommands => {
                         if let Some(x) = self.message_as_render_commands() {
+                            ds.field("message", &x)
+                        } else {
+                            ds.field(
+                                "message",
+                                &"InvalidFlatbuffer: Union discriminant does not match value.",
+                            )
+                        }
+                    },
+                    BotMessage::Provisional => {
+                        if let Some(x) = self.message_as_provisional() {
+                            ds.field("message", &x)
+                        } else {
+                            ds.field(
+                                "message",
+                                &"InvalidFlatbuffer: Union discriminant does not match value.",
+                            )
+                        }
+                    },
+                    BotMessage::SyncOk => {
+                        if let Some(x) = self.message_as_sync_ok() {
+                            ds.field("message", &x)
+                        } else {
+                            ds.field(
+                                "message",
+                                &"InvalidFlatbuffer: Union discriminant does not match value.",
+                            )
+                        }
+                    },
+                    BotMessage::Resync => {
+                        if let Some(x) = self.message_as_resync() {
                             ds.field("message", &x)
                         } else {
                             ds.field(

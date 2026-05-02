@@ -39,18 +39,9 @@ impl InfoSender {
 
     /// Build and send an Info message from [`InfoParams`].
     pub fn send_info(&self, params: &InfoParams, turn: u16, state_hash: u64) {
-        let frame = crate::wire::build_info(
-            params.player,
-            params.multipv,
-            params.target,
-            params.depth,
-            params.nodes,
-            params.score,
-            params.pv,
-            params.message,
-            turn,
-            state_hash,
-        );
+        let frame = crate::wire::serialize(&pyrat_protocol::BotMsg::Info(info_from_params(
+            params, turn, state_hash,
+        )));
         self.send(&frame);
     }
 }
@@ -59,19 +50,25 @@ pub use pyrat_bot_api::InfoParams;
 
 impl InfoSink for InfoSender {
     fn send_info(&self, params: &InfoParams<'_>, turn: u16, state_hash: u64) {
-        let frame = crate::wire::build_info(
-            params.player,
-            params.multipv,
-            params.target,
-            params.depth,
-            params.nodes,
-            params.score,
-            params.pv,
-            params.message,
-            turn,
-            state_hash,
-        );
+        let frame = crate::wire::serialize(&pyrat_protocol::BotMsg::Info(info_from_params(
+            params, turn, state_hash,
+        )));
         self.send(&frame);
+    }
+}
+
+fn info_from_params(params: &InfoParams<'_>, turn: u16, state_hash: u64) -> pyrat_protocol::Info {
+    pyrat_protocol::Info {
+        player: params.player,
+        multipv: params.multipv,
+        target: params.target,
+        depth: params.depth,
+        nodes: params.nodes,
+        score: params.score,
+        pv: params.pv.to_vec(),
+        message: params.message.to_string(),
+        turn,
+        state_hash,
     }
 }
 
@@ -201,13 +198,12 @@ impl Context {
     /// action doesn't arrive in time.
     pub fn send_provisional(&self, direction: Direction) {
         if let Some(sender) = self.info_sender.lock().unwrap().as_ref() {
-            let frame = crate::wire::build_action_full(
-                self.player,
+            let frame = crate::wire::serialize(&pyrat_protocol::BotMsg::Provisional {
                 direction,
-                self.turn,
-                true,
-                self.think_elapsed_ms(),
-            );
+                player: self.player,
+                turn: self.turn,
+                state_hash: self.state_hash,
+            });
             sender.send(&frame);
         }
     }
@@ -288,6 +284,11 @@ impl<B: Bot> Runner for BotRunner<'_, B> {
 }
 
 /// Newtype wrapper so Hivemind can implement Runner without blanket-impl conflicts.
+///
+/// Currently unused (`run_hivemind` early-errors under the new wire protocol).
+/// Kept so the `Hivemind` trait surface stays buildable for downstream code,
+/// and so the adapter is ready when hivemind support returns.
+#[allow(dead_code)]
 pub(crate) struct HivemindRunner<'a, H: Hivemind>(pub &'a mut H);
 
 impl<H: Hivemind> Options for HivemindRunner<'_, H> {

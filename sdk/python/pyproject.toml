@@ -44,11 +44,8 @@ lint.ignore = [
     "B008",      # Do not perform function call in argument defaults
 ]
 
-exclude = ["pyrat_sdk/_wire/protocol"]
-
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["PLC0415", "PLR2004", "PLR0915"]
-"pyrat_sdk/_wire/codec.py" = ["C901"]
 "pyrat_sdk/bot.py" = ["C901", "PLR0912", "PLR0915"]
 
 [tool.ruff.format]

@@ -182,9 +182,6 @@ pub struct MazeState {
 
 /// Convert engine GameState to our serializable MazeState.
 pub fn build_maze_state(game: &GameState) -> MazeState {
-    use pyrat::{Coordinates, Direction as EngineDirection};
-    use pyrat_host::game_loop::{HashedTurnState, TurnState};
-
     let walls = game
         .wall_entries()
         .into_iter()
@@ -210,20 +207,6 @@ pub fn build_maze_state(game: &GameState) -> MazeState {
         .map(Coord::from)
         .collect();
 
-    // Compute state_hash for the initial position (last moves are Stay/Stay).
-    let hts = HashedTurnState::new(TurnState {
-        turn: game.turns(),
-        player1_position: game.player1_position(),
-        player2_position: game.player2_position(),
-        player1_score: game.player1_score(),
-        player2_score: game.player2_score(),
-        player1_mud_turns: game.player1_mud_turns(),
-        player2_mud_turns: game.player2_mud_turns(),
-        cheese: cheese.iter().map(|c| Coordinates::new(c.x, c.y)).collect(),
-        player1_last_move: EngineDirection::Stay,
-        player2_last_move: EngineDirection::Stay,
-    });
-
     MazeState {
         width: game.width(),
         height: game.height(),
@@ -243,7 +226,7 @@ pub fn build_maze_state(game: &GameState) -> MazeState {
             mud_turns: game.player2_mud_turns(),
         },
         total_cheese: game.total_cheese(),
-        state_hash: format!("{:016x}", hts.state_hash()),
+        state_hash: format!("{:016x}", game.state_hash()),
     }
 }
 

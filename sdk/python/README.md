@@ -236,7 +236,15 @@ ctx.send_info(
 
 ## `HivemindBot`
 
-Controls both players. `think()` returns a dict mapping each player to a direction:
+> **Currently unsupported under the new wire protocol.** `HivemindBot.run()`
+> raises `RuntimeError`. The host's `accept_players` rejects duplicate
+> `agent_id`, and `TcpPlayer` rejects off-slot `Action` messages — a hivemind
+> bot can't complete the handshake. The class and `think()` API are kept
+> for source compatibility; hivemind support is tracked as a follow-up brief
+> (concrete two-connection / multi-slot design) and `run()` will come back
+> once that lands.
+
+The class shape (for reference / future use):
 
 ```python
 from pyrat_sdk import HivemindBot, Direction, Player
@@ -250,9 +258,6 @@ class MyHivemind(HivemindBot):
             Player.PLAYER1: Direction.UP,
             Player.PLAYER2: Direction.DOWN,
         }
-
-if __name__ == "__main__":
-    MyHivemind().run()
 ```
 
 Uses the raw `player1_*` / `player2_*` properties on `GameState` (no my/opponent mapping). Missing keys default to STAY.

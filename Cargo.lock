@@ -128,6 +128,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-trait"
+version = "0.1.89"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9035ad2d096bed7955a320ee7e2230574d28fd3c3a0f186cbea1ff3c7eed5dbb"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "atk"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2982,6 +2993,7 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "pyrat-host",
+ "pyrat-protocol",
  "pyrat-rust",
  "serde",
  "serde_json",
@@ -3021,7 +3033,9 @@ dependencies = [
 name = "pyrat-gui"
 version = "0.1.0"
 dependencies = [
+ "fastrand",
  "pyrat-host",
+ "pyrat-protocol",
  "pyrat-rust",
  "serde",
  "serde_json",
@@ -3044,9 +3058,9 @@ name = "pyrat-headless"
 version = "0.1.0"
 dependencies = [
  "clap",
- "flatbuffers",
  "pyrat-host",
  "pyrat-rust",
+ "pyrat-sdk",
  "rand 0.10.0",
  "serde",
  "serde_json",
@@ -3060,6 +3074,8 @@ dependencies = [
 name = "pyrat-host"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
+ "bytes",
  "fastrand",
  "flatbuffers",
  "pyrat-bot-api",
@@ -3068,6 +3084,7 @@ dependencies = [
  "pyrat-wire",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 
@@ -3078,6 +3095,7 @@ dependencies = [
  "flatbuffers",
  "pyrat-rust",
  "pyrat-wire",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
@@ -3120,11 +3138,14 @@ dependencies = [
 name = "pyrat-sdk-python"
 version = "0.1.0"
 dependencies = [
+ "flatbuffers",
  "ndarray",
  "numpy",
  "pyo3",
  "pyrat-engine-interface",
+ "pyrat-protocol",
  "pyrat-rust",
+ "pyrat-wire",
 ]
 
 [[package]]

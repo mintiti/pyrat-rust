@@ -1,285 +1,350 @@
-"""Tests for FlatBuffers codec — decode host packets, encode bot packets."""
+"""Tests for the codec — kind-tagged dicts ↔ wire frames.
+
+Each variant round-trips through ``serialize_*`` then ``parse_*`` to verify
+the dict shape stays stable across the bridge.
+"""
 
 from __future__ import annotations
 
-import flatbuffers
+from conftest import minimal_match_config, turn_state
 
+from pyrat_sdk._engine import (
+    parse_bot_frame,
+    parse_host_frame,
+    serialize_bot_msg,
+    serialize_host_msg,
+)
 from pyrat_sdk._wire import codec
-from pyrat_sdk._wire.protocol import GameOver as GameOverMod
-from pyrat_sdk._wire.protocol import HostPacket as HostPacketMod
-from pyrat_sdk._wire.protocol import MatchConfig as MatchConfigMod
-from pyrat_sdk._wire.protocol import Mud as MudMod
-from pyrat_sdk._wire.protocol import Timeout as TimeoutMod
-from pyrat_sdk._wire.protocol import TurnState as TurnStateMod
-from pyrat_sdk._wire.protocol import Wall as WallMod
-from pyrat_sdk._wire.protocol.Action import Action
-from pyrat_sdk._wire.protocol.BotMessage import BotMessage
-from pyrat_sdk._wire.protocol.BotPacket import BotPacket
-from pyrat_sdk._wire.protocol.HostMessage import HostMessage
-from pyrat_sdk._wire.protocol.Info import Info
-from pyrat_sdk._wire.protocol.Vec2 import CreateVec2
-
-# ── Helpers ───────────────────────────────────────────
 
 
-def _build_host_packet(msg_type: int, build_fn) -> bytes:
-    builder = flatbuffers.Builder(512)
-    msg_offset = build_fn(builder)
-    HostPacketMod.Start(builder)
-    HostPacketMod.AddMessageType(builder, msg_type)
-    HostPacketMod.AddMessage(builder, msg_offset)
-    packet = HostPacketMod.End(builder)
-    builder.Finish(packet)
-    return bytes(builder.Output())
+def _full_match_config() -> dict:
+    """A non-trivial MatchConfig exercising walls, mud, multiple cheeses."""
+    return {
+        "width": 5,
+        "height": 4,
+        "max_turns": 100,
+        "walls": [((0, 0), (0, 1)), ((2, 2), (3, 2))],
+        "mud": [((1, 0), (1, 1), 3)],
+        "cheese": [(0, 0), (2, 2), (4, 3)],
+        "player1_start": (0, 0),
+        "player2_start": (4, 3),
+        "timing": 1,  # Clock
+        "move_timeout_ms": 250,
+        "preprocessing_timeout_ms": 5_000,
+    }
 
 
 # ══════════════════════════════════════════════════════════
-# 1. extract_match_config
+# 1. HostMsg round-trips
 # ══════════════════════════════════════════════════════════
 
 
-class TestExtractMatchConfig:
-    def test_full_config(self):
-        """Build a MatchConfig with walls, mud, cheese, player starts — verify every field."""
+class TestHostMsgRoundTrip:
+    def _round_trip(self, msg: dict) -> dict:
+        return parse_host_frame(serialize_host_msg(msg))
 
-        def build(b):
-            # Wall between (0,0) and (0,1)
-            WallMod.Start(b)
-            WallMod.AddPos1(b, CreateVec2(b, 0, 0))
-            WallMod.AddPos2(b, CreateVec2(b, 0, 1))
-            wall = WallMod.End(b)
+    def test_welcome(self):
+        msg = {"kind": "Welcome", "player_slot": 1}
+        assert self._round_trip(msg) == msg
 
-            MatchConfigMod.StartWallsVector(b, 1)
-            b.PrependUOffsetTRelative(wall)
-            walls_vec = b.EndVector()
+    def test_configure(self):
+        msg = {
+            "kind": "Configure",
+            "options": [("depth", "5"), ("avoid_mud", "true")],
+            "match_config": _full_match_config(),
+        }
+        got = self._round_trip(msg)
+        assert got["kind"] == "Configure"
+        assert got["options"] == [("depth", "5"), ("avoid_mud", "true")]
+        assert got["match_config"] == _full_match_config()
 
-            # Mud between (1,0) and (1,1) with cost 3
-            MudMod.Start(b)
-            MudMod.AddPos1(b, CreateVec2(b, 1, 0))
-            MudMod.AddPos2(b, CreateVec2(b, 1, 1))
-            MudMod.AddValue(b, 3)
-            mud = MudMod.End(b)
+    def test_go_preprocess(self):
+        msg = {"kind": "GoPreprocess", "state_hash": 0xDEAD_BEEF}
+        assert self._round_trip(msg) == msg
 
-            MatchConfigMod.StartMudVector(b, 1)
-            b.PrependUOffsetTRelative(mud)
-            mud_vec = b.EndVector()
+    def test_advance(self):
+        msg = {
+            "kind": "Advance",
+            "p1_dir": 1,
+            "p2_dir": 4,
+            "turn": 7,
+            "new_hash": 0xCAFE_BABE,
+        }
+        assert self._round_trip(msg) == msg
 
-            # Cheese at (2,1) and (1,2)
-            MatchConfigMod.StartCheeseVector(b, 2)
-            CreateVec2(b, 1, 2)
-            CreateVec2(b, 2, 1)
-            cheese_vec = b.EndVector()
+    def test_go(self):
+        msg = {
+            "kind": "Go",
+            "state_hash": 0xABCD,
+            "limits": {"timeout_ms": 100, "depth": None, "nodes": 10_000},
+        }
+        assert self._round_trip(msg) == msg
 
-            # Controlled players: [0]
-            MatchConfigMod.StartControlledPlayersVector(b, 1)
-            b.PrependUint8(0)
-            cp_vec = b.EndVector()
+    def test_go_state(self):
+        msg = {
+            "kind": "GoState",
+            "turn_state": turn_state(turn=5),
+            "state_hash": 0x1234,
+            "limits": {"timeout_ms": None, "depth": 4, "nodes": None},
+        }
+        got = self._round_trip(msg)
+        assert got["kind"] == "GoState"
+        assert got["state_hash"] == 0x1234
+        assert got["turn_state"] == turn_state(turn=5)
+        assert got["limits"] == {"timeout_ms": None, "depth": 4, "nodes": None}
 
-            MatchConfigMod.Start(b)
-            MatchConfigMod.AddWidth(b, 5)
-            MatchConfigMod.AddHeight(b, 4)
-            MatchConfigMod.AddMaxTurns(b, 200)
-            MatchConfigMod.AddWalls(b, walls_vec)
-            MatchConfigMod.AddMud(b, mud_vec)
-            MatchConfigMod.AddCheese(b, cheese_vec)
-            MatchConfigMod.AddPlayer1Start(b, CreateVec2(b, 0, 0))
-            MatchConfigMod.AddPlayer2Start(b, CreateVec2(b, 4, 3))
-            MatchConfigMod.AddControlledPlayers(b, cp_vec)
-            MatchConfigMod.AddMoveTimeoutMs(b, 500)
-            MatchConfigMod.AddPreprocessingTimeoutMs(b, 2000)
-            return MatchConfigMod.End(b)
+    def test_stop(self):
+        msg = {"kind": "Stop"}
+        assert self._round_trip(msg) == msg
 
-        buf = _build_host_packet(HostMessage.MatchConfig, build)
-        _, table = codec.decode_host_packet(buf)
-        config = codec.extract_match_config(table)
+    def test_full_state(self):
+        msg = {
+            "kind": "FullState",
+            "match_config": _full_match_config(),
+            "turn_state": turn_state(turn=3),
+        }
+        got = self._round_trip(msg)
+        assert got["kind"] == "FullState"
+        assert got["match_config"] == _full_match_config()
+        assert got["turn_state"] == turn_state(turn=3)
 
-        assert config["width"] == 5
-        assert config["height"] == 4
-        assert config["max_turns"] == 200
-        assert config["player1_start"] == (0, 0)
-        assert config["player2_start"] == (4, 3)
-        assert config["controlled_players"] == [0]
-        assert config["move_timeout_ms"] == 500
-        assert config["preprocessing_timeout_ms"] == 2000
+    def test_protocol_error(self):
+        msg = {"kind": "ProtocolError", "reason": "bad welcome order"}
+        assert self._round_trip(msg) == msg
 
-        assert len(config["walls"]) == 1
-        assert config["walls"][0] == ((0, 0), (0, 1))
-
-        assert len(config["mud"]) == 1
-        p1, p2, cost = config["mud"][0]
-        assert p1 == (1, 0)
-        assert p2 == (1, 1)
-        assert cost == 3
-
-        assert set(config["cheese"]) == {(2, 1), (1, 2)}
-
-
-# ══════════════════════════════════════════════════════════
-# 2. extract_turn_state
-# ══════════════════════════════════════════════════════════
-
-
-class TestExtractTurnState:
-    def test_non_trivial_values(self):
-        def build(b):
-            TurnStateMod.StartCheeseVector(b, 2)
-            CreateVec2(b, 3, 1)
-            CreateVec2(b, 2, 0)
-            cheese_vec = b.EndVector()
-
-            TurnStateMod.Start(b)
-            TurnStateMod.AddTurn(b, 42)
-            TurnStateMod.AddPlayer1Position(b, CreateVec2(b, 1, 2))
-            TurnStateMod.AddPlayer2Position(b, CreateVec2(b, 3, 0))
-            TurnStateMod.AddPlayer1Score(b, 5.5)
-            TurnStateMod.AddPlayer2Score(b, 3.0)
-            TurnStateMod.AddPlayer1MudTurns(b, 2)
-            TurnStateMod.AddPlayer2MudTurns(b, 0)
-            TurnStateMod.AddPlayer1LastMove(b, 0)  # UP
-            TurnStateMod.AddPlayer2LastMove(b, 3)  # LEFT
-            TurnStateMod.AddCheese(b, cheese_vec)
-            return TurnStateMod.End(b)
-
-        buf = _build_host_packet(HostMessage.TurnState, build)
-        _, table = codec.decode_host_packet(buf)
-        ts = codec.extract_turn_state(table)
-
-        assert ts["turn"] == 42
-        assert ts["player1_position"] == (1, 2)
-        assert ts["player2_position"] == (3, 0)
-        assert ts["player1_score"] == 5.5
-        assert ts["player2_score"] == 3.0
-        assert ts["player1_mud_turns"] == 2
-        assert ts["player2_mud_turns"] == 0
-        assert ts["player1_last_move"] == 0
-        assert ts["player2_last_move"] == 3
-        assert set(ts["cheese"]) == {(2, 0), (3, 1)}
+    def test_game_over(self):
+        msg = {
+            "kind": "GameOver",
+            "result": 2,
+            "player1_score": 3.5,
+            "player2_score": 3.5,
+        }
+        assert self._round_trip(msg) == msg
 
 
 # ══════════════════════════════════════════════════════════
-# 3. extract_game_over
+# 2. BotMsg round-trips
 # ══════════════════════════════════════════════════════════
 
 
-class TestExtractGameOver:
-    def test_result_and_scores(self):
-        def build(b):
-            GameOverMod.Start(b)
-            GameOverMod.AddResult(b, 1)  # Player1Won
-            GameOverMod.AddPlayer1Score(b, 10.0)
-            GameOverMod.AddPlayer2Score(b, 3.5)
-            return GameOverMod.End(b)
+class TestBotMsgRoundTrip:
+    def _round_trip(self, msg: dict) -> dict:
+        return parse_bot_frame(serialize_bot_msg(msg))
 
-        buf = _build_host_packet(HostMessage.GameOver, build)
-        _, table = codec.decode_host_packet(buf)
-        go = codec.extract_game_over(table)
+    def test_identify_no_options(self):
+        msg = {
+            "kind": "Identify",
+            "name": "TestBot",
+            "author": "Tester",
+            "agent_id": "test/bot",
+            "options": [],
+        }
+        assert self._round_trip(msg) == msg
 
-        assert go["result"] == 1
-        assert go["player1_score"] == 10.0
-        assert go["player2_score"] == 3.5
+    def test_identify_with_options(self):
+        opt = {
+            "name": "depth",
+            "option_type": 1,  # Spin
+            "default_value": "3",
+            "min": 1,
+            "max": 10,
+            "choices": [],
+        }
+        msg = {
+            "kind": "Identify",
+            "name": "B",
+            "author": "A",
+            "agent_id": "",
+            "options": [opt],
+        }
+        got = self._round_trip(msg)
+        assert got["options"] == [opt]
+
+    def test_ready(self):
+        msg = {"kind": "Ready", "state_hash": 0xC001}
+        assert self._round_trip(msg) == msg
+
+    def test_preprocessing_done(self):
+        msg = {"kind": "PreprocessingDone"}
+        assert self._round_trip(msg) == msg
+
+    def test_action(self):
+        msg = {
+            "kind": "Action",
+            "direction": 0,
+            "player": 1,
+            "turn": 12,
+            "state_hash": 0xBEEF,
+            "think_ms": 47,
+        }
+        assert self._round_trip(msg) == msg
+
+    def test_provisional(self):
+        msg = {
+            "kind": "Provisional",
+            "direction": 2,
+            "player": 0,
+            "turn": 3,
+            "state_hash": 0xFACE,
+        }
+        assert self._round_trip(msg) == msg
+
+    def test_sync_ok(self):
+        msg = {"kind": "SyncOk", "hash": 0x1111}
+        assert self._round_trip(msg) == msg
+
+    def test_resync(self):
+        msg = {"kind": "Resync", "my_hash": 0x2222}
+        assert self._round_trip(msg) == msg
+
+    def test_info_minimal(self):
+        msg = {
+            "kind": "Info",
+            "player": 0,
+            "multipv": 0,
+            "target": None,
+            "depth": 0,
+            "nodes": 0,
+            "score": None,
+            "pv": [],
+            "message": "",
+            "turn": 0,
+            "state_hash": 0,
+        }
+        assert self._round_trip(msg) == msg
+
+    def test_info_full(self):
+        msg = {
+            "kind": "Info",
+            "player": 1,
+            "multipv": 2,
+            "target": (3, 4),
+            "depth": 5,
+            "nodes": 10_000,
+            "score": 1.5,
+            "pv": [0, 1, 2, 4],
+            "message": "depth 5",
+            "turn": 8,
+            "state_hash": 0xDEAD,
+        }
+        assert self._round_trip(msg) == msg
+
+    def test_render_commands(self):
+        msg = {
+            "kind": "RenderCommands",
+            "player": 1,
+            "turn": 5,
+            "state_hash": 0xAAAA,
+        }
+        assert self._round_trip(msg) == msg
 
 
 # ══════════════════════════════════════════════════════════
-# 4. extract_timeout
+# 3. Encoder helpers (codec.encode_*)
 # ══════════════════════════════════════════════════════════
 
 
-class TestExtractTimeout:
-    def test_default_move(self):
-        def build(b):
-            TimeoutMod.Start(b)
-            TimeoutMod.AddDefaultMove(b, 4)  # STAY
-            return TimeoutMod.End(b)
+class TestEncoderHelpers:
+    def test_encode_identify(self):
+        opts = [
+            {
+                "name": "depth",
+                "option_type": 1,
+                "default_value": "3",
+                "min": 1,
+                "max": 10,
+                "choices": [],
+            }
+        ]
+        buf = codec.encode_identify("Bot", "Auth", "agent-x", opts)
+        msg = parse_bot_frame(buf)
+        assert msg["kind"] == "Identify"
+        assert msg["name"] == "Bot"
+        assert msg["author"] == "Auth"
+        assert msg["agent_id"] == "agent-x"
+        assert msg["options"] == opts
 
-        buf = _build_host_packet(HostMessage.Timeout, build)
-        _, table = codec.decode_host_packet(buf)
-        default_move = codec.extract_timeout(table)
-        assert default_move == 4
+    def test_encode_identify_default_options(self):
+        buf = codec.encode_identify("Plain", "Nobody")
+        msg = parse_bot_frame(buf)
+        assert msg["options"] == []
 
+    def test_encode_ready(self):
+        msg = parse_bot_frame(codec.encode_ready(0x42))
+        assert msg == {"kind": "Ready", "state_hash": 0x42}
 
-# ══════════════════════════════════════════════════════════
-# 5. encode_action roundtrip
-# ══════════════════════════════════════════════════════════
+    def test_encode_preprocessing_done(self):
+        msg = parse_bot_frame(codec.encode_preprocessing_done())
+        assert msg == {"kind": "PreprocessingDone"}
 
-
-class TestEncodeAction:
-    def test_roundtrip(self):
-        buf = codec.encode_action(direction=2, player=1, turn=42)  # DOWN, PLAYER2
-        packet = BotPacket.GetRootAs(buf)
-        assert packet.MessageType() == BotMessage.Action
-
-        action = Action()
-        action.Init(packet.Message().Bytes, packet.Message().Pos)
-        assert action.Direction() == 2
-        assert action.Player() == 1
-        assert action.Turn() == 42
-
-    def test_stay(self):
-        buf = codec.encode_action(direction=4, player=0)
-        packet = BotPacket.GetRootAs(buf)
-        action = Action()
-        action.Init(packet.Message().Bytes, packet.Message().Pos)
-        assert action.Direction() == 4
-        assert action.Player() == 0
-        assert action.Turn() == 0
-
-
-# ══════════════════════════════════════════════════════════
-# 6. encode_info roundtrip
-# ══════════════════════════════════════════════════════════
-
-
-class TestEncodeInfo:
-    def test_all_fields(self):
-        buf = codec.encode_info(
-            player=1,
-            multipv=2,
-            target=(5, 3),
-            depth=10,
-            nodes=1000,
-            score=42.5,
-            pv=[0, 3],  # UP, LEFT
-            message="hello",
+    def test_encode_action(self):
+        msg = parse_bot_frame(
+            codec.encode_action(direction=1, player=0, turn=3, state_hash=0xCC, think_ms=12)
         )
-        packet = BotPacket.GetRootAs(buf)
-        assert packet.MessageType() == BotMessage.Info
+        assert msg == {
+            "kind": "Action",
+            "direction": 1,
+            "player": 0,
+            "turn": 3,
+            "state_hash": 0xCC,
+            "think_ms": 12,
+        }
 
-        info = Info()
-        info.Init(packet.Message().Bytes, packet.Message().Pos)
+    def test_encode_provisional(self):
+        msg = parse_bot_frame(
+            codec.encode_provisional(direction=2, player=1, turn=5, state_hash=0x99)
+        )
+        assert msg == {
+            "kind": "Provisional",
+            "direction": 2,
+            "player": 1,
+            "turn": 5,
+            "state_hash": 0x99,
+        }
 
-        assert info.Player() == 1
-        assert info.Multipv() == 2
-        assert info.Target().X() == 5
-        assert info.Target().Y() == 3
-        assert info.Depth() == 10
-        assert info.Nodes() == 1000
-        assert info.Score() == 42.5
-        assert info.PvLength() == 2
-        assert info.Pv(0) == 0  # UP
-        assert info.Pv(1) == 3  # LEFT
-        msg = info.Message()
-        assert (msg.decode("utf-8") if isinstance(msg, bytes) else msg) == "hello"
+    def test_encode_sync_ok(self):
+        msg = parse_bot_frame(codec.encode_sync_ok(0x77))
+        assert msg == {"kind": "SyncOk", "hash": 0x77}
 
-    def test_minimal(self):
-        """Only default values — no target, pv, or message."""
-        buf = codec.encode_info()
-        packet = BotPacket.GetRootAs(buf)
-        info = Info()
-        info.Init(packet.Message().Bytes, packet.Message().Pos)
+    def test_encode_resync(self):
+        msg = parse_bot_frame(codec.encode_resync(0x88))
+        assert msg == {"kind": "Resync", "my_hash": 0x88}
 
-        assert info.Player() == 0
-        assert info.Multipv() == 0
-        assert info.Target() is None
-        assert info.Depth() == 0
-        assert info.Nodes() == 0
-        assert info.PvIsNone()
+    def test_encode_info(self):
+        msg = parse_bot_frame(
+            codec.encode_info(
+                player=0,
+                target=(2, 3),
+                depth=4,
+                pv=[0, 1],
+                score=0.5,
+                message="hi",
+                turn=7,
+                state_hash=0xAB,
+            )
+        )
+        assert msg["kind"] == "Info"
+        assert msg["player"] == 0
+        assert msg["target"] == (2, 3)
+        assert msg["depth"] == 4
+        assert msg["pv"] == [0, 1]
+        assert msg["score"] == 0.5
+        assert msg["message"] == "hi"
+        assert msg["turn"] == 7
+        assert msg["state_hash"] == 0xAB
 
-    def test_with_target_only(self):
-        buf = codec.encode_info(target=(7, 2))
-        packet = BotPacket.GetRootAs(buf)
-        info = Info()
-        info.Init(packet.Message().Bytes, packet.Message().Pos)
 
-        assert info.Target().X() == 7
-        assert info.Target().Y() == 2
-        assert info.PvIsNone()
+# ══════════════════════════════════════════════════════════
+# 4. minimal_match_config fixture parses cleanly
+# ══════════════════════════════════════════════════════════
+
+
+def test_minimal_match_config_round_trips():
+    """The conftest minimal config should round-trip without changes."""
+    msg = {
+        "kind": "Configure",
+        "options": [],
+        "match_config": minimal_match_config(),
+    }
+    got = parse_host_frame(serialize_host_msg(msg))
+    assert got["match_config"] == minimal_match_config()

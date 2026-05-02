@@ -1,25 +1,45 @@
-"""Tests for HivemindBot — multi-player action dispatch and error handling."""
+"""Tests for HivemindBot — multi-player action dispatch and error handling.
+
+The dispatch tests still drive ``_handle_turn`` directly because the adapter
+shape (think-returns-dict → two Action frames) is what'll need to keep
+working when hivemind support comes back. The public ``run()`` path is
+tested separately to assert the documented unsupported-protocol error.
+"""
 
 from __future__ import annotations
 
+import pytest
 from conftest import MockConnection, make_lifecycle_frames
 
-from pyrat_sdk._wire.protocol.Action import Action
-from pyrat_sdk._wire.protocol.BotMessage import BotMessage
-from pyrat_sdk._wire.protocol.BotPacket import BotPacket
+from pyrat_sdk._engine import parse_bot_frame
 from pyrat_sdk.bot import HivemindBot, _run_lifecycle
 from pyrat_sdk.state import Direction, Player
+
+
+class TestHivemindRunUnsupported:
+    """Public ``HivemindBot.run()`` must raise ``RuntimeError`` until the new
+    wire protocol grows hivemind support — the host's ``accept_players``
+    rejects duplicate ``agent_id``, so a hivemind bot can't even connect."""
+
+    def test_run_raises_runtime_error_with_clear_message(self):
+        class MyHive(HivemindBot):
+            name = "Hive"
+            author = "Test"
+
+            def think(self, state, ctx):
+                return {Player.PLAYER1: Direction.UP, Player.PLAYER2: Direction.DOWN}
+
+        with pytest.raises(RuntimeError, match="not supported"):
+            MyHive().run()
 
 
 def _extract_actions(conn: MockConnection) -> list[tuple[int, int]]:
     """Extract (direction, player) pairs from Action frames in conn.sent."""
     actions = []
     for frame in conn.sent:
-        packet = BotPacket.GetRootAs(frame)
-        if packet.MessageType() == BotMessage.Action:
-            action = Action()
-            action.Init(packet.Message().Bytes, packet.Message().Pos)
-            actions.append((action.Direction(), action.Player()))
+        msg = parse_bot_frame(frame)
+        if msg.get("kind") == "Action":
+            actions.append((msg["direction"], msg["player"]))
     return actions
 
 
@@ -33,10 +53,7 @@ class TestHivemindHappyPath:
                 return {Player.PLAYER1: Direction.UP, Player.PLAYER2: Direction.DOWN}
 
         bot = MyHive()
-        frames = make_lifecycle_frames(
-            controlled_player=0,
-            turn_states=1,
-        )
+        frames = make_lifecycle_frames(turn_count=1)
         conn = MockConnection(frames)
         _run_lifecycle(
             conn,
@@ -48,7 +65,6 @@ class TestHivemindHappyPath:
 
         actions = _extract_actions(conn)
         assert len(actions) == 2
-        # Player 0 (PLAYER1) gets UP (0), Player 1 (PLAYER2) gets DOWN (2)
         assert (0, 0) in actions  # UP, PLAYER1
         assert (2, 1) in actions  # DOWN, PLAYER2
 
@@ -63,7 +79,7 @@ class TestHivemindMissingKey:
                 return {Player.PLAYER1: Direction.UP}
 
         bot = PartialHive()
-        frames = make_lifecycle_frames(turn_states=1)
+        frames = make_lifecycle_frames(turn_count=1)
         conn = MockConnection(frames)
         _run_lifecycle(
             conn,
@@ -89,7 +105,7 @@ class TestHivemindNonDictReturn:
                 return [Direction.UP, Direction.DOWN]
 
         bot = BadHive()
-        frames = make_lifecycle_frames(turn_states=1)
+        frames = make_lifecycle_frames(turn_count=1)
         conn = MockConnection(frames)
         _run_lifecycle(
             conn,
@@ -116,7 +132,7 @@ class TestHivemindException:
                 raise ValueError("oops")
 
         bot = CrashHive()
-        frames = make_lifecycle_frames(turn_states=1)
+        frames = make_lifecycle_frames(turn_count=1)
         conn = MockConnection(frames)
         _run_lifecycle(
             conn,

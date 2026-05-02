@@ -65,7 +65,8 @@ table OptionDef {
 
 // ── Host → Bot ──────────────────────────────────────
 
-table SetOption {
+// One option=value assignment, used inside Configure.
+table OptionAssignment {
   name: string;
   value: string;
 }
@@ -79,14 +80,51 @@ table MatchConfig {
   cheese: [Vec2];
   player1_start: Vec2;
   player2_start: Vec2;
-  controlled_players: [Player];
   timing: TimingMode;
   move_timeout_ms: uint32;
   preprocessing_timeout_ms: uint32;
 }
 
-table StartPreprocessing {
+// Lobby phase: server assigns the player slot after Identify.
+table Welcome {
+  player_slot: Player;
+}
+
+// Lobby phase: server batches options + match config into one message.
+table Configure {
+  options: [OptionAssignment];
+  match_config: MatchConfig;
+}
+
+// Search limits sent with Go / GoState. Each axis: 0 = unconstrained.
+// "Infinite" search = all three at 0. Mirrors the owned SearchLimits in
+// pyrat-protocol where Option<_> = None means unset.
+table SearchLimits {
+  timeout_ms: uint32 = 0;
+  depth: uint16 = 0;
+  nodes: uint32 = 0;
+}
+
+// Playing phase: begin preprocessing.
+table GoPreprocess {
   state_hash: uint64;
+}
+
+// Playing phase: delta update after a turn (carries both directions plus
+// the resulting hash). Bots verify by applying locally and computing the
+// engine state_hash; reply with SyncOk on match, Resync on mismatch.
+table Advance {
+  p1_dir: Direction;
+  p2_dir: Direction;
+  turn: uint16;
+  new_hash: uint64;
+}
+
+// Playing phase: lightweight start-thinking. Bots are already synced via
+// Advance/SyncOk (or, on the first turn, via Ready/Configure).
+table Go {
+  state_hash: uint64;
+  limits: SearchLimits;
 }
 
 table TurnState {
@@ -100,14 +138,34 @@ table TurnState {
   cheese: [Vec2];
   player1_last_move: Direction;
   player2_last_move: Direction;
+}
+
+// Playing phase: stateless start-thinking. Carries full TurnState — no
+// prior sync required. Used for analysis-mode injection, restart, and
+// reconnection recovery. The parent's `state_hash` field is the
+// authoritative hash for the carried TurnState.
+table GoState {
+  turn_state: TurnState;
   state_hash: uint64;
+  limits: SearchLimits;
+}
+
+// Any phase: full reconstruction payload, server's response to Resync.
+// Carries MatchConfig + TurnState. Phase is preserved across recovery.
+table FullState {
+  match_config: MatchConfig;
+  turn_state: TurnState;
+}
+
+// Any phase: protocol violation, terminal. Followed by socket close.
+// Sideband errors (malformed Info, bad RenderCommands) are NOT sent as
+// ProtocolError — they're logged and dropped, since they don't affect
+// game state.
+table ProtocolError {
+  reason: string;
 }
 
 table Stop {}
-
-table Timeout {
-  default_move: Direction;
-}
 
 table GameOver {
   result: GameResult;
@@ -115,17 +173,17 @@ table GameOver {
   player2_score: float32;
 }
 
-table Ping {}
-
 union HostMessage {
-  SetOption,
-  MatchConfig,
-  StartPreprocessing,
-  TurnState,
+  Welcome,
+  Configure,
+  GoPreprocess,
+  Advance,
+  Go,
+  GoState,
   Stop,
-  Timeout,
   GameOver,
-  Ping,
+  FullState,
+  ProtocolError,
 }
 
 table HostPacket {
@@ -141,7 +199,11 @@ table Identify {
   agent_id: string;
 }
 
-table Ready {}
+// Lobby phase: bot acknowledges Configure with its initial state hash.
+// This IS the initial sync — no separate exchange needed.
+table Ready {
+  state_hash: uint64;
+}
 
 table PreprocessingDone {}
 
@@ -149,11 +211,34 @@ table Action {
   direction: Direction;
   player: Player;
   turn: uint16;
-  provisional: bool = false;
   think_ms: uint32 = 0;
+  // The state hash this move was computed for. Used by host for
+  // stale-action detection.
+  state_hash: uint64;
 }
 
-table Pong {}
+// Playing phase: provisional best-so-far action (sideband). Host stores
+// the latest as a Stop-fallback. Resolution order on Stop:
+// committed Action > latest Provisional > STAY.
+table Provisional {
+  direction: Direction;
+  player: Player;
+  turn: uint16;
+  state_hash: uint64;
+}
+
+// Playing phase: bot confirms state sync after Advance. Carries the
+// hash the bot computed locally so the server can verify.
+table SyncOk {
+  hash: uint64;
+}
+
+// Any phase: bot detected hash mismatch, requests FullState.
+// Server replies with FullState; bot reloads, sends SyncOk to resume.
+// Phase is preserved.
+table Resync {
+  my_hash: uint64;
+}
 
 table Info {
   player: Player;
@@ -168,8 +253,13 @@ table Info {
   state_hash: uint64;
 }
 
+// Playing phase: GUI render commands (sideband). Body primitives TBD —
+// designed with the GUI brief. For now, just the addressing fields so
+// the host can route observer-facing messages without inspecting them.
 table RenderCommands {
-  // Primitives TBD — designed with GUI brief.
+  player: Player;
+  turn: uint16 = 0;
+  state_hash: uint64 = 0;
 }
 
 union BotMessage {
@@ -177,9 +267,11 @@ union BotMessage {
   Ready,
   PreprocessingDone,
   Action,
-  Pong,
   Info,
   RenderCommands,
+  Provisional,
+  SyncOk,
+  Resync,
 }
 
 table BotPacket {

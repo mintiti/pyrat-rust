@@ -7,12 +7,11 @@
 use tokio::sync::mpsc;
 use tracing::warn;
 
-use crate::session::messages::DisconnectReason;
 use pyrat::Direction;
 use pyrat_protocol::{HashedTurnState, Info, MatchConfig};
 use pyrat_wire::Player;
 
-use super::playing::MatchResult;
+use super::result::MatchResult;
 
 /// Events emitted during a match, from setup through game over.
 #[derive(Debug, Clone)]
@@ -24,8 +23,9 @@ pub enum MatchEvent {
         player: Player,
         name: String,
         author: String,
+        agent_id: String,
     },
-    /// All bots have been sent StartPreprocessing — preprocessing is underway.
+    /// All bots have been sent GoPreprocess — preprocessing is underway.
     PreprocessingStarted,
     /// All bots connected, identified, configured, and preprocessed.
     SetupComplete,
@@ -48,13 +48,17 @@ pub enum MatchEvent {
         state_hash: u64,
         info: Info,
     },
+    /// A bot sent a provisional (best-so-far) direction during think.
+    /// Observer-facing only: `Player::take_provisional` is the game-driving
+    /// access path. See `Player` trait docs.
+    BotProvisional {
+        sender: Player,
+        turn: u16,
+        state_hash: u64,
+        direction: Direction,
+    },
     /// A bot timed out on an action this turn.
     BotTimeout { player: Player, turn: u16 },
-    /// A bot disconnected during play.
-    BotDisconnected {
-        player: Player,
-        reason: DisconnectReason,
-    },
 
     // ── End ──────────────────────────────────────
     /// The match ended.

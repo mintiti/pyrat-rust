@@ -102,7 +102,6 @@ async probeBot(runCommand: string, workingDir: string, agentId: string) : Promis
 
 
 export const events = __makeEvents__<{
-botDisconnectedEvent: BotDisconnectedEvent,
 botInfoEvent: BotInfoEvent,
 matchErrorEvent: MatchErrorEvent,
 matchOverEvent: MatchOverEvent,
@@ -111,7 +110,6 @@ preprocessingStartedEvent: PreprocessingStartedEvent,
 setupCompleteEvent: SetupCompleteEvent,
 turnPlayedEvent: TurnPlayedEvent
 }>({
-botDisconnectedEvent: "bot-disconnected-event",
 botInfoEvent: "bot-info-event",
 matchErrorEvent: "match-error-event",
 matchOverEvent: "match-over-event",
@@ -137,10 +135,6 @@ export type AnalysisActions = { player1: Direction; player2: Direction }
  */
 export type AnalysisPosition = { turn: number; player1: PlayerState; player2: PlayerState; cheese: Coord[]; player1_last_move: Direction; player2_last_move: Direction }
 /**
- * Emitted when a bot disconnects mid-game.
- */
-export type BotDisconnectedEvent = { match_id: number; player: PlayerSide; reason: string }
-/**
  * Bot debug/analysis info forwarded from the host event stream.
  */
 export type BotInfoEvent = { match_id: number; sender: PlayerSide; subject: PlayerSide; turn: number; state_hash: string; multipv: number; target: Coord | null; depth: number; nodes: number; score: number | null; pv: Direction[]; message: string }
@@ -156,7 +150,7 @@ export type Coord = { x: number; y: number }
  * Movement direction — specta-friendly mirror of pyrat_wire::Direction.
  */
 export type Direction = "Up" | "Right" | "Down" | "Left" | "Stay"
-export type DiscoveredBot = { agent_id: string; name: string; run_command: string;
+export type DiscoveredBot = { agent_id: string; name: string; run_command: string; 
 /**
  * Absolute path to the directory containing bot.toml.
  */
@@ -164,20 +158,20 @@ working_dir: string; description: string; developer: string; language: string; t
 /**
  * Per-player option overrides + match flags, bundled so start_match stays under specta's 10-arg limit.
  */
-export type MatchBotOptions = { player1?: BotOptionValue[]; player2?: BotOptionValue[];
+export type MatchBotOptions = { player1?: BotOptionValue[]; player2?: BotOptionValue[]; 
 /**
  * When true, run in analysis (step-by-step) mode instead of auto-play.
  */
 step_mode?: boolean }
-export type MatchConfigParams = {
+export type MatchConfigParams = { 
 /**
  * Named preset, or "custom" for manual configuration.
  */
-preset: string; width: number; height: number; max_turns: number; wall_density: number; mud_density: number; mud_range: number; connected: boolean; symmetric: boolean; cheese_count: number; cheese_symmetric: boolean;
+preset: string; width: number; height: number; max_turns: number; wall_density: number; mud_density: number; mud_range: number; connected: boolean; symmetric: boolean; cheese_count: number; cheese_symmetric: boolean; 
 /**
  * "corners" or "random".
  */
-player_start: string;
+player_start: string; 
 /**
  * Seed for RNG. None = OS entropy.
  */

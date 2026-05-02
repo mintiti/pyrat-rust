@@ -8,6 +8,7 @@ mod events;
 mod json_store;
 mod match_config;
 mod match_runner;
+mod random_bot;
 mod state;
 
 use bot_discovery::{discover_bots, load_scan_paths, save_scan_paths};
@@ -17,8 +18,8 @@ use commands::{
     stop_match,
 };
 use events::{
-    BotDisconnectedEvent, BotInfoEvent, MatchErrorEvent, MatchOverEvent, MatchStartedEvent,
-    PreprocessingStartedEvent, SetupCompleteEvent, TurnPlayedEvent,
+    BotInfoEvent, MatchErrorEvent, MatchOverEvent, MatchStartedEvent, PreprocessingStartedEvent,
+    SetupCompleteEvent, TurnPlayedEvent,
 };
 use match_config::{load_match_config, save_match_config};
 use tauri_specta::{collect_commands, collect_events, Builder};
@@ -53,7 +54,6 @@ fn main() {
             TurnPlayedEvent,
             MatchOverEvent,
             MatchErrorEvent,
-            BotDisconnectedEvent,
             BotInfoEvent
         ]);
 

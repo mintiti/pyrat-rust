@@ -1,23 +1,18 @@
-"""Shared test helpers — MockConnection and FlatBuffers frame builders."""
+"""Shared test helpers — MockConnection and dict-based message builders.
+
+Frames are built by serializing kind-tagged dicts through the same Rust
+codec the SDK uses, so tests speak the new protocol natively.
+"""
 
 from __future__ import annotations
 
-import flatbuffers
+from typing import Any
 
-from pyrat_sdk._wire.protocol import GameOver as GameOverMod
-from pyrat_sdk._wire.protocol import HostPacket as HostPacketMod
-from pyrat_sdk._wire.protocol import MatchConfig as MatchConfigMod
-from pyrat_sdk._wire.protocol import Ping as PingMod
-from pyrat_sdk._wire.protocol import SetOption as SetOptionMod
-from pyrat_sdk._wire.protocol import StartPreprocessing as StartPreprocessingMod
-from pyrat_sdk._wire.protocol import Stop as StopMod
-from pyrat_sdk._wire.protocol import Timeout as TimeoutMod
-from pyrat_sdk._wire.protocol import TurnState as TurnStateMod
-from pyrat_sdk._wire.protocol.Vec2 import CreateVec2
+from pyrat_sdk._engine import serialize_host_msg
 
 
 class MockConnection:
-    """Fake Connection for testing _run_lifecycle without sockets."""
+    """In-memory Connection for testing _run_lifecycle without sockets."""
 
     def __init__(self, incoming: list[bytes]) -> None:
         self._incoming = list(incoming)
@@ -38,168 +33,94 @@ class MockConnection:
         pass
 
 
-def build_host_packet(msg_type: int, build_fn) -> bytes:
-    """Build a HostPacket wrapping the inner message created by *build_fn*."""
-    builder = flatbuffers.Builder(256)
-    msg_offset = build_fn(builder)
-    HostPacketMod.Start(builder)
-    HostPacketMod.AddMessageType(builder, msg_type)
-    HostPacketMod.AddMessage(builder, msg_offset)
-    packet = HostPacketMod.End(builder)
-    builder.Finish(packet)
-    return bytes(builder.Output())
+# ── Message builders ───────────────────────────────────
 
 
-def build_set_option(builder, name: str, value: str):
-    n = builder.CreateString(name)
-    v = builder.CreateString(value)
-    SetOptionMod.Start(builder)
-    SetOptionMod.AddName(builder, n)
-    SetOptionMod.AddValue(builder, v)
-    return SetOptionMod.End(builder)
+def host_frame(msg: dict[str, Any]) -> bytes:
+    """Serialize a HostMsg dict into a wire frame."""
+    return serialize_host_msg(msg)
 
 
-def build_minimal_match_config(builder, *, controlled_player: int = 0):
-    """Build a MatchConfig with just enough fields for GameState to initialize."""
-    MatchConfigMod.StartControlledPlayersVector(builder, 1)
-    builder.PrependUint8(controlled_player)
-    cp_vec = builder.EndVector()
-
-    MatchConfigMod.StartCheeseVector(builder, 1)
-    CreateVec2(builder, 1, 1)
-    cheese_vec = builder.EndVector()
-
-    MatchConfigMod.Start(builder)
-    MatchConfigMod.AddWidth(builder, 3)
-    MatchConfigMod.AddHeight(builder, 3)
-    MatchConfigMod.AddMaxTurns(builder, 10)
-    MatchConfigMod.AddControlledPlayers(builder, cp_vec)
-    MatchConfigMod.AddCheese(builder, cheese_vec)
-    MatchConfigMod.AddPlayer1Start(builder, CreateVec2(builder, 0, 0))
-    MatchConfigMod.AddPlayer2Start(builder, CreateVec2(builder, 2, 2))
-    MatchConfigMod.AddMoveTimeoutMs(builder, 1000)
-    MatchConfigMod.AddPreprocessingTimeoutMs(builder, 1000)
-    return MatchConfigMod.End(builder)
+def minimal_match_config(**overrides: Any) -> dict[str, Any]:
+    """Minimal MatchConfig dict — 3x3 maze, single cheese."""
+    cfg = {
+        "width": 3,
+        "height": 3,
+        "max_turns": 10,
+        "walls": [],
+        "mud": [],
+        "cheese": [(1, 1)],
+        "player1_start": (0, 0),
+        "player2_start": (2, 2),
+        "timing": 0,  # Wait
+        "move_timeout_ms": 1000,
+        "preprocessing_timeout_ms": 1000,
+    }
+    cfg.update(overrides)
+    return cfg
 
 
-def build_empty(builder, mod):
-    mod.Start(builder)
-    return mod.End(builder)
+def empty_search_limits() -> dict[str, Any]:
+    """Search limits with all fields unset — bot thinks until Stop."""
+    return {"timeout_ms": None, "depth": None, "nodes": None}
 
 
-def build_start_preprocessing(builder, state_hash: int = 0):
-    StartPreprocessingMod.Start(builder)
-    StartPreprocessingMod.AddStateHash(builder, state_hash)
-    return StartPreprocessingMod.End(builder)
-
-
-def build_game_over(builder, result: int = 0, p1: float = 0.0, p2: float = 0.0):
-    GameOverMod.Start(builder)
-    GameOverMod.AddResult(builder, result)
-    GameOverMod.AddPlayer1Score(builder, p1)
-    GameOverMod.AddPlayer2Score(builder, p2)
-    return GameOverMod.End(builder)
-
-
-def build_turn_state(
-    builder,
-    *,
-    turn: int = 1,
-    p1_pos: tuple[int, int] = (0, 0),
-    p2_pos: tuple[int, int] = (2, 2),
-    p1_score: float = 0.0,
-    p2_score: float = 0.0,
-    p1_mud: int = 0,
-    p2_mud: int = 0,
-    p1_last: int = 4,
-    p2_last: int = 4,
-    cheese: list[tuple[int, int]] | None = None,
-):
-    """Build a TurnState FlatBuffers table."""
-    if cheese is None:
-        cheese = [(1, 1)]
-
-    TurnStateMod.StartCheeseVector(builder, len(cheese))
-    for cx, cy in reversed(cheese):
-        CreateVec2(builder, cx, cy)
-    cheese_vec = builder.EndVector()
-
-    TurnStateMod.Start(builder)
-    TurnStateMod.AddTurn(builder, turn)
-    TurnStateMod.AddPlayer1Position(builder, CreateVec2(builder, *p1_pos))
-    TurnStateMod.AddPlayer2Position(builder, CreateVec2(builder, *p2_pos))
-    TurnStateMod.AddPlayer1Score(builder, p1_score)
-    TurnStateMod.AddPlayer2Score(builder, p2_score)
-    TurnStateMod.AddPlayer1MudTurns(builder, p1_mud)
-    TurnStateMod.AddPlayer2MudTurns(builder, p2_mud)
-    TurnStateMod.AddPlayer1LastMove(builder, p1_last)
-    TurnStateMod.AddPlayer2LastMove(builder, p2_last)
-    TurnStateMod.AddCheese(builder, cheese_vec)
-    return TurnStateMod.End(builder)
-
-
-def build_ping(builder):
-    PingMod.Start(builder)
-    return PingMod.End(builder)
-
-
-def build_stop(builder):
-    StopMod.Start(builder)
-    return StopMod.End(builder)
-
-
-def build_timeout(builder, default_move: int = 4):
-    TimeoutMod.Start(builder)
-    TimeoutMod.AddDefaultMove(builder, default_move)
-    return TimeoutMod.End(builder)
+def turn_state(**overrides: Any) -> dict[str, Any]:
+    """TurnState dict with sensible defaults for the minimal config."""
+    ts = {
+        "turn": 1,
+        "player1_position": (0, 0),
+        "player2_position": (2, 2),
+        "player1_score": 0.0,
+        "player2_score": 0.0,
+        "player1_mud_turns": 0,
+        "player2_mud_turns": 0,
+        "cheese": [(1, 1)],
+        "player1_last_move": 4,  # STAY
+        "player2_last_move": 4,
+    }
+    ts.update(overrides)
+    return ts
 
 
 def make_lifecycle_frames(
     *,
-    controlled_player: int = 0,
-    set_options: list[tuple[str, str]] | None = None,
-    turn_states: int = 0,
-    include_ping: bool = False,
+    slot: int = 0,
+    configure_options: list[tuple[str, str]] | None = None,
+    turn_count: int = 0,
+    match_config: dict[str, Any] | None = None,
 ) -> list[bytes]:
-    """Build a standard sequence of host frames for lifecycle tests."""
-    from pyrat_sdk._wire.protocol.HostMessage import HostMessage
-
-    frames: list[bytes] = []
-
-    if set_options:
-        for name, value in set_options:
-            frames.append(
-                build_host_packet(
-                    HostMessage.SetOption,
-                    lambda b, n=name, v=value: build_set_option(b, n, v),
-                )
-            )
-
-    frames.append(
-        build_host_packet(
-            HostMessage.MatchConfig,
-            lambda b: build_minimal_match_config(
-                b, controlled_player=controlled_player
-            ),
-        )
-    )
-    frames.append(
-        build_host_packet(
-            HostMessage.StartPreprocessing,
-            lambda b: build_start_preprocessing(b),
-        )
-    )
-
-    for i in range(turn_states):
+    """Build a complete handshake + N Go frames + GameOver."""
+    cfg = match_config if match_config is not None else minimal_match_config()
+    frames = [
+        host_frame({"kind": "Welcome", "player_slot": slot}),
+        host_frame(
+            {
+                "kind": "Configure",
+                "options": configure_options or [],
+                "match_config": cfg,
+            }
+        ),
+        host_frame({"kind": "GoPreprocess", "state_hash": 0}),
+    ]
+    for _ in range(turn_count):
         frames.append(
-            build_host_packet(
-                HostMessage.TurnState,
-                lambda b, t=i + 1: build_turn_state(b, turn=t),
+            host_frame(
+                {
+                    "kind": "Go",
+                    "state_hash": 0,
+                    "limits": empty_search_limits(),
+                }
             )
         )
-
-    if include_ping:
-        frames.append(build_host_packet(HostMessage.Ping, build_ping))
-
-    frames.append(build_host_packet(HostMessage.GameOver, lambda b: build_game_over(b)))
+    frames.append(
+        host_frame(
+            {
+                "kind": "GameOver",
+                "result": 0,
+                "player1_score": 0.0,
+                "player2_score": 0.0,
+            }
+        )
+    )
     return frames

@@ -1,15 +1,21 @@
+//! One-shot bot probing.
+//!
+//! Spawns a bot, accepts its connection, reads its `Identify` message, and
+//! returns the declared metadata (name, author, options). Used by the GUI's
+//! bot-config panel to populate per-bot option pickers without running a
+//! full match.
+
 use std::path::PathBuf;
 use std::time::Duration;
 
 use tokio::net::TcpListener;
 use tracing::debug;
 
-use crate::session::{extract_bot_packet, BotPayload};
-use pyrat_protocol::OptionDef;
+use pyrat_protocol::{extract_bot_msg, BotMsg, OptionDef};
 use pyrat_wire::framing::FrameReader;
+use pyrat_wire::BotPacket;
 
-use super::config::BotConfig;
-use super::launch::{launch_bots, BotProcesses, LaunchError};
+use crate::launch::{launch_bots, BotConfig, BotProcesses, LaunchError};
 
 // ── Public types ─────────────────────────────────────
 
@@ -95,11 +101,14 @@ pub async fn probe_bot(
         .map_err(|_| ProbeError::IdentifyTimeout(IDENTIFY_TIMEOUT))?
         .map_err(|e| ProbeError::ProtocolError(e.to_string()))?;
 
-    // 5. Parse
-    let (_msg_type, payload) = extract_bot_packet(buf).map_err(ProbeError::ProtocolError)?;
+    // 5. Parse via the canonical pyrat-protocol codec.
+    let packet = flatbuffers::root::<BotPacket>(buf)
+        .map_err(|e| ProbeError::ProtocolError(format!("packet decode: {e}")))?;
+    let msg =
+        extract_bot_msg(&packet).map_err(|e| ProbeError::ProtocolError(format!("extract: {e}")))?;
 
-    match payload {
-        BotPayload::Identify {
+    match msg {
+        BotMsg::Identify {
             name,
             author,
             options,
@@ -117,9 +126,9 @@ pub async fn probe_bot(
                 options,
             })
         },
-        _ => Err(ProbeError::ProtocolError(
-            "expected Identify as first message".into(),
-        )),
+        other => Err(ProbeError::ProtocolError(format!(
+            "expected Identify as first message, got {other:?}"
+        ))),
     }
 
     // procs drops here, killing the bot process
