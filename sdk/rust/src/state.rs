@@ -292,10 +292,19 @@ fn apply_turn_state(engine: &mut pyrat::GameState, ts: &TurnState) {
 
     engine.turn = ts.turn;
 
-    // Reset cheese to the TurnState's set: take any not present in `ts.cheese`.
-    for pos in engine.cheese_positions() {
-        if !ts.cheese.contains(&pos) {
-            engine.cheese.take_cheese(pos);
+    // Reset cheese to the TurnState's set: take any not present in `ts.cheese`,
+    // restore any present in `ts.cheese` but absent from the engine. Both
+    // directions are necessary because GoState can rewind to an earlier
+    // analysis position with cheese the SDK has already collected.
+    let current = engine.cheese_positions();
+    for pos in &current {
+        if !ts.cheese.contains(pos) {
+            engine.cheese.take_cheese(*pos);
+        }
+    }
+    for pos in &ts.cheese {
+        if !current.contains(pos) {
+            engine.cheese.restore_cheese(*pos);
         }
     }
 
@@ -532,5 +541,69 @@ mod tests {
         });
 
         assert_eq!(advanced, loaded);
+    }
+
+    /// Regression: GoState rewinding to a turn with cheese the SDK has
+    /// already collected must restore that cheese (not just remove
+    /// not-in-snapshot entries) so the recomputed hash matches the host.
+    /// Before the fix, `load_turn_state` only did the take-direction; rewinds
+    /// silently diverged.
+    #[test]
+    fn load_turn_state_restores_cheese_collected_then_rewound() {
+        let cfg = MatchConfig {
+            width: 5,
+            height: 5,
+            max_turns: 300,
+            walls: vec![],
+            mud: vec![],
+            cheese: vec![Coordinates::new(2, 0), Coordinates::new(3, 0)],
+            player1_start: Coordinates::new(0, 0),
+            player2_start: Coordinates::new(4, 4),
+            timing: TimingMode::Wait,
+            move_timeout_ms: 1000,
+            preprocessing_timeout_ms: 5000,
+        };
+
+        // Path A: stay at the initial state — this is the host's "rewound"
+        // hash we want the SDK to match.
+        let baseline = GameState::from_config(Player::Player1, &cfg)
+            .unwrap()
+            .state_hash();
+
+        // Path B: SDK collects one cheese, then GoState rewinds to the
+        // initial position with both cheese present.
+        let mut sdk = GameState::from_config(Player::Player1, &cfg).unwrap();
+        // Walk P1 onto (2,0) — collects the cheese there.
+        sdk.apply_advance(Direction::Right, Direction::Stay);
+        sdk.apply_advance(Direction::Right, Direction::Stay);
+        assert_eq!(
+            sdk.engine.cheese.remaining_cheese(),
+            1,
+            "SDK should have collected one cheese"
+        );
+
+        // GoState payload: rewind to turn 0 with both cheese back.
+        let recomputed = sdk.load_turn_state(&TurnState {
+            turn: 0,
+            player1_position: Coordinates::new(0, 0),
+            player2_position: Coordinates::new(4, 4),
+            player1_score: 0.0,
+            player2_score: 0.0,
+            player1_mud_turns: 0,
+            player2_mud_turns: 0,
+            cheese: vec![Coordinates::new(2, 0), Coordinates::new(3, 0)],
+            player1_last_move: Direction::Stay,
+            player2_last_move: Direction::Stay,
+        });
+
+        assert_eq!(
+            recomputed, baseline,
+            "rewound state hash must match the host's initial hash"
+        );
+        assert_eq!(
+            sdk.engine.cheese.remaining_cheese(),
+            2,
+            "both cheese must be restored after rewind"
+        );
     }
 }

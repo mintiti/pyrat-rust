@@ -379,9 +379,14 @@ async fn turn_loop<T: bot::Runner>(
             } => {
                 let computed = state.load_turn_state(&turn_state);
                 if computed != state_hash {
+                    // SDK's local engine diverges from the host snapshot. Sending an
+                    // Action tagged with the host hash would let the host accept a
+                    // move computed against the wrong state. Abort the bot instead;
+                    // the host will see the disconnect and surface a clean error.
                     eprintln!(
-                        "[sdk] GoState hash mismatch (host={state_hash:#018x}, sdk={computed:#018x})"
+                        "[sdk] GoState hash mismatch (host={state_hash:#018x}, sdk={computed:#018x}); aborting"
                     );
+                    break;
                 }
                 think_and_send(
                     bot,
