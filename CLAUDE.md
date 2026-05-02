@@ -263,10 +263,13 @@ Each player receives:
 
 ### Host Library (`server/host/`)
 Match hosting library. Manages bot connections, setup handshake, and the turn loop:
-- `game_loop/` — Setup phases (connect → identify → configure → preprocess), playing loop, event streaming
-- `session/` — Per-connection state machine, FlatBuffers wire codec
+- `match_host/` — `Match<S>` typestate (Created → Ready → Playing → Finished, with Thinking/Collected analysis sub-states), `FaultPolicy`, `MatchEvent`, `MatchError`
+- `player/` — `Player` trait, `EmbeddedPlayer` (in-process bot), `TcpPlayer` + `accept_players` (concurrent agent_id-keyed handshake)
+- `launch.rs` — Bot subprocess launching with RAII cleanup (`BotProcesses`)
+- `match_config.rs` — Match config + builder
+- `probe.rs` — Single-bot probe for GUI/bot-check
+- `snapshot.rs` — Engine state reconstruction from `(MatchConfig, TurnState)` (private, used by `start_turn_with` and `EmbeddedPlayer`)
 - `pub use pyrat_wire as wire` — Re-exports FlatBuffers schema types from `server/wire/` for consumers
-- `MatchEvent` — Event stream consumed by headless runner, GUI, or tournament systems
 
 **Key pattern:** The host is a pipe — it streams `MatchEvent`s through a channel. Consumers decide what to record or display.
 
