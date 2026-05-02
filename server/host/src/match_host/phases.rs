@@ -359,6 +359,11 @@ impl Match<Ready> {
 // ── Playing: step + start_turn + start_turn_with ──────
 
 impl Match<Playing> {
+    /// Inspect the next turn to be played.
+    pub fn turn(&self) -> u16 {
+        self.state.turn
+    }
+
     /// Advance the match by one full turn (live mode):
     /// 1. Optional Advance + SyncOk (skipped on the first turn).
     /// 2. Send Go.
@@ -487,9 +492,16 @@ impl Match<Playing> {
         slot: PlayerSlot,
         pa: PendingAdvance,
     ) -> Result<(), MatchError> {
+        let sync_timeout = self.ctx.playing_config.sync_timeout;
         let mut resync_used = false;
         loop {
-            let msg = recv_required(self.ctx.players[slot_idx].as_mut(), slot).await?;
+            let msg = recv_with_timeout(
+                self.ctx.players[slot_idx].as_mut(),
+                slot,
+                sync_timeout,
+                MatchError::SyncTimeout(slot),
+            )
+            .await?;
             match msg {
                 BotMsg::SyncOk { hash } => {
                     if hash != pa.new_hash {

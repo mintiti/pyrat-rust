@@ -51,6 +51,12 @@ pub enum MatchError {
     #[error("player {0:?} action timeout")]
     ActionTimeout(PlayerSlot),
 
+    /// A bot didn't acknowledge `Advance` (with `SyncOk` or `Resync`) within
+    /// `sync_timeout`. Authoritative — the match cannot continue without
+    /// confirmed sync.
+    #[error("player {0:?} sync timeout")]
+    SyncTimeout(PlayerSlot),
+
     /// Underlying [`PlayerError`] from `send`/`recv`/`close`.
     #[error("player {slot:?} error: {source}")]
     PlayerError {

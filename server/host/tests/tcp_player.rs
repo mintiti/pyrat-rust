@@ -307,6 +307,35 @@ async fn accept_players_invalid_expected_rejected() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn accept_players_rejects_duplicate_slot_in_expected() {
+    // Two distinct agent_ids both targeting Player1 is invalid input — both
+    // would race for the same slot. Reject at validation time rather than
+    // letting one connection time out awkwardly.
+    let (listener, _) = bound_listener().await;
+    let expected = vec![
+        (PlayerSlot::Player1, "alice".into()),
+        (PlayerSlot::Player1, "bob".into()),
+    ];
+    let result = accept_players(
+        &listener,
+        &expected,
+        EventSink::noop(),
+        Duration::from_secs(1),
+    )
+    .await;
+    match result {
+        Err(AcceptError::InvalidExpected(reason)) => {
+            assert!(
+                reason.contains("slot") && reason.contains("twice"),
+                "reason should mention duplicate slot, got: {reason}"
+            );
+        },
+        Err(other) => panic!("expected InvalidExpected, got {other:?}"),
+        Ok(_) => panic!("expected error"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn accept_players_overall_timeout_fires() {
     // No bots connect; the overall timeout fires.
     let (listener, _) = bound_listener().await;

@@ -41,6 +41,12 @@ pub struct PlayingConfig {
     /// The host waits this long past the think deadline for packets to
     /// arrive before falling back to provisional / Stay.
     pub network_grace: Duration,
+    /// Per-message timeout for the post-`Advance` sync acknowledgment
+    /// (`SyncOk` or `Resync`). Decoupled from `move_timeout` because sync is
+    /// network round-trip, not bot thinking time, and must stay bounded when
+    /// `move_timeout` is infinite (`Duration::ZERO`). Worst case is 2× this
+    /// value when a single `Resync → FullState → SyncOk` round-trip happens.
+    pub sync_timeout: Duration,
     /// How to resolve per-slot action outcomes (committed / timed out /
     /// disconnected) into a final [`Direction`](pyrat::Direction). Defaults
     /// to [`DefaultFaultPolicy`](super::policy::DefaultFaultPolicy), which
@@ -54,6 +60,7 @@ impl Default for PlayingConfig {
         Self {
             move_timeout: Duration::from_secs(3),
             network_grace: Duration::from_millis(50),
+            sync_timeout: Duration::from_secs(2),
             fault_policy: default_policy(),
         }
     }

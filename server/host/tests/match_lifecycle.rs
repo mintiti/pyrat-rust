@@ -167,6 +167,18 @@ impl ScriptedHandle {
     fn respond(&self, msg: BotMsg) {
         self.bot_tx.send(msg).expect("bot_rx dropped");
     }
+
+    /// Simulate a clean peer disconnect: closes the response channel so the
+    /// Player's next `recv()` returns `Ok(None)` (mapped to
+    /// `MatchError::BotDisconnected`). Keeps the request channel open so
+    /// in-flight `send()` from Match still completes without TransportError.
+    /// This mirrors the real TCP close → recv-None path.
+    fn close_responses(&mut self) {
+        let (dead_tx, _dead_rx) = mpsc::unbounded_channel();
+        // Replacing bot_tx drops the original sender; the Player's bot_rx
+        // sees the channel as closed.
+        self.bot_tx = dead_tx;
+    }
 }
 
 // ── Tests ─────────────────────────────────────────────
@@ -534,6 +546,566 @@ async fn second_resync_on_same_turn_is_persistent_desync() {
             assert_eq!(slot, PlayerSlot::Player1);
         },
         other => panic!("expected PersistentDesync, got {other:?}"),
+    }
+}
+
+/// Mid-match disconnect: P1 plays turn 0 cleanly then drops mid-turn-1.
+/// Default fault policy treats `Disconnected` as fatal; the match must
+/// return `MatchError::BotDisconnected(Player1)`.
+///
+/// Replaces the deleted `playing_integration::disconnect_mid_game`. Note the
+/// chosen new behavior differs from the old "continue with STAY" — the new
+/// `DefaultFaultPolicy` is fatal-on-disconnect.
+#[tokio::test]
+async fn mid_match_disconnect_returns_bot_disconnected_under_default_policy() {
+    let game = make_game();
+    let expected_hash = game.state_hash();
+    let cfg = build_match_config(&game, TimingMode::Wait, 500, 1000);
+
+    let (p1_player, p1_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player1, "p1"));
+    let (p2_player, p2_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player2, "p2"));
+
+    let p1: Box<dyn Player> = Box::new(p1_player);
+    let p2: Box<dyn Player> = Box::new(p2_player);
+
+    let m = Match::new(
+        game,
+        [p1, p2],
+        cfg,
+        [vec![], vec![]],
+        fast_setup(),
+        fast_playing(),
+        None,
+    );
+
+    let driver = tokio::spawn(async move {
+        let mut p1 = p1_handle;
+        let mut p2 = p2_handle;
+
+        // Setup + preprocess.
+        let _ = p1.expect_send().await;
+        let _ = p2.expect_send().await;
+        p1.respond(BotMsg::Ready {
+            state_hash: expected_hash,
+        });
+        p2.respond(BotMsg::Ready {
+            state_hash: expected_hash,
+        });
+        let _ = p1.expect_send().await;
+        let _ = p2.expect_send().await;
+        p1.respond(BotMsg::PreprocessingDone);
+        p2.respond(BotMsg::PreprocessingDone);
+
+        // Turn 0: clean play.
+        let go1 = p1.expect_send().await;
+        let _ = p2.expect_send().await;
+        let go_hash = match go1 {
+            HostMsg::Go { state_hash, .. } => state_hash,
+            other => panic!("expected Go, got {other:?}"),
+        };
+        p1.respond(BotMsg::Action {
+            direction: Direction::Stay,
+            player: PlayerSlot::Player1,
+            turn: 0,
+            state_hash: go_hash,
+            think_ms: 1,
+        });
+        p2.respond(BotMsg::Action {
+            direction: Direction::Stay,
+            player: PlayerSlot::Player2,
+            turn: 0,
+            state_hash: go_hash,
+            think_ms: 1,
+        });
+
+        // Turn 1: P1 closes its response channel cleanly (mirrors a TCP
+        // peer close). The Player's recv() returns None on the next read;
+        // sends from Match still complete. P2 stays cooperative.
+        p1.close_responses();
+        // Hold the handles open so Match's send() doesn't race with handle
+        // drop and surface as TransportError instead of BotDisconnected.
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        let _keep_alive = (p1, p2);
+    });
+
+    let err = timeout(Duration::from_secs(3), m.run())
+        .await
+        .expect("run hung")
+        .expect_err("expected BotDisconnected");
+
+    driver.abort();
+    let _ = driver.await;
+
+    match err {
+        MatchError::BotDisconnected(slot) => {
+            assert_eq!(slot, PlayerSlot::Player1, "P1 disconnected");
+        },
+        other => panic!("expected BotDisconnected(Player1), got {other:?}"),
+    }
+}
+
+/// Stale-action regression: P1 sends `Action { turn: 0 }` after the host has
+/// already advanced to turn 1. The stale Action is dropped without cascade;
+/// when P1 sends a valid `Action { turn: 1 }`, the match accepts it and
+/// continues to turn 2 normally.
+#[tokio::test]
+async fn stale_action_from_previous_turn_is_dropped_without_cascade() {
+    let game = make_game();
+    let expected_hash = game.state_hash();
+    let cfg = build_match_config(&game, TimingMode::Wait, 500, 1000);
+
+    let (p1_player, p1_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player1, "p1"));
+    let (p2_player, p2_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player2, "p2"));
+
+    let p1: Box<dyn Player> = Box::new(p1_player);
+    let p2: Box<dyn Player> = Box::new(p2_player);
+
+    let m = Match::new(
+        game,
+        [p1, p2],
+        cfg,
+        [vec![], vec![]],
+        fast_setup(),
+        fast_playing(),
+        None,
+    );
+
+    let driver = tokio::spawn(async move {
+        let mut p1 = p1_handle;
+        let mut p2 = p2_handle;
+
+        // Setup + preprocess.
+        let _ = p1.expect_send().await;
+        let _ = p2.expect_send().await;
+        p1.respond(BotMsg::Ready {
+            state_hash: expected_hash,
+        });
+        p2.respond(BotMsg::Ready {
+            state_hash: expected_hash,
+        });
+        let _ = p1.expect_send().await;
+        let _ = p2.expect_send().await;
+        p1.respond(BotMsg::PreprocessingDone);
+        p2.respond(BotMsg::PreprocessingDone);
+
+        // Turn 0: clean play.
+        let go1 = p1.expect_send().await;
+        let _ = p2.expect_send().await;
+        let go_hash_t0 = match go1 {
+            HostMsg::Go { state_hash, .. } => state_hash,
+            other => panic!("expected Go, got {other:?}"),
+        };
+        p1.respond(BotMsg::Action {
+            direction: Direction::Stay,
+            player: PlayerSlot::Player1,
+            turn: 0,
+            state_hash: go_hash_t0,
+            think_ms: 1,
+        });
+        p2.respond(BotMsg::Action {
+            direction: Direction::Stay,
+            player: PlayerSlot::Player2,
+            turn: 0,
+            state_hash: go_hash_t0,
+            think_ms: 1,
+        });
+
+        // Turn 1: Advance + Go. P1 first sends a stale Action tagged with
+        // turn=0 — must be dropped silently. Then sends the valid turn=1
+        // Action.
+        let advance1 = p1.expect_send().await;
+        let _ = p2.expect_send().await;
+        let new_hash_t1 = match advance1 {
+            HostMsg::Advance { new_hash, .. } => new_hash,
+            other => panic!("expected Advance, got {other:?}"),
+        };
+        p1.respond(BotMsg::SyncOk { hash: new_hash_t1 });
+        p2.respond(BotMsg::SyncOk { hash: new_hash_t1 });
+
+        let go1_t1 = p1.expect_send().await;
+        let _ = p2.expect_send().await;
+        let go_hash_t1 = match go1_t1 {
+            HostMsg::Go { state_hash, .. } => state_hash,
+            other => panic!("expected Go, got {other:?}"),
+        };
+        // Stale Action: turn=0 with the (now-stale) turn-0 hash.
+        p1.respond(BotMsg::Action {
+            direction: Direction::Stay,
+            player: PlayerSlot::Player1,
+            turn: 0,
+            state_hash: go_hash_t0,
+            think_ms: 1,
+        });
+        // Real turn-1 Action right after — must be accepted.
+        p1.respond(BotMsg::Action {
+            direction: Direction::Stay,
+            player: PlayerSlot::Player1,
+            turn: 1,
+            state_hash: go_hash_t1,
+            think_ms: 1,
+        });
+        p2.respond(BotMsg::Action {
+            direction: Direction::Stay,
+            player: PlayerSlot::Player2,
+            turn: 1,
+            state_hash: go_hash_t1,
+            think_ms: 1,
+        });
+
+        // Turn 2: should land normally. Drive a few more turns to confirm
+        // no cascade — the host is happy.
+        let _ = go_hash_t1; // suppress unused-after-here lint; documented context
+        for t in 2..5_u16 {
+            let advance = p1.expect_send().await;
+            let _ = p2.expect_send().await;
+            let current_hash = match advance {
+                HostMsg::Advance { new_hash, .. } => new_hash,
+                other => panic!("expected Advance, got {other:?}"),
+            };
+            p1.respond(BotMsg::SyncOk { hash: current_hash });
+            p2.respond(BotMsg::SyncOk { hash: current_hash });
+
+            let _ = p1.expect_send().await; // Go
+            let _ = p2.expect_send().await;
+            p1.respond(BotMsg::Action {
+                direction: Direction::Stay,
+                player: PlayerSlot::Player1,
+                turn: t,
+                state_hash: current_hash,
+                think_ms: 1,
+            });
+            p2.respond(BotMsg::Action {
+                direction: Direction::Stay,
+                player: PlayerSlot::Player2,
+                turn: t,
+                state_hash: current_hash,
+                think_ms: 1,
+            });
+        }
+
+        // Keep handles alive so the match can wrap up normally without
+        // racing with handle drop.
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let _keep_alive = (p1, p2);
+    });
+
+    // make_game() builds a 5-turn match — 5 turns of clean play after the
+    // stale-action injection means the match completes successfully.
+    let result = timeout(Duration::from_secs(3), m.run())
+        .await
+        .expect("run hung — stale action may have cascaded")
+        .expect("match should complete after stale-action drop");
+
+    driver.abort();
+    let _ = driver.await;
+
+    assert!(
+        result.turns_played >= 4,
+        "match should have advanced past the stale-action turn"
+    );
+}
+
+/// Setup-phase disconnect: P1 receives `Configure` but drops before sending
+/// `Ready`. Match must surface this as `BotDisconnected` (recv-side clean
+/// close) or `SetupTimeout` (silent slot exhausts the configure_timeout),
+/// not hang.
+#[tokio::test]
+async fn disconnect_after_configure_before_ready_errors() {
+    let game = make_game();
+    let expected_hash = game.state_hash();
+    let cfg = build_match_config(&game, TimingMode::Wait, 500, 1000);
+
+    let (p1_player, p1_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player1, "p1"));
+    let (p2_player, p2_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player2, "p2"));
+
+    let p1: Box<dyn Player> = Box::new(p1_player);
+    let p2: Box<dyn Player> = Box::new(p2_player);
+
+    // Tight configure_timeout so the test doesn't wait the full 2s.
+    let setup = SetupTiming {
+        configure_timeout: Duration::from_millis(150),
+        preprocessing_timeout: Duration::from_secs(2),
+    };
+
+    let m = Match::new(
+        game,
+        [p1, p2],
+        cfg,
+        [vec![], vec![]],
+        setup,
+        fast_playing(),
+        None,
+    );
+
+    let driver = tokio::spawn(async move {
+        let mut p1 = p1_handle;
+        let mut p2 = p2_handle;
+
+        // Both bots receive Configure. P2 sends Ready cleanly; P1 closes
+        // its response side without ever sending Ready.
+        let _ = p1.expect_send().await;
+        let _ = p2.expect_send().await;
+        p2.respond(BotMsg::Ready {
+            state_hash: expected_hash,
+        });
+        p1.close_responses();
+        // Hold handles open so failure mode is unambiguously P1.
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        let _keep_alive = (p1, p2);
+    });
+
+    let err = timeout(Duration::from_secs(2), m.run())
+        .await
+        .expect("run hung")
+        .expect_err("expected setup-phase error");
+
+    driver.abort();
+    let _ = driver.await;
+
+    match err {
+        MatchError::BotDisconnected(slot) | MatchError::SetupTimeout(slot) => {
+            assert_eq!(slot, PlayerSlot::Player1, "P1 closed before Ready");
+        },
+        other => panic!("expected BotDisconnected or SetupTimeout for P1, got {other:?}"),
+    }
+}
+
+/// Explicit preprocessing-timeout test: P1 sends Ready cleanly, then never
+/// sends PreprocessingDone (channel stays open, just silent). Match must
+/// fire `PreprocessingTimeout(Player1)` after `preprocessing_timeout`.
+#[tokio::test]
+async fn preprocessing_timeout_fires_when_bot_silent_after_ready() {
+    let game = make_game();
+    let expected_hash = game.state_hash();
+    let cfg = build_match_config(&game, TimingMode::Wait, 500, 1000);
+
+    let (p1_player, p1_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player1, "p1"));
+    let (p2_player, p2_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player2, "p2"));
+
+    let p1: Box<dyn Player> = Box::new(p1_player);
+    let p2: Box<dyn Player> = Box::new(p2_player);
+
+    let setup = SetupTiming {
+        configure_timeout: Duration::from_secs(2),
+        preprocessing_timeout: Duration::from_millis(150),
+    };
+
+    let m = Match::new(
+        game,
+        [p1, p2],
+        cfg,
+        [vec![], vec![]],
+        setup,
+        fast_playing(),
+        None,
+    );
+
+    let driver = tokio::spawn(async move {
+        let mut p1 = p1_handle;
+        let mut p2 = p2_handle;
+
+        // Both bots reach Ready cleanly.
+        let _ = p1.expect_send().await;
+        let _ = p2.expect_send().await;
+        p1.respond(BotMsg::Ready {
+            state_hash: expected_hash,
+        });
+        p2.respond(BotMsg::Ready {
+            state_hash: expected_hash,
+        });
+
+        // Both receive GoPreprocess. P2 acknowledges; P1 stays silent (no
+        // close — just no response — to distinguish from disconnect).
+        let _ = p1.expect_send().await;
+        let _ = p2.expect_send().await;
+        p2.respond(BotMsg::PreprocessingDone);
+        // Hold handles open so the silence is genuine.
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        let _keep_alive = (p1, p2);
+    });
+
+    let err = timeout(Duration::from_secs(2), m.run())
+        .await
+        .expect("run hung — preprocessing_timeout did not fire")
+        .expect_err("expected PreprocessingTimeout");
+
+    driver.abort();
+    let _ = driver.await;
+
+    match err {
+        MatchError::PreprocessingTimeout(slot) => {
+            assert_eq!(slot, PlayerSlot::Player1);
+        },
+        other => panic!("expected PreprocessingTimeout(Player1), got {other:?}"),
+    }
+}
+
+/// Setup-phase disconnect: P1 sends `Ready` cleanly but drops before
+/// responding to `GoPreprocess`. Match must surface this as a recognizable
+/// error rather than hanging on the preprocessing-phase `recv`.
+#[tokio::test]
+async fn disconnect_after_ready_before_preprocessing_done_errors() {
+    let game = make_game();
+    let expected_hash = game.state_hash();
+    let cfg = build_match_config(&game, TimingMode::Wait, 500, 1000);
+
+    let (p1_player, p1_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player1, "p1"));
+    let (p2_player, p2_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player2, "p2"));
+
+    let p1: Box<dyn Player> = Box::new(p1_player);
+    let p2: Box<dyn Player> = Box::new(p2_player);
+
+    let m = Match::new(
+        game,
+        [p1, p2],
+        cfg,
+        [vec![], vec![]],
+        fast_setup(),
+        fast_playing(),
+        None,
+    );
+
+    let driver = tokio::spawn(async move {
+        let mut p1 = p1_handle;
+        let mut p2 = p2_handle;
+
+        // Both bots reach Ready cleanly.
+        let _ = p1.expect_send().await; // Configure
+        let _ = p2.expect_send().await;
+        p1.respond(BotMsg::Ready {
+            state_hash: expected_hash,
+        });
+        p2.respond(BotMsg::Ready {
+            state_hash: expected_hash,
+        });
+
+        // GoPreprocess sent. P1 drops; P2 cooperates.
+        let _ = p1.expect_send().await;
+        let _ = p2.expect_send().await;
+        p2.respond(BotMsg::PreprocessingDone);
+        drop(p1);
+        // Hold P2 so the failure mode is "P1 disconnect during preprocessing".
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        let _keep_alive = p2;
+    });
+
+    let err = timeout(Duration::from_secs(3), m.run())
+        .await
+        .expect("run hung")
+        .expect_err("expected setup-phase error");
+
+    driver.abort();
+    let _ = driver.await;
+
+    // The current setup loop should surface either BotDisconnected (clean
+    // close detected during recv) or PreprocessingTimeout (silent slot
+    // exhausts the timeout). Either is an acceptable error class for this
+    // gap; the regression we're guarding against is "match hangs".
+    match err {
+        MatchError::BotDisconnected(slot) | MatchError::PreprocessingTimeout(slot) => {
+            assert_eq!(slot, PlayerSlot::Player1, "P1 dropped");
+        },
+        other => panic!("expected BotDisconnected or PreprocessingTimeout for P1, got {other:?}"),
+    }
+}
+
+/// P1 receives Advance but stays silent (no SyncOk, no Resync). The match
+/// must abort with `MatchError::SyncTimeout(Player1)` after `sync_timeout`,
+/// not hang waiting on `recv()` indefinitely.
+#[tokio::test]
+async fn silent_bot_after_advance_triggers_sync_timeout() {
+    let game = make_game();
+    let expected_hash = game.state_hash();
+    let cfg = build_match_config(&game, TimingMode::Wait, 500, 1000);
+
+    let (p1_player, p1_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player1, "p1"));
+    let (p2_player, p2_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player2, "p2"));
+
+    let p1: Box<dyn Player> = Box::new(p1_player);
+    let p2: Box<dyn Player> = Box::new(p2_player);
+
+    // Tight sync_timeout so the test doesn't wait the default 2s.
+    let playing = PlayingConfig {
+        move_timeout: Duration::from_millis(500),
+        network_grace: Duration::from_millis(50),
+        sync_timeout: Duration::from_millis(150),
+        ..Default::default()
+    };
+
+    let m = Match::new(
+        game,
+        [p1, p2],
+        cfg,
+        [vec![], vec![]],
+        fast_setup(),
+        playing,
+        None,
+    );
+
+    let driver = tokio::spawn(async move {
+        let mut p1 = p1_handle;
+        let mut p2 = p2_handle;
+
+        let _ = p1.expect_send().await; // Configure
+        let _ = p2.expect_send().await;
+        p1.respond(BotMsg::Ready {
+            state_hash: expected_hash,
+        });
+        p2.respond(BotMsg::Ready {
+            state_hash: expected_hash,
+        });
+
+        let _ = p1.expect_send().await; // GoPreprocess
+        let _ = p2.expect_send().await;
+        p1.respond(BotMsg::PreprocessingDone);
+        p2.respond(BotMsg::PreprocessingDone);
+
+        // Turn 0: Go → Action(Stay).
+        let go1 = p1.expect_send().await;
+        let _ = p2.expect_send().await;
+        let go_hash = match go1 {
+            HostMsg::Go { state_hash, .. } => state_hash,
+            other => panic!("expected Go, got {other:?}"),
+        };
+        p1.respond(BotMsg::Action {
+            direction: Direction::Stay,
+            player: PlayerSlot::Player1,
+            turn: 0,
+            state_hash: go_hash,
+            think_ms: 1,
+        });
+        p2.respond(BotMsg::Action {
+            direction: Direction::Stay,
+            player: PlayerSlot::Player2,
+            turn: 0,
+            state_hash: go_hash,
+            think_ms: 1,
+        });
+
+        // Turn 1: Advance is sent. P1 stays silent. The host must time out
+        // rather than block forever.
+        let _ = p1.expect_send().await; // Advance
+        let _ = p2.expect_send().await;
+        // Keep handles alive (no drop = no clean-close = no
+        // BotDisconnected). The outer timeout aborts this task once
+        // sync_timeout has fired.
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        let _keep_alive = (p1, p2);
+    });
+
+    let err = timeout(Duration::from_secs(2), m.run())
+        .await
+        .expect("run hung — sync_timeout did not fire")
+        .expect_err("expected SyncTimeout");
+
+    driver.abort();
+    let _ = driver.await;
+
+    match err {
+        MatchError::SyncTimeout(slot) => {
+            assert_eq!(slot, PlayerSlot::Player1, "P1 was silent");
+        },
+        other => panic!("expected SyncTimeout(Player1), got {other:?}"),
     }
 }
 

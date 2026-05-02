@@ -168,6 +168,12 @@ pub async fn accept_players(
             expected.len()
         )));
     }
+    if expected.len() == 2 && expected[0].0 == expected[1].0 {
+        return Err(AcceptError::InvalidExpected(format!(
+            "slot {:?} appears twice in expected; each slot must be unique",
+            expected[0].0
+        )));
+    }
     if expected.len() == 2 && expected[0].1 == expected[1].1 {
         return Err(AcceptError::HivemindNotSupported(format!(
             "agent_id {:?} appears twice",
