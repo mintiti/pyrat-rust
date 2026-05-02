@@ -219,29 +219,13 @@ if let Some(sender) = ctx.info_sender() {
 
 ## Hivemind
 
-Controls both players. Implement `Hivemind` instead of `Bot`:
-
-```rust
-use pyrat_sdk::{Context, Direction, GameState, Hivemind, Options, Player};
-
-struct MyHivemind;
-impl Options for MyHivemind {}
-
-impl Hivemind for MyHivemind {
-    fn think(&mut self, _state: &GameState, _ctx: &Context) -> [(Player, Direction); 2] {
-        [
-            (Player::Player1, Direction::Up),
-            (Player::Player2, Direction::Down),
-        ]
-    }
-}
-
-fn main() {
-    pyrat_sdk::run_hivemind(MyHivemind, "Hive", "Me");
-}
-```
-
-Same lifecycle as `Bot` (`preprocess`, `on_game_over`). Uses the raw `player1_*()` / `player2_*()` methods on `GameState`.
+> **Currently unsupported under the new wire protocol.** The `Hivemind`
+> trait and `run_hivemind` entry point still exist for source compatibility
+> but `run_hivemind` exits immediately with an unsupported message. The
+> host's `accept_players` rejects duplicate `agent_id`, and `TcpPlayer`
+> rejects off-slot `Action` messages — a hivemind bot can't complete the
+> handshake. Tracked as a follow-up brief; the entry point will come back
+> once that lands.
 
 ## Options
 

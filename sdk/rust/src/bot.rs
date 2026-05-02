@@ -284,6 +284,11 @@ impl<B: Bot> Runner for BotRunner<'_, B> {
 }
 
 /// Newtype wrapper so Hivemind can implement Runner without blanket-impl conflicts.
+///
+/// Currently unused (`run_hivemind` early-errors under the new wire protocol).
+/// Kept so the `Hivemind` trait surface stays buildable for downstream code,
+/// and so the adapter is ready when hivemind support returns.
+#[allow(dead_code)]
 pub(crate) struct HivemindRunner<'a, H: Hivemind>(pub &'a mut H);
 
 impl<H: Hivemind> Options for HivemindRunner<'_, H> {

@@ -79,19 +79,24 @@ pub fn run(mut bot: impl Bot, name: &str, author: &str) {
 }
 
 /// Run a hivemind bot controlling both players. Blocks until the game ends.
-pub fn run_hivemind(mut bot: impl Hivemind, name: &str, author: &str) {
-    let std_stream = connect();
-    let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(2)
-        .enable_all()
-        .build()
-        .expect("failed to build tokio runtime");
-    rt.block_on(run_async(
-        &mut bot::HivemindRunner(&mut bot),
-        name,
-        author,
-        std_stream,
-    ));
+///
+/// **Currently unsupported under the new wire protocol.** The host's
+/// `accept_players` rejects duplicate `agent_id`, and `TcpPlayer` rejects
+/// off-slot `Action` messages — a hivemind bot would be refused at the
+/// handshake. Hivemind support is tracked as a follow-up brief
+/// (concrete two-connection / multi-slot design); this entry point will
+/// come back once that lands.
+#[deprecated(
+    note = "hivemind is not supported under the new wire protocol; tracked as a follow-up brief"
+)]
+pub fn run_hivemind(_bot: impl Hivemind, _name: &str, _author: &str) -> ! {
+    eprintln!(
+        "[pyrat-sdk] run_hivemind is not supported under the new wire protocol. \
+         The host rejects duplicate agent_id at accept_players, and TcpPlayer \
+         rejects off-slot Action messages. Hivemind support is deferred — see \
+         the follow-up brief. Exiting."
+    );
+    std::process::exit(2);
 }
 
 /// Connect to the host. The std→tokio conversion happens inside `run_async`.

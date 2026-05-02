@@ -1,12 +1,36 @@
-"""Tests for HivemindBot — multi-player action dispatch and error handling."""
+"""Tests for HivemindBot — multi-player action dispatch and error handling.
+
+The dispatch tests still drive ``_handle_turn`` directly because the adapter
+shape (think-returns-dict → two Action frames) is what'll need to keep
+working when hivemind support comes back. The public ``run()`` path is
+tested separately to assert the documented unsupported-protocol error.
+"""
 
 from __future__ import annotations
 
+import pytest
 from conftest import MockConnection, make_lifecycle_frames
 
 from pyrat_sdk._engine import parse_bot_frame
 from pyrat_sdk.bot import HivemindBot, _run_lifecycle
 from pyrat_sdk.state import Direction, Player
+
+
+class TestHivemindRunUnsupported:
+    """Public ``HivemindBot.run()`` must raise ``RuntimeError`` until the new
+    wire protocol grows hivemind support — the host's ``accept_players``
+    rejects duplicate ``agent_id``, so a hivemind bot can't even connect."""
+
+    def test_run_raises_runtime_error_with_clear_message(self):
+        class MyHive(HivemindBot):
+            name = "Hive"
+            author = "Test"
+
+            def think(self, state, ctx):
+                return {Player.PLAYER1: Direction.UP, Player.PLAYER2: Direction.DOWN}
+
+        with pytest.raises(RuntimeError, match="not supported"):
+            MyHive().run()
 
 
 def _extract_actions(conn: MockConnection) -> list[tuple[int, int]]:

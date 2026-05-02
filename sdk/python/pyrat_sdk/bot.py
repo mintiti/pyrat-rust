@@ -183,6 +183,13 @@ class Bot:
 class HivemindBot:
     """Base class for a bot controlling both players.
 
+    .. warning::
+       Currently unsupported under the new wire protocol. The host's
+       ``accept_players`` rejects duplicate ``agent_id``, and ``TcpPlayer``
+       rejects off-slot ``Action`` messages — a hivemind bot would be
+       refused at the handshake. ``run()`` raises ``RuntimeError``.
+       Hivemind support is tracked as a follow-up brief.
+
     Override ``think()`` to return ``{Player.PLAYER1: dir, Player.PLAYER2: dir}``.
     """
 
@@ -202,7 +209,12 @@ class HivemindBot:
         """Optional — called when the game ends with the result and final scores."""
 
     def run(self) -> None:
-        _run_bot(self, self.preprocess, self._handle_turn)
+        raise RuntimeError(
+            "HivemindBot is not supported under the new wire protocol. "
+            "The host rejects duplicate agent_id at accept_players, and "
+            "TcpPlayer rejects off-slot Action messages. Hivemind support "
+            "is deferred — see the follow-up brief."
+        )
 
     def _handle_turn(self, state: GameState, ctx: Context, conn: Connection) -> None:
         try:
