@@ -3,7 +3,7 @@
 //! Children are stored with their [`SinkRole`]. On a terminal callback:
 //! - The first `Required` child to error short-circuits and returns `Err`.
 //!   The executor demotes the terminal to `MatchFailed { durable_record: false }`.
-//!   `Optional` children that follow are skipped — we don't write a forensic
+//!   `Optional` children that follow are skipped: we don't write a forensic
 //!   replay for a match the store couldn't record.
 //! - `Optional` errors log at `warn` and increment a counter; `Ok(())` is
 //!   still returned to the caller.
@@ -49,7 +49,7 @@ impl<D: Descriptor> CompositeSink<D> {
     }
 
     /// Total count of optional-sink errors logged across this composite's
-    /// lifetime. Useful for asserting in tests; PR 3 wires it to telemetry.
+    /// lifetime. Useful for asserting in tests and for telemetry wiring.
     pub fn optional_error_count(&self) -> u64 {
         self.optional_errors.load(Ordering::Relaxed)
     }
@@ -276,7 +276,7 @@ mod tests {
     }
 
     /// `Optional` listed before `Required` in the constructor must still see
-    /// the `Required` callback invoked first — partitioning by role at
+    /// the `Required` callback invoked first. Partitioning by role at
     /// construction prevents an optional forensic sink (e.g. replay) from
     /// writing side effects for a match the required sink later rejects.
     #[tokio::test]

@@ -37,13 +37,14 @@ pub struct MatchFailure<D: Descriptor> {
     pub reason: FailureReason,
     pub players: Option<[PlayerIdentity; 2]>,
     /// True when the store has a row for this failure (normal failure path).
-    /// False for kill-9 mid-match or required-sink terminal flush failure —
-    /// resume must re-issue at the same `attempt_index`.
+    /// False for kill-9 mid-match or required-sink terminal flush failure.
+    /// In the false case, resume must re-issue at the same `attempt_index`.
     pub durable_record: bool,
 }
 
 /// Why a match failed. Operational categories, not user-facing messages.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub enum FailureReason {
     SpawnFailed,
     HandshakeTimeout,

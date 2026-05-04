@@ -15,8 +15,8 @@ use crate::id::MatchId;
 /// Identity carried alongside a match through queue, execution, and sinks.
 ///
 /// Implementors:
-/// - [`AdHocDescriptor`] — minimal, used by run-one paths and tests.
-/// - `EvalMatchDescriptor` — defined in `pyrat-eval`, carries tournament/store ids.
+/// - [`AdHocDescriptor`]: minimal, used by run-one paths and tests.
+/// - `EvalMatchDescriptor` (in `pyrat-eval`): carries tournament/store ids.
 pub trait Descriptor: Send + Sync + Clone + 'static {
     fn match_id(&self) -> MatchId;
     fn seed(&self) -> u64;

@@ -3,7 +3,7 @@
 //! `Matchup<D>` carries identity (`descriptor`) plus the concrete runtime
 //! values to invoke `pyrat_host::match_host::Match::new`. The descriptor
 //! is the durable identity passed to sinks; the matchup adds engine inputs
-//! (game_config, players, timing). The seed is the descriptor's — accessed
+//! (game_config, players, timing). The seed is the descriptor's, accessed
 //! via `descriptor.seed()` so engine and sinks can never disagree.
 
 use std::path::PathBuf;
@@ -46,6 +46,7 @@ pub type EmbeddedBotFactory = Arc<dyn Fn() -> Box<dyn EmbeddedBot> + Send + Sync
 
 /// How a player slot is materialised when the match starts.
 #[derive(Clone)]
+#[non_exhaustive]
 pub enum PlayerSpec {
     /// Launch a subprocess and accept it on the per-match TCP listener.
     Subprocess {
@@ -84,7 +85,7 @@ impl std::fmt::Debug for PlayerSpec {
 
 /// One match unit: identity plus everything `Match::new` needs.
 ///
-/// The seed is read via `descriptor.seed()` — there is no separate
+/// The seed is read via `descriptor.seed()`. There is no separate
 /// `Matchup::seed` field, so engine and forensic sinks can never disagree.
 #[derive(Clone)]
 pub struct Matchup<D: Descriptor> {
@@ -122,7 +123,7 @@ mod tests {
 
     use super::*;
 
-    /// Stateless bot used by the factory test — distinctness is observed
+    /// Stateless bot used by the factory test. Distinctness is observed
     /// through the shared counter, not through bot fields.
     struct CountingBot;
 

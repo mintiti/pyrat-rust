@@ -3,8 +3,8 @@
 //! Sinks see every match event, the terminal outcome, and the failure path.
 //! The orchestrator is the producer; consumers (eval store, replay JSON,
 //! tests) plug in here. Sinks are classified `Required` or `Optional` at
-//! composition time — required-sink terminal failure is fatal to the
-//! match's durable record, optional-sink failure is a telemetry concern.
+//! composition time. Required-sink terminal failure is fatal to the
+//! match's durable record; optional-sink failure is a telemetry concern.
 
 use async_trait::async_trait;
 
@@ -28,7 +28,7 @@ pub enum SinkRole {
 }
 
 /// Error returned by sink callbacks. Criticality is per-sink (controlled
-/// by `SinkRole`), not per-error — `SinkError` carries only the source.
+/// by `SinkRole`), not per-error: `SinkError` carries only the source.
 #[derive(Debug, thiserror::Error)]
 #[error("sink error: {source}")]
 pub struct SinkError {
@@ -100,8 +100,8 @@ mod tests {
     use super::*;
     use crate::descriptor::AdHocDescriptor;
 
-    /// Confirms the trait is object-safe — `Box<dyn MatchSink<AdHocDescriptor>>`
-    /// must compile so PR 3 can hold heterogeneous sinks behind one type.
+    /// Confirms the trait is object-safe. `Box<dyn MatchSink<AdHocDescriptor>>`
+    /// must compile so the executor can hold heterogeneous sinks behind one type.
     #[test]
     fn match_sink_is_object_safe() {
         let _sink: Box<dyn MatchSink<AdHocDescriptor>> =

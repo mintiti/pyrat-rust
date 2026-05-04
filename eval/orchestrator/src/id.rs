@@ -2,7 +2,7 @@
 //!
 //! `MatchId` is allocated at submit time and stays stable across broadcast,
 //! sink calls, and replay records. The allocator is explicit (not a global
-//! atomic) so each orchestrator instance — and each test — controls its own
+//! atomic) so each orchestrator instance, and each test, controls its own
 //! id space.
 
 use std::sync::atomic::{AtomicU64, Ordering};
