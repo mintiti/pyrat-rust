@@ -55,6 +55,21 @@ pub trait MatchSink<D: Descriptor>: Send + Sync {
     async fn on_match_finished(&self, outcome: &MatchOutcome<D>) -> Result<(), SinkError>;
 
     async fn on_match_failed(&self, failure: &MatchFailure<D>) -> Result<(), SinkError>;
+
+    /// Called when a match's lifecycle was cut short before terminal
+    /// callbacks could fire (typically: a `Required` sink errored, so
+    /// terminal callbacks were skipped on the rest). Best-effort cleanup
+    /// only: errors are logged at `warn` and never mutate outcomes.
+    /// Default no-op so stateless sinks ignore it.
+    ///
+    /// Stateful sinks (e.g. replay buffers keyed by `MatchId`) implement it
+    /// to release per-match state. Conflating cleanup with terminal
+    /// `on_match_failed` would force a synthesized `MatchFailure` that
+    /// doesn't reflect what really happened to *this* sink (it never
+    /// failed; another sink did). Separate hook = honest semantics.
+    async fn on_match_abandoned(&self, _id: MatchId) -> Result<(), SinkError> {
+        Ok(())
+    }
 }
 
 /// Drops every callback. Useful for tests that don't need persistence and

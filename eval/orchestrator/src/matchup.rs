@@ -54,9 +54,14 @@ pub enum PlayerSpec {
         command: String,
         working_dir: Option<PathBuf>,
     },
-    /// Build an in-process bot via `factory`.
+    /// Build an in-process bot via `factory`. `name` and `author` populate
+    /// the `PlayerIdentity` handed to `EmbeddedPlayer::accept`; without them
+    /// every embedded bot would identify anonymously in `BotIdentified`
+    /// events, replays, and the durable record.
     Embedded {
         agent_id: String,
+        name: String,
+        author: String,
         factory: EmbeddedBotFactory,
     },
 }
@@ -74,9 +79,16 @@ impl std::fmt::Debug for PlayerSpec {
                 .field("command", command)
                 .field("working_dir", working_dir)
                 .finish(),
-            Self::Embedded { agent_id, .. } => f
+            Self::Embedded {
+                agent_id,
+                name,
+                author,
+                ..
+            } => f
                 .debug_struct("Embedded")
                 .field("agent_id", agent_id)
+                .field("name", name)
+                .field("author", author)
                 .field("factory", &"<closure>")
                 .finish(),
         }
@@ -147,6 +159,24 @@ mod tests {
         let _bot_a = factory();
         let _bot_b = factory();
         assert_eq!(counter.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn embedded_spec_carries_name_and_author() {
+        let factory: EmbeddedBotFactory = Arc::new(|| Box::new(CountingBot));
+        let spec = PlayerSpec::Embedded {
+            agent_id: "pyrat/test".into(),
+            name: "Tester".into(),
+            author: "team".into(),
+            factory,
+        };
+        match spec {
+            PlayerSpec::Embedded { name, author, .. } => {
+                assert_eq!(name, "Tester");
+                assert_eq!(author, "team");
+            },
+            other => panic!("expected Embedded, got {other:?}"),
+        }
     }
 
     #[test]
