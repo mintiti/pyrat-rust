@@ -3089,6 +3089,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "pyrat-orchestrator"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "pyrat-bot-api",
+ "pyrat-host",
+ "pyrat-protocol",
+ "pyrat-rust",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "pyrat-protocol"
 version = "0.1.0"
 dependencies = [
