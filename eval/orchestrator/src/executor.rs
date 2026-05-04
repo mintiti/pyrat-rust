@@ -20,16 +20,31 @@
 //! `CancellationToken`, watches it inside its `select!`, and drops the
 //! `Match::run` future on cancel. `BotProcesses` (held inside that task)
 //! reaps subprocesses through `Drop`.
+//!
+//! On `DriverDropped` (the lifecycle mpsc receiver was dropped) the next
+//! `publish_lifecycle` call cancels the root token, which is what unwinds
+//! the run-loop and per-match tasks. The broadcast `Sender` lives on
+//! `ExecutorInner` and only closes when the orchestrator itself drops; the
+//! "close broadcast" wording in the eval brief is aspirational. The
+//! practical equivalent (cancel matches → run-loop exits → no further
+//! events emitted) is what's shipped here.
+//!
+//! Panic recovery: per-match tasks normally own their own terminal
+//! publication. If a task panics or is force-aborted, the run-loop
+//! correlates the `JoinError` back to the descriptor via an
+//! `in_flight: HashMap<task::Id, D>` (populated at spawn time) and
+//! synthesises a `MatchFailed { Panic | Cancelled, durable_record: false }`
+//! terminal so the lifecycle mpsc and `state.running` stay consistent.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use parking_lot::Mutex;
 use pyrat_host::match_host::{PlayingConfig, SetupTiming};
 use tokio::sync::{broadcast, mpsc, watch, Semaphore};
-use tokio::task::JoinSet;
+use tokio::task::{JoinError, JoinHandle, JoinSet};
 use tokio_util::sync::CancellationToken;
-use tokio_util::task::AbortOnDropHandle;
 use tracing::{error, warn};
 
 use crate::descriptor::Descriptor;
@@ -37,6 +52,7 @@ use crate::error::{OrchestratorError, OrchestratorInternalError};
 use crate::event::OrchestratorEvent;
 use crate::id::MatchId;
 use crate::matchup::Matchup;
+use crate::outcome::{FailureReason, MatchFailure};
 use crate::run_match;
 use crate::sink::MatchSink;
 use crate::state::ExecutorState;
@@ -107,13 +123,21 @@ pub(crate) struct ExecutorInner<D: Descriptor> {
     /// The composed sink (store / replay / etc.). All sink calls go
     /// through `Arc<dyn MatchSink>` so per-match tasks can share it.
     pub(crate) sink: Arc<dyn MatchSink<D>>,
+    /// Root cancellation. Cancelled on shutdown, or by `publish_lifecycle`
+    /// when the driver receiver is gone (`DriverDropped` is fatal).
+    root_cancel: CancellationToken,
+    /// Descriptors of every spawned per-match task, keyed by `task::Id`.
+    /// Populated at spawn (run-loop), removed on clean exit, or used by
+    /// `handle_joined` to synthesise a terminal when a task panics or is
+    /// force-aborted.
+    pub(crate) in_flight: Mutex<HashMap<tokio::task::Id, D>>,
 }
 
 impl<D: Descriptor> ExecutorInner<D> {
     /// Publish a lifecycle event (queued/started/finished/failed). Awaits
-    /// the driver mpsc first; on `SendError` returns
-    /// `OrchestratorInternalError::DriverDropped` so the run-loop can
-    /// trigger root cancellation.
+    /// the driver mpsc first; on `SendError` cancels the root token (so
+    /// the run-loop unwinds) and returns
+    /// `OrchestratorInternalError::DriverDropped`.
     pub(crate) async fn publish_lifecycle(
         &self,
         event: OrchestratorEvent<D>,
@@ -123,10 +147,13 @@ impl<D: Descriptor> ExecutorInner<D> {
             .expect("publish_lifecycle called with per-turn MatchEvent");
 
         // 1. Driver mpsc: bounded, awaited, may backpressure.
-        self.driver_tx
-            .send(driver)
-            .await
-            .map_err(|_| OrchestratorInternalError::DriverDropped)?;
+        if self.driver_tx.send(driver).await.is_err() {
+            // Driver receiver gone. Cancel root so the run-loop and any
+            // sibling per-match tasks unwind on their next cancel-arm tick.
+            // Idempotent: re-cancel is a no-op.
+            self.root_cancel.cancel();
+            return Err(OrchestratorInternalError::DriverDropped);
+        }
 
         // 2. Sync state-update + broadcast under publish mutex.
         let mut state = self.state.lock();
@@ -190,14 +217,18 @@ fn apply_state_transition<D: Descriptor>(state: &mut ExecutorState, event: &Orch
     }
 }
 
-/// Concurrent match executor. Owns the run-loop task; drops it on `Drop`.
+/// Concurrent match executor. Owns the run-loop task; aborts it on `Drop`
+/// if `shutdown` wasn't called, awaits it cleanly if it was.
 pub struct Orchestrator<D: Descriptor> {
     inner: Arc<ExecutorInner<D>>,
-    submit_tx: mpsc::Sender<Matchup<D>>,
+    /// `Option` so `shutdown(self)` can take the sender out and drop it
+    /// (closing the run-loop's submit_rx) before awaiting the run-loop.
+    submit_tx: Option<mpsc::Sender<Matchup<D>>>,
     root_cancel: CancellationToken,
-    /// Aborts the run-loop if the orchestrator is dropped without
-    /// `shutdown` being called.
-    _run_loop: AbortOnDropHandle<()>,
+    /// `Option` so `shutdown(self)` can take the handle and `.await` it.
+    /// On a drop without prior shutdown, the manual `Drop` impl below
+    /// aborts whatever is left.
+    run_loop_handle: Option<JoinHandle<()>>,
     semaphore: Arc<Semaphore>,
     allocator: crate::id::MatchIdAllocator,
 }
@@ -206,8 +237,8 @@ impl<D: Descriptor> Orchestrator<D> {
     /// Construct an orchestrator. Returns `(self, driver_rx)`. The caller
     /// (the "driver", typically an `EvalSession` or a CLI loop) consumes
     /// the lifecycle mpsc exclusively. Dropping `driver_rx` is fatal: the
-    /// run-loop sees `SendError` on the next lifecycle publish, cancels
-    /// every match, drains, and exits.
+    /// next lifecycle publish sees `SendError`, cancels the root token,
+    /// the run-loop unwinds, drains, and exits.
     pub fn new(
         config: OrchestratorConfig,
         sink: Arc<dyn MatchSink<D>>,
@@ -219,16 +250,18 @@ impl<D: Descriptor> Orchestrator<D> {
         let initial_state = ExecutorState::default();
         let (state_tx, _state_rx) = watch::channel(initial_state.clone());
 
+        let root_cancel = CancellationToken::new();
         let inner = Arc::new(ExecutorInner {
             state: Mutex::new(initial_state),
             state_tx,
             broadcast: broadcast_tx,
             driver_tx,
             sink,
+            root_cancel: root_cancel.clone(),
+            in_flight: Mutex::new(HashMap::new()),
         });
 
         let semaphore = Arc::new(Semaphore::new(config.max_parallel));
-        let root_cancel = CancellationToken::new();
         let run_cfg = Arc::new(RunConfig {
             setup_timing: config.setup_timing,
             playing_config: config.playing_config,
@@ -245,14 +278,13 @@ impl<D: Descriptor> Orchestrator<D> {
             cancel_for_loop,
             run_cfg,
         ));
-        let _run_loop = AbortOnDropHandle::new(run_loop_handle);
 
         (
             Self {
                 inner,
-                submit_tx,
+                submit_tx: Some(submit_tx),
                 root_cancel,
-                _run_loop,
+                run_loop_handle: Some(run_loop_handle),
                 semaphore,
                 allocator: crate::id::MatchIdAllocator::new(),
             },
@@ -268,10 +300,10 @@ impl<D: Descriptor> Orchestrator<D> {
 
     /// Submit a matchup. Backpressure: if the submit channel is full,
     /// awaits until a slot frees. Returns `ShutDown` if the run-loop has
-    /// already exited.
+    /// already exited (or `shutdown` consumed the sender).
     pub async fn submit(&self, matchup: Matchup<D>) -> Result<(), OrchestratorError> {
-        self.submit_tx
-            .send(matchup)
+        let tx = self.submit_tx.as_ref().ok_or(OrchestratorError::ShutDown)?;
+        tx.send(matchup)
             .await
             .map_err(|_| OrchestratorError::ShutDown)
     }
@@ -308,22 +340,40 @@ impl<D: Descriptor> Orchestrator<D> {
     }
 
     /// Trigger graceful shutdown: cancel the root token, close the submit
-    /// channel, and wait for the run-loop to drain. Returns once the
-    /// run-loop has exited.
-    pub async fn shutdown(self) {
+    /// channel, and await the run-loop drain. Returns once the run-loop
+    /// task has actually exited (including its bounded straggler-drain
+    /// timeout). Per-match terminal events fire normally en route, so
+    /// callers must keep the lifecycle `driver_rx` polled — otherwise
+    /// `publish_lifecycle` from a draining task will backpressure-stall on
+    /// `driver_tx.send`.
+    pub async fn shutdown(mut self) {
         self.root_cancel.cancel();
-        // Drop submit_tx so any blocked sender returns; the run-loop's
-        // `recv` returns None and breaks the loop. AbortOnDropHandle
-        // aborts the run-loop task on drop.
-        drop(self.submit_tx);
-        drop(self._run_loop);
+        // Drop submit_tx so any blocked sender returns and the run-loop's
+        // `recv` returns None.
+        drop(self.submit_tx.take());
+        if let Some(h) = self.run_loop_handle.take() {
+            let _ = h.await;
+        }
     }
 
     /// Synchronous abort: cancel the root token immediately. The run-loop
-    /// is aborted at orchestrator drop time via `AbortOnDropHandle`. Use
+    /// task is aborted at orchestrator drop time via the `Drop` impl. Use
     /// when graceful shutdown isn't needed.
     pub fn abort(&self) {
         self.root_cancel.cancel();
+    }
+}
+
+impl<D: Descriptor> Drop for Orchestrator<D> {
+    /// Belt-and-braces. If the orchestrator is dropped without `shutdown`
+    /// being awaited, cancel root and abort the run-loop task to avoid
+    /// stranding it. `shutdown` already takes both fields, so this is a
+    /// no-op on the graceful path.
+    fn drop(&mut self) {
+        self.root_cancel.cancel();
+        if let Some(h) = self.run_loop_handle.take() {
+            h.abort();
+        }
     }
 }
 
@@ -340,43 +390,103 @@ async fn run_loop<D: Descriptor>(
         tokio::select! {
             biased;
             _ = root_cancel.cancelled() => break,
-            joined = tasks.join_next(), if !tasks.is_empty() => {
-                if let Some(Err(e)) = joined {
-                    if e.is_panic() {
-                        // run_match catches Match::run errors and emits
-                        // MatchFailed { Panic }. If run_match itself
-                        // panicked, no terminal was published.
-                        error!(error = %e, "run_match task panicked unexpectedly");
-                    } else if e.is_cancelled() {
-                        // Force-aborted task. This shouldn't happen
-                        // because we drop futures cooperatively, but it's
-                        // legitimate during shutdown.
-                        warn!("run_match task was force-aborted");
-                    }
-                }
+            Some(joined) = tasks.join_next_with_id(), if !tasks.is_empty() => {
+                handle_joined(&inner, joined).await;
             }
             maybe_item = submit_rx.recv() => {
                 let Some(matchup) = maybe_item else { break; };
+                let descriptor = matchup.descriptor.clone();
                 let inner_c = inner.clone();
                 let sem_c = semaphore.clone();
                 let cfg_c = run_cfg.clone();
                 let cancel = root_cancel.child_token();
-                tasks.spawn(async move {
+                let abort_handle = tasks.spawn(async move {
                     run_match::run_match(inner_c, matchup, cancel, sem_c, cfg_c).await;
                 });
+                inner.in_flight.lock().insert(abort_handle.id(), descriptor);
             }
         }
     }
 
     // Drain in-flight tasks. Each child sees root_cancel.cancelled() in
-    // its biased select and bails through Drop on the run future. Wait
-    // bounded so a misbehaving sink doesn't strand shutdown forever.
-    let drain = async { while tasks.join_next().await.is_some() {} };
-    if tokio::time::timeout(Duration::from_secs(10), drain)
-        .await
-        .is_err()
+    // its biased select and bails through Drop on the run future. We use
+    // `join_next_with_id` so panicked / force-aborted stragglers are
+    // routed through `handle_joined` and synthesise terminals — without
+    // that, `state.running` would retain the straggler's id forever.
     {
-        warn!("orchestrator shutdown drain timed out, aborting stragglers");
-        tasks.shutdown().await;
+        let drain_inner = &inner;
+        let drain = async {
+            while let Some(joined) = tasks.join_next_with_id().await {
+                handle_joined(drain_inner, joined).await;
+            }
+        };
+        if tokio::time::timeout(Duration::from_secs(10), drain)
+            .await
+            .is_err()
+        {
+            warn!("orchestrator shutdown drain timed out, aborting stragglers");
+            tasks.abort_all();
+            while let Some(joined) = tasks.join_next_with_id().await {
+                handle_joined(&inner, joined).await;
+            }
+        }
+    }
+}
+
+/// Per-task disposition handler shared by the main select loop, the drain
+/// loop, and the post-timeout force-abort drain. Clean exits remove the
+/// in-flight entry; `JoinError`s look up the descriptor and synthesise a
+/// terminal `MatchFailed` so the lifecycle mpsc and `state.running` stay
+/// consistent. After publishing, calls `sink.on_match_abandoned` so
+/// stateful sinks (e.g. `ReplaySink`'s per-match buffer) release whatever
+/// the dead task populated before going down. Both publishes are
+/// best-effort; a failed publish here means the driver receiver is gone
+/// (which already triggered root cancel via `publish_lifecycle`).
+async fn handle_joined<D: Descriptor>(
+    inner: &Arc<ExecutorInner<D>>,
+    joined: Result<(tokio::task::Id, ()), JoinError>,
+) {
+    match joined {
+        Ok((id, ())) => {
+            // Per-match task already published its own terminal.
+            inner.in_flight.lock().remove(&id);
+        },
+        Err(je) => {
+            let task_id = je.id();
+            let descriptor = match inner.in_flight.lock().remove(&task_id) {
+                Some(d) => d,
+                None => {
+                    // Defensive: spawn-side insert is synchronous before
+                    // any `.await`, so the entry should be present.
+                    error!(?task_id, "JoinError for unknown in-flight task id");
+                    return;
+                },
+            };
+            let match_id = descriptor.match_id();
+            let reason = if je.is_panic() {
+                error!(?task_id, %match_id, error = %je, "run_match task panicked");
+                FailureReason::Panic
+            } else if je.is_cancelled() {
+                warn!(?task_id, %match_id, "run_match task was force-aborted");
+                FailureReason::Cancelled
+            } else {
+                FailureReason::Internal(format!("join error: {je}"))
+            };
+            let failure = MatchFailure {
+                descriptor,
+                started_at: None,
+                failed_at: SystemTime::now(),
+                reason,
+                players: None,
+                durable_record: false,
+            };
+            let _ = inner
+                .publish_lifecycle(OrchestratorEvent::MatchFailed { failure })
+                .await;
+            // Best-effort cleanup of any stateful sink buffers populated
+            // by the dead task before it went down. Errors are ignored;
+            // composite/optional sinks log them through their own paths.
+            let _ = inner.sink.on_match_abandoned(match_id).await;
+        },
     }
 }

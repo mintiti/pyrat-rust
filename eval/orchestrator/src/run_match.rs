@@ -133,11 +133,12 @@ pub(crate) async fn run_match<D: Descriptor>(
     let setup = match setup_players(&matchup, &cfg, &handshake_sink, &cancel).await {
         Ok(s) => s,
         Err(setup_err) => {
+            // Operational setup failures (spawn / launch / accept /
+            // handshake) are recordable: build a durable MatchFailure and
+            // call sink.on_match_failed so a Required store sink can write
+            // the row. `Cancelled` (user-initiated) stays non-durable.
             let reason = setup_err.into_failure_reason();
-            // Setup happens before `on_match_started` ever fires, so we
-            // intentionally skip `sink.on_match_failed`. Sinks see
-            // started before they see terminals.
-            publish_failure(&inner, &matchup, None, reason, None, false).await;
+            record_pre_started_failure(&inner, &matchup, reason, None).await;
             return;
         },
     };
@@ -180,18 +181,13 @@ pub(crate) async fn run_match<D: Descriptor>(
     let game = match matchup.game_config.create(Some(matchup.seed())) {
         Ok(g) => g,
         Err(s) => {
-            let failure = MatchFailure {
-                descriptor: matchup.descriptor.clone(),
-                started_at: None,
-                failed_at: SystemTime::now(),
-                reason: FailureReason::Internal(format!("game state build failed: {s}")),
-                players: Some(identities.clone()),
-                durable_record: false,
-            };
-            let _ = inner.sink.on_match_failed(&failure).await;
-            let _ = inner
-                .publish_lifecycle(OrchestratorEvent::MatchFailed { failure })
-                .await;
+            record_pre_started_failure(
+                &inner,
+                &matchup,
+                FailureReason::Internal(format!("game state build failed: {s}")),
+                Some(identities.clone()),
+            )
+            .await;
             return;
         },
     };
@@ -310,7 +306,10 @@ async fn build_terminal<D: Descriptor>(
         durable_record,
     };
     let demote_to_sink_flush = |e: SinkError| OrchestratorEvent::MatchFailed {
-        failure: make_failure(FailureReason::SinkFlushError(e.to_string()), false),
+        failure: make_failure(
+            FailureReason::SinkFlushError(format!("{:#}", e.source)),
+            false,
+        ),
     };
 
     match (run_result, sink_event_error) {
@@ -355,10 +354,55 @@ async fn build_terminal<D: Descriptor>(
     }
 }
 
-/// Publish a pre-MatchStarted failure (no sink terminal call). Used for
-/// cancel-while-queued, setup errors (bind/launch/accept/embedded-accept),
-/// and engine-state build errors. Sinks haven't seen `on_match_started` for
-/// this match, so calling `on_match_failed` would be incoherent.
+/// Build a `MatchFailure` for a pre-MatchStarted operational failure (setup
+/// error, engine-state build error), call `sink.on_match_failed` so a
+/// Required store sink can record a durable row, and publish. On sink error,
+/// demote to `SinkFlushError { durable_record: false }`.
+///
+/// `Cancelled` (user-initiated) stays non-durable and skips the sink entirely:
+/// the honest invariant at `plan.md:440` lists kill-9 / required-flush /
+/// user-cancel / panic as the non-recordable cases. Other reasons map to
+/// recordable failures with `started_at: None`.
+async fn record_pre_started_failure<D: Descriptor>(
+    inner: &Arc<ExecutorInner<D>>,
+    matchup: &Matchup<D>,
+    reason: FailureReason,
+    players: Option<[PlayerIdentity; 2]>,
+) {
+    let durable = !matches!(reason, FailureReason::Cancelled);
+    let failure = MatchFailure {
+        descriptor: matchup.descriptor.clone(),
+        started_at: None,
+        failed_at: SystemTime::now(),
+        reason,
+        players,
+        durable_record: durable,
+    };
+    if !durable {
+        let _ = inner
+            .publish_lifecycle(OrchestratorEvent::MatchFailed { failure })
+            .await;
+        return;
+    }
+    let final_failure = match inner.sink.on_match_failed(&failure).await {
+        Ok(()) => failure,
+        Err(e) => MatchFailure {
+            reason: FailureReason::SinkFlushError(format!("{:#}", e.source)),
+            durable_record: false,
+            ..failure
+        },
+    };
+    let _ = inner
+        .publish_lifecycle(OrchestratorEvent::MatchFailed {
+            failure: final_failure,
+        })
+        .await;
+}
+
+/// Publish a pre-MatchStarted failure without calling the sink. Used for
+/// cancel-while-queued (sinks haven't seen started; user cancelled, not a
+/// recordable failure). The sink-on-`on_match_started` error path inlines
+/// its own publish because the sink is the broken one.
 async fn publish_failure<D: Descriptor>(
     inner: &Arc<ExecutorInner<D>>,
     matchup: &Matchup<D>,

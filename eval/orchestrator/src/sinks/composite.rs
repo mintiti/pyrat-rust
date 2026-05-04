@@ -216,6 +216,19 @@ impl<D: Descriptor> MatchSink<D> for CompositeSink<D> {
         self.take_match_state(id);
         Ok(())
     }
+
+    /// External abandoned call (e.g. from the run-loop's panic-recovery
+    /// path in `handle_joined`). Dispatch to every child that previously
+    /// received a successful `on_match_started`, so stateful children
+    /// release per-match buffers. `broken_idx: None` because the cause
+    /// here is task-level (panic / force-abort), not a specific child
+    /// returning Err — every recorded child gets the call. Always
+    /// returns `Ok` (errors logged + counted via the existing optional
+    /// path; outcomes never mutated).
+    async fn on_match_abandoned(&self, id: MatchId) -> Result<(), SinkError> {
+        self.dispatch_abandoned(id, None).await;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

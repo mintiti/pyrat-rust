@@ -35,7 +35,6 @@ use parking_lot::Mutex;
 use pyrat_host::match_host::MatchEvent;
 use pyrat_host::player::PlayerIdentity;
 use serde::{Deserialize, Serialize};
-use tracing::warn;
 
 use crate::descriptor::Descriptor;
 use crate::id::MatchId;
@@ -244,11 +243,11 @@ impl<D: Descriptor> MatchSink<D> for ReplaySink {
 
     async fn on_match_failed(&self, failure: &MatchFailure<D>) -> Result<(), SinkError> {
         // Drop the buffer without writing. No partial replays on failure.
-        let id = failure.descriptor.match_id();
-        if self.state.lock().remove(&id).is_none() {
-            // Defensive: nothing to drop.
-            warn!(match_id = %id, "replay sink: on_match_failed for unknown id");
-        }
+        // Missing buffer is normal: pre-MatchStarted failures (setup error,
+        // engine-state-build error) call `on_match_failed` durably without
+        // a prior `on_match_started`. Silent remove matches the
+        // `on_match_abandoned` shape below.
+        self.state.lock().remove(&failure.descriptor.match_id());
         Ok(())
     }
 
