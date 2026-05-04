@@ -20,19 +20,23 @@
 //! Three invariants need to hold for this shape to be cancel-safe with no
 //! source changes in `pyrat-host` or `pyrat-protocol`:
 //!
-//! 1. `Match::run()` is a droppable async future — when the surrounding
-//!    `select!` resolves on the cancel arm, dropping the run future returns
-//!    promptly without hanging.
+//! 1. `Match::run()` is a droppable async future — dropping the run future
+//!    from a `select!` cancel arm returns promptly. Two tests cover this:
+//!    cancel during `setup()` (first inbound await on `BotMsg::Ready`) and
+//!    cancel during `step()` (playing-loop await on `BotMsg::Action`).
 //! 2. `accept_players()` is droppable — cancellation may fire mid-handshake,
 //!    before any `Match` exists.
 //! 3. `BotProcesses::Drop` reaps spawned children when the *async task* that
 //!    owns it is dropped (the simple sync drop case is already covered by
 //!    `launch::tests::drop_kills_process`).
 //!
-//! Each test below pins one invariant. The conclusion: **no host change
-//! needed for cancellation.** The mechanism is RAII — `BotProcesses` for
-//! children, the existing async/await graph for everything else.
+//! Each test below pins one invariant (invariant 1 is split into two
+//! tests covering the setup and step phases of `Match::run`). The
+//! conclusion: **no host change needed for cancellation.** The mechanism
+//! is RAII — `BotProcesses` for children, the existing async/await graph
+//! for everything else.
 
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -112,9 +116,10 @@ fn idle_bot_config() -> BotConfig {
 
 #[cfg(unix)]
 fn pid_alive(pid: u32) -> bool {
-    use std::process::Command;
+    use std::process::{Command, Stdio};
     Command::new("kill")
         .args(["-0", &pid.to_string()])
+        .stderr(Stdio::null())
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
@@ -161,13 +166,69 @@ impl Player for HangingPlayer {
     }
 }
 
+/// Player that completes setup with canned replies, then hangs forever in
+/// recv. Used to land the cancel during the playing loop's `recv(Action)`,
+/// past `setup()`'s two recv points. Fires `step_reached` (via
+/// `notify_one`, so the permit is stored if no waiter is set up yet) when
+/// it observes `HostMsg::Go` — that's the precise point at which the host
+/// has entered the step await graph.
+struct StepHangingPlayer {
+    identity: PlayerIdentity,
+    canned: VecDeque<BotMsg>,
+    step_reached: Arc<Notify>,
+}
+
+impl StepHangingPlayer {
+    fn new(identity: PlayerIdentity, state_hash: u64, step_reached: Arc<Notify>) -> Self {
+        let canned = VecDeque::from(vec![
+            BotMsg::Ready { state_hash },
+            BotMsg::PreprocessingDone,
+        ]);
+        Self {
+            identity,
+            canned,
+            step_reached,
+        }
+    }
+}
+
+#[async_trait]
+impl Player for StepHangingPlayer {
+    fn identity(&self) -> &PlayerIdentity {
+        &self.identity
+    }
+
+    async fn send(&mut self, msg: HostMsg) -> Result<(), PlayerError> {
+        if matches!(msg, HostMsg::Go { .. }) {
+            self.step_reached.notify_one();
+        }
+        Ok(())
+    }
+
+    async fn recv(&mut self) -> Result<Option<BotMsg>, PlayerError> {
+        if let Some(msg) = self.canned.pop_front() {
+            return Ok(Some(msg));
+        }
+        std::future::pending::<()>().await;
+        unreachable!()
+    }
+
+    fn take_provisional(&mut self, _: u16, _: u64) -> Option<Direction> {
+        None
+    }
+
+    async fn close(self: Box<Self>) -> Result<(), PlayerError> {
+        Ok(())
+    }
+}
+
 // ── Tests ─────────────────────────────────────────────
 
-/// Invariant 1: dropping `Match::run()` from a `select!` cancel arm returns
-/// promptly. Both players are silent at the recv layer; without cancel the
-/// match would hang at `setup()`'s `recv(Ready)`.
+/// Invariant 1, setup phase: dropping `Match::run()` from a `select!`
+/// cancel arm returns promptly when the bots are silent at the very first
+/// recv. Without cancel the match would hang at `setup()`'s `recv(Ready)`.
 #[tokio::test]
-async fn match_run_drops_cleanly_on_select_cancel() {
+async fn match_run_drops_cleanly_during_setup() {
     let game = make_game();
     let cfg = build_match_config(&game, TimingMode::Wait, 500, 1000);
 
@@ -204,6 +265,71 @@ async fn match_run_drops_cleanly_on_select_cancel() {
     assert!(
         elapsed < Duration::from_millis(500),
         "cancel-then-drop took {elapsed:?} — match.run() did not drop promptly"
+    );
+}
+
+/// Invariant 1, step phase: dropping `Match::run()` from a `select!` cancel
+/// arm returns promptly when the bots reach the playing loop. Setup
+/// completes via canned replies; then both players hang at the first
+/// `recv(Action)`. This is the orchestrator's actual cancel risk surface —
+/// a bot that completes setup, plays N turns, then stalls during a move.
+/// Sibling to `match_run_drops_cleanly_during_setup` — same invariant, the
+/// other half of `Match::run`'s await graph.
+///
+/// The cancel is triggered by the players observing `HostMsg::Go` (not a
+/// timer) so the test can't accidentally cancel during setup if setup ever
+/// slows down. The outer `select!` carries a 500ms timeout arm: if `Go` is
+/// never reached or cancel doesn't propagate, the test fails fast instead
+/// of hanging.
+#[tokio::test]
+async fn match_run_drops_cleanly_during_step() {
+    let game = make_game();
+    let state_hash = game.state_hash();
+    let cfg = build_match_config(&game, TimingMode::Wait, 500, 1000);
+
+    let step_reached = Arc::new(Notify::new());
+    let p1: Box<dyn Player> = Box::new(StepHangingPlayer::new(
+        identity(PlayerSlot::Player1, "p1"),
+        state_hash,
+        step_reached.clone(),
+    ));
+    let p2: Box<dyn Player> = Box::new(StepHangingPlayer::new(
+        identity(PlayerSlot::Player2, "p2"),
+        state_hash,
+        step_reached.clone(),
+    ));
+
+    let m = Match::new(
+        game,
+        [p1, p2],
+        cfg,
+        [vec![], vec![]],
+        long_setup(),
+        fast_playing(),
+        None,
+    );
+
+    let cancel = Arc::new(Notify::new());
+    let cancel_trigger = cancel.clone();
+    tokio::spawn(async move {
+        step_reached.notified().await;
+        cancel_trigger.notify_waiters();
+    });
+
+    let started = Instant::now();
+    tokio::select! {
+        res = m.run() => {
+            panic!("match.run() should not complete while bots hang at step, got {res:?}");
+        }
+        _ = cancel.notified() => {}
+        _ = sleep(Duration::from_millis(500)) => {
+            panic!("timeout: match never reached Go in 500ms, or cancel did not arm");
+        }
+    }
+    let elapsed = started.elapsed();
+    assert!(
+        elapsed < Duration::from_millis(500),
+        "cancel-then-drop took {elapsed:?} — `m.run()` did not drop promptly after cancel fired"
     );
 }
 
