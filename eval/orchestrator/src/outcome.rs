@@ -10,6 +10,7 @@ use std::time::SystemTime;
 
 use pyrat_host::match_host::MatchResult;
 use pyrat_host::player::PlayerIdentity;
+use pyrat_host::wire::Player as PlayerSlot;
 
 use crate::descriptor::Descriptor;
 
@@ -43,15 +44,30 @@ pub struct MatchFailure<D: Descriptor> {
 }
 
 /// Why a match failed. Operational categories, not user-facing messages.
+///
+/// `ProtocolError`, `Disconnected`, and `SinkFlushError` carry payloads so a
+/// failed-tournament forensic pass has enough context to triage without
+/// reaching back into per-match logs: the underlying error string for
+/// protocol faults, the player slot for clean disconnects, the propagated
+/// sink error string for flush failures.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum FailureReason {
     SpawnFailed,
     HandshakeTimeout,
-    Disconnected,
-    ProtocolError,
+    /// A player closed transport-cleanly while Match needed it. The slot
+    /// identifies which one.
+    Disconnected(PlayerSlot),
+    /// Protocol-layer fault (timeout, hash mismatch, malformed message).
+    /// Payload is the underlying `MatchError`/`PlayerError` rendered via
+    /// `Display` at the fault site, enough to triage without reaching back
+    /// into per-match logs.
+    ProtocolError(String),
     Panic,
     Cancelled,
-    SinkFlushError,
+    /// A `Required` sink errored on a terminal callback (or on
+    /// `on_match_event` while a match was running). Payload is the
+    /// `SinkError` rendered via `Display`.
+    SinkFlushError(String),
     Internal(String),
 }

@@ -5,6 +5,10 @@
 //! `MatchResult`, `PlayerIdentity`) that aren't serde-friendly. Persistence
 //! flows through sink callbacks (sinks extract fields and write them);
 //! replay flows through the `ReplayEvent` DTO.
+//!
+//! Two consumers, two channels: per-turn detail goes through a lossy
+//! `broadcast`, and lifecycle (queued/started/finished/failed) goes through
+//! a lossless `mpsc`. See [`DriverEvent`] for the lifecycle subset.
 
 use pyrat_host::match_host::MatchEvent;
 use pyrat_host::player::PlayerIdentity;
@@ -54,6 +58,78 @@ impl<D: Descriptor> OrchestratorEvent<D> {
             Self::MatchEvent { id, .. } => *id,
             Self::MatchFinished { outcome } => outcome.descriptor.match_id(),
             Self::MatchFailed { failure } => failure.descriptor.match_id(),
+        }
+    }
+}
+
+/// Lifecycle-only subset of [`OrchestratorEvent`] handed to the owning
+/// driver through a lossless bounded mpsc.
+///
+/// The driver (an `EvalSession`, the run-one CLI loop, etc.) consumes these
+/// to advance domain-level state: exactly the events that mutate
+/// `TournamentState`. Per-turn `OrchestratorEvent::MatchEvent` items are
+/// **not** carried on this channel; live observers subscribe to the
+/// orchestrator's broadcast for those.
+///
+/// Constructed from `OrchestratorEvent` via
+/// [`OrchestratorEvent::driver_event`]; the `MatchEvent` variant returns
+/// `None`.
+#[derive(Debug, Clone)]
+#[non_exhaustive]
+pub enum DriverEvent<D: Descriptor> {
+    MatchQueued {
+        id: MatchId,
+        descriptor: D,
+    },
+    MatchStarted {
+        id: MatchId,
+        descriptor: D,
+        players: [PlayerIdentity; 2],
+    },
+    MatchFinished {
+        outcome: MatchOutcome<D>,
+    },
+    MatchFailed {
+        failure: MatchFailure<D>,
+    },
+}
+
+impl<D: Descriptor> DriverEvent<D> {
+    /// `MatchId` carried by every variant.
+    pub fn match_id(&self) -> MatchId {
+        match self {
+            Self::MatchQueued { id, .. } | Self::MatchStarted { id, .. } => *id,
+            Self::MatchFinished { outcome } => outcome.descriptor.match_id(),
+            Self::MatchFailed { failure } => failure.descriptor.match_id(),
+        }
+    }
+}
+
+impl<D: Descriptor> OrchestratorEvent<D> {
+    /// Project to the lifecycle subset. Returns `None` for the per-turn
+    /// `MatchEvent` variant.
+    pub fn driver_event(&self) -> Option<DriverEvent<D>> {
+        match self {
+            Self::MatchQueued { id, descriptor } => Some(DriverEvent::MatchQueued {
+                id: *id,
+                descriptor: descriptor.clone(),
+            }),
+            Self::MatchStarted {
+                id,
+                descriptor,
+                players,
+            } => Some(DriverEvent::MatchStarted {
+                id: *id,
+                descriptor: descriptor.clone(),
+                players: players.clone(),
+            }),
+            Self::MatchEvent { .. } => None,
+            Self::MatchFinished { outcome } => Some(DriverEvent::MatchFinished {
+                outcome: outcome.clone(),
+            }),
+            Self::MatchFailed { failure } => Some(DriverEvent::MatchFailed {
+                failure: failure.clone(),
+            }),
         }
     }
 }
