@@ -38,6 +38,25 @@ pub struct PlayerRecord {
     pub id: String,
     pub display_name: String,
     pub created_at: String,
+    /// Stable bot identifier from `bot.toml`. NULL on rows created via
+    /// `ensure_player`; populated via `register_player`.
+    pub agent_id: Option<String>,
+    pub version: Option<String>,
+    pub command: Option<String>,
+    /// Free-form planner/runner metadata as JSON. Opaque to the store.
+    pub metadata_json: Option<String>,
+}
+
+/// Identity-bearing player insert. Use this for tournament participants;
+/// `ensure_player(id, name)` remains for ad-hoc / back-compat callers.
+#[derive(Debug, Clone)]
+pub struct NewPlayer {
+    pub id: String,
+    pub display_name: String,
+    pub agent_id: Option<String>,
+    pub version: Option<String>,
+    pub command: Option<String>,
+    pub metadata_json: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -71,6 +90,120 @@ pub struct ResultFilter {
     pub before: Option<String>,
 }
 
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, Default,
+)]
+pub struct TournamentId(pub i64);
+
+#[derive(Debug, Clone)]
+pub struct TournamentRecord {
+    pub id: TournamentId,
+    pub format: String,
+    pub target_games_per_matchup: Option<u32>,
+    /// Opaque planner-defined config. The store does not validate this field.
+    pub params_json: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct NewTournament {
+    pub format: String,
+    pub target_games_per_matchup: Option<u32>,
+    pub params_json: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct TournamentParticipant {
+    pub tournament_id: TournamentId,
+    pub player_id: String,
+    pub slot: i64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AttemptStatus {
+    Success,
+    Failure,
+}
+
+impl AttemptStatus {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            AttemptStatus::Success => "success",
+            AttemptStatus::Failure => "failure",
+        }
+    }
+
+    pub(crate) fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "success" => Some(AttemptStatus::Success),
+            "failure" => Some(AttemptStatus::Failure),
+            _ => None,
+        }
+    }
+}
+
+/// Common identifying fields shared by both attempt variants.
+#[derive(Debug, Clone)]
+pub struct AttemptKey {
+    pub tournament_id: TournamentId,
+    pub game_config_id: String,
+    pub player1_id: String,
+    pub player2_id: String,
+    pub seed: u64,
+    pub repetition_index: u32,
+    /// Per-matchup-key retry counter chosen by the session (next free integer).
+    pub attempt_index: u32,
+}
+
+/// Input for `record_attempt`. Variant choice is the type-level guarantee
+/// that scores/turns are always set on success and never on failure.
+/// The DB has matching CHECK constraints as defense in depth.
+#[derive(Debug, Clone)]
+pub enum NewAttempt {
+    Success {
+        key: AttemptKey,
+        player1_score: f64,
+        player2_score: f64,
+        turns: u32,
+        /// SQLite datetime string (`datetime('now')` format).
+        started_at: String,
+    },
+    Failure {
+        key: AttemptKey,
+        failure_reason: String,
+        /// `None` for spawn-failures (the bot never started). `Some` for
+        /// post-start failures (timeout, crash, etc.).
+        started_at: Option<String>,
+    },
+}
+
+impl NewAttempt {
+    pub fn key(&self) -> &AttemptKey {
+        match self {
+            NewAttempt::Success { key, .. } | NewAttempt::Failure { key, .. } => key,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct AttemptRecord {
+    pub id: i64,
+    pub tournament_id: TournamentId,
+    pub game_config_id: String,
+    pub player1_id: String,
+    pub player2_id: String,
+    pub seed: u64,
+    pub repetition_index: u32,
+    pub attempt_index: u32,
+    pub status: AttemptStatus,
+    pub player1_score: Option<f64>,
+    pub player2_score: Option<f64>,
+    pub turns: Option<u32>,
+    pub failure_reason: Option<String>,
+    pub started_at: Option<String>,
+    pub finished_at: String,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum EvalError {
     #[error("database error: {0}")]
@@ -78,4 +211,82 @@ pub enum EvalError {
 
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
+}
+
+/// Tournament-context player insert errors.
+#[derive(Debug, thiserror::Error)]
+pub enum RegisterPlayerError {
+    #[error(transparent)]
+    Db(#[from] EvalError),
+
+    /// A row with this `id` exists but has different non-NULL identity fields.
+    /// The user must either bump the player id or delete the existing row.
+    #[error("player {id} already exists with conflicting identity fields: {fields:?}")]
+    IdentityConflict { id: String, fields: Vec<String> },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum DeletePlayerError {
+    #[error(transparent)]
+    Db(#[from] EvalError),
+
+    /// The player is referenced by tournament rows. Delete the listed
+    /// tournaments first, or bump the player id.
+    #[error("player is referenced by tournament history (tournaments: {tournament_ids:?})")]
+    InTournamentHistory { tournament_ids: Vec<TournamentId> },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum AddTournamentPlayerError {
+    #[error(transparent)]
+    Db(#[from] EvalError),
+
+    /// The player is already a participant in this tournament.
+    #[error("player {player_id} already in tournament {tournament_id:?}")]
+    PlayerAlreadyInTournament {
+        tournament_id: TournamentId,
+        player_id: String,
+    },
+
+    /// Slot is taken by a different player in this tournament.
+    #[error("slot {slot} already occupied in tournament {tournament_id:?}")]
+    SlotTaken {
+        tournament_id: TournamentId,
+        slot: i64,
+    },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum RecordAttemptError {
+    #[error(transparent)]
+    Db(#[from] EvalError),
+
+    /// SQLite stores INTEGER as signed i64. Planner-derived seeds must be
+    /// masked to fit; this is a defense-in-depth check at the store boundary.
+    #[error("seed {value} exceeds i64::MAX (cannot store as SQLite INTEGER)")]
+    SeedOutOfRange { value: u64 },
+}
+
+impl From<rusqlite::Error> for RegisterPlayerError {
+    fn from(e: rusqlite::Error) -> Self {
+        RegisterPlayerError::Db(EvalError::Db(e))
+    }
+}
+
+impl From<rusqlite::Error> for DeletePlayerError {
+    fn from(e: rusqlite::Error) -> Self {
+        DeletePlayerError::Db(EvalError::Db(e))
+    }
+}
+
+impl From<rusqlite::Error> for AddTournamentPlayerError {
+    fn from(e: rusqlite::Error) -> Self {
+        AddTournamentPlayerError::Db(EvalError::Db(e))
+    }
+}
+
+impl From<rusqlite::Error> for RecordAttemptError {
+    fn from(e: rusqlite::Error) -> Self {
+        RecordAttemptError::Db(EvalError::Db(e))
+    }
 }
