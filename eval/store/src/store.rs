@@ -419,7 +419,7 @@ impl EvalStore {
                 started_at.as_deref(),
             ),
         };
-        self.conn.execute(
+        let result = self.conn.execute(
             "INSERT INTO match_attempts
                (tournament_id, game_config_id, player1_id, player2_id, seed,
                 repetition_index, attempt_index, status,
@@ -442,8 +442,19 @@ impl EvalStore {
                 started_at,
                 finished_at,
             ],
-        )?;
-        Ok(self.conn.last_insert_rowid())
+        );
+        match result {
+            Ok(_) => Ok(self.conn.last_insert_rowid()),
+            // The only UNIQUE constraint on `match_attempts` is the matchup
+            // key tuple; surface it as a typed error so the planner can
+            // distinguish retry-collision from a generic DB blip.
+            Err(rusqlite::Error::SqliteFailure(e, _))
+                if e.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_UNIQUE =>
+            {
+                Err(RecordAttemptError::AttemptAlreadyExists { key: key.clone() })
+            },
+            Err(e) => Err(e.into()),
+        }
     }
 
     pub fn get_attempts(
@@ -1123,12 +1134,15 @@ mod tests {
             .record_attempt(&success_attempt(tid, &cid, "alice", "bob", 0, 8.0, 2.0))
             .unwrap();
         let dup = store.record_attempt(&success_attempt(tid, &cid, "alice", "bob", 0, 1.0, 9.0));
-        assert!(matches!(
-            dup,
-            Err(RecordAttemptError::Db(EvalError::Db(
-                rusqlite::Error::SqliteFailure(_, _)
-            )))
-        ));
+        match dup {
+            Err(RecordAttemptError::AttemptAlreadyExists { key }) => {
+                assert_eq!(key.player1_id, "alice");
+                assert_eq!(key.player2_id, "bob");
+                assert_eq!(key.attempt_index, 0);
+                assert_eq!(key.repetition_index, 0);
+            },
+            other => panic!("expected AttemptAlreadyExists, got {other:?}"),
+        }
     }
 
     #[test]

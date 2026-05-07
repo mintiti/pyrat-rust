@@ -284,6 +284,13 @@ pub enum RecordAttemptError {
     /// masked to fit; this is a defense-in-depth check at the store boundary.
     #[error("seed {value} exceeds i64::MAX (cannot store as SQLite INTEGER)")]
     SeedOutOfRange { value: u64 },
+
+    /// An attempt with this `(tournament, game_config, p1, p2,
+    /// repetition_index, attempt_index)` already exists. Typically signals a
+    /// planner bug (wrong `attempt_index`) or a resume race; the caller can
+    /// pick the next free index from the in-memory matchup history and retry.
+    #[error("attempt already exists for this matchup key")]
+    AttemptAlreadyExists { key: AttemptKey },
 }
 
 impl From<rusqlite::Error> for RegisterPlayerError {
