@@ -614,7 +614,14 @@ pub fn head_to_head_from_attempt_records(attempts: &[AttemptRecord]) -> Vec<Head
     }))
 }
 
-fn aggregate_pairs<'a, I>(iter: I) -> Vec<HeadToHead>
+/// Aggregate `(p1, p2, p1_score, p2_score)` tuples into per-pair head-to-head
+/// records. Pair order is canonicalized lex-min/lex-max so two attempts
+/// with players in opposite slots collapse into the same `HeadToHead`.
+///
+/// Public because consumers fold their own in-memory tournament state into
+/// head-to-heads for Elo (e.g. `pyrat-eval`'s `TournamentState::head_to_head`)
+/// and re-implementing this would be drift-prone.
+pub fn aggregate_pairs<'a, I>(iter: I) -> Vec<HeadToHead>
 where
     I: IntoIterator<Item = (&'a String, &'a String, f64, f64)>,
 {
