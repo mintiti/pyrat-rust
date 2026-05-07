@@ -10,7 +10,7 @@ pub use elo::{
 pub use store::{head_to_head_from_attempts, head_to_head_from_results, EvalStore};
 pub use types::{
     AddTournamentPlayerError, AttemptKey, AttemptRecord, AttemptStatus, DeletePlayerError,
-    EvalError, GameConfigRecord, GameResultRecord, NewAttempt, NewGameResult, NewPlayer,
-    NewTournament, PlayerRecord, RecordAttemptError, RegisterPlayerError, ResultFilter,
+    EvalError, GameConfigRecord, GameResultRecord, NewAttempt, NewAttemptOutcome, NewGameResult,
+    NewPlayer, NewTournament, PlayerRecord, RecordAttemptError, RegisterPlayerError, ResultFilter,
     TournamentId, TournamentParticipant, TournamentRecord,
 };

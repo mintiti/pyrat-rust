@@ -155,13 +155,21 @@ pub struct AttemptKey {
     pub attempt_index: u32,
 }
 
-/// Input for `record_attempt`. Variant choice is the type-level guarantee
-/// that scores/turns are always set on success and never on failure.
-/// The DB has matching CHECK constraints as defense in depth.
+/// Input for `record_attempt`. The `outcome` variant is the type-level
+/// guarantee that scores/turns are always set on success and never on failure;
+/// the DB CHECK constraint mirrors this as defense in depth.
 #[derive(Debug, Clone)]
-pub enum NewAttempt {
+pub struct NewAttempt {
+    pub key: AttemptKey,
+    /// Caller-supplied terminal timestamp. SQLite datetime string format
+    /// (e.g. `"2026-05-06 12:34:56"`).
+    pub finished_at: String,
+    pub outcome: NewAttemptOutcome,
+}
+
+#[derive(Debug, Clone)]
+pub enum NewAttemptOutcome {
     Success {
-        key: AttemptKey,
         player1_score: f64,
         player2_score: f64,
         turns: u32,
@@ -169,20 +177,11 @@ pub enum NewAttempt {
         started_at: String,
     },
     Failure {
-        key: AttemptKey,
         failure_reason: String,
         /// `None` for spawn-failures (the bot never started). `Some` for
         /// post-start failures (timeout, crash, etc.).
         started_at: Option<String>,
     },
-}
-
-impl NewAttempt {
-    pub fn key(&self) -> &AttemptKey {
-        match self {
-            NewAttempt::Success { key, .. } | NewAttempt::Failure { key, .. } => key,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]

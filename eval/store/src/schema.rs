@@ -73,7 +73,7 @@ CREATE TABLE match_attempts (
     turns            INTEGER,
     failure_reason   TEXT,
     started_at       TEXT,
-    finished_at      TEXT NOT NULL DEFAULT (datetime('now')),
+    finished_at      TEXT NOT NULL,
     UNIQUE (tournament_id, game_config_id, player1_id, player2_id, repetition_index, attempt_index),
     CHECK (status IN ('success', 'failure')),
     CHECK (

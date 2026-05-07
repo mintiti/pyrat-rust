@@ -7,9 +7,9 @@ use crate::elo::HeadToHead;
 use crate::schema;
 use crate::types::{
     AddTournamentPlayerError, AttemptRecord, AttemptStatus, DeletePlayerError, EvalError,
-    GameConfigRecord, GameResultRecord, NewAttempt, NewGameResult, NewPlayer, NewTournament,
-    PlayerRecord, RecordAttemptError, RegisterPlayerError, ResultFilter, TournamentId,
-    TournamentParticipant, TournamentRecord,
+    GameConfigRecord, GameResultRecord, NewAttempt, NewAttemptOutcome, NewGameResult, NewPlayer,
+    NewTournament, PlayerRecord, RecordAttemptError, RegisterPlayerError, ResultFilter,
+    TournamentId, TournamentParticipant, TournamentRecord,
 };
 
 /// SQLite-backed store for game results, players, tournaments, and match
@@ -384,18 +384,21 @@ impl EvalStore {
     /// in depth. Validates that `seed` fits in `i64` (SQLite INTEGER is
     /// signed) before binding.
     pub fn record_attempt(&self, attempt: &NewAttempt) -> Result<i64, RecordAttemptError> {
-        let key = attempt.key();
+        let NewAttempt {
+            key,
+            finished_at,
+            outcome,
+        } = attempt;
         if key.seed > i64::MAX as u64 {
             return Err(RecordAttemptError::SeedOutOfRange { value: key.seed });
         }
         let seed_i64 = key.seed as i64;
-        let (status, score1, score2, turns, failure_reason, started_at) = match attempt {
-            NewAttempt::Success {
+        let (status, score1, score2, turns, failure_reason, started_at) = match outcome {
+            NewAttemptOutcome::Success {
                 player1_score,
                 player2_score,
                 turns,
                 started_at,
-                ..
             } => (
                 AttemptStatus::Success.as_str(),
                 Some(*player1_score),
@@ -404,10 +407,9 @@ impl EvalStore {
                 None,
                 Some(started_at.as_str()),
             ),
-            NewAttempt::Failure {
+            NewAttemptOutcome::Failure {
                 failure_reason,
                 started_at,
-                ..
             } => (
                 AttemptStatus::Failure.as_str(),
                 None,
@@ -422,8 +424,8 @@ impl EvalStore {
                (tournament_id, game_config_id, player1_id, player2_id, seed,
                 repetition_index, attempt_index, status,
                 player1_score, player2_score, turns,
-                failure_reason, started_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+                failure_reason, started_at, finished_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
             params![
                 key.tournament_id.0,
                 key.game_config_id,
@@ -438,6 +440,7 @@ impl EvalStore {
                 turns,
                 failure_reason,
                 started_at,
+                finished_at,
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -657,7 +660,7 @@ mod tests {
         s1: f64,
         s2: f64,
     ) -> NewAttempt {
-        NewAttempt::Success {
+        NewAttempt {
             key: AttemptKey {
                 tournament_id: tid,
                 game_config_id: cid.into(),
@@ -667,10 +670,13 @@ mod tests {
                 repetition_index: 0,
                 attempt_index,
             },
-            player1_score: s1,
-            player2_score: s2,
-            turns: 100,
-            started_at: "2026-05-06 10:00:00".into(),
+            finished_at: "2026-05-06 10:05:00".into(),
+            outcome: NewAttemptOutcome::Success {
+                player1_score: s1,
+                player2_score: s2,
+                turns: 100,
+                started_at: "2026-05-06 10:00:00".into(),
+            },
         }
     }
 
@@ -682,7 +688,7 @@ mod tests {
         attempt_index: u32,
         started_at: Option<&str>,
     ) -> NewAttempt {
-        NewAttempt::Failure {
+        NewAttempt {
             key: AttemptKey {
                 tournament_id: tid,
                 game_config_id: cid.into(),
@@ -692,8 +698,11 @@ mod tests {
                 repetition_index: 0,
                 attempt_index,
             },
-            failure_reason: "bot crash".into(),
-            started_at: started_at.map(String::from),
+            finished_at: "2026-05-06 10:10:00".into(),
+            outcome: NewAttemptOutcome::Failure {
+                failure_reason: "bot crash".into(),
+                started_at: started_at.map(String::from),
+            },
         }
     }
 
@@ -1106,18 +1115,14 @@ mod tests {
         let (tid, cid) = setup_tournament(&store);
         // Out of range: rejected before binding.
         let mut bad = success_attempt(tid, &cid, "alice", "bob", 0, 8.0, 2.0);
-        if let NewAttempt::Success { key, .. } = &mut bad {
-            key.seed = u64::MAX;
-        }
+        bad.key.seed = u64::MAX;
         match store.record_attempt(&bad) {
             Err(RecordAttemptError::SeedOutOfRange { value }) => assert_eq!(value, u64::MAX),
             other => panic!("expected SeedOutOfRange, got {other:?}"),
         }
         // i64::MAX round-trips exactly.
         let mut at_max = success_attempt(tid, &cid, "alice", "bob", 1, 5.0, 5.0);
-        if let NewAttempt::Success { key, .. } = &mut at_max {
-            key.seed = i64::MAX as u64;
-        }
+        at_max.key.seed = i64::MAX as u64;
         store.record_attempt(&at_max).unwrap();
         let attempts = store.get_attempts(tid, None).unwrap();
         assert_eq!(attempts.len(), 1);
@@ -1133,9 +1138,11 @@ mod tests {
             "INSERT INTO match_attempts
               (tournament_id, game_config_id, player1_id, player2_id, seed,
                repetition_index, attempt_index, status,
-               player1_score, player2_score, turns, failure_reason, started_at)
+               player1_score, player2_score, turns, failure_reason, started_at,
+               finished_at)
              VALUES (?1, ?2, 'alice', 'bob', 1, 0, 0, 'success',
-                     NULL, 5.0, 100, NULL, '2026-01-01 00:00:00')",
+                     NULL, 5.0, 100, NULL, '2026-01-01 00:00:00',
+                     '2026-01-01 00:05:00')",
             params![tid.0, cid],
         );
         assert!(
@@ -1147,9 +1154,11 @@ mod tests {
             "INSERT INTO match_attempts
               (tournament_id, game_config_id, player1_id, player2_id, seed,
                repetition_index, attempt_index, status,
-               player1_score, player2_score, turns, failure_reason, started_at)
+               player1_score, player2_score, turns, failure_reason, started_at,
+               finished_at)
              VALUES (?1, ?2, 'alice', 'bob', 1, 0, 1, 'success',
-                     5.0, 5.0, 100, NULL, NULL)",
+                     5.0, 5.0, 100, NULL, NULL,
+                     '2026-01-01 00:05:00')",
             params![tid.0, cid],
         );
         assert!(
@@ -1166,9 +1175,11 @@ mod tests {
             "INSERT INTO match_attempts
               (tournament_id, game_config_id, player1_id, player2_id, seed,
                repetition_index, attempt_index, status,
-               player1_score, player2_score, turns, failure_reason, started_at)
+               player1_score, player2_score, turns, failure_reason, started_at,
+               finished_at)
              VALUES (?1, ?2, 'alice', 'bob', 1, 0, 0, 'failure',
-                     5.0, NULL, NULL, 'crash', NULL)",
+                     5.0, NULL, NULL, 'crash', NULL,
+                     '2026-01-01 00:05:00')",
             params![tid.0, cid],
         );
         assert!(res.is_err(), "failure row with score must fail CHECK");
@@ -1177,9 +1188,11 @@ mod tests {
             "INSERT INTO match_attempts
               (tournament_id, game_config_id, player1_id, player2_id, seed,
                repetition_index, attempt_index, status,
-               player1_score, player2_score, turns, failure_reason, started_at)
+               player1_score, player2_score, turns, failure_reason, started_at,
+               finished_at)
              VALUES (?1, ?2, 'alice', 'bob', 1, 0, 1, 'failure',
-                     NULL, NULL, NULL, NULL, NULL)",
+                     NULL, NULL, NULL, NULL, NULL,
+                     '2026-01-01 00:05:00')",
             params![tid.0, cid],
         );
         assert!(
