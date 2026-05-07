@@ -473,6 +473,17 @@ impl EvalStore {
         };
         Ok(rows)
     }
+
+    /// Load this tournament's success attempts and aggregate into pairwise
+    /// head-to-head records. The standard Elo input for a tournament; a
+    /// thin wrapper over [`get_attempts`] + [`head_to_head_from_attempt_records`].
+    pub fn head_to_head_from_attempts(
+        &self,
+        tournament_id: TournamentId,
+    ) -> Result<Vec<HeadToHead>, EvalError> {
+        let attempts = self.get_attempts(tournament_id, Some(AttemptStatus::Success))?;
+        Ok(head_to_head_from_attempt_records(&attempts))
+    }
 }
 
 fn read_player_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PlayerRecord> {
@@ -572,9 +583,13 @@ pub fn head_to_head_from_results(results: &[GameResultRecord]) -> Vec<HeadToHead
 }
 
 /// Same shape as [`head_to_head_from_results`], but over tournament attempt
-/// rows. Failure rows are skipped — Elo is computed from successful matches
-/// only. Variant-dispatch on `outcome` makes the success-only access total.
-pub fn head_to_head_from_attempts(attempts: &[AttemptRecord]) -> Vec<HeadToHead> {
+/// rows already loaded into memory. Failure rows are skipped — Elo is computed
+/// from successful matches only. Variant-dispatch on `outcome` makes the
+/// success-only access total.
+///
+/// For "load and aggregate from the store" in one call, see
+/// [`EvalStore::head_to_head_from_attempts`].
+pub fn head_to_head_from_attempt_records(attempts: &[AttemptRecord]) -> Vec<HeadToHead> {
     aggregate_pairs(attempts.iter().filter_map(|a| match &a.outcome {
         AttemptOutcome::Success {
             player1_score,
@@ -1260,11 +1275,16 @@ mod tests {
             .record_attempt(&failure_attempt(tid, &cid, "alice", "bob", 1, None))
             .unwrap();
 
+        // Free-fn path: caller already holds the records.
         let attempts = store.get_attempts(tid, None).unwrap();
-        let h = head_to_head_from_attempts(&attempts);
+        let h = head_to_head_from_attempt_records(&attempts);
         assert_eq!(h.len(), 1);
         // alice (player_a) won the only success; failure ignored.
         assert_eq!(h[0].wins_a + h[0].wins_b + h[0].draws, 1);
+
+        // Store-method path: same result, one call.
+        let h2 = store.head_to_head_from_attempts(tid).unwrap();
+        assert_eq!(h2, h);
     }
 
     #[test]
