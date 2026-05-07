@@ -212,17 +212,6 @@ pub enum AttemptOutcome {
     },
 }
 
-impl AttemptRecord {
-    /// Convenience accessor over `outcome`. Lets callers filter / count by
-    /// status without destructuring the enum.
-    pub fn status(&self) -> AttemptStatus {
-        match self.outcome {
-            AttemptOutcome::Success { .. } => AttemptStatus::Success,
-            AttemptOutcome::Failure { .. } => AttemptStatus::Failure,
-        }
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
 pub enum EvalError {
     #[error("database error: {0}")]

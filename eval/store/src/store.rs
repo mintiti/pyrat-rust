@@ -538,8 +538,9 @@ fn read_attempt_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AttemptRecord> 
         repetition_index: row.get(6)?,
         attempt_index: row.get(7)?,
     };
-    // The `match_attempts` CHECK guarantees the column shape per status,
-    // so the unwraps below cannot fire on a healthy DB.
+    // The `match_attempts` CHECK guarantees these reads are non-NULL on
+    // success rows; on a hand-edited DB a NULL would surface as
+    // `InvalidColumnType` from `row.get`, not a panic.
     let outcome = match status {
         AttemptStatus::Success => AttemptOutcome::Success {
             player1_score: row.get(9)?,
@@ -593,12 +594,9 @@ pub fn head_to_head_from_results(results: &[GameResultRecord]) -> Vec<HeadToHead
     }))
 }
 
-/// Same shape as [`head_to_head_from_results`], but over tournament attempt
-/// rows already loaded into memory. Failure rows are skipped — Elo is computed
-/// from successful matches only. Variant-dispatch on `outcome` makes the
-/// success-only access total.
-///
-/// For "load and aggregate from the store" in one call, see
+/// Same shape as [`head_to_head_from_results`], but over already-loaded
+/// attempt records. Failure rows are skipped (Elo is computed from successful
+/// matches only). For "load and aggregate from the store" in one call, see
 /// [`EvalStore::head_to_head_from_attempts`].
 pub fn head_to_head_from_attempt_records(attempts: &[AttemptRecord]) -> Vec<HeadToHead> {
     aggregate_pairs(attempts.iter().filter_map(|a| match &a.outcome {
@@ -684,6 +682,25 @@ mod tests {
         (tid, config_id)
     }
 
+    fn attempt_key(
+        tid: TournamentId,
+        cid: &str,
+        p1: &str,
+        p2: &str,
+        seed: u64,
+        attempt_index: u32,
+    ) -> AttemptKey {
+        AttemptKey {
+            tournament_id: tid,
+            game_config_id: cid.into(),
+            player1_id: p1.into(),
+            player2_id: p2.into(),
+            seed,
+            repetition_index: 0,
+            attempt_index,
+        }
+    }
+
     fn success_attempt(
         tid: TournamentId,
         cid: &str,
@@ -694,15 +711,7 @@ mod tests {
         s2: f64,
     ) -> NewAttempt {
         NewAttempt {
-            key: AttemptKey {
-                tournament_id: tid,
-                game_config_id: cid.into(),
-                player1_id: p1.into(),
-                player2_id: p2.into(),
-                seed: 1234,
-                repetition_index: 0,
-                attempt_index,
-            },
+            key: attempt_key(tid, cid, p1, p2, 1234, attempt_index),
             finished_at: "2026-05-06 10:05:00".into(),
             outcome: NewAttemptOutcome::Success {
                 player1_score: s1,
@@ -722,15 +731,7 @@ mod tests {
         started_at: Option<&str>,
     ) -> NewAttempt {
         NewAttempt {
-            key: AttemptKey {
-                tournament_id: tid,
-                game_config_id: cid.into(),
-                player1_id: p1.into(),
-                player2_id: p2.into(),
-                seed: 5678,
-                repetition_index: 0,
-                attempt_index,
-            },
+            key: attempt_key(tid, cid, p1, p2, 5678, attempt_index),
             finished_at: "2026-05-06 10:10:00".into(),
             outcome: NewAttemptOutcome::Failure {
                 failure_reason: "bot crash".into(),
@@ -1315,11 +1316,11 @@ mod tests {
         assert_eq!(all.len(), 2);
         let success_count = all
             .iter()
-            .filter(|a| a.status() == AttemptStatus::Success)
+            .filter(|a| matches!(a.outcome, AttemptOutcome::Success { .. }))
             .count();
         let failure_count = all
             .iter()
-            .filter(|a| a.status() == AttemptStatus::Failure)
+            .filter(|a| matches!(a.outcome, AttemptOutcome::Failure { .. }))
             .count();
         assert_eq!(success_count, 1);
         assert_eq!(failure_count, 1);
@@ -1372,9 +1373,7 @@ mod tests {
 
         let attempts = store.get_attempts(tid, None).unwrap();
         assert_eq!(attempts.len(), 1);
-        let a = &attempts[0];
-        assert_eq!(a.status(), AttemptStatus::Failure);
-        match &a.outcome {
+        match &attempts[0].outcome {
             AttemptOutcome::Failure {
                 failure_reason,
                 started_at,
