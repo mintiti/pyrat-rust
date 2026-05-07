@@ -187,20 +187,40 @@ pub enum NewAttemptOutcome {
 #[derive(Debug, Clone)]
 pub struct AttemptRecord {
     pub id: i64,
-    pub tournament_id: TournamentId,
-    pub game_config_id: String,
-    pub player1_id: String,
-    pub player2_id: String,
-    pub seed: u64,
-    pub repetition_index: u32,
-    pub attempt_index: u32,
-    pub status: AttemptStatus,
-    pub player1_score: Option<f64>,
-    pub player2_score: Option<f64>,
-    pub turns: Option<u32>,
-    pub failure_reason: Option<String>,
-    pub started_at: Option<String>,
+    pub key: AttemptKey,
     pub finished_at: String,
+    pub outcome: AttemptOutcome,
+}
+
+/// Read-side mirror of [`NewAttemptOutcome`]. Variant-typed reads remove
+/// the `Option<f64>` soup that the previous flat struct carried, and the
+/// `match_attempts` CHECK constraint guarantees the variant fields are
+/// non-NULL on success and NULL on failure.
+#[derive(Debug, Clone)]
+pub enum AttemptOutcome {
+    Success {
+        player1_score: f64,
+        player2_score: f64,
+        turns: u32,
+        started_at: String,
+    },
+    Failure {
+        failure_reason: String,
+        /// `None` for spawn-failures (the bot never started). `Some` for
+        /// post-start failures (timeout, crash, etc.).
+        started_at: Option<String>,
+    },
+}
+
+impl AttemptRecord {
+    /// Convenience accessor over `outcome`. Lets callers filter / count by
+    /// status without destructuring the enum.
+    pub fn status(&self) -> AttemptStatus {
+        match self.outcome {
+            AttemptOutcome::Success { .. } => AttemptStatus::Success,
+            AttemptOutcome::Failure { .. } => AttemptStatus::Failure,
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

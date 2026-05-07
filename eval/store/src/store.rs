@@ -6,10 +6,10 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::elo::HeadToHead;
 use crate::schema;
 use crate::types::{
-    AddTournamentPlayerError, AttemptRecord, AttemptStatus, DeletePlayerError, EvalError,
-    GameConfigRecord, GameResultRecord, NewAttempt, NewAttemptOutcome, NewGameResult, NewPlayer,
-    NewTournament, PlayerRecord, RecordAttemptError, RegisterPlayerError, ResultFilter,
-    TournamentId, TournamentParticipant, TournamentRecord,
+    AddTournamentPlayerError, AttemptKey, AttemptOutcome, AttemptRecord, AttemptStatus,
+    DeletePlayerError, EvalError, GameConfigRecord, GameResultRecord, NewAttempt,
+    NewAttemptOutcome, NewGameResult, NewPlayer, NewTournament, PlayerRecord, RecordAttemptError,
+    RegisterPlayerError, ResultFilter, TournamentId, TournamentParticipant, TournamentRecord,
 };
 
 /// SQLite-backed store for game results, players, tournaments, and match
@@ -507,8 +507,7 @@ fn read_attempt_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AttemptRecord> 
             format!("invalid attempt status: {status_str}").into(),
         )
     })?;
-    Ok(AttemptRecord {
-        id: row.get(0)?,
+    let key = AttemptKey {
         tournament_id: TournamentId(row.get(1)?),
         game_config_id: row.get(2)?,
         player1_id: row.get(3)?,
@@ -516,13 +515,26 @@ fn read_attempt_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AttemptRecord> 
         seed: seed_i64 as u64,
         repetition_index: row.get(6)?,
         attempt_index: row.get(7)?,
-        status,
-        player1_score: row.get(9)?,
-        player2_score: row.get(10)?,
-        turns: row.get(11)?,
-        failure_reason: row.get(12)?,
-        started_at: row.get(13)?,
+    };
+    // The `match_attempts` CHECK guarantees the column shape per status,
+    // so the unwraps below cannot fire on a healthy DB.
+    let outcome = match status {
+        AttemptStatus::Success => AttemptOutcome::Success {
+            player1_score: row.get(9)?,
+            player2_score: row.get(10)?,
+            turns: row.get(11)?,
+            started_at: row.get(13)?,
+        },
+        AttemptStatus::Failure => AttemptOutcome::Failure {
+            failure_reason: row.get(12)?,
+            started_at: row.get(13)?,
+        },
+    };
+    Ok(AttemptRecord {
+        id: row.get(0)?,
+        key,
         finished_at: row.get(14)?,
+        outcome,
     })
 }
 
@@ -561,24 +573,20 @@ pub fn head_to_head_from_results(results: &[GameResultRecord]) -> Vec<HeadToHead
 
 /// Same shape as [`head_to_head_from_results`], but over tournament attempt
 /// rows. Failure rows are skipped — Elo is computed from successful matches
-/// only.
-///
-/// The `expect` on each score is gated by the `match_attempts` CHECK
-/// constraint, which guarantees success rows have non-NULL scores. A row
-/// reaching this code with `status = Success` and a NULL score means the
-/// CHECK was disabled or the DB was hand-edited.
+/// only. Variant-dispatch on `outcome` makes the success-only access total.
 pub fn head_to_head_from_attempts(attempts: &[AttemptRecord]) -> Vec<HeadToHead> {
-    aggregate_pairs(attempts.iter().filter_map(|a| {
-        if a.status == AttemptStatus::Success {
-            Some((
-                &a.player1_id,
-                &a.player2_id,
-                a.player1_score.expect("success rows have scores"),
-                a.player2_score.expect("success rows have scores"),
-            ))
-        } else {
-            None
-        }
+    aggregate_pairs(attempts.iter().filter_map(|a| match &a.outcome {
+        AttemptOutcome::Success {
+            player1_score,
+            player2_score,
+            ..
+        } => Some((
+            &a.key.player1_id,
+            &a.key.player2_id,
+            *player1_score,
+            *player2_score,
+        )),
+        AttemptOutcome::Failure { .. } => None,
     }))
 }
 
@@ -614,7 +622,6 @@ where
 mod tests {
     use super::*;
     use crate::elo::compute_elo;
-    use crate::types::AttemptKey;
 
     fn sample_config() -> GameConfigRecord {
         GameConfigRecord {
@@ -1126,7 +1133,7 @@ mod tests {
         store.record_attempt(&at_max).unwrap();
         let attempts = store.get_attempts(tid, None).unwrap();
         assert_eq!(attempts.len(), 1);
-        assert_eq!(attempts[0].seed, i64::MAX as u64);
+        assert_eq!(attempts[0].key.seed, i64::MAX as u64);
     }
 
     #[test]
@@ -1223,11 +1230,11 @@ mod tests {
         assert_eq!(all.len(), 2);
         let success_count = all
             .iter()
-            .filter(|a| a.status == AttemptStatus::Success)
+            .filter(|a| a.status() == AttemptStatus::Success)
             .count();
         let failure_count = all
             .iter()
-            .filter(|a| a.status == AttemptStatus::Failure)
+            .filter(|a| a.status() == AttemptStatus::Failure)
             .count();
         assert_eq!(success_count, 1);
         assert_eq!(failure_count, 1);
@@ -1271,12 +1278,17 @@ mod tests {
         let attempts = store.get_attempts(tid, None).unwrap();
         assert_eq!(attempts.len(), 1);
         let a = &attempts[0];
-        assert_eq!(a.status, AttemptStatus::Failure);
-        assert!(a.player1_score.is_none());
-        assert!(a.player2_score.is_none());
-        assert!(a.turns.is_none());
-        assert!(a.started_at.is_none());
-        assert_eq!(a.failure_reason.as_deref(), Some("bot crash"));
+        assert_eq!(a.status(), AttemptStatus::Failure);
+        match &a.outcome {
+            AttemptOutcome::Failure {
+                failure_reason,
+                started_at,
+            } => {
+                assert!(started_at.is_none(), "spawn-failure has no started_at");
+                assert_eq!(failure_reason.as_str(), "bot crash");
+            },
+            other => panic!("expected Failure outcome, got {other:?}"),
+        }
     }
 
     #[test]
