@@ -1127,6 +1127,46 @@ mod tests {
     }
 
     #[test]
+    fn match_attempts_fk_enforced() {
+        // Stronger than `pragma_foreign_keys_is_on_per_connection`: prove an
+        // FK action on the new `match_attempts` table actually fires, not
+        // just that the PRAGMA echoes back as 1.
+        let store = EvalStore::open_in_memory().unwrap();
+        let (_tid, cid) = setup_tournament(&store);
+        let res = store.conn.execute(
+            "INSERT INTO match_attempts
+              (tournament_id, game_config_id, player1_id, player2_id, seed,
+               repetition_index, attempt_index, status,
+               player1_score, player2_score, turns,
+               failure_reason, started_at, finished_at)
+             VALUES (?1, ?2, 'alice', 'bob', 1, 0, 0, 'success',
+                     5.0, 5.0, 100, NULL, '2026-01-01 00:00:00',
+                     '2026-01-01 00:05:00')",
+            params![99999, cid], // 99999 = no such tournament
+        );
+        assert!(
+            matches!(res, Err(rusqlite::Error::SqliteFailure(e, _)) if e.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_FOREIGNKEY),
+            "expected FOREIGNKEY violation, got {res:?}"
+        );
+    }
+
+    #[test]
+    fn tournament_players_fk_enforced() {
+        let store = EvalStore::open_in_memory().unwrap();
+        setup_players(&store);
+        // No tournament 99999 → tournament_id FK should fire.
+        let res = store.conn.execute(
+            "INSERT INTO tournament_players (tournament_id, player_id, slot)
+             VALUES (?1, ?2, 0)",
+            params![99999, "alice"],
+        );
+        assert!(
+            matches!(res, Err(rusqlite::Error::SqliteFailure(e, _)) if e.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_FOREIGNKEY),
+            "expected FOREIGNKEY violation, got {res:?}"
+        );
+    }
+
+    #[test]
     fn duplicate_attempt_key_violates_unique() {
         let store = EvalStore::open_in_memory().unwrap();
         let (tid, cid) = setup_tournament(&store);
@@ -1163,6 +1203,22 @@ mod tests {
         let attempts = store.get_attempts(tid, None).unwrap();
         assert_eq!(attempts.len(), 1);
         assert_eq!(attempts[0].key.seed, i64::MAX as u64);
+    }
+
+    #[test]
+    fn record_attempt_preserves_finished_at() {
+        // The orchestrator passes a real terminal timestamp from
+        // MatchOutcome.finished_at; the store must round-trip it bit-for-bit
+        // rather than overwriting with `datetime('now')`.
+        let store = EvalStore::open_in_memory().unwrap();
+        let (tid, cid) = setup_tournament(&store);
+        let mut attempt = success_attempt(tid, &cid, "alice", "bob", 0, 8.0, 2.0);
+        attempt.finished_at = "2026-05-06 12:34:56".into();
+        store.record_attempt(&attempt).unwrap();
+
+        let attempts = store.get_attempts(tid, None).unwrap();
+        assert_eq!(attempts.len(), 1);
+        assert_eq!(attempts[0].finished_at, "2026-05-06 12:34:56");
     }
 
     #[test]
@@ -1293,8 +1349,13 @@ mod tests {
         let attempts = store.get_attempts(tid, None).unwrap();
         let h = head_to_head_from_attempt_records(&attempts);
         assert_eq!(h.len(), 1);
-        // alice (player_a) won the only success; failure ignored.
-        assert_eq!(h[0].wins_a + h[0].wins_b + h[0].draws, 1);
+        // alice (player_a) won the only success 8.0–2.0; failure ignored.
+        // Bind each count so a regression that mis-classifies failures (e.g.
+        // counting them as draws) is caught — `wins_a + wins_b + draws == 1`
+        // would silently pass.
+        assert_eq!(h[0].wins_a, 1);
+        assert_eq!(h[0].wins_b, 0);
+        assert_eq!(h[0].draws, 0);
 
         // Store-method path: same result, one call.
         let h2 = store.head_to_head_from_attempts(tid).unwrap();
@@ -1452,7 +1513,14 @@ mod tests {
             .record_attempt(&success_attempt(tid, &cid, "alice", "bob", 0, 8.0, 2.0))
             .unwrap();
 
-        assert!(store.delete_player("alice").is_err());
+        // Bind the typed variant so a regression that swallows the FK
+        // discrimination into a generic Db error is caught.
+        match store.delete_player("alice") {
+            Err(DeletePlayerError::InTournamentHistory { tournament_ids }) => {
+                assert_eq!(tournament_ids, vec![tid]);
+            },
+            other => panic!("expected InTournamentHistory, got {other:?}"),
+        }
         store.delete_tournament(tid).unwrap();
         assert!(store.delete_player("alice").unwrap());
     }
