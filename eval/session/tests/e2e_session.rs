@@ -44,7 +44,7 @@ async fn round_robin_two_mockbots_finishes_with_durable_rows() {
     .await
     .expect("session start");
 
-    session.join().await;
+    session.join().await.expect("session join");
 
     let attempts = store
         .lock()
@@ -94,7 +94,7 @@ async fn three_player_round_robin_records_three_attempts() {
     )
     .await
     .unwrap();
-    session.join().await;
+    session.join().await.expect("session join");
 
     let attempts = store
         .lock()

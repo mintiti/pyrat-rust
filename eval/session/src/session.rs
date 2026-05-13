@@ -28,6 +28,7 @@ use pyrat_orchestrator::{
 };
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 use crate::descriptor::EvalMatchDescriptor;
 use crate::mapping::MappingError;
@@ -150,6 +151,12 @@ pub enum SessionError {
 
     #[error("orchestrator error: {0}")]
     Orchestrator(#[from] OrchestratorError),
+
+    /// The session run loop panicked. The string is the panic message
+    /// stringified — `tokio::task::JoinError` itself is not part of the
+    /// public API so we don't carry it through.
+    #[error("run loop panicked: {0}")]
+    RunLoopPanicked(String),
 }
 
 // ---------------------------------------------------------------------------
@@ -167,10 +174,12 @@ pub struct EvalSession {
     session_events: broadcast::Sender<SessionEvent>,
     publish_mutex: Arc<Mutex<()>>,
     orch: Arc<Orchestrator<EvalMatchDescriptor>>,
-    /// Held so `live_events()` can hand out new receivers via `orch.events()`.
-    /// (Field exists implicitly through `orch` — no extra storage.)
-    /// Run-loop join handle. `None` after `shutdown` consumes the session.
-    run_loop_handle: Option<JoinHandle<()>>,
+    /// Cancellation seam for `shutdown`. The run-loop selects on this
+    /// alongside `driver_rx.recv()` so cancellation always wins even if no
+    /// further lifecycle events arrive.
+    cancel: CancellationToken,
+    /// Run-loop join handle. `None` after `shutdown`/`join` consume it.
+    run_loop_handle: Option<JoinHandle<Result<(), SessionError>>>,
 }
 
 impl EvalSession {
@@ -241,34 +250,59 @@ impl EvalSession {
     }
 
     /// Wait for the tournament to finish (planner.is_done && orch.idle).
-    /// Returns when the run-loop emits `TournamentFinished`.
-    pub async fn join(mut self) {
+    /// Returns when the run-loop emits `TournamentFinished`. Surfaces
+    /// `SessionError::RunLoopPanicked` if the run-loop task panicked.
+    pub async fn join(mut self) -> Result<(), SessionError> {
         if let Some(h) = self.run_loop_handle.take() {
-            let _ = h.await;
+            await_run_loop(h).await?;
         }
+        Ok(())
     }
 
-    /// Cancel the run loop and shut down the orchestrator. Blocks until
-    /// every match has terminated (with `MatchFailed { Cancelled }` for
-    /// in-flight ones).
+    /// Cancel the run loop and drain the orchestrator.
     ///
-    /// The orchestrator's `Drop` impl handles its own task abort once the
-    /// last `Arc` ref drops; we don't `try_unwrap` to call its consuming
-    /// `shutdown(self)` because the run-loop holds an `Arc` clone that
-    /// only drops after `h.await` returns — at that point `self` is also
-    /// going out of scope, so the `Drop` path runs naturally.
-    pub async fn shutdown(mut self) {
-        self.orch.abort();
+    /// Sequence:
+    /// 1. Cancel the session token — the run-loop's `select!` picks this up
+    ///    and exits on the next iteration, dropping its `Arc<Orchestrator>`
+    ///    clone.
+    /// 2. Await the run-loop handle.
+    /// 3. Reclaim the orchestrator via `Arc::try_unwrap` and call its
+    ///    consuming `shutdown().await` for graceful drain. Falls back to
+    ///    `abort()` if any other `Arc` clone exists.
+    ///
+    /// **Drain guarantee.** Graceful drain runs only when `EvalSession`
+    /// owns the last `Arc<Orchestrator>` at shutdown time. Today only the
+    /// session struct and the run-loop task clone the Arc; the loop drops
+    /// its clone when it exits, so `try_unwrap` succeeds and drain runs.
+    /// If a future caller retains a clone (for cross-session inspection,
+    /// say), `shutdown` falls back to `abort` and drain becomes best-effort.
+    pub async fn shutdown(mut self) -> Result<(), SessionError> {
+        self.cancel.cancel();
         if let Some(h) = self.run_loop_handle.take() {
-            let _ = h.await;
+            await_run_loop(h).await?;
         }
+        match Arc::try_unwrap(self.orch) {
+            Ok(orch) => orch.shutdown().await,
+            Err(arc) => arc.abort(),
+        }
+        Ok(())
+    }
+}
+
+/// Map a finished run-loop `JoinHandle` to a `SessionError`-shaped result.
+/// Panics flow through as `RunLoopPanicked`; the inner `Result` carries any
+/// `SessionError` the run-loop returned.
+async fn await_run_loop(h: JoinHandle<Result<(), SessionError>>) -> Result<(), SessionError> {
+    match h.await {
+        Ok(inner) => inner,
+        Err(join_err) => Err(SessionError::RunLoopPanicked(join_err.to_string())),
     }
 }
 
 impl EvalSession {
     fn launch<P: Planner + 'static>(
         store: Arc<Mutex<EvalStore>>,
-        tournament_id: TournamentId,
+        _tournament_id: TournamentId,
         initial_state: TournamentState,
         planner: P,
         orch_config: OrchestratorConfig,
@@ -283,17 +317,18 @@ impl EvalSession {
         let (state_watch, _state_rx) = watch::channel(initial_state.clone());
         let (session_events, _events_rx) = broadcast::channel(256);
         let publish_mutex = Arc::new(Mutex::new(()));
+        let cancel = CancellationToken::new();
 
         let run_loop_handle = tokio::spawn(run_loop(
             planner,
             initial_state,
-            tournament_id,
             state_watch.clone(),
             session_events.clone(),
             publish_mutex.clone(),
             orch.clone(),
             driver_rx,
             elo_options,
+            cancel.clone(),
         ));
 
         Ok(Self {
@@ -301,6 +336,7 @@ impl EvalSession {
             session_events,
             publish_mutex,
             orch,
+            cancel,
             run_loop_handle: Some(run_loop_handle),
         })
     }
@@ -412,14 +448,14 @@ fn player_agent_id(spec: &pyrat_orchestrator::PlayerSpec) -> &str {
 async fn run_loop<P: Planner>(
     mut planner: P,
     mut state: TournamentState,
-    _tournament_id: TournamentId,
     state_watch: watch::Sender<TournamentState>,
     session_events: broadcast::Sender<SessionEvent>,
     publish_mutex: Arc<Mutex<()>>,
     orch: Arc<Orchestrator<EvalMatchDescriptor>>,
     mut driver_rx: mpsc::Receiver<DriverEvent<EvalMatchDescriptor>>,
     elo_options: EloOptions,
-) {
+    cancel: CancellationToken,
+) -> Result<(), SessionError> {
     // Initial Elo on resume (so subscribers see standings before the first
     // MatchFinished arrives).
     state.recompute_elo(&elo_options);
@@ -437,40 +473,47 @@ async fn run_loop<P: Planner>(
                 planner.next_batch(&state, cap, &mut allocate)
             };
             for matchup in batch {
-                if orch.submit(matchup).await.is_err() {
-                    // Orchestrator shut down underneath us.
-                    return;
+                tokio::select! {
+                    biased;
+                    _ = cancel.cancelled() => return Ok(()),
+                    res = orch.submit(matchup) => {
+                        if res.is_err() {
+                            // Orchestrator shut down underneath us.
+                            return Ok(());
+                        }
+                    }
                 }
             }
         }
 
         if planner.is_done(&state) && orch.idle() {
             let _ = session_events.send(SessionEvent::TournamentFinished);
-            return;
+            return Ok(());
         }
 
-        match driver_rx.recv().await {
-            Some(event) => {
-                state.apply(&event);
-                if matches!(event, DriverEvent::MatchFinished { .. }) {
-                    state.recompute_elo(&elo_options);
-                }
-                {
-                    let _g = publish_mutex.lock();
-                    state_watch.send_replace(state.clone());
-                    if let Some(se) = SessionEvent::from_driver(&event) {
-                        let _ = session_events.send(se);
-                    }
-                }
-                if let Some(obs) = Observation::from_driver_event(&event) {
-                    planner.on_observation(&obs);
-                }
-            },
-            None => {
+        let event = tokio::select! {
+            biased;
+            _ = cancel.cancelled() => return Ok(()),
+            maybe = driver_rx.recv() => match maybe {
+                Some(e) => e,
                 // Driver channel closed (orchestrator dropped). Tournament
                 // can't progress further.
-                return;
-            },
+                None => return Ok(()),
+            }
+        };
+        state.apply(&event);
+        if matches!(event, DriverEvent::MatchFinished { .. }) {
+            state.recompute_elo(&elo_options);
+        }
+        {
+            let _g = publish_mutex.lock();
+            state_watch.send_replace(state.clone());
+            if let Some(se) = SessionEvent::from_driver(&event) {
+                let _ = session_events.send(se);
+            }
+        }
+        if let Some(obs) = Observation::from_driver_event(&event) {
+            planner.on_observation(&obs);
         }
     }
 }
