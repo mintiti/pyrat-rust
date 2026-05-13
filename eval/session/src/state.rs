@@ -351,6 +351,40 @@ mod tests {
         assert!(s.in_flight.contains(&MatchId(7)));
     }
 
+    /// `MatchStarted` is information-only; `apply` must not touch
+    /// `history` or remove from `in_flight`. Pins the no-op so a future
+    /// edit that (say) starts indexing by start time can't silently
+    /// regress the contract.
+    #[test]
+    fn match_started_is_a_no_op_for_state() {
+        use pyrat_host::player::PlayerIdentity;
+        use pyrat_host::wire::Player;
+
+        let mut s = TournamentState::empty(TournamentId(1));
+        let d = desc(0, "a", "b");
+        s.apply(&DriverEvent::MatchQueued {
+            id: d.match_id,
+            descriptor: d.clone(),
+        });
+        let key = MatchupKey::from_descriptor(&d);
+        let identity = |slot, name: &str| PlayerIdentity {
+            name: name.into(),
+            author: "x".into(),
+            agent_id: name.into(),
+            slot,
+        };
+        s.apply(&DriverEvent::MatchStarted {
+            id: d.match_id,
+            descriptor: d.clone(),
+            players: [
+                identity(Player::Player1, "a"),
+                identity(Player::Player2, "b"),
+            ],
+        });
+        assert!(s.in_flight.contains(&d.match_id), "in_flight unchanged");
+        assert!(!s.history.contains_key(&key), "history unchanged");
+    }
+
     #[test]
     fn match_finished_removes_in_flight_and_appends_success() {
         let mut s = TournamentState::empty(TournamentId(1));
