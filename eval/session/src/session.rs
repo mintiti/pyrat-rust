@@ -730,11 +730,11 @@ fn persistent_failure_check(
         // MatchFinished terminals reset it (handled below via the
         // explicit MatchFinished arm).
         if let DriverEvent::MatchFinished { outcome } = event {
-            counts.remove(&matchup_key_from_descriptor(&outcome.descriptor));
+            counts.remove(&MatchupKey::from_descriptor(&outcome.descriptor));
         }
         return None;
     };
-    let key = matchup_key_from_descriptor(&failure.descriptor);
+    let key = MatchupKey::from_descriptor(&failure.descriptor);
     let is_sink_flush = matches!(failure.reason, FailureReason::SinkFlushError(_));
     if !is_sink_flush {
         // Any other terminal — durable failure, cancellation, internal —
@@ -763,25 +763,6 @@ struct PersistentFailureBreach {
     matchup_key: MatchupKey,
     attempt_index: u32,
     last_message: String,
-}
-
-/// Canonical `MatchupKey` for a descriptor (lex-sorted players). The session
-/// indexes by canonical key so two orientations of the same pair share a
-/// counter regardless of which planner submitted them. Commit 7 will fold
-/// this into `MatchupKey::from_descriptor`; until then this stays a local
-/// helper.
-fn matchup_key_from_descriptor(desc: &EvalMatchDescriptor) -> MatchupKey {
-    let (p1, p2) = if desc.player1_id <= desc.player2_id {
-        (desc.player1_id.clone(), desc.player2_id.clone())
-    } else {
-        (desc.player2_id.clone(), desc.player1_id.clone())
-    };
-    MatchupKey {
-        player1_id: p1,
-        player2_id: p2,
-        game_config_id: desc.game_config_id.clone(),
-        repetition_index: desc.repetition_index,
-    }
 }
 
 #[cfg(test)]

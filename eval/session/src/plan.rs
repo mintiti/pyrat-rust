@@ -202,7 +202,7 @@ impl Planner for RoundRobinPlanner {
             let a = &self.config.players[i];
             let b = &self.config.players[j];
             (0..self.config.target_per_pair).all(|rep| {
-                let key = canonical_key(&a.id, &b.id, &self.config.game_config_id, rep);
+                let key = MatchupKey::from_pair(&a.id, &b.id, &self.config.game_config_id, rep);
                 slot_done(&key, state, self.config.max_failures_per_pair)
                     && !self
                         .pending
@@ -307,7 +307,7 @@ impl Planner for GauntletPlanner {
     fn is_done(&self, state: &TournamentState) -> bool {
         self.config.opponents.iter().all(|opp| {
             (0..self.config.target_each).all(|rep| {
-                let key = canonical_key(
+                let key = MatchupKey::from_pair(
                     &self.config.challenger.id,
                     &opp.id,
                     &self.config.game_config_id,
@@ -354,16 +354,6 @@ impl Planner for GauntletPlanner {
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-fn canonical_key(p_a: &str, p_b: &str, game_config_id: &str, repetition_index: u32) -> MatchupKey {
-    let (p1, p2) = if p_a <= p_b { (p_a, p_b) } else { (p_b, p_a) };
-    MatchupKey {
-        player1_id: p1.to_owned(),
-        player2_id: p2.to_owned(),
-        game_config_id: game_config_id.to_owned(),
-        repetition_index,
-    }
-}
-
 fn slot_done(key: &MatchupKey, state: &TournamentState, max_failures: u32) -> bool {
     let history = state.history.get(key).map(Vec::as_slice).unwrap_or(&[]);
     let success = history
@@ -384,12 +374,7 @@ fn clear_pending(pending: &mut HashMap<MatchupKey, HashSet<u32>>, observation: &
         Observation::Finished { descriptor } | Observation::Failed { descriptor, .. } => descriptor,
         Observation::Queued { .. } | Observation::Started { .. } => return,
     };
-    let key = canonical_key(
-        &desc.player1_id,
-        &desc.player2_id,
-        &desc.game_config_id,
-        desc.repetition_index,
-    );
+    let key = MatchupKey::from_descriptor(desc);
     if let Some(set) = pending.get_mut(&key) {
         set.remove(&desc.attempt_index);
     }
@@ -441,15 +426,12 @@ fn build_slot(
     pending: &mut HashMap<MatchupKey, HashSet<u32>>,
     allocate_match_id: &mut dyn FnMut() -> MatchId,
 ) -> Option<Matchup<EvalMatchDescriptor>> {
-    // Canonicalize player ids so repetition_index across orientations
-    // collapses onto a single MatchupKey.
+    // Lex-sort players for slot 0/1 so the planner submits descriptors in
+    // canonical orientation. `MatchupKey::from_pair` already canonicalizes
+    // its own player_ids, but the descriptor's slot order is what the
+    // engine sees.
     let (p1, p2) = if a.id <= b.id { (a, b) } else { (b, a) };
-    let key = MatchupKey {
-        player1_id: p1.id.clone(),
-        player2_id: p2.id.clone(),
-        game_config_id: ctx.game_config_id.to_owned(),
-        repetition_index,
-    };
+    let key = MatchupKey::from_pair(&p1.id, &p2.id, ctx.game_config_id, repetition_index);
 
     if slot_done(&key, state, ctx.max_failures) {
         return None;

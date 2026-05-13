@@ -28,6 +28,12 @@ pub type GameConfigId = String;
 
 /// Identity of one matchup-pair-with-config-and-repetition.
 ///
+/// Always canonical: the constructors lex-sort the player ids, so two
+/// orientations of the same pair `(a, b)` and `(b, a)` collapse onto one
+/// key. Direct struct literal construction is discouraged but not forbidden;
+/// callers should prefer [`MatchupKey::from_descriptor`] or
+/// [`MatchupKey::from_pair`] for the canonicalization guarantee.
+///
 /// Seed is intentionally NOT in the key: it is functionally derived from
 /// the other fields via the planner's stateless seed function. Including
 /// seed here would make every retry a distinct matchup, breaking the
@@ -38,6 +44,32 @@ pub struct MatchupKey {
     pub player2_id: PlayerId,
     pub game_config_id: GameConfigId,
     pub repetition_index: u32,
+}
+
+impl MatchupKey {
+    /// Canonical key for a descriptor — lex-sorts the players so the key
+    /// is invariant under the descriptor's slot orientation.
+    pub fn from_descriptor(desc: &EvalMatchDescriptor) -> Self {
+        Self::from_pair(
+            &desc.player1_id,
+            &desc.player2_id,
+            &desc.game_config_id,
+            desc.repetition_index,
+        )
+    }
+
+    /// Canonical key for a pair — lex-sorts the players. Use this when
+    /// the caller has loose pair fields (e.g. building a key inside a
+    /// planner's `is_done` check).
+    pub fn from_pair(p_a: &str, p_b: &str, game_config_id: &str, repetition_index: u32) -> Self {
+        let (lo, hi) = if p_a <= p_b { (p_a, p_b) } else { (p_b, p_a) };
+        Self {
+            player1_id: lo.to_owned(),
+            player2_id: hi.to_owned(),
+            game_config_id: game_config_id.to_owned(),
+            repetition_index,
+        }
+    }
 }
 
 /// One attempt for a matchup. Carries enough to recompute Elo without
@@ -93,20 +125,29 @@ impl TournamentState {
 
     /// Fold one durable row into history. Used by resume.
     pub fn fold_attempt(&mut self, a: &AttemptRecord) {
-        let key = MatchupKey {
-            player1_id: a.key.player1_id.clone(),
-            player2_id: a.key.player2_id.clone(),
-            game_config_id: a.key.game_config_id.clone(),
-            repetition_index: a.key.repetition_index,
-        };
+        let key = MatchupKey::from_pair(
+            &a.key.player1_id,
+            &a.key.player2_id,
+            &a.key.game_config_id,
+            a.key.repetition_index,
+        );
         let outcome = match &a.outcome {
             AttemptOutcome::Success {
                 player1_score,
                 player2_score,
                 ..
-            } => MatchupOutcome::Success {
-                player1_score: *player1_score,
-                player2_score: *player2_score,
+            } => {
+                // Canonicalize scores to match the canonical key orientation.
+                let (p1_score, p2_score) = canonicalize_scores(
+                    &a.key.player1_id,
+                    &a.key.player2_id,
+                    *player1_score,
+                    *player2_score,
+                );
+                MatchupOutcome::Success {
+                    player1_score: p1_score,
+                    player2_score: p2_score,
+                }
             },
             AttemptOutcome::Failure { .. } => MatchupOutcome::Failure,
         };
@@ -129,14 +170,20 @@ impl TournamentState {
             DriverEvent::MatchFinished { outcome } => {
                 self.in_flight.remove(&outcome.descriptor.match_id);
                 let desc = &outcome.descriptor;
+                let (p1_score, p2_score) = canonicalize_scores(
+                    &desc.player1_id,
+                    &desc.player2_id,
+                    f64::from(outcome.result.player1_score),
+                    f64::from(outcome.result.player2_score),
+                );
                 self.history
-                    .entry(matchup_key(desc))
+                    .entry(MatchupKey::from_descriptor(desc))
                     .or_default()
                     .push(MatchupAttempt {
                         attempt_index: desc.attempt_index,
                         outcome: MatchupOutcome::Success {
-                            player1_score: f64::from(outcome.result.player1_score),
-                            player2_score: f64::from(outcome.result.player2_score),
+                            player1_score: p1_score,
+                            player2_score: p2_score,
                         },
                     });
             },
@@ -145,7 +192,7 @@ impl TournamentState {
                 if failure.durable_record {
                     let desc = &failure.descriptor;
                     self.history
-                        .entry(matchup_key(desc))
+                        .entry(MatchupKey::from_descriptor(desc))
                         .or_default()
                         .push(MatchupAttempt {
                             attempt_index: desc.attempt_index,
@@ -208,12 +255,14 @@ impl TournamentState {
     }
 }
 
-fn matchup_key(desc: &EvalMatchDescriptor) -> MatchupKey {
-    MatchupKey {
-        player1_id: desc.player1_id.clone(),
-        player2_id: desc.player2_id.clone(),
-        game_config_id: desc.game_config_id.clone(),
-        repetition_index: desc.repetition_index,
+/// Swap `(s1, s2)` if `(p1, p2)` would be sorted by `MatchupKey::from_pair`.
+/// Stored history scores must align with the canonical key's player order
+/// so `head_to_head` reads scores in the right slot.
+fn canonicalize_scores(p1: &str, p2: &str, s1: f64, s2: f64) -> (f64, f64) {
+    if p1 <= p2 {
+        (s1, s2)
+    } else {
+        (s2, s1)
     }
 }
 
@@ -312,7 +361,7 @@ mod tests {
         });
         s.apply(&finished(d.clone(), 5.0, 3.0));
         assert!(!s.in_flight.contains(&d.match_id));
-        let key = matchup_key(&d);
+        let key = MatchupKey::from_descriptor(&d);
         let entries = s.history.get(&key).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].attempt_index, 0);
@@ -335,7 +384,7 @@ mod tests {
         });
         s.apply(&failed(d.clone(), true));
         assert!(!s.in_flight.contains(&d.match_id));
-        let entries = s.history.get(&matchup_key(&d)).unwrap();
+        let entries = s.history.get(&MatchupKey::from_descriptor(&d)).unwrap();
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].attempt_index, 2);
         assert_eq!(entries[0].outcome.status(), AttemptStatus::Failure);
@@ -355,7 +404,7 @@ mod tests {
         });
         s.apply(&failed(d.clone(), false));
         assert!(!s.in_flight.contains(&d.match_id));
-        assert!(!s.history.contains_key(&matchup_key(&d)));
+        assert!(!s.history.contains_key(&MatchupKey::from_descriptor(&d)));
     }
 
     #[test]
