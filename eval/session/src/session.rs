@@ -21,7 +21,7 @@ use parking_lot::Mutex;
 use pyrat::game::builder::GameConfig;
 use pyrat_eval_store::{
     AddTournamentPlayerError, CreateTournamentError, EloOptions, EvalError, EvalStore,
-    NewTournament, RegisterPlayerError, TournamentId,
+    NewTournament, RegisterPlayerError, TournamentId, TournamentParticipant, TournamentRecord,
 };
 use pyrat_orchestrator::{
     CompositeSink, DriverEvent, FailureReason, MatchSink, Orchestrator, OrchestratorConfig,
@@ -201,6 +201,13 @@ pub enum SessionError {
     #[error("background task `{what}` panicked: {message}")]
     TaskPanicked { what: &'static str, message: String },
 
+    /// The planner handed to `EvalSession::start` doesn't match the stored
+    /// tournament's spec (players, game config, seed, or per-pair target).
+    /// Reconstructing state from someone else's tournament would silently
+    /// fragment standings.
+    #[error("planner does not match stored tournament: {0}")]
+    TournamentMismatch(String),
+
     /// A single matchup has hit the configured ceiling of consecutive
     /// `SinkFlushError` terminals (see
     /// [`SessionConfig::max_consecutive_sink_flush_failures`]). The store
@@ -258,6 +265,12 @@ impl EvalSession {
     /// anchor player must be one of the resolved player ids.
     /// `session_config` carries session-level tunables (defaults are fine
     /// for most callers).
+    ///
+    /// Validates the planner against the stored tournament's spec
+    /// (tournament_id, players, game_config_id, tournament_seed,
+    /// target_games_per_matchup). Returns `SessionError::TournamentMismatch`
+    /// on any divergence so a drifted planner can't silently fragment the
+    /// tournament's history.
     pub async fn start<P: Planner + 'static>(
         store: Arc<Mutex<EvalStore>>,
         mode: SessionMode,
@@ -266,12 +279,14 @@ impl EvalSession {
         elo_options: EloOptions,
         session_config: SessionConfig,
     ) -> Result<Self, SessionError> {
-        let (tournament_id, initial_state) =
+        let (tournament_record, tournament_players, initial_state) =
             reconstruct_tournament_state(store.clone(), mode.tournament_id).await?;
+
+        validate_planner_against_stored_spec(&planner, &tournament_record, &tournament_players)?;
 
         Self::launch(
             store,
-            tournament_id,
+            tournament_record.id,
             initial_state,
             planner,
             orch_config,
@@ -494,31 +509,93 @@ async fn bootstrap_new_tournament(
 
 /// Reconstruct state from store rows for a resume.
 ///
-/// Loads attempts once (no per-loop queries). Folds successes into Elo
-/// and into per-MatchupKey history. The planner picks up from there: it
-/// re-issues missing slots (no row yet) and retries failed slots up to
-/// `max_failures_per_pair` (its own config).
+/// Loads the tournament record, its participants, and all attempts in one
+/// blocking call. The caller cross-checks the planner against the
+/// returned record before launching.
 async fn reconstruct_tournament_state(
     store: Arc<Mutex<EvalStore>>,
     tournament_id: TournamentId,
-) -> Result<(TournamentId, TournamentState), SessionError> {
-    let (tournament_id, state) = tokio::task::spawn_blocking(move || {
+) -> Result<
+    (
+        TournamentRecord,
+        Vec<TournamentParticipant>,
+        TournamentState,
+    ),
+    SessionError,
+> {
+    tokio::task::spawn_blocking(move || {
         let store = store.lock();
         let tournament = store
             .get_tournament(tournament_id)?
             .ok_or(SessionError::TournamentNotFound(tournament_id))?;
+        let tournament_players = store.get_tournament_players(tournament.id)?;
         let mut state = TournamentState::empty(tournament.id);
         for attempt in store.get_attempts(tournament.id, None)? {
             state.fold_attempt(&attempt);
         }
-        Ok::<(TournamentId, TournamentState), SessionError>((tournament.id, state))
+        Ok::<_, SessionError>((tournament, tournament_players, state))
     })
     .await
     .map_err(|e| SessionError::TaskPanicked {
         what: "reconstruct_tournament_state",
         message: e.to_string(),
-    })??;
-    Ok((tournament_id, state))
+    })?
+}
+
+/// Cross-check the planner's expected spec against what the store has on
+/// the tournament. Anything that diverges returns
+/// `SessionError::TournamentMismatch` with a precise reason.
+fn validate_planner_against_stored_spec(
+    planner: &impl Planner,
+    tournament: &TournamentRecord,
+    tournament_players: &[TournamentParticipant],
+) -> Result<(), SessionError> {
+    if planner.tournament_id() != tournament.id {
+        return Err(SessionError::TournamentMismatch(format!(
+            "tournament_id: planner expected {:?}, stored is {:?}",
+            planner.tournament_id(),
+            tournament.id
+        )));
+    }
+    if planner.expected_game_config_id() != tournament.game_config_id {
+        return Err(SessionError::TournamentMismatch(format!(
+            "game_config_id: planner expected {:?}, stored is {:?}",
+            planner.expected_game_config_id(),
+            tournament.game_config_id
+        )));
+    }
+    if planner.expected_tournament_seed() != tournament.tournament_seed {
+        return Err(SessionError::TournamentMismatch(format!(
+            "tournament_seed: planner expected {}, stored is {}",
+            planner.expected_tournament_seed(),
+            tournament.tournament_seed
+        )));
+    }
+    // target_games_per_matchup: both sides know it only when both surface
+    // a value. Don't enforce when either side is None.
+    if let (Some(planner_target), Some(stored_target)) = (
+        planner.expected_target_per_pair(),
+        tournament.target_games_per_matchup,
+    ) {
+        if planner_target != stored_target {
+            return Err(SessionError::TournamentMismatch(format!(
+                "target_games_per_matchup: planner expected {planner_target}, stored is {stored_target}",
+            )));
+        }
+    }
+    // Players: stored rows are sorted by slot (`get_tournament_players`'s
+    // ORDER BY). Compare by id+slot in that order.
+    let stored_ids: Vec<&str> = tournament_players
+        .iter()
+        .map(|p| p.player_id.as_str())
+        .collect();
+    let expected_ids = planner.expected_players();
+    if expected_ids != stored_ids {
+        return Err(SessionError::TournamentMismatch(format!(
+            "players: planner expected {expected_ids:?}, stored is {stored_ids:?}",
+        )));
+    }
+    Ok(())
 }
 
 fn player_agent_id(spec: &pyrat_orchestrator::PlayerSpec) -> &str {

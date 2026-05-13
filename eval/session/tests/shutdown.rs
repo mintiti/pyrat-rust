@@ -9,12 +9,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use pyrat_eval::{EvalSession, SessionConfig, SessionMode};
+use pyrat_eval::{EvalSession, SessionConfig, SessionMode, TournamentSpec};
 use pyrat_eval_store::{EloOptions, EvalStore};
 
-use crate::common::{
-    embedded_player, fast_orch_config, round_robin, round_robin_spec, small_game_config,
-};
+use crate::common::{embedded_player, fast_orch_config, round_robin, small_game_config};
 
 #[tokio::test]
 async fn shutdown_returns_promptly_with_pending_matchups() {
@@ -28,10 +26,19 @@ async fn shutdown_returns_promptly_with_pending_matchups() {
         embedded_player("e"),
     ];
 
-    let created =
-        EvalSession::create_tournament(store.clone(), round_robin_spec(), players.clone())
-            .await
-            .expect("create_tournament");
+    // Spec target must match the planner's target_per_pair below or
+    // `start` rejects the planner via TournamentMismatch.
+    const TARGET: u32 = 50;
+    let spec = TournamentSpec {
+        format: "round_robin".into(),
+        target_games_per_matchup: Some(TARGET),
+        params_json: "{}".into(),
+        game_config: small_game_config(),
+        tournament_seed: 0xC0FFEE,
+    };
+    let created = EvalSession::create_tournament(store.clone(), spec, players.clone())
+        .await
+        .expect("create_tournament");
 
     let planner = round_robin(
         players,
@@ -41,7 +48,7 @@ async fn shutdown_returns_promptly_with_pending_matchups() {
         // Many games per pair so the planner has plenty of pending work
         // when we call shutdown. The point is to prove `shutdown` doesn't
         // wait for natural completion.
-        50,
+        TARGET,
     );
     let session = EvalSession::start(
         store.clone(),

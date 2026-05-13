@@ -91,6 +91,30 @@ pub trait Planner: Send {
     /// capacity. Tournament terminates when this returns true and no
     /// matches are in flight.
     fn is_done(&self, state: &TournamentState) -> bool;
+
+    /// Tournament this planner is configured to drive. `EvalSession::start`
+    /// cross-checks this against the resumed `TournamentId` so a caller
+    /// can't accidentally point a planner at the wrong tournament.
+    fn tournament_id(&self) -> TournamentId;
+
+    /// Player ids in slot order. Compared against the stored
+    /// `tournament_players` rows on resume.
+    fn expected_players(&self) -> Vec<&str>;
+
+    /// Content-hash id of the game config this planner uses. Compared
+    /// against the stored `tournaments.game_config_id` on resume.
+    fn expected_game_config_id(&self) -> &str;
+
+    /// Tournament-level seed driving `matchup_seed`. Compared against the
+    /// stored `tournaments.tournament_seed` on resume. Two resumes with
+    /// different seeds would replay different games and silently fragment
+    /// the tournament.
+    fn expected_tournament_seed(&self) -> u64;
+
+    /// `target_games_per_matchup` if the planner has one, else `None`.
+    /// Round-robin returns `Some(target_per_pair)`; gauntlet doesn't have
+    /// a per-pair target so it returns `None`.
+    fn expected_target_per_pair(&self) -> Option<u32>;
 }
 
 // ---------------------------------------------------------------------------
@@ -188,6 +212,26 @@ impl Planner for RoundRobinPlanner {
             })
         })
     }
+
+    fn tournament_id(&self) -> TournamentId {
+        self.config.tournament_id
+    }
+
+    fn expected_players(&self) -> Vec<&str> {
+        self.config.players.iter().map(|p| p.id.as_str()).collect()
+    }
+
+    fn expected_game_config_id(&self) -> &str {
+        &self.config.game_config_id
+    }
+
+    fn expected_tournament_seed(&self) -> u64 {
+        self.config.tournament_seed
+    }
+
+    fn expected_target_per_pair(&self) -> Option<u32> {
+        Some(self.config.target_per_pair)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -277,6 +321,32 @@ impl Planner for GauntletPlanner {
                         .unwrap_or(false)
             })
         })
+    }
+
+    fn tournament_id(&self) -> TournamentId {
+        self.config.tournament_id
+    }
+
+    fn expected_players(&self) -> Vec<&str> {
+        // Slot 0 is the challenger; opponents follow in declaration order.
+        std::iter::once(self.config.challenger.id.as_str())
+            .chain(self.config.opponents.iter().map(|p| p.id.as_str()))
+            .collect()
+    }
+
+    fn expected_game_config_id(&self) -> &str {
+        &self.config.game_config_id
+    }
+
+    fn expected_tournament_seed(&self) -> u64 {
+        self.config.tournament_seed
+    }
+
+    fn expected_target_per_pair(&self) -> Option<u32> {
+        // Gauntlet's "target_each" is per opponent — same semantic shape
+        // as round-robin's target_per_pair, so we surface it here for
+        // consistency with the resume cross-check.
+        Some(self.config.target_each)
     }
 }
 
