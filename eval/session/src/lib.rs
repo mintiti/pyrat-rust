@@ -31,7 +31,9 @@ pub use plan::{
     matchup_seed, GauntletPlanner, GauntletPlannerConfig, Planner, ResolvedPlayer,
     RoundRobinPlanner, RoundRobinPlannerConfig,
 };
-pub use session::{EvalSession, SessionError, SessionEvent, SessionMode, TournamentSpec};
+pub use session::{
+    CreatedTournament, EvalSession, SessionError, SessionEvent, SessionMode, TournamentSpec,
+};
 pub use state::{
     GameConfigId, MatchupAttempt, MatchupHistory, MatchupKey, MatchupOutcome, PlayerId,
     TournamentState,

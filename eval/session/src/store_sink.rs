@@ -192,6 +192,8 @@ mod tests {
                 format: "round_robin".into(),
                 target_games_per_matchup: Some(1),
                 params_json: "{}".into(),
+                game_config_id: game_config_id.clone(),
+                tournament_seed: 0,
             })
             .unwrap();
         store.add_tournament_player(tid, "a", 0).unwrap();

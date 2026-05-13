@@ -44,6 +44,8 @@ async fn resume_skips_completed_matchups() {
                 format: "round_robin".into(),
                 target_games_per_matchup: Some(1),
                 params_json: "{}".into(),
+                game_config_id: game_config_id.clone(),
+                tournament_seed: 0xC0FFEE,
             })
             .unwrap();
         for (slot, p) in [&p1, &p2, &p3].iter().enumerate() {

@@ -11,25 +11,32 @@ use pyrat_eval::{EvalSession, SessionMode};
 use pyrat_eval_store::{AttemptOutcome, EloOptions, EvalStore};
 
 use crate::common::{
-    embedded_player, fast_orch_config, open_store_with_config, round_robin, round_robin_spec,
-    small_game_config,
+    embedded_player, fast_orch_config, round_robin, round_robin_spec, small_game_config,
 };
 
 #[tokio::test]
 async fn round_robin_two_mockbots_finishes_with_durable_rows() {
     let store = Arc::new(Mutex::new(EvalStore::open_in_memory().unwrap()));
-    let game_config_id = open_store_with_config(&store);
-
     let players = vec![embedded_player("a"), embedded_player("b")];
 
-    let tid = EvalSession::create_tournament(store.clone(), round_robin_spec(), players.clone())
-        .await
-        .expect("create_tournament");
+    // create_tournament now ensures the game_config row internally.
+    let created =
+        EvalSession::create_tournament(store.clone(), round_robin_spec(), players.clone())
+            .await
+            .expect("create_tournament");
 
-    let planner = round_robin(players, small_game_config(), game_config_id, tid, 1);
+    let planner = round_robin(
+        players,
+        small_game_config(),
+        created.game_config_id.clone(),
+        created.tournament_id,
+        1,
+    );
     let session = EvalSession::start(
         store.clone(),
-        SessionMode { tournament_id: tid },
+        SessionMode {
+            tournament_id: created.tournament_id,
+        },
         planner,
         fast_orch_config(),
         EloOptions::new("a"),
@@ -39,7 +46,10 @@ async fn round_robin_two_mockbots_finishes_with_durable_rows() {
 
     session.join().await;
 
-    let attempts = store.lock().get_attempts(tid, None).unwrap();
+    let attempts = store
+        .lock()
+        .get_attempts(created.tournament_id, None)
+        .unwrap();
     // 2 players × 1 game per pair = 1 matchup.
     assert_eq!(
         attempts.len(),
@@ -55,21 +65,29 @@ async fn round_robin_two_mockbots_finishes_with_durable_rows() {
 #[tokio::test]
 async fn three_player_round_robin_records_three_attempts() {
     let store = Arc::new(Mutex::new(EvalStore::open_in_memory().unwrap()));
-    let game_config_id = open_store_with_config(&store);
     let players = vec![
         embedded_player("a"),
         embedded_player("b"),
         embedded_player("c"),
     ];
 
-    let tid = EvalSession::create_tournament(store.clone(), round_robin_spec(), players.clone())
-        .await
-        .unwrap();
+    let created =
+        EvalSession::create_tournament(store.clone(), round_robin_spec(), players.clone())
+            .await
+            .unwrap();
 
-    let planner = round_robin(players, small_game_config(), game_config_id, tid, 1);
+    let planner = round_robin(
+        players,
+        small_game_config(),
+        created.game_config_id,
+        created.tournament_id,
+        1,
+    );
     let session = EvalSession::start(
         store.clone(),
-        SessionMode { tournament_id: tid },
+        SessionMode {
+            tournament_id: created.tournament_id,
+        },
         planner,
         fast_orch_config(),
         EloOptions::new("a"),
@@ -78,7 +96,10 @@ async fn three_player_round_robin_records_three_attempts() {
     .unwrap();
     session.join().await;
 
-    let attempts = store.lock().get_attempts(tid, None).unwrap();
+    let attempts = store
+        .lock()
+        .get_attempts(created.tournament_id, None)
+        .unwrap();
     assert_eq!(
         attempts.len(),
         3,

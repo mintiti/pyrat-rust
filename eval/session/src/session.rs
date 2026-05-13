@@ -17,9 +17,10 @@
 use std::sync::Arc;
 
 use parking_lot::Mutex;
+use pyrat::game::builder::GameConfig;
 use pyrat_eval_store::{
-    AddTournamentPlayerError, EloOptions, EvalError, EvalStore, NewTournament, RegisterPlayerError,
-    TournamentId,
+    AddTournamentPlayerError, CreateTournamentError, EloOptions, EvalError, EvalStore,
+    NewTournament, RegisterPlayerError, TournamentId,
 };
 use pyrat_orchestrator::{
     CompositeSink, DriverEvent, MatchSink, Orchestrator, OrchestratorConfig, OrchestratorError,
@@ -39,13 +40,38 @@ use crate::store_sink::StoreSink;
 // Public types
 // ---------------------------------------------------------------------------
 
-/// Specification for a brand-new tournament. Stored opaquely as
-/// `tournaments.params_json`; planners deserialize whatever they need.
-#[derive(Debug, Clone)]
+/// Specification for a brand-new tournament. `format`, `target_games_per_matchup`,
+/// and `params_json` are stored opaquely; planners deserialize whatever they
+/// need from `params_json`. `game_config` and `tournament_seed` are the
+/// tournament's runtime identity. Bootstrap derives the durable record from
+/// the config (via `mapping::game_config_to_record`) and stores both on the
+/// tournament row so resume can validate the planner.
+///
+/// `Debug` and `Clone` are not derived: `GameConfig` itself is `Clone` but
+/// not `Debug` — callers that need to log a spec should format the relevant
+/// fields explicitly.
+#[derive(Clone)]
 pub struct TournamentSpec {
     pub format: String,
     pub target_games_per_matchup: Option<u32>,
     pub params_json: String,
+    /// Runtime config — caller hands one source of truth. The bootstrap
+    /// derives the `GameConfigRecord`, ensures the row, and returns the id.
+    pub game_config: GameConfig,
+    /// Tournament-level seed for `matchup_seed` derivation. The high bit is
+    /// dropped at the store boundary; callers can pass any `u64`.
+    pub tournament_seed: u64,
+}
+
+/// Result of [`EvalSession::create_tournament`]. Carries both the freshly
+/// allocated `TournamentId` and the content-hashed `game_config_id` resolved
+/// from `TournamentSpec.game_config`. Callers plug the id into their planner
+/// config; the `game_config_id` saves them a second `ensure_game_config`
+/// round-trip.
+#[derive(Debug, Clone)]
+pub struct CreatedTournament {
+    pub tournament_id: TournamentId,
+    pub game_config_id: String,
 }
 
 /// Reconstruct mode handed to `EvalSession::start`.
@@ -113,6 +139,9 @@ pub enum SessionError {
     #[error("attach tournament player failed: {0}")]
     AddTournamentPlayer(#[from] AddTournamentPlayerError),
 
+    #[error("create tournament failed: {0}")]
+    CreateTournament(#[from] CreateTournamentError),
+
     #[error("game-config mapping failed: {0}")]
     Mapping(#[from] MappingError),
 
@@ -145,17 +174,17 @@ pub struct EvalSession {
 }
 
 impl EvalSession {
-    /// Create a fresh tournament: register players, insert the tournament
-    /// row, attach participants. Returns the freshly allocated id, which
-    /// the caller plugs into their planner config before [`Self::start`].
+    /// Create a fresh tournament: ensure the game config row, register
+    /// players, insert the tournament, attach participants. Returns both
+    /// the freshly allocated `TournamentId` and the resolved
+    /// `game_config_id` (caller plugs both into their planner config
+    /// before [`Self::start`]).
     pub async fn create_tournament(
         store: Arc<Mutex<EvalStore>>,
         spec: TournamentSpec,
         players: Vec<ResolvedPlayer>,
-    ) -> Result<TournamentId, SessionError> {
-        bootstrap_new_tournament(store, &spec, &players)
-            .await
-            .map(|(tid, _)| tid)
+    ) -> Result<CreatedTournament, SessionError> {
+        bootstrap_new_tournament(store, &spec, &players).await
     }
 
     /// Construct + start the session against an existing tournament id.
@@ -281,19 +310,25 @@ impl EvalSession {
 // Construction modes
 // ---------------------------------------------------------------------------
 
-/// Bootstrap a new tournament: register identity-bearing rows for each
-/// player, create the tournament, attach participants. Returns a fresh
-/// (empty) `TournamentState`.
+/// Bootstrap a new tournament: derive the durable `GameConfigRecord` from
+/// the runtime `GameConfig`, ensure the row, register identity-bearing
+/// player rows, insert the tournament with `game_config_id` +
+/// `tournament_seed`, attach participants. Returns the resolved id pair.
+///
+/// `ensure_game_config` is the single source of truth for `game_config_id`:
+/// content-hashed, idempotent. The caller never passes the id directly,
+/// which removes any chance of disagreement between the durable form and
+/// the runtime form.
 async fn bootstrap_new_tournament(
     store: Arc<Mutex<EvalStore>>,
     spec: &TournamentSpec,
     players: &[ResolvedPlayer],
-) -> Result<(TournamentId, TournamentState), SessionError> {
-    let new_tournament = NewTournament {
-        format: spec.format.clone(),
-        target_games_per_matchup: spec.target_games_per_matchup,
-        params_json: spec.params_json.clone(),
-    };
+) -> Result<CreatedTournament, SessionError> {
+    let game_config_record = crate::mapping::game_config_to_record(&spec.game_config)?;
+    let format = spec.format.clone();
+    let target_games_per_matchup = spec.target_games_per_matchup;
+    let params_json = spec.params_json.clone();
+    let tournament_seed = spec.tournament_seed;
     let players_to_register: Vec<_> = players
         .iter()
         .map(|p| pyrat_eval_store::NewPlayer {
@@ -306,21 +341,30 @@ async fn bootstrap_new_tournament(
         })
         .collect();
 
-    let tournament_id = tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || {
         let store = store.lock();
+        let game_config_id = store.ensure_game_config(&game_config_record)?;
         for p in &players_to_register {
             store.register_player(p)?;
         }
+        let new_tournament = NewTournament {
+            format,
+            target_games_per_matchup,
+            params_json,
+            game_config_id: game_config_id.clone(),
+            tournament_seed,
+        };
         let tid = store.create_tournament(&new_tournament)?;
         for (slot, p) in players_to_register.iter().enumerate() {
             store.add_tournament_player(tid, &p.id, slot as i64)?;
         }
-        Ok::<TournamentId, SessionError>(tid)
+        Ok::<CreatedTournament, SessionError>(CreatedTournament {
+            tournament_id: tid,
+            game_config_id,
+        })
     })
     .await
-    .expect("bootstrap blocking task panicked")?;
-
-    Ok((tournament_id, TournamentState::empty(tournament_id)))
+    .expect("bootstrap blocking task panicked")
 }
 
 /// Reconstruct state from store rows for a resume.

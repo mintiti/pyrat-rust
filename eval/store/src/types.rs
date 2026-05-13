@@ -102,6 +102,12 @@ pub struct TournamentRecord {
     pub target_games_per_matchup: Option<u32>,
     /// Opaque planner-defined config. The store does not validate this field.
     pub params_json: String,
+    /// Content-hashed id of the `game_configs` row this tournament uses.
+    /// Validated at insert time and on resume.
+    pub game_config_id: String,
+    /// Seed fed into the planner's `matchup_seed` derivation. Stored as i64
+    /// with the high bit masked off (see `NewTournament.tournament_seed`).
+    pub tournament_seed: u64,
     pub created_at: String,
 }
 
@@ -110,6 +116,15 @@ pub struct NewTournament {
     pub format: String,
     pub target_games_per_matchup: Option<u32>,
     pub params_json: String,
+    /// Must reference an existing `game_configs.id`. The store validates this
+    /// up front and returns `CreateTournamentError::GameConfigNotFound` for a
+    /// missing config.
+    pub game_config_id: String,
+    /// Tournament-level seed for `matchup_seed`. SQLite's INTEGER is signed;
+    /// the high bit is masked off at the store boundary (matching the
+    /// `matchup_seed` precedent), so callers can pass any `u64` without
+    /// knowing about `i64::MAX`.
+    pub tournament_seed: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -219,6 +234,11 @@ pub enum EvalError {
 
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
+
+    /// A migration refused to run because pre-flight state was unsafe to
+    /// upgrade automatically. The operator must manually backfill or wipe.
+    #[error("migration {version} blocked: {message}")]
+    MigrationBlocked { version: u32, message: String },
 }
 
 /// Tournament-context player insert errors.
@@ -242,6 +262,23 @@ pub enum DeletePlayerError {
     /// tournaments first, or bump the player id.
     #[error("player is referenced by tournament history (tournaments: {tournament_ids:?})")]
     InTournamentHistory { tournament_ids: Vec<TournamentId> },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum CreateTournamentError {
+    #[error(transparent)]
+    Db(#[from] EvalError),
+
+    /// `NewTournament.game_config_id` does not reference an existing row in
+    /// `game_configs`. The caller must `ensure_game_config(...)` first.
+    #[error("game_config_id {0:?} does not exist in game_configs")]
+    GameConfigNotFound(String),
+}
+
+impl From<rusqlite::Error> for CreateTournamentError {
+    fn from(e: rusqlite::Error) -> Self {
+        CreateTournamentError::Db(EvalError::Db(e))
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -32,14 +32,19 @@ pub fn mock_factory() -> EmbeddedBotFactory {
     Arc::new(|| Box::new(MockBot))
 }
 
-/// Tiny deterministic config: 3x3 open maze, corner starts, single cheese,
-/// 5-turn cap. Two MockBots draw with player1/player2 score = 0.5 / 0.5.
+/// Tiny config: 3x3 open maze, corner starts, single random cheese,
+/// 5-turn cap. Random cheese (instead of custom) so the config maps
+/// cleanly through `game_config_to_record` (the durable record schema
+/// only represents random cheese). MockBots always Stay, so neither
+/// reaches any cheese regardless of where it spawns and the game runs
+/// to max_turns with score 0/0 — the test outcome is `AttemptOutcome::Success`
+/// regardless of cheese placement.
 pub fn small_game_config() -> GameConfig {
     GameBuilder::new(3, 3)
         .with_max_turns(5)
         .with_open_maze()
         .with_custom_positions(Coordinates::new(0, 0), Coordinates::new(2, 2))
-        .with_custom_cheese(vec![Coordinates::new(1, 1)])
+        .with_random_cheese(1, false)
         .build()
 }
 
@@ -70,6 +75,9 @@ pub fn fast_timing() -> Timing {
     }
 }
 
+/// Insert the game config row that matches [`small_game_config`] and return
+/// its content-hash id. For tests that bypass [`EvalSession::create_tournament`]
+/// and plant rows into the store directly (the session does this itself).
 pub fn open_store_with_config(store: &Arc<Mutex<EvalStore>>) -> GameConfigId {
     store
         .lock()
@@ -112,5 +120,7 @@ pub fn round_robin_spec() -> TournamentSpec {
         format: "round_robin".into(),
         target_games_per_matchup: Some(1),
         params_json: "{}".into(),
+        game_config: small_game_config(),
+        tournament_seed: 0xC0FFEE,
     }
 }

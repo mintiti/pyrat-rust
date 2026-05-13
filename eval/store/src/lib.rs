@@ -12,7 +12,8 @@ pub use store::{
 };
 pub use types::{
     AddTournamentPlayerError, AttemptKey, AttemptOutcome, AttemptRecord, AttemptStatus,
-    DeletePlayerError, EvalError, GameConfigRecord, GameResultRecord, NewAttempt,
-    NewAttemptOutcome, NewGameResult, NewPlayer, NewTournament, PlayerRecord, RecordAttemptError,
-    RegisterPlayerError, ResultFilter, TournamentId, TournamentParticipant, TournamentRecord,
+    CreateTournamentError, DeletePlayerError, EvalError, GameConfigRecord, GameResultRecord,
+    NewAttempt, NewAttemptOutcome, NewGameResult, NewPlayer, NewTournament, PlayerRecord,
+    RecordAttemptError, RegisterPlayerError, ResultFilter, TournamentId, TournamentParticipant,
+    TournamentRecord,
 };
