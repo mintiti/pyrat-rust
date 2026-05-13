@@ -194,6 +194,13 @@ pub enum SessionError {
     #[error("run loop panicked: {0}")]
     RunLoopPanicked(String),
 
+    /// A `spawn_blocking` task panicked during setup (bootstrap or resume
+    /// reconstruction). `what` identifies the task; `message` is the
+    /// stringified panic. Distinct from `RunLoopPanicked` because the
+    /// failure happens before the run loop is even spawned.
+    #[error("background task `{what}` panicked: {message}")]
+    TaskPanicked { what: &'static str, message: String },
+
     /// A single matchup has hit the configured ceiling of consecutive
     /// `SinkFlushError` terminals (see
     /// [`SessionConfig::max_consecutive_sink_flush_failures`]). The store
@@ -479,7 +486,10 @@ async fn bootstrap_new_tournament(
         })
     })
     .await
-    .expect("bootstrap blocking task panicked")
+    .map_err(|e| SessionError::TaskPanicked {
+        what: "bootstrap_new_tournament",
+        message: e.to_string(),
+    })?
 }
 
 /// Reconstruct state from store rows for a resume.
@@ -504,7 +514,10 @@ async fn reconstruct_tournament_state(
         Ok::<(TournamentId, TournamentState), SessionError>((tournament.id, state))
     })
     .await
-    .expect("reconstruct blocking task panicked")?;
+    .map_err(|e| SessionError::TaskPanicked {
+        what: "reconstruct_tournament_state",
+        message: e.to_string(),
+    })??;
     Ok((tournament_id, state))
 }
 
