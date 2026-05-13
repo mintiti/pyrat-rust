@@ -7,7 +7,7 @@ mod common;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use pyrat_eval::{EvalSession, SessionMode};
+use pyrat_eval::{EvalSession, SessionConfig, SessionMode};
 use pyrat_eval_store::{AttemptOutcome, EloOptions, EvalStore};
 
 use crate::common::{
@@ -40,6 +40,7 @@ async fn round_robin_two_mockbots_finishes_with_durable_rows() {
         planner,
         fast_orch_config(),
         EloOptions::new("a"),
+        SessionConfig::default(),
     )
     .await
     .expect("session start");
@@ -91,6 +92,7 @@ async fn three_player_round_robin_records_three_attempts() {
         planner,
         fast_orch_config(),
         EloOptions::new("a"),
+        SessionConfig::default(),
     )
     .await
     .unwrap();

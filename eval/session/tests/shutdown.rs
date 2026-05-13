@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use pyrat_eval::{EvalSession, SessionMode};
+use pyrat_eval::{EvalSession, SessionConfig, SessionMode};
 use pyrat_eval_store::{EloOptions, EvalStore};
 
 use crate::common::{
@@ -51,6 +51,7 @@ async fn shutdown_returns_promptly_with_pending_matchups() {
         planner,
         fast_orch_config(),
         EloOptions::new("a"),
+        SessionConfig::default(),
     )
     .await
     .expect("session start");

@@ -32,7 +32,8 @@ pub use plan::{
     RoundRobinPlanner, RoundRobinPlannerConfig,
 };
 pub use session::{
-    CreatedTournament, EvalSession, SessionError, SessionEvent, SessionMode, TournamentSpec,
+    CreatedTournament, EvalSession, SessionConfig, SessionError, SessionEvent, SessionMode,
+    TournamentSpec,
 };
 pub use state::{
     GameConfigId, MatchupAttempt, MatchupHistory, MatchupKey, MatchupOutcome, PlayerId,

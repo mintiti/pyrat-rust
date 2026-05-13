@@ -14,6 +14,7 @@
 //! (reconstruct from store rows). Both produce a session that runs to
 //! completion (planner.is_done && orchestrator.idle).
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -23,8 +24,8 @@ use pyrat_eval_store::{
     NewTournament, RegisterPlayerError, TournamentId,
 };
 use pyrat_orchestrator::{
-    CompositeSink, DriverEvent, MatchSink, Orchestrator, OrchestratorConfig, OrchestratorError,
-    OrchestratorEvent, SinkRole,
+    CompositeSink, DriverEvent, FailureReason, MatchSink, Orchestrator, OrchestratorConfig,
+    OrchestratorError, OrchestratorEvent, SinkRole,
 };
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::task::JoinHandle;
@@ -34,7 +35,7 @@ use crate::descriptor::EvalMatchDescriptor;
 use crate::mapping::MappingError;
 use crate::observation::Observation;
 use crate::plan::{Planner, ResolvedPlayer};
-use crate::state::TournamentState;
+use crate::state::{MatchupKey, TournamentState};
 use crate::store_sink::StoreSink;
 
 // ---------------------------------------------------------------------------
@@ -75,6 +76,33 @@ pub struct CreatedTournament {
     pub game_config_id: String,
 }
 
+/// Session-level tunables. Defaults are sensible for most callers.
+#[derive(Debug, Clone)]
+pub struct SessionConfig {
+    /// Per-matchup ceiling on consecutive `FailureReason::SinkFlushError`
+    /// terminals. When hit, the run loop aborts with
+    /// [`SessionError::PersistentSinkFlushError`].
+    ///
+    /// Why only `SinkFlushError`: `durable_record=false` also covers
+    /// `Cancelled` (intentional shutdown) and `Internal(_)` (ambiguous);
+    /// neither belongs in an infinite-loop guard. `SinkFlushError` is the
+    /// "infrastructure broken" signal — read-only DB, disk full, FK
+    /// violation, etc. The counter resets on any other terminal for the
+    /// same key (a successful match, durable failure, or cancellation).
+    ///
+    /// The counter is transient (in-memory, not persisted), so a fresh
+    /// process retries from zero. Default: 5.
+    pub max_consecutive_sink_flush_failures: u32,
+}
+
+impl Default for SessionConfig {
+    fn default() -> Self {
+        Self {
+            max_consecutive_sink_flush_failures: 5,
+        }
+    }
+}
+
 /// Reconstruct mode handed to `EvalSession::start`.
 ///
 /// The session always runs against an *existing* tournament id. To create
@@ -106,6 +134,14 @@ pub enum SessionEvent {
         durable_record: bool,
     },
     TournamentFinished,
+    /// Tournament terminated abnormally. Emitted in addition to the
+    /// `SessionError` that `join`/`shutdown` return — consumers that only
+    /// watch the broadcast (e.g. GUIs) get a signal that the tournament
+    /// won't progress further. Currently the only producer is the
+    /// persistent-sink-flush guard.
+    TournamentAborted {
+        reason: String,
+    },
 }
 
 impl SessionEvent {
@@ -157,6 +193,18 @@ pub enum SessionError {
     /// public API so we don't carry it through.
     #[error("run loop panicked: {0}")]
     RunLoopPanicked(String),
+
+    /// A single matchup has hit the configured ceiling of consecutive
+    /// `SinkFlushError` terminals (see
+    /// [`SessionConfig::max_consecutive_sink_flush_failures`]). The store
+    /// is likely broken in a non-transient way (read-only DB, disk full,
+    /// schema mismatch, ...); operator intervention is needed.
+    #[error("persistent sink-flush failure for matchup {matchup_key:?} at attempt {attempt_index}: {last_message}")]
+    PersistentSinkFlushError {
+        matchup_key: MatchupKey,
+        attempt_index: u32,
+        last_message: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -201,12 +249,15 @@ impl EvalSession {
     ///
     /// `elo_options` controls Elo recompute on each `MatchFinished`. The
     /// anchor player must be one of the resolved player ids.
+    /// `session_config` carries session-level tunables (defaults are fine
+    /// for most callers).
     pub async fn start<P: Planner + 'static>(
         store: Arc<Mutex<EvalStore>>,
         mode: SessionMode,
         planner: P,
         orch_config: OrchestratorConfig,
         elo_options: EloOptions,
+        session_config: SessionConfig,
     ) -> Result<Self, SessionError> {
         let (tournament_id, initial_state) =
             reconstruct_tournament_state(store.clone(), mode.tournament_id).await?;
@@ -218,6 +269,7 @@ impl EvalSession {
             planner,
             orch_config,
             elo_options,
+            session_config,
         )
     }
 
@@ -302,15 +354,41 @@ async fn await_run_loop(h: JoinHandle<Result<(), SessionError>>) -> Result<(), S
 impl EvalSession {
     fn launch<P: Planner + 'static>(
         store: Arc<Mutex<EvalStore>>,
+        tournament_id: TournamentId,
+        initial_state: TournamentState,
+        planner: P,
+        orch_config: OrchestratorConfig,
+        elo_options: EloOptions,
+        session_config: SessionConfig,
+    ) -> Result<Self, SessionError> {
+        let store_sink: Arc<dyn MatchSink<EvalMatchDescriptor>> =
+            Arc::new(StoreSink::new(store.clone()));
+        let sinks = vec![(SinkRole::Required, store_sink)];
+        Self::launch_with_sinks(
+            tournament_id,
+            initial_state,
+            planner,
+            orch_config,
+            elo_options,
+            session_config,
+            sinks,
+        )
+    }
+
+    /// Test seam: build the orchestrator from caller-supplied sinks instead
+    /// of the default `StoreSink`. Lets unit tests plant a deliberately
+    /// failing sink to exercise [`SessionConfig::max_consecutive_sink_flush_failures`].
+    /// Not part of the public API.
+    pub(crate) fn launch_with_sinks<P: Planner + 'static>(
         _tournament_id: TournamentId,
         initial_state: TournamentState,
         planner: P,
         orch_config: OrchestratorConfig,
         elo_options: EloOptions,
+        session_config: SessionConfig,
+        sinks: Vec<(SinkRole, Arc<dyn MatchSink<EvalMatchDescriptor>>)>,
     ) -> Result<Self, SessionError> {
-        let store_sink: Arc<dyn MatchSink<EvalMatchDescriptor>> =
-            Arc::new(StoreSink::new(store.clone()));
-        let composite = Arc::new(CompositeSink::new(vec![(SinkRole::Required, store_sink)]));
+        let composite = Arc::new(CompositeSink::new(sinks));
         let (orch, driver_rx) = Orchestrator::<EvalMatchDescriptor>::new(orch_config, composite);
         let orch = Arc::new(orch);
 
@@ -328,6 +406,7 @@ impl EvalSession {
             orch.clone(),
             driver_rx,
             elo_options,
+            session_config,
             cancel.clone(),
         ));
 
@@ -454,6 +533,7 @@ async fn run_loop<P: Planner>(
     orch: Arc<Orchestrator<EvalMatchDescriptor>>,
     mut driver_rx: mpsc::Receiver<DriverEvent<EvalMatchDescriptor>>,
     elo_options: EloOptions,
+    session_config: SessionConfig,
     cancel: CancellationToken,
 ) -> Result<(), SessionError> {
     // Initial Elo on resume (so subscribers see standings before the first
@@ -463,6 +543,10 @@ async fn run_loop<P: Planner>(
         let _g = publish_mutex.lock();
         state_watch.send_replace(state.clone());
     }
+
+    // Transient (in-memory) counter of consecutive `SinkFlushError` terminals
+    // per matchup key. See `SessionConfig::max_consecutive_sink_flush_failures`.
+    let mut sink_flush_counts: HashMap<MatchupKey, u32> = HashMap::new();
 
     loop {
         let cap = orch.available_capacity();
@@ -514,6 +598,417 @@ async fn run_loop<P: Planner>(
         }
         if let Some(obs) = Observation::from_driver_event(&event) {
             planner.on_observation(&obs);
+        }
+
+        // Persistent-sink-flush guard. Counts only `SinkFlushError` so
+        // benign non-durable terminals (`Cancelled`, `Internal`) don't
+        // burn the counter. Any other terminal for the same key resets it.
+        if let Some(check) = persistent_failure_check(
+            &event,
+            &mut sink_flush_counts,
+            session_config.max_consecutive_sink_flush_failures,
+        ) {
+            let _ = session_events.send(SessionEvent::TournamentAborted {
+                reason: format!(
+                    "persistent sink-flush failure: {} consecutive `SinkFlushError`s for matchup {:?} (last: {})",
+                    session_config.max_consecutive_sink_flush_failures,
+                    check.matchup_key,
+                    check.last_message
+                ),
+            });
+            return Err(SessionError::PersistentSinkFlushError {
+                matchup_key: check.matchup_key,
+                attempt_index: check.attempt_index,
+                last_message: check.last_message,
+            });
+        }
+    }
+}
+
+/// Per-event update of the per-matchup sink-flush counter. Returns the
+/// breach details when a matchup hits `threshold` consecutive
+/// `SinkFlushError`s, otherwise `None`.
+fn persistent_failure_check(
+    event: &DriverEvent<EvalMatchDescriptor>,
+    counts: &mut HashMap<MatchupKey, u32>,
+    threshold: u32,
+) -> Option<PersistentFailureBreach> {
+    let DriverEvent::MatchFailed { failure } = event else {
+        // Non-terminal events don't update the counter.
+        // MatchFinished terminals reset it (handled below via the
+        // explicit MatchFinished arm).
+        if let DriverEvent::MatchFinished { outcome } = event {
+            counts.remove(&matchup_key_from_descriptor(&outcome.descriptor));
+        }
+        return None;
+    };
+    let key = matchup_key_from_descriptor(&failure.descriptor);
+    let is_sink_flush = matches!(failure.reason, FailureReason::SinkFlushError(_));
+    if !is_sink_flush {
+        // Any other terminal — durable failure, cancellation, internal —
+        // resets the counter for this matchup.
+        counts.remove(&key);
+        return None;
+    }
+    let count = counts.entry(key.clone()).or_insert(0);
+    *count += 1;
+    if *count >= threshold {
+        let last_message = match &failure.reason {
+            FailureReason::SinkFlushError(s) => s.clone(),
+            _ => unreachable!("guard above guarantees SinkFlushError"),
+        };
+        Some(PersistentFailureBreach {
+            matchup_key: key,
+            attempt_index: failure.descriptor.attempt_index,
+            last_message,
+        })
+    } else {
+        None
+    }
+}
+
+struct PersistentFailureBreach {
+    matchup_key: MatchupKey,
+    attempt_index: u32,
+    last_message: String,
+}
+
+/// Canonical `MatchupKey` for a descriptor (lex-sorted players). The session
+/// indexes by canonical key so two orientations of the same pair share a
+/// counter regardless of which planner submitted them. Commit 7 will fold
+/// this into `MatchupKey::from_descriptor`; until then this stays a local
+/// helper.
+fn matchup_key_from_descriptor(desc: &EvalMatchDescriptor) -> MatchupKey {
+    let (p1, p2) = if desc.player1_id <= desc.player2_id {
+        (desc.player1_id.clone(), desc.player2_id.clone())
+    } else {
+        (desc.player2_id.clone(), desc.player1_id.clone())
+    };
+    MatchupKey {
+        player1_id: p1,
+        player2_id: p2,
+        game_config_id: desc.game_config_id.clone(),
+        repetition_index: desc.repetition_index,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    //! Tests that exercise the `pub(crate)` test seam `launch_with_sinks`
+    //! and the persistent-sink-flush guard. Lives in `src/` (not `tests/`)
+    //! because integration tests compile as external crates and can't see
+    //! `pub(crate)` items.
+
+    use std::time::{Duration, SystemTime};
+
+    use async_trait::async_trait;
+    use pyrat_host::match_host::MatchEvent;
+    use pyrat_host::player::PlayerIdentity;
+    use pyrat_orchestrator::{MatchFailure, MatchId, MatchOutcome, OrchestratorConfig, SinkError};
+
+    use super::*;
+
+    /// Synthetic `MatchFailure` shaped for the persistent-failure tests.
+    fn synthetic_failure(
+        match_id: u64,
+        attempt_index: u32,
+        player1: &str,
+        player2: &str,
+        reason: FailureReason,
+    ) -> MatchFailure<EvalMatchDescriptor> {
+        MatchFailure {
+            descriptor: EvalMatchDescriptor {
+                match_id: MatchId(match_id),
+                tournament_id: TournamentId(1),
+                game_config_id: "gc".into(),
+                player1_id: player1.into(),
+                player2_id: player2.into(),
+                seed: 7,
+                repetition_index: 0,
+                attempt_index,
+                planned_at: SystemTime::UNIX_EPOCH,
+            },
+            started_at: None,
+            failed_at: SystemTime::UNIX_EPOCH,
+            reason,
+            players: None,
+            // `durable_record=false` is the value the run-loop sees from
+            // the orchestrator after a sink flush failure.
+            durable_record: false,
+        }
+    }
+
+    fn driver_failed(
+        failure: MatchFailure<EvalMatchDescriptor>,
+    ) -> DriverEvent<EvalMatchDescriptor> {
+        DriverEvent::MatchFailed { failure }
+    }
+
+    #[test]
+    fn persistent_failure_check_increments_on_sink_flush() {
+        let mut counts = HashMap::new();
+        // 4 of 5 — not yet a breach.
+        for i in 0..4 {
+            let ev = driver_failed(synthetic_failure(
+                i,
+                i as u32,
+                "a",
+                "b",
+                FailureReason::SinkFlushError(format!("planted #{i}")),
+            ));
+            assert!(persistent_failure_check(&ev, &mut counts, 5).is_none());
+        }
+        // 5th SinkFlushError trips the threshold.
+        let ev = driver_failed(synthetic_failure(
+            4,
+            4,
+            "a",
+            "b",
+            FailureReason::SinkFlushError("planted #4".into()),
+        ));
+        let breach = persistent_failure_check(&ev, &mut counts, 5).expect("threshold should fire");
+        assert_eq!(breach.attempt_index, 4);
+        assert_eq!(breach.last_message, "planted #4");
+        assert_eq!(breach.matchup_key.player1_id, "a");
+        assert_eq!(breach.matchup_key.player2_id, "b");
+    }
+
+    #[test]
+    fn persistent_failure_check_resets_on_non_sink_flush_terminal() {
+        let mut counts = HashMap::new();
+        // Two SinkFlush failures.
+        for i in 0..2 {
+            persistent_failure_check(
+                &driver_failed(synthetic_failure(
+                    i,
+                    i as u32,
+                    "a",
+                    "b",
+                    FailureReason::SinkFlushError("planted".into()),
+                )),
+                &mut counts,
+                5,
+            );
+        }
+        assert_eq!(*counts.iter().next().unwrap().1, 2);
+
+        // A `Cancelled` failure on the same matchup resets the counter.
+        let cancel = driver_failed(synthetic_failure(2, 2, "a", "b", FailureReason::Cancelled));
+        persistent_failure_check(&cancel, &mut counts, 5);
+        assert!(counts.is_empty(), "Cancelled resets the counter");
+    }
+
+    #[test]
+    fn persistent_failure_check_resets_on_match_finished() {
+        let mut counts = HashMap::new();
+        persistent_failure_check(
+            &driver_failed(synthetic_failure(
+                0,
+                0,
+                "a",
+                "b",
+                FailureReason::SinkFlushError("planted".into()),
+            )),
+            &mut counts,
+            5,
+        );
+        assert_eq!(counts.len(), 1);
+
+        // Synthesize a successful terminal for the same matchup.
+        let success = DriverEvent::MatchFinished {
+            outcome: MatchOutcome {
+                descriptor: EvalMatchDescriptor {
+                    match_id: MatchId(99),
+                    tournament_id: TournamentId(1),
+                    game_config_id: "gc".into(),
+                    player1_id: "a".into(),
+                    player2_id: "b".into(),
+                    seed: 7,
+                    repetition_index: 0,
+                    attempt_index: 1,
+                    planned_at: SystemTime::UNIX_EPOCH,
+                },
+                started_at: SystemTime::UNIX_EPOCH,
+                finished_at: SystemTime::UNIX_EPOCH,
+                result: pyrat_host::match_host::MatchResult {
+                    result: pyrat_host::wire::GameResult::Draw,
+                    player1_score: 0.0,
+                    player2_score: 0.0,
+                    turns_played: 5,
+                },
+                players: [
+                    PlayerIdentity {
+                        name: "a".into(),
+                        author: "x".into(),
+                        agent_id: "a".into(),
+                        slot: pyrat_host::wire::Player::Player1,
+                    },
+                    PlayerIdentity {
+                        name: "b".into(),
+                        author: "x".into(),
+                        agent_id: "b".into(),
+                        slot: pyrat_host::wire::Player::Player2,
+                    },
+                ],
+            },
+        };
+        persistent_failure_check(&success, &mut counts, 5);
+        assert!(counts.is_empty(), "MatchFinished resets the counter");
+    }
+
+    /// A `MatchSink` that returns `Err` on every terminal callback,
+    /// producing the `SinkFlushError` chain the guard is designed to catch.
+    struct AlwaysFailingSink;
+
+    #[async_trait]
+    impl MatchSink<EvalMatchDescriptor> for AlwaysFailingSink {
+        async fn on_match_started(
+            &self,
+            _descriptor: &EvalMatchDescriptor,
+            _players: &[PlayerIdentity; 2],
+        ) -> Result<(), SinkError> {
+            Ok(())
+        }
+        async fn on_match_event(&self, _id: MatchId, _event: &MatchEvent) -> Result<(), SinkError> {
+            Ok(())
+        }
+        async fn on_match_finished(
+            &self,
+            _outcome: &MatchOutcome<EvalMatchDescriptor>,
+        ) -> Result<(), SinkError> {
+            Err(SinkError {
+                source: anyhow::anyhow!("planted sink failure"),
+            })
+        }
+        async fn on_match_failed(
+            &self,
+            _failure: &MatchFailure<EvalMatchDescriptor>,
+        ) -> Result<(), SinkError> {
+            Ok(())
+        }
+    }
+
+    /// End-to-end via `launch_with_sinks`: plant an always-failing sink and
+    /// confirm the session aborts with `PersistentSinkFlushError` instead of
+    /// looping forever.
+    #[tokio::test]
+    async fn launch_with_sinks_persists_sink_flush_failure_triggers_abort() {
+        use crate::plan::{RoundRobinPlanner, RoundRobinPlannerConfig};
+        use pyrat::game::builder::GameBuilder;
+        use pyrat::{Coordinates, Direction};
+        use pyrat_bot_api::Options;
+        use pyrat_host::player::{EmbeddedBot, EmbeddedCtx};
+        use pyrat_host::wire::TimingMode;
+        use pyrat_orchestrator::{EmbeddedBotFactory, PlayerSpec, Timing};
+        use pyrat_protocol::HashedTurnState;
+
+        struct StayBot;
+        impl Options for StayBot {}
+        impl EmbeddedBot for StayBot {
+            fn think(&mut self, _: &HashedTurnState, _: &EmbeddedCtx) -> Direction {
+                Direction::Stay
+            }
+        }
+
+        let store = Arc::new(Mutex::new(EvalStore::open_in_memory().unwrap()));
+
+        let game_config = GameBuilder::new(3, 3)
+            .with_max_turns(5)
+            .with_open_maze()
+            .with_custom_positions(Coordinates::new(0, 0), Coordinates::new(2, 2))
+            .with_random_cheese(1, false)
+            .build();
+
+        let factory: EmbeddedBotFactory = Arc::new(|| Box::new(StayBot));
+        let players = vec![
+            ResolvedPlayer {
+                id: "a".into(),
+                spec: PlayerSpec::Embedded {
+                    agent_id: "a".into(),
+                    name: "a".into(),
+                    author: "tests".into(),
+                    factory: factory.clone(),
+                },
+            },
+            ResolvedPlayer {
+                id: "b".into(),
+                spec: PlayerSpec::Embedded {
+                    agent_id: "b".into(),
+                    name: "b".into(),
+                    author: "tests".into(),
+                    factory,
+                },
+            },
+        ];
+
+        let spec = TournamentSpec {
+            format: "round_robin".into(),
+            target_games_per_matchup: Some(10),
+            params_json: "{}".into(),
+            game_config: game_config.clone(),
+            tournament_seed: 0xC0FFEE,
+        };
+        let created = EvalSession::create_tournament(store.clone(), spec, players.clone())
+            .await
+            .expect("create_tournament");
+
+        let planner = RoundRobinPlanner::new(RoundRobinPlannerConfig {
+            players,
+            game_config,
+            game_config_id: created.game_config_id,
+            timing: Timing {
+                mode: TimingMode::Wait,
+                move_timeout_ms: 1000,
+                preprocessing_timeout_ms: 5000,
+            },
+            tournament_id: created.tournament_id,
+            target_per_pair: 10,
+            // High enough that the counter trips first, not max_failures.
+            max_failures_per_pair: 999,
+            tournament_seed: 0xC0FFEE,
+        });
+
+        let initial_state = TournamentState::empty(created.tournament_id);
+        let failing_sink: Arc<dyn MatchSink<EvalMatchDescriptor>> = Arc::new(AlwaysFailingSink);
+        let sinks = vec![(SinkRole::Required, failing_sink)];
+
+        let session = EvalSession::launch_with_sinks(
+            created.tournament_id,
+            initial_state,
+            planner,
+            OrchestratorConfig {
+                max_parallel: 1,
+                ..OrchestratorConfig::default()
+            },
+            EloOptions::new("a"),
+            SessionConfig {
+                max_consecutive_sink_flush_failures: 3,
+            },
+            sinks,
+        )
+        .expect("launch");
+
+        let result = tokio::time::timeout(Duration::from_secs(5), session.join())
+            .await
+            .expect("session should not hang");
+        match result {
+            Err(SessionError::PersistentSinkFlushError {
+                attempt_index,
+                last_message,
+                ..
+            }) => {
+                // 3 consecutive failures → counter hits threshold on the 3rd,
+                // so attempt_index in [0, 2].
+                assert!(
+                    attempt_index < 3,
+                    "unexpected attempt_index {attempt_index}"
+                );
+                assert!(
+                    last_message.contains("planted sink failure"),
+                    "unexpected message: {last_message}"
+                );
+            },
+            other => panic!("expected PersistentSinkFlushError, got {other:?}"),
         }
     }
 }
