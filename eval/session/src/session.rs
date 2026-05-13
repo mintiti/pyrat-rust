@@ -403,7 +403,7 @@ impl EvalSession {
     /// Not part of the public API.
     pub(crate) fn launch_with_sinks<P: Planner + 'static>(
         _tournament_id: TournamentId,
-        initial_state: TournamentState,
+        mut initial_state: TournamentState,
         planner: P,
         orch_config: OrchestratorConfig,
         elo_options: EloOptions,
@@ -413,6 +413,12 @@ impl EvalSession {
         let composite = Arc::new(CompositeSink::new(sinks));
         let (orch, driver_rx) = Orchestrator::<EvalMatchDescriptor>::new(orch_config, composite);
         let orch = Arc::new(orch);
+
+        // Recompute Elo on the initial state *before* publishing to the
+        // watch. Otherwise a subscriber hitting `subscribe()` between
+        // `start()` returning and the run-loop's first iteration sees a
+        // resumed-tournament snapshot with empty standings.
+        initial_state.recompute_elo(&elo_options);
 
         let (state_watch, _state_rx) = watch::channel(initial_state.clone());
         let (session_events, _events_rx) = broadcast::channel(256);
@@ -626,13 +632,9 @@ async fn run_loop<P: Planner>(
     session_config: SessionConfig,
     cancel: CancellationToken,
 ) -> Result<(), SessionError> {
-    // Initial Elo on resume (so subscribers see standings before the first
-    // MatchFinished arrives).
-    state.recompute_elo(&elo_options);
-    {
-        let _g = publish_mutex.lock();
-        state_watch.send_replace(state.clone());
-    }
+    // Initial Elo was recomputed in `launch_with_sinks` before this task
+    // was spawned, so a subscriber that lands during start sees standings
+    // immediately. The watch was already populated with that state.
 
     // Transient (in-memory) counter of consecutive `SinkFlushError` terminals
     // per matchup key. See `SessionConfig::max_consecutive_sink_flush_failures`.
