@@ -112,8 +112,10 @@ pub trait Planner: Send {
     fn expected_tournament_seed(&self) -> u64;
 
     /// `target_games_per_matchup` if the planner has one, else `None`.
-    /// Round-robin returns `Some(target_per_pair)`; gauntlet doesn't have
-    /// a per-pair target so it returns `None`.
+    /// Round-robin returns `Some(target_per_pair)`; gauntlet surfaces
+    /// `Some(target_each)` (the per-opponent count has the same semantic
+    /// shape as round-robin's per-pair target, so resume's cross-check
+    /// can treat them uniformly).
     fn expected_target_per_pair(&self) -> Option<u32>;
 
     /// String tag identifying the planner format, compared against the

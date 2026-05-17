@@ -383,7 +383,8 @@ impl Drop for EvalSession {
     /// or `join`. The loop's `select!` picks up the cancellation on its
     /// next iteration and exits, dropping its `Arc<Orchestrator>` clone;
     /// the session's own clone goes away with `self`. The orchestrator's
-    /// tasks then drain through its own `Drop`.
+    /// in-flight tasks are then cancelled and aborted by
+    /// `Orchestrator::Drop` (no graceful drain on this path).
     ///
     /// Fire-and-forget: we can't `await` here, so this is best-effort.
     /// Callers who need a guaranteed graceful drain should call

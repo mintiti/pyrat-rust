@@ -105,8 +105,10 @@ pub struct TournamentRecord {
     /// Content-hashed id of the `game_configs` row this tournament uses.
     /// Validated at insert time and on resume.
     pub game_config_id: String,
-    /// Seed fed into the planner's `matchup_seed` derivation. Stored as i64
-    /// with the high bit masked off (see `NewTournament.tournament_seed`).
+    /// Seed fed into the planner's `matchup_seed` derivation. Bounded at
+    /// insert time to `<= i64::MAX` (see `NewTournament.tournament_seed`),
+    /// so this value round-trips bit-identically with what the caller
+    /// passed.
     pub tournament_seed: u64,
     pub created_at: String,
 }
