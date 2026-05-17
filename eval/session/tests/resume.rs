@@ -85,12 +85,7 @@ async fn resume_skips_completed_matchups() {
     }
 
     // Sanity: history shows the (a, b) matchup as Success.
-    let key_ab = MatchupKey {
-        player1_id: "a".into(),
-        player2_id: "b".into(),
-        game_config_id: game_config_id.clone(),
-        repetition_index: 0,
-    };
+    let key_ab = MatchupKey::from_pair("a", "b", &game_config_id, 0);
     assert!(matches!(
         state.history.get(&key_ab).unwrap()[0].outcome,
         MatchupOutcome::Success { .. }

@@ -64,71 +64,13 @@ impl EvalStore {
     ///   field names.
     /// - Row exists with identical identity: no-op success.
     pub fn register_player(&self, p: &NewPlayer) -> Result<(), RegisterPlayerError> {
-        let existing = self
-            .conn
-            .query_row(
-                "SELECT agent_id, version, command, metadata_json
-                 FROM players WHERE id = ?1",
-                params![p.id],
-                |row| {
-                    Ok(ExistingIdentity {
-                        agent_id: row.get(0)?,
-                        version: row.get(1)?,
-                        command: row.get(2)?,
-                        metadata_json: row.get(3)?,
-                    })
-                },
-            )
-            .optional()?;
-
-        match existing {
-            None => {
-                self.conn.execute(
-                    "INSERT INTO players (id, display_name, agent_id, version, command, metadata_json)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                    params![p.id, p.display_name, p.agent_id, p.version, p.command, p.metadata_json],
-                )?;
-            },
-            Some(ex) => {
-                let mut conflicts = Vec::new();
-                check_conflict(&mut conflicts, "agent_id", &ex.agent_id, &p.agent_id);
-                check_conflict(&mut conflicts, "version", &ex.version, &p.version);
-                check_conflict(&mut conflicts, "command", &ex.command, &p.command);
-                check_conflict(
-                    &mut conflicts,
-                    "metadata_json",
-                    &ex.metadata_json,
-                    &p.metadata_json,
-                );
-                if !conflicts.is_empty() {
-                    return Err(RegisterPlayerError::IdentityConflict {
-                        id: p.id.clone(),
-                        fields: conflicts,
-                    });
-                }
-                self.conn.execute(
-                    "UPDATE players
-                       SET agent_id      = COALESCE(agent_id, ?1),
-                           version       = COALESCE(version, ?2),
-                           command       = COALESCE(command, ?3),
-                           metadata_json = COALESCE(metadata_json, ?4)
-                     WHERE id = ?5",
-                    params![p.agent_id, p.version, p.command, p.metadata_json, p.id],
-                )?;
-            },
-        }
-        Ok(())
+        register_player_on(&self.conn, p)
     }
 
     /// Insert a game config (keyed by content hash) if it doesn't already exist.
     /// Returns the content hash used as the ID.
     pub fn ensure_game_config(&self, config: &GameConfigRecord) -> Result<String, EvalError> {
-        let (id, json) = config.content_hash_with_json();
-        self.conn.execute(
-            "INSERT OR IGNORE INTO game_configs (id, config_json) VALUES (?1, ?2)",
-            params![id, json],
-        )?;
-        Ok(id)
+        ensure_game_config_on(&self.conn, config)
     }
 
     /// Append a game result. Returns the autoincrement row ID.
@@ -283,40 +225,7 @@ impl EvalStore {
         &self,
         t: &NewTournament,
     ) -> Result<TournamentId, CreateTournamentError> {
-        // Typed pre-check on the FK gives a clearer error than the generic
-        // SQL constraint violation the FK would throw on its own.
-        let exists: bool = self
-            .conn
-            .query_row(
-                "SELECT EXISTS(SELECT 1 FROM game_configs WHERE id = ?1)",
-                params![t.game_config_id],
-                |row| row.get(0),
-            )
-            .map_err(EvalError::from)?;
-        if !exists {
-            return Err(CreateTournamentError::GameConfigNotFound(
-                t.game_config_id.clone(),
-            ));
-        }
-        // SQLite INTEGER is signed; mask the high bit to fit. Matches the
-        // pattern used by `matchup_seed` and validated by `record_attempt`.
-        let seed_i64 = (t.tournament_seed & i64::MAX as u64) as i64;
-        self.conn
-            .execute(
-                "INSERT INTO tournaments
-                   (format, target_games_per_matchup, params_json,
-                    game_config_id, tournament_seed)
-                 VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![
-                    t.format,
-                    t.target_games_per_matchup,
-                    t.params_json,
-                    t.game_config_id,
-                    seed_i64,
-                ],
-            )
-            .map_err(EvalError::from)?;
-        Ok(TournamentId(self.conn.last_insert_rowid()))
+        create_tournament_on(&self.conn, t)
     }
 
     pub fn get_tournament(&self, id: TournamentId) -> Result<Option<TournamentRecord>, EvalError> {
@@ -362,36 +271,7 @@ impl EvalStore {
         player_id: &str,
         slot: i64,
     ) -> Result<(), AddTournamentPlayerError> {
-        let already_in: bool = self.conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM tournament_players
-                            WHERE tournament_id = ?1 AND player_id = ?2)",
-            params![tournament_id.0, player_id],
-            |row| row.get(0),
-        )?;
-        if already_in {
-            return Err(AddTournamentPlayerError::PlayerAlreadyInTournament {
-                tournament_id,
-                player_id: player_id.to_string(),
-            });
-        }
-        let slot_taken: bool = self.conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM tournament_players
-                            WHERE tournament_id = ?1 AND slot = ?2)",
-            params![tournament_id.0, slot],
-            |row| row.get(0),
-        )?;
-        if slot_taken {
-            return Err(AddTournamentPlayerError::SlotTaken {
-                tournament_id,
-                slot,
-            });
-        }
-        self.conn.execute(
-            "INSERT INTO tournament_players (tournament_id, player_id, slot)
-             VALUES (?1, ?2, ?3)",
-            params![tournament_id.0, player_id, slot],
-        )?;
-        Ok(())
+        add_tournament_player_on(&self.conn, tournament_id, player_id, slot)
     }
 
     pub fn get_tournament_players(
@@ -528,6 +408,234 @@ impl EvalStore {
     ) -> Result<Vec<HeadToHead>, EvalError> {
         let attempts = self.get_attempts(tournament_id, Some(AttemptStatus::Success))?;
         Ok(head_to_head_from_attempt_records(&attempts))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Transaction seam
+// ---------------------------------------------------------------------------
+//
+// The four operations bootstrap uses (ensure_game_config, register_player,
+// create_tournament, add_tournament_player) live below as free functions over
+// `&Connection`. `rusqlite::Transaction` derefs to `Connection`, so the same
+// bodies serve both the auto-commit path (each `EvalStore` method) and the
+// transactional path (`TxStore` inside `EvalStore::transaction`). Without
+// this seam, bootstrap could not roll back partial state on a mid-sequence
+// failure.
+
+fn ensure_game_config_on(
+    conn: &Connection,
+    config: &GameConfigRecord,
+) -> Result<String, EvalError> {
+    let (id, json) = config.content_hash_with_json();
+    conn.execute(
+        "INSERT OR IGNORE INTO game_configs (id, config_json) VALUES (?1, ?2)",
+        params![id, json],
+    )?;
+    Ok(id)
+}
+
+fn register_player_on(conn: &Connection, p: &NewPlayer) -> Result<(), RegisterPlayerError> {
+    let existing = conn
+        .query_row(
+            "SELECT agent_id, version, command, metadata_json
+             FROM players WHERE id = ?1",
+            params![p.id],
+            |row| {
+                Ok(ExistingIdentity {
+                    agent_id: row.get(0)?,
+                    version: row.get(1)?,
+                    command: row.get(2)?,
+                    metadata_json: row.get(3)?,
+                })
+            },
+        )
+        .optional()?;
+
+    match existing {
+        None => {
+            conn.execute(
+                "INSERT INTO players (id, display_name, agent_id, version, command, metadata_json)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    p.id,
+                    p.display_name,
+                    p.agent_id,
+                    p.version,
+                    p.command,
+                    p.metadata_json
+                ],
+            )?;
+        },
+        Some(ex) => {
+            let mut conflicts = Vec::new();
+            check_conflict(&mut conflicts, "agent_id", &ex.agent_id, &p.agent_id);
+            check_conflict(&mut conflicts, "version", &ex.version, &p.version);
+            check_conflict(&mut conflicts, "command", &ex.command, &p.command);
+            check_conflict(
+                &mut conflicts,
+                "metadata_json",
+                &ex.metadata_json,
+                &p.metadata_json,
+            );
+            if !conflicts.is_empty() {
+                return Err(RegisterPlayerError::IdentityConflict {
+                    id: p.id.clone(),
+                    fields: conflicts,
+                });
+            }
+            conn.execute(
+                "UPDATE players
+                   SET agent_id      = COALESCE(agent_id, ?1),
+                       version       = COALESCE(version, ?2),
+                       command       = COALESCE(command, ?3),
+                       metadata_json = COALESCE(metadata_json, ?4)
+                 WHERE id = ?5",
+                params![p.agent_id, p.version, p.command, p.metadata_json, p.id],
+            )?;
+        },
+    }
+    Ok(())
+}
+
+fn create_tournament_on(
+    conn: &Connection,
+    t: &NewTournament,
+) -> Result<TournamentId, CreateTournamentError> {
+    // Typed pre-check on the FK gives a clearer error than the generic
+    // SQL constraint violation the FK would throw on its own.
+    let exists: bool = conn
+        .query_row(
+            "SELECT EXISTS(SELECT 1 FROM game_configs WHERE id = ?1)",
+            params![t.game_config_id],
+            |row| row.get(0),
+        )
+        .map_err(EvalError::from)?;
+    if !exists {
+        return Err(CreateTournamentError::GameConfigNotFound(
+            t.game_config_id.clone(),
+        ));
+    }
+    // SQLite INTEGER is signed; reject high-bit seeds at the boundary
+    // so the caller's `tournament_seed` and the stored seed are always
+    // bit-identical.
+    let seed_i64 =
+        i64::try_from(t.tournament_seed).map_err(|_| CreateTournamentError::SeedOutOfRange {
+            seed: t.tournament_seed,
+        })?;
+    conn.execute(
+        "INSERT INTO tournaments
+           (format, target_games_per_matchup, params_json,
+            game_config_id, tournament_seed)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![
+            t.format,
+            t.target_games_per_matchup,
+            t.params_json,
+            t.game_config_id,
+            seed_i64,
+        ],
+    )
+    .map_err(EvalError::from)?;
+    Ok(TournamentId(conn.last_insert_rowid()))
+}
+
+fn add_tournament_player_on(
+    conn: &Connection,
+    tournament_id: TournamentId,
+    player_id: &str,
+    slot: i64,
+) -> Result<(), AddTournamentPlayerError> {
+    let already_in: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM tournament_players
+                        WHERE tournament_id = ?1 AND player_id = ?2)",
+        params![tournament_id.0, player_id],
+        |row| row.get(0),
+    )?;
+    if already_in {
+        return Err(AddTournamentPlayerError::PlayerAlreadyInTournament {
+            tournament_id,
+            player_id: player_id.to_string(),
+        });
+    }
+    let slot_taken: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM tournament_players
+                        WHERE tournament_id = ?1 AND slot = ?2)",
+        params![tournament_id.0, slot],
+        |row| row.get(0),
+    )?;
+    if slot_taken {
+        return Err(AddTournamentPlayerError::SlotTaken {
+            tournament_id,
+            slot,
+        });
+    }
+    conn.execute(
+        "INSERT INTO tournament_players (tournament_id, player_id, slot)
+         VALUES (?1, ?2, ?3)",
+        params![tournament_id.0, player_id, slot],
+    )?;
+    Ok(())
+}
+
+/// View of [`EvalStore`] inside a transaction. Exposes the four operations
+/// bootstrap composes. The same SQL bodies serve both the auto-commit path
+/// (each `EvalStore` method) and the transactional path; `TxStore` just
+/// routes them through a [`rusqlite::Transaction`] borrow instead of the
+/// owned `Connection`.
+///
+/// Two lifetimes: `'tx` borrows the transaction, `'conn` is the connection
+/// the transaction itself borrows from. Collapsing to one lifetime
+/// over-constrains callers.
+pub struct TxStore<'tx, 'conn> {
+    tx: &'tx rusqlite::Transaction<'conn>,
+}
+
+impl<'tx, 'conn> TxStore<'tx, 'conn> {
+    pub fn ensure_game_config(&self, config: &GameConfigRecord) -> Result<String, EvalError> {
+        ensure_game_config_on(self.tx, config)
+    }
+
+    pub fn register_player(&self, p: &NewPlayer) -> Result<(), RegisterPlayerError> {
+        register_player_on(self.tx, p)
+    }
+
+    pub fn create_tournament(
+        &self,
+        t: &NewTournament,
+    ) -> Result<TournamentId, CreateTournamentError> {
+        create_tournament_on(self.tx, t)
+    }
+
+    pub fn add_tournament_player(
+        &self,
+        tournament_id: TournamentId,
+        player_id: &str,
+        slot: i64,
+    ) -> Result<(), AddTournamentPlayerError> {
+        add_tournament_player_on(self.tx, tournament_id, player_id, slot)
+    }
+}
+
+impl EvalStore {
+    /// Run a closure inside a SQLite transaction. The closure gets a
+    /// `TxStore` exposing the same four operations bootstrap needs; on
+    /// `Ok` the transaction commits, on `Err` (or panic) it rolls back.
+    ///
+    /// The closure's error type `E` only needs `From<EvalError>` — concrete
+    /// errors from `register_player`/`create_tournament`/`add_tournament_player`
+    /// convert via the caller's own `From` impls (e.g. `SessionError`
+    /// already has `#[from]` for each).
+    pub fn transaction<F, T, E>(&mut self, f: F) -> Result<T, E>
+    where
+        F: FnOnce(&TxStore<'_, '_>) -> Result<T, E>,
+        E: From<EvalError>,
+    {
+        let tx = self.conn.transaction().map_err(EvalError::from)?;
+        let store = TxStore { tx: &tx };
+        let out = f(&store)?;
+        tx.commit().map_err(EvalError::from)?;
+        Ok(out)
     }
 }
 
@@ -1266,19 +1374,40 @@ mod tests {
     fn create_tournament_round_trips_seed_and_config_id() {
         let store = EvalStore::open_in_memory().unwrap();
         let cid = store.ensure_game_config(&sample_config()).unwrap();
+        // i64::MAX is the largest value that round-trips through the
+        // signed INTEGER column without truncation.
         let tid = store
             .create_tournament(&NewTournament {
                 format: "rr".into(),
                 target_games_per_matchup: Some(2),
                 params_json: "{}".into(),
                 game_config_id: cid.clone(),
-                tournament_seed: 0xDEAD_BEEF_CAFE_FACE,
+                tournament_seed: i64::MAX as u64,
             })
             .unwrap();
         let t = store.get_tournament(tid).unwrap().unwrap();
         assert_eq!(t.game_config_id, cid);
-        // High bit is masked at the store boundary.
-        assert_eq!(t.tournament_seed, 0xDEAD_BEEF_CAFE_FACE & i64::MAX as u64);
+        // Seed round-trips bit-identically — no masking.
+        assert_eq!(t.tournament_seed, i64::MAX as u64);
+    }
+
+    #[test]
+    fn create_tournament_rejects_high_bit_seed() {
+        let store = EvalStore::open_in_memory().unwrap();
+        let cid = store.ensure_game_config(&sample_config()).unwrap();
+        let seed = 1u64 << 63;
+        match store.create_tournament(&NewTournament {
+            format: "rr".into(),
+            target_games_per_matchup: None,
+            params_json: "{}".into(),
+            game_config_id: cid,
+            tournament_seed: seed,
+        }) {
+            Err(CreateTournamentError::SeedOutOfRange { seed: got }) => {
+                assert_eq!(got, seed);
+            },
+            other => panic!("expected SeedOutOfRange, got {other:?}"),
+        }
     }
 
     #[test]

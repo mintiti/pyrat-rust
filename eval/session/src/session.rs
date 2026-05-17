@@ -60,8 +60,11 @@ pub struct TournamentSpec {
     /// Runtime config — caller hands one source of truth. The bootstrap
     /// derives the `GameConfigRecord`, ensures the row, and returns the id.
     pub game_config: GameConfig,
-    /// Tournament-level seed for `matchup_seed` derivation. The high bit is
-    /// dropped at the store boundary; callers can pass any `u64`.
+    /// Tournament-level seed for `matchup_seed` derivation. Must be
+    /// `<= i64::MAX` — SQLite's INTEGER column is signed, and the store
+    /// rejects out-of-range values with
+    /// `CreateTournamentError::SeedOutOfRange` so the caller's seed and
+    /// the stored seed always agree.
     pub tournament_seed: u64,
 }
 
@@ -235,10 +238,14 @@ pub struct EvalSession {
     state_watch: watch::Sender<TournamentState>,
     session_events: broadcast::Sender<SessionEvent>,
     publish_mutex: Arc<Mutex<()>>,
-    orch: Arc<Orchestrator<EvalMatchDescriptor>>,
-    /// Cancellation seam for `shutdown`. The run-loop selects on this
-    /// alongside `driver_rx.recv()` so cancellation always wins even if no
-    /// further lifecycle events arrive.
+    /// `Option` so `shutdown` can `.take()` the Arc and `Arc::try_unwrap`
+    /// it. Rust forbids partial moves out of types with a `Drop` impl,
+    /// so the only way to keep `Drop for EvalSession` *and* hand `orch`
+    /// to `try_unwrap` is to gate it behind `Option`.
+    orch: Option<Arc<Orchestrator<EvalMatchDescriptor>>>,
+    /// Cancellation seam for `shutdown` and `Drop`. The run-loop selects
+    /// on this alongside `driver_rx.recv()` so cancellation always wins
+    /// even if no further lifecycle events arrive.
     cancel: CancellationToken,
     /// Run-loop join handle. `None` after `shutdown`/`join` consume it.
     run_loop_handle: Option<JoinHandle<Result<(), SessionError>>>,
@@ -286,7 +293,6 @@ impl EvalSession {
 
         Self::launch(
             store,
-            tournament_record.id,
             initial_state,
             planner,
             orch_config,
@@ -319,8 +325,15 @@ impl EvalSession {
     /// Pass-through to the orchestrator's broadcast: every event including
     /// per-turn `MatchEvent`s. Lossy. Used by GUIs that want live per-turn
     /// detail.
+    ///
+    /// # Panics
+    /// Panics if called after [`Self::shutdown`] (the orchestrator handle
+    /// is consumed there). A live session always has it.
     pub fn live_events(&self) -> broadcast::Receiver<OrchestratorEvent<EvalMatchDescriptor>> {
-        self.orch.events()
+        self.orch
+            .as_ref()
+            .expect("live_events called after shutdown")
+            .events()
     }
 
     /// Wait for the tournament to finish (planner.is_done && orch.idle).
@@ -355,11 +368,28 @@ impl EvalSession {
         if let Some(h) = self.run_loop_handle.take() {
             await_run_loop(h).await?;
         }
-        match Arc::try_unwrap(self.orch) {
-            Ok(orch) => orch.shutdown().await,
-            Err(arc) => arc.abort(),
+        if let Some(orch) = self.orch.take() {
+            match Arc::try_unwrap(orch) {
+                Ok(o) => o.shutdown().await,
+                Err(a) => a.abort(),
+            }
         }
         Ok(())
+    }
+}
+
+impl Drop for EvalSession {
+    /// Cancel the run loop if the session is dropped without `shutdown`
+    /// or `join`. The loop's `select!` picks up the cancellation on its
+    /// next iteration and exits, dropping its `Arc<Orchestrator>` clone;
+    /// the session's own clone goes away with `self`. The orchestrator's
+    /// tasks then drain through its own `Drop`.
+    ///
+    /// Fire-and-forget: we can't `await` here, so this is best-effort.
+    /// Callers who need a guaranteed graceful drain should call
+    /// [`Self::shutdown`].
+    fn drop(&mut self) {
+        self.cancel.cancel();
     }
 }
 
@@ -376,7 +406,6 @@ async fn await_run_loop(h: JoinHandle<Result<(), SessionError>>) -> Result<(), S
 impl EvalSession {
     fn launch<P: Planner + 'static>(
         store: Arc<Mutex<EvalStore>>,
-        tournament_id: TournamentId,
         initial_state: TournamentState,
         planner: P,
         orch_config: OrchestratorConfig,
@@ -387,7 +416,6 @@ impl EvalSession {
             Arc::new(StoreSink::new(store.clone()));
         let sinks = vec![(SinkRole::Required, store_sink)];
         Self::launch_with_sinks(
-            tournament_id,
             initial_state,
             planner,
             orch_config,
@@ -400,9 +428,10 @@ impl EvalSession {
     /// Test seam: build the orchestrator from caller-supplied sinks instead
     /// of the default `StoreSink`. Lets unit tests plant a deliberately
     /// failing sink to exercise [`SessionConfig::max_consecutive_sink_flush_failures`].
-    /// Not part of the public API.
+    /// Not part of the public API. The tournament id lives on
+    /// `initial_state.tournament_id`, so the explicit parameter that
+    /// earlier versions carried was redundant.
     pub(crate) fn launch_with_sinks<P: Planner + 'static>(
-        _tournament_id: TournamentId,
         mut initial_state: TournamentState,
         planner: P,
         orch_config: OrchestratorConfig,
@@ -442,10 +471,29 @@ impl EvalSession {
             state_watch,
             session_events,
             publish_mutex,
-            orch,
+            orch: Some(orch),
             cancel,
             run_loop_handle: Some(run_loop_handle),
         })
+    }
+
+    /// Test seam: clone of the session's cancellation token. Used by the
+    /// Drop test to verify that dropping the session fires cancellation.
+    #[cfg(test)]
+    pub(crate) fn cancel_token_for_test(&self) -> CancellationToken {
+        self.cancel.clone()
+    }
+
+    /// Test seam: weak reference to the orchestrator. Used by the Drop
+    /// test to verify the run loop actually drops its `Arc` clone after
+    /// cancellation, proving the leak is closed.
+    #[cfg(test)]
+    pub(crate) fn orch_weak_for_test(&self) -> std::sync::Weak<Orchestrator<EvalMatchDescriptor>> {
+        Arc::downgrade(
+            self.orch
+                .as_ref()
+                .expect("orch_weak_for_test called after shutdown"),
+        )
     }
 }
 
@@ -477,7 +525,7 @@ async fn bootstrap_new_tournament(
         .map(|p| pyrat_eval_store::NewPlayer {
             id: p.id.clone(),
             display_name: p.id.clone(),
-            agent_id: Some(player_agent_id(&p.spec).into()),
+            agent_id: player_agent_id(&p.spec).map(String::from),
             version: None,
             command: None,
             metadata_json: None,
@@ -485,25 +533,31 @@ async fn bootstrap_new_tournament(
         .collect();
 
     tokio::task::spawn_blocking(move || {
-        let store = store.lock();
-        let game_config_id = store.ensure_game_config(&game_config_record)?;
-        for p in &players_to_register {
-            store.register_player(p)?;
-        }
-        let new_tournament = NewTournament {
-            format,
-            target_games_per_matchup,
-            params_json,
-            game_config_id: game_config_id.clone(),
-            tournament_seed,
-        };
-        let tid = store.create_tournament(&new_tournament)?;
-        for (slot, p) in players_to_register.iter().enumerate() {
-            store.add_tournament_player(tid, &p.id, slot as i64)?;
-        }
-        Ok::<CreatedTournament, SessionError>(CreatedTournament {
-            tournament_id: tid,
-            game_config_id,
+        let mut store = store.lock();
+        // Wrap the four bootstrap operations in one transaction so a
+        // mid-sequence failure (e.g. a slot-taken or duplicate-player
+        // error in `add_tournament_player`) doesn't leave a tournament
+        // row + partial participants behind.
+        store.transaction(move |tx| -> Result<CreatedTournament, SessionError> {
+            let game_config_id = tx.ensure_game_config(&game_config_record)?;
+            for p in &players_to_register {
+                tx.register_player(p)?;
+            }
+            let new_tournament = NewTournament {
+                format,
+                target_games_per_matchup,
+                params_json,
+                game_config_id: game_config_id.clone(),
+                tournament_seed,
+            };
+            let tid = tx.create_tournament(&new_tournament)?;
+            for (slot, p) in players_to_register.iter().enumerate() {
+                tx.add_tournament_player(tid, &p.id, slot as i64)?;
+            }
+            Ok(CreatedTournament {
+                tournament_id: tid,
+                game_config_id,
+            })
         })
     })
     .await
@@ -556,6 +610,13 @@ fn validate_planner_against_stored_spec(
     tournament: &TournamentRecord,
     tournament_players: &[TournamentParticipant],
 ) -> Result<(), SessionError> {
+    if planner.expected_format() != tournament.format {
+        return Err(SessionError::TournamentMismatch(format!(
+            "format: planner expected {:?}, stored is {:?}",
+            planner.expected_format(),
+            tournament.format
+        )));
+    }
     if planner.tournament_id() != tournament.id {
         return Err(SessionError::TournamentMismatch(format!(
             "tournament_id: planner expected {:?}, stored is {:?}",
@@ -604,14 +665,14 @@ fn validate_planner_against_stored_spec(
     Ok(())
 }
 
-fn player_agent_id(spec: &pyrat_orchestrator::PlayerSpec) -> &str {
+fn player_agent_id(spec: &pyrat_orchestrator::PlayerSpec) -> Option<&str> {
     match spec {
-        pyrat_orchestrator::PlayerSpec::Subprocess { agent_id, .. } => agent_id,
-        pyrat_orchestrator::PlayerSpec::Embedded { agent_id, .. } => agent_id,
-        // PlayerSpec is `#[non_exhaustive]`. Falls back to "" for unknown
-        // variants — the row gets registered without an agent_id, and the
-        // ensure_player NULL-fill path applies on later updates.
-        _ => "",
+        pyrat_orchestrator::PlayerSpec::Subprocess { agent_id, .. }
+        | pyrat_orchestrator::PlayerSpec::Embedded { agent_id, .. } => Some(agent_id),
+        // PlayerSpec is `#[non_exhaustive]`. Return None for unknown
+        // variants so the row registers with `agent_id = NULL`; the
+        // `register_player` NULL-fill path then applies on later updates.
+        _ => None,
     }
 }
 
@@ -842,8 +903,8 @@ mod tests {
         let breach = persistent_failure_check(&ev, &mut counts, 5).expect("threshold should fire");
         assert_eq!(breach.attempt_index, 4);
         assert_eq!(breach.last_message, "planted #4");
-        assert_eq!(breach.matchup_key.player1_id, "a");
-        assert_eq!(breach.matchup_key.player2_id, "b");
+        assert_eq!(breach.matchup_key.player1_id(), "a");
+        assert_eq!(breach.matchup_key.player2_id(), "b");
     }
 
     #[test]
@@ -1046,7 +1107,6 @@ mod tests {
         let sinks = vec![(SinkRole::Required, failing_sink)];
 
         let session = EvalSession::launch_with_sinks(
-            created.tournament_id,
             initial_state,
             planner,
             OrchestratorConfig {
@@ -1083,5 +1143,126 @@ mod tests {
             },
             other => panic!("expected PersistentSinkFlushError, got {other:?}"),
         }
+    }
+
+    /// Drop without `join`/`shutdown` must cancel the run loop and let
+    /// the orchestrator be released. Two assertions:
+    ///   1. The cancel token transitions to cancelled — proves Drop fired.
+    ///   2. The `Weak<Orchestrator>` fails to upgrade within a bounded
+    ///      window — proves the run loop's `Arc` clone was actually
+    ///      dropped (the leak is closed). Cancellation alone proves the
+    ///      signal; the weak-release check proves the consequence.
+    #[tokio::test]
+    async fn dropping_session_cancels_run_loop_and_releases_orchestrator() {
+        use crate::plan::{RoundRobinPlanner, RoundRobinPlannerConfig};
+        use pyrat::game::builder::GameBuilder;
+        use pyrat::{Coordinates, Direction};
+        use pyrat_bot_api::Options;
+        use pyrat_host::player::{EmbeddedBot, EmbeddedCtx};
+        use pyrat_host::wire::TimingMode;
+        use pyrat_orchestrator::{EmbeddedBotFactory, PlayerSpec, Timing};
+        use pyrat_protocol::HashedTurnState;
+
+        struct StayBot;
+        impl Options for StayBot {}
+        impl EmbeddedBot for StayBot {
+            fn think(&mut self, _: &HashedTurnState, _: &EmbeddedCtx) -> Direction {
+                Direction::Stay
+            }
+        }
+
+        let game_config = GameBuilder::new(3, 3)
+            .with_max_turns(5)
+            .with_open_maze()
+            .with_custom_positions(Coordinates::new(0, 0), Coordinates::new(2, 2))
+            .with_random_cheese(1, false)
+            .build();
+
+        let factory: EmbeddedBotFactory = Arc::new(|| Box::new(StayBot));
+        let players = vec![
+            ResolvedPlayer {
+                id: "a".into(),
+                spec: PlayerSpec::Embedded {
+                    agent_id: "a".into(),
+                    name: "a".into(),
+                    author: "tests".into(),
+                    factory: factory.clone(),
+                },
+            },
+            ResolvedPlayer {
+                id: "b".into(),
+                spec: PlayerSpec::Embedded {
+                    agent_id: "b".into(),
+                    name: "b".into(),
+                    author: "tests".into(),
+                    factory,
+                },
+            },
+        ];
+
+        // 100 games-per-pair: more than enough pending work so the loop
+        // is busy when we drop. We never observe a terminal — Drop fires
+        // mid-run.
+        let planner = RoundRobinPlanner::new(RoundRobinPlannerConfig {
+            players,
+            game_config,
+            game_config_id: "test-config".into(),
+            timing: Timing {
+                mode: TimingMode::Wait,
+                move_timeout_ms: 1000,
+                preprocessing_timeout_ms: 5000,
+            },
+            tournament_id: TournamentId(1),
+            target_per_pair: 100,
+            max_failures_per_pair: 999,
+            tournament_seed: 0xC0FFEE,
+        });
+
+        let initial_state = TournamentState::empty(TournamentId(1));
+        let noop_sink: Arc<dyn MatchSink<EvalMatchDescriptor>> =
+            Arc::new(pyrat_orchestrator::NoOpSink::<EvalMatchDescriptor>::new());
+        let sinks = vec![(SinkRole::Required, noop_sink)];
+
+        let session = EvalSession::launch_with_sinks(
+            initial_state,
+            planner,
+            OrchestratorConfig {
+                max_parallel: 1,
+                ..OrchestratorConfig::default()
+            },
+            EloOptions::new("a"),
+            SessionConfig::default(),
+            sinks,
+        )
+        .expect("launch");
+
+        let token = session.cancel_token_for_test();
+        let weak = session.orch_weak_for_test();
+        assert!(
+            weak.upgrade().is_some(),
+            "orchestrator should be live before drop"
+        );
+
+        drop(session);
+
+        // 1. Cancellation fired — proves Drop ran.
+        tokio::time::timeout(Duration::from_secs(1), token.cancelled())
+            .await
+            .expect("cancel token should fire within 1s of drop");
+
+        // 2. The Arc was actually released — proves the leak is closed.
+        let start = std::time::Instant::now();
+        let mut released = false;
+        while start.elapsed() < Duration::from_secs(1) {
+            if weak.upgrade().is_none() {
+                released = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(
+            released,
+            "orchestrator Arc was not released within 1s of drop"
+        );
     }
 }

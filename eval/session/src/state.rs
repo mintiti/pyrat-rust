@@ -30,9 +30,9 @@ pub type GameConfigId = String;
 ///
 /// Always canonical: the constructors lex-sort the player ids, so two
 /// orientations of the same pair `(a, b)` and `(b, a)` collapse onto one
-/// key. Direct struct literal construction is discouraged but not forbidden;
-/// callers should prefer [`MatchupKey::from_descriptor`] or
-/// [`MatchupKey::from_pair`] for the canonicalization guarantee.
+/// key. Fields are private so direct struct-literal construction can't
+/// break the invariant; use [`MatchupKey::from_descriptor`] or
+/// [`MatchupKey::from_pair`], read with the accessor methods below.
 ///
 /// Seed is intentionally NOT in the key: it is functionally derived from
 /// the other fields via the planner's stateless seed function. Including
@@ -40,10 +40,10 @@ pub type GameConfigId = String;
 /// "retry plays the same seeded game" semantics.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MatchupKey {
-    pub player1_id: PlayerId,
-    pub player2_id: PlayerId,
-    pub game_config_id: GameConfigId,
-    pub repetition_index: u32,
+    player1_id: PlayerId,
+    player2_id: PlayerId,
+    game_config_id: GameConfigId,
+    repetition_index: u32,
 }
 
 impl MatchupKey {
@@ -69,6 +69,27 @@ impl MatchupKey {
             game_config_id: game_config_id.to_owned(),
             repetition_index,
         }
+    }
+
+    /// Canonical player id at slot 0 (lex-min).
+    pub fn player1_id(&self) -> &str {
+        &self.player1_id
+    }
+
+    /// Canonical player id at slot 1 (lex-max).
+    pub fn player2_id(&self) -> &str {
+        &self.player2_id
+    }
+
+    /// Content-hashed id of the game config this matchup uses.
+    pub fn game_config_id(&self) -> &str {
+        &self.game_config_id
+    }
+
+    /// 0-based index distinguishing the Nth game of this pair-and-config
+    /// matchup (target > 1 schedules multiple games per pair).
+    pub fn repetition_index(&self) -> u32 {
+        self.repetition_index
     }
 }
 
@@ -467,12 +488,7 @@ mod tests {
         s.fold_attempt(&rec);
         let entries = s
             .history
-            .get(&MatchupKey {
-                player1_id: "a".into(),
-                player2_id: "b".into(),
-                game_config_id: "gc".into(),
-                repetition_index: 0,
-            })
+            .get(&MatchupKey::from_pair("a", "b", "gc", 0))
             .unwrap();
         assert_eq!(entries.len(), 1);
     }

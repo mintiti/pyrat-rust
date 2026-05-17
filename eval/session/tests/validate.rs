@@ -198,6 +198,60 @@ async fn rejects_planner_with_different_target_per_pair() {
     .await;
 }
 
+/// Format mismatch: a `GauntletPlanner` whose `expected_players()` happens
+/// to slot-match a stored `round_robin` tournament's participants would
+/// pass the player + target + seed + config checks. The format guard is
+/// what catches this — otherwise the gauntlet would run challenger-vs-each
+/// pairings and silently skip opponent-vs-opponent matchups, fragmenting
+/// the tournament's history.
+#[tokio::test]
+async fn rejects_gauntlet_planner_for_round_robin_tournament() {
+    let store = Arc::new(Mutex::new(EvalStore::open_in_memory().unwrap()));
+    let players = vec![
+        embedded_player("a"),
+        embedded_player("b"),
+        embedded_player("c"),
+    ];
+    // Stored spec is round_robin (format = "round_robin"), players [a, b, c],
+    // target_games_per_matchup = 1.
+    let created =
+        EvalSession::create_tournament(store.clone(), round_robin_spec(), players.clone())
+            .await
+            .expect("create_tournament");
+
+    // Gauntlet planner with the same id, same game_config_id, same seed,
+    // same total players in slot order ([challenger, opponents..]), same
+    // target. The only divergence is format.
+    let planner = pyrat_eval::GauntletPlanner::new(pyrat_eval::GauntletPlannerConfig {
+        challenger: players[0].clone(),
+        opponents: vec![players[1].clone(), players[2].clone()],
+        game_config: small_game_config(),
+        game_config_id: created.game_config_id,
+        timing: crate::common::fast_timing(),
+        tournament_id: created.tournament_id,
+        target_each: 1,
+        max_failures_per_pair: 3,
+        tournament_seed: 0xC0FFEE,
+    });
+
+    expect_mismatch_containing(
+        || {
+            EvalSession::start(
+                store.clone(),
+                SessionMode {
+                    tournament_id: created.tournament_id,
+                },
+                planner,
+                fast_orch_config(),
+                EloOptions::new("a"),
+                SessionConfig::default(),
+            )
+        },
+        "format",
+    )
+    .await;
+}
+
 /// Happy path: a planner that matches the stored spec resumes cleanly.
 #[tokio::test]
 async fn accepts_matching_planner() {

@@ -9,6 +9,7 @@ pub use elo::{
 };
 pub use store::{
     aggregate_pairs, head_to_head_from_attempt_records, head_to_head_from_results, EvalStore,
+    TxStore,
 };
 pub use types::{
     AddTournamentPlayerError, AttemptKey, AttemptOutcome, AttemptRecord, AttemptStatus,

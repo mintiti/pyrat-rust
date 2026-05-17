@@ -120,10 +120,12 @@ pub fn failure_reason_string(reason: &FailureReason) -> String {
         FailureReason::Cancelled => "cancelled".into(),
         FailureReason::SinkFlushError(s) => format!("sink_flush_error: {s}"),
         FailureReason::Internal(s) => format!("internal: {s}"),
-        // FailureReason is `#[non_exhaustive]`. Future variants land here as
-        // an explicit "unknown" rather than a panic so lifecycle records
-        // never get blocked on an upstream addition.
-        _ => "unknown".into(),
+        // FailureReason is `#[non_exhaustive]`. Future variants land here
+        // as a Debug repr (rather than a flat "unknown") so two new
+        // variants stay distinguishable for triage. The string is less
+        // stable to grep against — accept that tradeoff in exchange for
+        // preserving variant identity.
+        _ => format!("unknown: {reason:?}"),
     }
 }
 
@@ -165,7 +167,10 @@ fn days_to_ymd(days: u64) -> (i64, u32, u32) {
 /// Compose a tournament_id-scoped `NewAttempt` for a synthetic / test row.
 /// Not used in the live session path (which uses
 /// [`outcome_to_new_attempt`] / [`failure_to_new_attempt`]); useful inside
-/// tests that need to plant rows directly into the store.
+/// tests that need to plant rows directly into the store. `pub` so
+/// integration tests (external crates) can call it; `#[doc(hidden)]` to
+/// keep it out of generated docs and the apparent public API.
+#[doc(hidden)]
 #[allow(clippy::too_many_arguments)]
 pub fn synthetic_attempt(
     tournament_id: TournamentId,

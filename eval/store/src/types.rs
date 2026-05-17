@@ -120,10 +120,12 @@ pub struct NewTournament {
     /// up front and returns `CreateTournamentError::GameConfigNotFound` for a
     /// missing config.
     pub game_config_id: String,
-    /// Tournament-level seed for `matchup_seed`. SQLite's INTEGER is signed;
-    /// the high bit is masked off at the store boundary (matching the
-    /// `matchup_seed` precedent), so callers can pass any `u64` without
-    /// knowing about `i64::MAX`.
+    /// Tournament-level seed for `matchup_seed`. Must be `<= i64::MAX`:
+    /// SQLite's INTEGER column is signed, and a high-bit seed would not
+    /// round-trip without silent truncation. `create_tournament` rejects
+    /// out-of-range seeds with `CreateTournamentError::SeedOutOfRange`
+    /// rather than masking, so the value the caller passes always equals
+    /// the value the row stores.
     pub tournament_seed: u64,
 }
 
@@ -273,6 +275,13 @@ pub enum CreateTournamentError {
     /// `game_configs`. The caller must `ensure_game_config(...)` first.
     #[error("game_config_id {0:?} does not exist in game_configs")]
     GameConfigNotFound(String),
+
+    /// `NewTournament.tournament_seed` exceeds `i64::MAX`. SQLite's INTEGER
+    /// is signed, so values with the high bit set cannot round-trip
+    /// without truncation. Reject at the boundary instead of silently
+    /// masking so the caller's seed and the stored seed always agree.
+    #[error("tournament_seed {seed} exceeds i64::MAX; SQLite INTEGER is signed")]
+    SeedOutOfRange { seed: u64 },
 }
 
 impl From<rusqlite::Error> for CreateTournamentError {

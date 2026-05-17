@@ -115,6 +115,13 @@ pub trait Planner: Send {
     /// Round-robin returns `Some(target_per_pair)`; gauntlet doesn't have
     /// a per-pair target so it returns `None`.
     fn expected_target_per_pair(&self) -> Option<u32>;
+
+    /// String tag identifying the planner format, compared against the
+    /// stored `tournaments.format` on resume. Without this check, a
+    /// `GauntletPlanner` whose `expected_players()` happens to slot-match
+    /// a `round_robin` tournament's participants would pass validation
+    /// and silently skip the opponent-vs-opponent pairings.
+    fn expected_format(&self) -> &str;
 }
 
 // ---------------------------------------------------------------------------
@@ -232,6 +239,10 @@ impl Planner for RoundRobinPlanner {
     fn expected_target_per_pair(&self) -> Option<u32> {
         Some(self.config.target_per_pair)
     }
+
+    fn expected_format(&self) -> &str {
+        "round_robin"
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -348,6 +359,10 @@ impl Planner for GauntletPlanner {
         // consistency with the resume cross-check.
         Some(self.config.target_each)
     }
+
+    fn expected_format(&self) -> &str {
+        "gauntlet"
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -448,8 +463,8 @@ fn build_slot(
 
     let seed = matchup_seed(
         ctx.tournament_seed,
-        &key.player1_id,
-        &key.player2_id,
+        key.player1_id(),
+        key.player2_id(),
         ctx.game_config_id,
         repetition_index,
     );
@@ -457,8 +472,8 @@ fn build_slot(
         match_id: allocate_match_id(),
         tournament_id: ctx.tournament_id,
         game_config_id: ctx.game_config_id.to_owned(),
-        player1_id: key.player1_id.clone(),
-        player2_id: key.player2_id.clone(),
+        player1_id: key.player1_id().to_owned(),
+        player2_id: key.player2_id().to_owned(),
         seed,
         repetition_index,
         attempt_index,
