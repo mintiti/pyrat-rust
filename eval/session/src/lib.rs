@@ -14,6 +14,7 @@
 //!   broadcast for per-turn UI consumers).
 
 pub mod descriptor;
+pub mod legacy_record;
 pub mod mapping;
 pub mod observation;
 pub mod plan;
@@ -22,6 +23,7 @@ pub mod state;
 pub mod store_sink;
 
 pub use descriptor::EvalMatchDescriptor;
+pub use legacy_record::{GameRecord, LegacyRecordSink};
 pub use mapping::{
     failure_reason_string, failure_to_new_attempt, format_sqlite_datetime, game_config_to_record,
     outcome_to_new_attempt, MappingError,

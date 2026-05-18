@@ -1,9 +1,7 @@
-//! Minimal SDK-based test bot: picks a random direction each turn.
-//!
-//! Used by `tests/e2e.rs` as the live e2e smoke target. The new wire protocol
-//! requires hash-verified handshakes, so a hand-rolled subprocess bot would
-//! reimplement most of the SDK. Using the SDK here keeps the test honest:
-//! anything that breaks the SDK breaks this test, and vice versa.
+//! Minimal SDK-based test bot used by `tests/cli_run_one.rs`. Picks a random
+//! direction each turn. Going through the SDK (instead of hand-rolling a
+//! subprocess bot) keeps the test honest: anything that breaks the SDK
+//! breaks this test, and vice versa.
 
 use pyrat_sdk::{Bot, Context, Direction, GameState, Options};
 use rand::prelude::IndexedRandom;

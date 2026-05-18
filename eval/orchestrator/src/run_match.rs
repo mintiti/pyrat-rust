@@ -142,12 +142,12 @@ pub(crate) async fn run_match<D: Descriptor>(
             return;
         },
     };
-    // `_bot_procs` is held to function exit so subprocess children are
+    // `bot_procs` is held to function exit so subprocess children are
     // reaped via RAII on every path, including a dropped run future.
     let SetupOutput {
         players,
         identities,
-        bot_procs: _bot_procs,
+        bot_procs,
     } = setup;
 
     // ── 5. Pre-Match sink callback. Required failure here demotes to
@@ -249,7 +249,12 @@ pub(crate) async fn run_match<D: Descriptor>(
         }
     };
 
-    // ── 9. Build and publish the terminal event.
+    // ── 9. Build and publish the terminal event. Mark the game over so the
+    // bot-process exit monitor demotes subsequent child exits from warn to
+    // debug (post-match exits are expected).
+    if let Some(ref procs) = bot_procs {
+        procs.mark_game_over();
+    }
     let finished_at = SystemTime::now();
     let terminal = build_terminal(
         &inner,
@@ -523,7 +528,9 @@ async fn setup_players<D: Descriptor>(
                     expected.push((slot, agent_id.clone()));
                 }
             }
-            let procs = launch_bots(&bot_configs, port).map_err(SetupError::Launch)?;
+            let mut procs = launch_bots(&bot_configs, port).map_err(SetupError::Launch)?;
+            forward_bot_stderr(&mut procs);
+            procs.start_exit_monitor(tracing::Span::current());
             let result = tokio::select! {
                 biased;
                 _ = cancel.cancelled() => return Err(SetupError::Cancelled),
@@ -582,6 +589,38 @@ async fn setup_players<D: Descriptor>(
         identities,
         bot_procs,
     })
+}
+
+/// Drain each bot's piped stderr to `tracing::warn!` lines tagged with
+/// `agent_id`. Caps each bot at 200 lines so a runaway bot can't flood logs.
+/// Without this, `BotProcesses` holds the stderr handles but no task reads
+/// them — bot diagnostics are silently swallowed for the lifetime of the
+/// match.
+///
+/// Each forwarder is a blocking task (line reads on `ChildStderr` are
+/// synchronous) and exits naturally on EOF, which happens when the child
+/// exits — including when `BotProcesses::Drop` kills it on cancel paths.
+fn forward_bot_stderr(procs: &mut BotProcesses) {
+    use std::cmp::Ordering;
+    use std::io::BufRead;
+    const MAX_LINES: usize = 200;
+    for (agent_id, stderr) in procs.take_stderr_handles() {
+        let span = tracing::Span::current();
+        tokio::task::spawn_blocking(move || {
+            let _guard = span.entered();
+            let reader = std::io::BufReader::new(stderr);
+            for (i, line) in reader.lines().map_while(Result::ok).enumerate() {
+                match i.cmp(&MAX_LINES) {
+                    Ordering::Less => tracing::warn!(%agent_id, "{line}"),
+                    Ordering::Equal => tracing::warn!(
+                        %agent_id,
+                        "stderr output truncated after {MAX_LINES} lines"
+                    ),
+                    Ordering::Greater => {},
+                }
+            }
+        });
+    }
 }
 
 fn slot_for(idx: usize) -> PlayerSlot {

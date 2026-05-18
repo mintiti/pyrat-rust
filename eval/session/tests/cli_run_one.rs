@@ -1,18 +1,18 @@
-//! End-to-end subprocess test: runs pyrat-headless with test-bot as both players.
+//! End-to-end subprocess test: runs `pyrat-eval run-one` with `test-bot` as
+//! both players. Asserts the legacy JSON shape stays intact.
 
 use std::process::Command;
 
-// ── Tests ───────────────────────────────────────────
-
 #[test]
-fn headless_with_test_bots() {
-    let headless_bin = env!("CARGO_BIN_EXE_pyrat-headless");
+fn run_one_with_test_bots() {
+    let eval_bin = env!("CARGO_BIN_EXE_pyrat-eval");
     let test_bot_bin = env!("CARGO_BIN_EXE_test-bot");
 
     let output_dir = tempfile::tempdir().expect("failed to create temp dir");
     let output_path = output_dir.path().join("game_record.json");
 
-    let output = Command::new(headless_bin)
+    let output = Command::new(eval_bin)
+        .arg("run-one")
         .arg(test_bot_bin)
         .arg(test_bot_bin)
         .arg("--preset")
@@ -24,14 +24,14 @@ fn headless_with_test_bots() {
         .arg("--output")
         .arg(&output_path)
         .output()
-        .expect("failed to run pyrat-headless");
+        .expect("failed to run pyrat-eval");
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     assert!(
         output.status.success(),
-        "pyrat-headless exited with non-zero status.\nstdout: {stdout}\nstderr: {stderr}"
+        "pyrat-eval exited with non-zero status.\nstdout: {stdout}\nstderr: {stderr}"
     );
 
     // Stdout should contain a result line

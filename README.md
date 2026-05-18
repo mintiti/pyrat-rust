@@ -76,7 +76,7 @@ uv sync --all-extras
 ## See it run
 
 ```bash
-cargo run -p pyrat-headless -- \
+cargo run -p pyrat-eval -- run-one \
   "cd botpack/greedy && cargo run --release" \
   "cd botpack/smart-random && cargo run --release"
 ```

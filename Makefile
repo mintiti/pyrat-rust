@@ -1,6 +1,6 @@
 # PyRat Monorepo Makefile
 
-.PHONY: all engine gui examples test bench clean help sync lint lint-engine lint-sdk-python test-engine test-sdk-python test-wire test-host test-headless test-eval generate-wire fmt fmt-gui check check-gui dev-setup test-botpack
+.PHONY: all engine gui examples test bench clean help sync lint lint-engine lint-sdk-python test-engine test-sdk-python test-wire test-host test-eval-cli test-eval generate-wire fmt fmt-gui check check-gui dev-setup test-botpack
 
 # Default target
 all: sync engine
@@ -35,7 +35,7 @@ dev-setup:
 	pnpm --dir gui install
 
 # Testing
-test: test-engine test-wire test-host test-headless test-eval test-sdk-python
+test: test-engine test-wire test-host test-eval-cli test-eval test-sdk-python
 
 test-engine:
 	@echo "Running engine tests..."
@@ -50,9 +50,9 @@ test-host:
 	@echo "Running host library tests..."
 	cargo test -p pyrat-host
 
-test-headless:
-	@echo "Running headless runner tests..."
-	cargo test -p pyrat-headless
+test-eval-cli:
+	@echo "Running pyrat-eval CLI tests..."
+	cargo test -p pyrat-eval
 
 test-eval:
 	@echo "Running eval store tests..."
@@ -148,7 +148,7 @@ help:
 	@echo "  test-engine      - Run engine tests only"
 	@echo "  test-wire        - Run wire protocol tests"
 	@echo "  test-host        - Run host library tests"
-	@echo "  test-headless    - Run headless runner tests"
+	@echo "  test-eval-cli    - Run pyrat-eval CLI tests"
 	@echo "  test-eval        - Run eval store tests"
 	@echo "  test-sdk-python  - Run SDK Python tests"
 	@echo "  test-botpack     - Smoke test all botpack bots"

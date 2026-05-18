@@ -14,7 +14,7 @@ pyrat-sdk = { path = "../sdk/rust" }
 Run a match between two botpack bots:
 
 ```bash
-cargo run -p pyrat-headless -- \
+cargo run -p pyrat-eval -- run-one \
   "cd botpack/greedy && cargo run --release" \
   "cd botpack/smart-random && cargo run --release"
 ```
