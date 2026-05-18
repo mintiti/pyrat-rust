@@ -102,6 +102,14 @@ pub struct TournamentRecord {
     pub target_games_per_matchup: Option<u32>,
     /// Opaque planner-defined config. The store does not validate this field.
     pub params_json: String,
+    /// Content-hashed id of the `game_configs` row this tournament uses.
+    /// Validated at insert time and on resume.
+    pub game_config_id: String,
+    /// Seed fed into the planner's `matchup_seed` derivation. Bounded at
+    /// insert time to `<= i64::MAX` (see `NewTournament.tournament_seed`),
+    /// so this value round-trips bit-identically with what the caller
+    /// passed.
+    pub tournament_seed: u64,
     pub created_at: String,
 }
 
@@ -110,6 +118,17 @@ pub struct NewTournament {
     pub format: String,
     pub target_games_per_matchup: Option<u32>,
     pub params_json: String,
+    /// Must reference an existing `game_configs.id`. The store validates this
+    /// up front and returns `CreateTournamentError::GameConfigNotFound` for a
+    /// missing config.
+    pub game_config_id: String,
+    /// Tournament-level seed for `matchup_seed`. Must be `<= i64::MAX`:
+    /// SQLite's INTEGER column is signed, and a high-bit seed would not
+    /// round-trip without silent truncation. `create_tournament` rejects
+    /// out-of-range seeds with `CreateTournamentError::SeedOutOfRange`
+    /// rather than masking, so the value the caller passes always equals
+    /// the value the row stores.
+    pub tournament_seed: u64,
 }
 
 #[derive(Debug, Clone)]
@@ -219,6 +238,11 @@ pub enum EvalError {
 
     #[error("json error: {0}")]
     Json(#[from] serde_json::Error),
+
+    /// A migration refused to run because pre-flight state was unsafe to
+    /// upgrade automatically. The operator must manually backfill or wipe.
+    #[error("migration {version} blocked: {message}")]
+    MigrationBlocked { version: u32, message: String },
 }
 
 /// Tournament-context player insert errors.
@@ -242,6 +266,30 @@ pub enum DeletePlayerError {
     /// tournaments first, or bump the player id.
     #[error("player is referenced by tournament history (tournaments: {tournament_ids:?})")]
     InTournamentHistory { tournament_ids: Vec<TournamentId> },
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum CreateTournamentError {
+    #[error(transparent)]
+    Db(#[from] EvalError),
+
+    /// `NewTournament.game_config_id` does not reference an existing row in
+    /// `game_configs`. The caller must `ensure_game_config(...)` first.
+    #[error("game_config_id {0:?} does not exist in game_configs")]
+    GameConfigNotFound(String),
+
+    /// `NewTournament.tournament_seed` exceeds `i64::MAX`. SQLite's INTEGER
+    /// is signed, so values with the high bit set cannot round-trip
+    /// without truncation. Reject at the boundary instead of silently
+    /// masking so the caller's seed and the stored seed always agree.
+    #[error("tournament_seed {seed} exceeds i64::MAX; SQLite INTEGER is signed")]
+    SeedOutOfRange { seed: u64 },
+}
+
+impl From<rusqlite::Error> for CreateTournamentError {
+    fn from(e: rusqlite::Error) -> Self {
+        CreateTournamentError::Db(EvalError::Db(e))
+    }
 }
 
 #[derive(Debug, thiserror::Error)]

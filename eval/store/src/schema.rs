@@ -1,3 +1,16 @@
+// Migration 3 rebuilds the tournaments tables to add `game_config_id` and
+// `tournament_seed` columns. The session crate needs these so resume can
+// validate the planner against the stored tournament identity.
+//
+// SQLite's `ALTER TABLE ADD COLUMN` cannot add a `NOT NULL REFERENCES`
+// column (NOT NULL requires a non-NULL default; REFERENCES requires a NULL
+// default). The canonical alternative is to rebuild the table.
+//
+// Because the dependent tables (`match_attempts`, `tournament_players`) are
+// also empty when `tournaments` is empty (their FKs prevent orphan rows),
+// dropping + recreating all three in one transaction is safe with foreign
+// keys enabled. No PRAGMA toggle needed for the empty-table case.
+
 use rusqlite::Connection;
 
 use crate::EvalError;
@@ -93,7 +106,65 @@ CREATE INDEX idx_attempts_tournament ON match_attempts(tournament_id);
 CREATE INDEX idx_attempts_matchup    ON match_attempts(tournament_id, player1_id, player2_id);
 ";
 
-const MIGRATIONS: &[(u32, &str)] = &[(1, MIGRATION_1), (2, MIGRATION_2)];
+const MIGRATION_3: &str = "
+DROP TABLE match_attempts;
+DROP TABLE tournament_players;
+DROP TABLE tournaments;
+
+CREATE TABLE tournaments (
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    format                   TEXT    NOT NULL,
+    target_games_per_matchup INTEGER,
+    params_json              TEXT    NOT NULL,
+    game_config_id           TEXT    NOT NULL REFERENCES game_configs(id),
+    tournament_seed          INTEGER NOT NULL,
+    created_at               TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE tournament_players (
+    tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+    player_id     TEXT    NOT NULL REFERENCES players(id) ON DELETE RESTRICT,
+    slot          INTEGER NOT NULL,
+    PRIMARY KEY (tournament_id, player_id),
+    UNIQUE (tournament_id, slot)
+);
+
+CREATE TABLE match_attempts (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    tournament_id    INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+    game_config_id   TEXT    NOT NULL REFERENCES game_configs(id),
+    player1_id       TEXT    NOT NULL REFERENCES players(id) ON DELETE RESTRICT,
+    player2_id       TEXT    NOT NULL REFERENCES players(id) ON DELETE RESTRICT,
+    seed             INTEGER NOT NULL,
+    repetition_index INTEGER NOT NULL DEFAULT 0,
+    attempt_index    INTEGER NOT NULL,
+    status           TEXT    NOT NULL,
+    player1_score    REAL,
+    player2_score    REAL,
+    turns            INTEGER,
+    failure_reason   TEXT,
+    started_at       TEXT,
+    finished_at      TEXT NOT NULL,
+    UNIQUE (tournament_id, game_config_id, player1_id, player2_id, repetition_index, attempt_index),
+    CHECK (status IN ('success', 'failure')),
+    CHECK (
+        (status = 'success' AND player1_score IS NOT NULL
+                            AND player2_score IS NOT NULL
+                            AND turns          IS NOT NULL
+                            AND failure_reason IS NULL
+                            AND started_at     IS NOT NULL)
+     OR (status = 'failure' AND failure_reason IS NOT NULL
+                            AND player1_score  IS NULL
+                            AND player2_score  IS NULL
+                            AND turns          IS NULL)
+    )
+);
+
+CREATE INDEX idx_attempts_tournament ON match_attempts(tournament_id);
+CREATE INDEX idx_attempts_matchup    ON match_attempts(tournament_id, player1_id, player2_id);
+";
+
+const MIGRATIONS: &[(u32, &str)] = &[(1, MIGRATION_1), (2, MIGRATION_2), (3, MIGRATION_3)];
 
 pub fn initialize(conn: &mut Connection) -> Result<(), EvalError> {
     // PRAGMAs are per-connection. `foreign_keys` cannot be set inside a
@@ -103,10 +174,34 @@ pub fn initialize(conn: &mut Connection) -> Result<(), EvalError> {
     let current: u32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     for &(version, sql) in MIGRATIONS {
         if version > current {
+            // Pre-flight checks must run before opening the transaction so a
+            // refusal returns a typed error without a half-applied state.
+            pre_migration_check(conn, version)?;
+
             let tx = conn.transaction()?;
             tx.execute_batch(sql)?;
             tx.execute_batch(&format!("PRAGMA user_version = {version}"))?;
             tx.commit()?;
+        }
+    }
+    Ok(())
+}
+
+/// Per-migration sanity checks. Migration 3 drops and recreates the
+/// tournament tables; refuse if any pre-migration tournaments exist,
+/// since we cannot synthesize `game_config_id` or `tournament_seed`
+/// for them.
+fn pre_migration_check(conn: &Connection, version: u32) -> Result<(), EvalError> {
+    if version == 3 {
+        let count: i64 = conn.query_row("SELECT COUNT(*) FROM tournaments", [], |r| r.get(0))?;
+        if count > 0 {
+            return Err(EvalError::MigrationBlocked {
+                version,
+                message:
+                    "tournaments table contains pre-migration rows; refusing to silently corrupt \
+                     (no automatic backfill for game_config_id and tournament_seed)"
+                        .into(),
+            });
         }
     }
     Ok(())

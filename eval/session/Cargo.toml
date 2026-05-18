@@ -1,0 +1,30 @@
+[package]
+name = "pyrat-eval"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+pyrat-orchestrator = { path = "../orchestrator" }
+pyrat-eval-store = { path = "../store" }
+pyrat-host = { path = "../../server/host" }
+pyrat-rust = { path = "../../engine", default-features = false }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+async-trait = "0.1"
+thiserror = "2"
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+parking_lot = "0.12"
+sha2 = "0.10"
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tempfile = "3"
+pyrat-bot-api = { path = "../../sdk/bot-api" }
+pyrat-protocol = { path = "../../server/protocol" }
