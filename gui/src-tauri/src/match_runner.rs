@@ -151,8 +151,8 @@ pub async fn run_match(
         let mut launched = launch_bots(&bot_configs, port)?;
 
         // Drain bot stderr so the OS pipe buffer doesn't fill and block the
-        // bot mid-write, and so we actually see panics / SDK errors. Mirrors
-        // the pattern in headless main.rs.
+        // bot mid-write, and so we actually see panics / SDK errors. Parallel
+        // to `forward_bot_stderr` in eval/orchestrator/src/run_match.rs.
         for (agent_id, stderr) in launched.take_stderr_handles() {
             tokio::task::spawn_blocking(move || {
                 use std::io::BufRead;
