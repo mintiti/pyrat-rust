@@ -60,8 +60,11 @@ jobs:
     - name: Run host tests
       run: cargo test -p pyrat-host --verbose
 
-    - name: Run headless tests
-      run: cargo test -p pyrat-headless --verbose
+    - name: Run pyrat-eval CLI tests
+      run: cargo test -p pyrat-eval --verbose
+
+    - name: Run orchestrator tests
+      run: cargo test -p pyrat-orchestrator --verbose
 
     - name: Run eval store tests
       run: cargo test -p pyrat-eval-store --verbose

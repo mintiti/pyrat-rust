@@ -76,7 +76,7 @@ uv sync --all-extras
 ## See it run
 
 ```bash
-cargo run -p pyrat-headless -- \
+cargo run -p pyrat-eval -- run-one \
   "cd botpack/greedy && cargo run --release" \
   "cd botpack/smart-random && cargo run --release"
 ```
@@ -95,7 +95,8 @@ Full rules in the [engine README](engine/).
 | -------------------- | -------------------------------------------------------------------------------------------- |
 | [`engine/`](engine/) | Game engine. Rust core, Python bindings, PettingZoo env                                      |
 | [`sdk/`](sdk/)       | Bot development kits for [Python](sdk/python/) and [Rust](sdk/rust/), more languages to come |
-| [`server/`](server/) | Match infrastructure: hosting, headless runner, wire protocol                                |
+| [`server/`](server/) | Match infrastructure: hosting library, wire protocol                                         |
+| [`eval/`](eval/)     | Evaluation stack: `pyrat-eval` CLI, orchestrator, result store                               |
 | [`gui/`](gui/)       | Desktop GUI for running and watching matches                                                 |
 
 Run `make help` for the full command list.

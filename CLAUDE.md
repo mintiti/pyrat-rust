@@ -8,11 +8,13 @@ PyRat is a monorepo containing the complete PyRat ecosystem for a competitive ma
 
 - **engine/**: Rust game engine with PyO3 bindings - core game logic and Python API
 - **server/host/**: Match hosting library — setup, turn loop, event streaming (Rust, `pyrat-host` crate)
-- **server/headless/**: Headless match runner binary — launches bots, runs a match, outputs JSON (`pyrat-headless` crate)
 - **server/wire/**: FlatBuffers schema and generated types, shared by host and SDKs (`pyrat-wire` crate)
 - **server/schema/**: FlatBuffers schema source and codegen script
 - **sdk/rust/**: Rust bot SDK (`pyrat-sdk` crate)
 - **sdk/python/**: Python bot SDK (`pyrat_sdk` package)
+- **eval/orchestrator/**: Concurrent match executor (`pyrat-orchestrator` crate)
+- **eval/store/**: SQLite-backed result store + Elo computation (`pyrat-eval-store` crate)
+- **eval/session/**: Eval session crate + `pyrat-eval` CLI (`run-one` replaces the former `pyrat-headless`)
 
 This monorepo structure enables clean separation of concerns while maintaining a cohesive ecosystem.
 
@@ -132,7 +134,7 @@ make test          # Run all tests
 make test-engine   # Run engine tests only
 make test-wire     # Run wire protocol tests
 make test-host     # Run host library tests
-make test-headless # Run headless runner tests
+make test-eval-cli # Run pyrat-eval CLI tests
 make test-sdk-python  # Run SDK Python tests
 make bench            # Run benchmarks
 
@@ -141,7 +143,7 @@ cargo build -p pyrat-rust --release
 cargo test -p pyrat-rust --lib --no-default-features
 cargo test -p pyrat-wire
 cargo test -p pyrat-host
-cargo test -p pyrat-headless
+cargo test -p pyrat-eval
 cargo test -p pyrat-sdk
 cargo bench -p pyrat-rust --bench game_benchmarks
 
@@ -151,13 +153,13 @@ cd engine && uv run maturin develop --release
 
 ### Running Games
 ```bash
-# Run a headless match between two Rust bots
-cargo run -p pyrat-headless -- \
+# Run a single match between two Rust bots
+cargo run -p pyrat-eval -- run-one \
     "cd botpack/greedy && cargo run --release" \
     "cd botpack/smart-random && cargo run --release"
 
 # Run a match with Python bots
-cargo run -p pyrat-headless -- \
+cargo run -p pyrat-eval -- run-one \
     "cd botpack/greedy-py && uv run python bot.py" \
     "cd botpack/smart-random-py && uv run python bot.py"
 ```
@@ -273,11 +275,10 @@ Match hosting library. Manages bot connections, setup handshake, and the turn lo
 
 **Key pattern:** The host is a pipe — it streams `MatchEvent`s through a channel. Consumers decide what to record or display.
 
-### Headless Runner (`server/headless/`)
-CLI binary that launches bot subprocesses, runs a match via the host library, and optionally writes a JSON game record:
-- `main.rs` — CLI parsing, bot launch, match orchestration, JSON output
+### Eval CLI (`eval/session/`)
+Single binary `pyrat-eval` with subcommands. The `run-one` subcommand launches two bot subprocesses, runs a match via the orchestrator + host library, and optionally writes a legacy-shape JSON game record. Replaced the former `pyrat-headless` crate.
 
-Command: `cargo run -p pyrat-headless -- bot1_cmd bot2_cmd`
+Command: `cargo run -p pyrat-eval -- run-one bot1_cmd bot2_cmd`
 
 ### SDKs
 

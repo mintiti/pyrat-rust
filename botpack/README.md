@@ -9,7 +9,7 @@ Rust bots need the [Rust toolchain](https://rustup.rs/). Python bots need [uv](h
 Pick a bot and play yours against it. From the repo root:
 
 ```bash
-cargo run -p pyrat-headless -- \
+cargo run -p pyrat-eval -- run-one \
   "your_bot_command" \
   "cd botpack/greedy && cargo run --release"
 ```

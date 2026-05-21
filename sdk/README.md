@@ -196,16 +196,16 @@ Four types: **Spin** (bounded int), **Check** (bool), **Combo** (constrained str
 
 ## Running matches
 
-The headless runner launches two bots as subprocesses and runs them against each other:
+The `pyrat-eval run-one` CLI launches two bots as subprocesses and runs them against each other:
 
 ```bash
 # Rust vs Rust
-cargo run -p pyrat-headless -- \
+cargo run -p pyrat-eval -- run-one \
   "cargo run -p pyrat-sdk --example greedy" \
   "cargo run -p pyrat-sdk --example search"
 
 # Python vs Python
-cargo run -p pyrat-headless -- \
+cargo run -p pyrat-eval -- run-one \
   "uv run python sdk/python/examples/greedy.py" \
   "uv run python sdk/python/examples/search.py"
 ```

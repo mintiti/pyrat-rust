@@ -16,7 +16,7 @@ cd sdk/python && uv run maturin develop --release && cd ../..
 Run a match between two botpack bots:
 
 ```bash
-cargo run -p pyrat-headless -- \
+cargo run -p pyrat-eval -- run-one \
   "cd botpack/greedy-py && uv run python bot.py" \
   "cd botpack/smart-random-py && uv run python bot.py"
 ```

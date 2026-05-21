@@ -3014,6 +3014,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "clap",
  "parking_lot",
  "pyrat-bot-api",
  "pyrat-eval-store",
@@ -3021,6 +3022,8 @@ dependencies = [
  "pyrat-orchestrator",
  "pyrat-protocol",
  "pyrat-rust",
+ "pyrat-sdk",
+ "rand 0.10.0",
  "serde",
  "serde_json",
  "sha2",
@@ -3029,6 +3032,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -3074,23 +3078,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "walkdir",
-]
-
-[[package]]
-name = "pyrat-headless"
-version = "0.1.0"
-dependencies = [
- "clap",
- "pyrat-host",
- "pyrat-rust",
- "pyrat-sdk",
- "rand 0.10.0",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

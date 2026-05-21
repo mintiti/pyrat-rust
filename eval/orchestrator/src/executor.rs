@@ -480,13 +480,16 @@ async fn handle_joined<D: Descriptor>(
                 players: None,
                 durable_record: false,
             };
+            // Best-effort cleanup of any stateful sink buffers populated
+            // by the dead task before it went down. Run before publishing
+            // so consumers observing `MatchFailed` see a fully-settled
+            // state — same contract as the non-panic terminal paths in
+            // `run_match::build_terminal`. Errors are ignored;
+            // composite/optional sinks log them through their own paths.
+            let _ = inner.sink.on_match_abandoned(match_id).await;
             let _ = inner
                 .publish_lifecycle(OrchestratorEvent::MatchFailed { failure })
                 .await;
-            // Best-effort cleanup of any stateful sink buffers populated
-            // by the dead task before it went down. Errors are ignored;
-            // composite/optional sinks log them through their own paths.
-            let _ = inner.sink.on_match_abandoned(match_id).await;
         },
     }
 }
