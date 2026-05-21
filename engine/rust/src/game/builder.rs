@@ -400,6 +400,21 @@ impl GameConfig {
             .build()
     }
 
+    /// Override the max_turns on an already-built config.
+    ///
+    /// Useful for callers that obtained the config from a preset or a shortcut
+    /// like [`Self::classic`] and want to change the turn limit without
+    /// rebuilding the maze, players, and cheese strategies.
+    ///
+    /// # Panics
+    /// Panics if `n == 0`.
+    #[must_use]
+    pub fn with_max_turns(mut self, n: u16) -> Self {
+        assert!(n > 0, "max_turns must be > 0");
+        self.max_turns = n;
+        self
+    }
+
     /// Create a `GameState` from this config.
     ///
     /// `seed` controls all random generation. `None` uses OS entropy.
@@ -815,5 +830,20 @@ mod tests {
         assert_eq!(game.height, 3);
         assert_eq!(game.cheese.total_cheese(), 1);
         assert!(game.mud.is_empty());
+    }
+
+    #[test]
+    fn config_with_max_turns_overrides() {
+        let config = GameConfig::classic(11, 9, 7).with_max_turns(50);
+        assert_eq!(config.max_turns(), 50);
+
+        let config = GameConfig::preset("tiny").unwrap().with_max_turns(42);
+        assert_eq!(config.max_turns(), 42);
+    }
+
+    #[test]
+    #[should_panic(expected = "max_turns must be > 0")]
+    fn config_with_max_turns_zero_panics() {
+        let _ = GameConfig::classic(11, 9, 7).with_max_turns(0);
     }
 }
