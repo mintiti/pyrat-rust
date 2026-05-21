@@ -4,6 +4,7 @@
 //! - `run-one`: runs a single match between two subprocess bots, optionally
 //!   writing a JSON game record.
 
+use std::num::NonZeroU16;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -53,8 +54,9 @@ struct RunOneArgs {
     cheese: u16,
     #[arg(long)]
     seed: Option<u64>,
-    #[arg(long, default_value_t = 300)]
-    max_turns: u16,
+    /// Override max_turns (defaults to the preset's value, or 300 for --width/--height).
+    #[arg(long)]
+    max_turns: Option<NonZeroU16>,
     #[arg(long, default_value_t = 1000)]
     move_timeout_ms: u32,
     #[arg(long, default_value_t = 10000)]
@@ -63,7 +65,7 @@ struct RunOneArgs {
     startup_timeout_ms: u32,
     #[arg(long, default_value_t = 5000)]
     configure_timeout_ms: u32,
-    /// Named preset: tiny, small, medium, large, huge
+    /// Named preset: tiny, small, medium, large, huge, open, asymmetric
     #[arg(long)]
     preset: Option<String>,
     /// Write game record JSON to this file
@@ -75,11 +77,15 @@ struct RunOneArgs {
 }
 
 fn build_game_config(args: &RunOneArgs) -> Result<GameConfig, String> {
-    if let Some(ref preset) = args.preset {
-        GameConfig::preset(preset)
+    let mut cfg = if let Some(ref preset) = args.preset {
+        GameConfig::preset(preset)?
     } else {
-        Ok(GameConfig::classic(args.width, args.height, args.cheese))
+        GameConfig::classic(args.width, args.height, args.cheese)
+    };
+    if let Some(n) = args.max_turns {
+        cfg = cfg.with_max_turns(n.get());
     }
+    Ok(cfg)
 }
 
 fn build_orchestrator_config(args: &RunOneArgs) -> OrchestratorConfig {
@@ -177,10 +183,19 @@ async fn main() -> ExitCode {
 async fn run_one(args: RunOneArgs) -> Result<(), Box<dyn std::error::Error>> {
     let seed = args.seed.unwrap_or_else(rand::random::<u64>);
     let game_config = build_game_config(&args)?;
+    // Fail fast before launching bots: surface invalid game configs (e.g.
+    // too many cheese for the board) without spawning subprocesses. The
+    // orchestrator re-runs `create()` with the same seed inside run_match;
+    // duplicated work is one maze/cheese gen.
+    let total_cheese = game_config
+        .create(Some(seed))
+        .map_err(|e| format!("invalid game config: {e}"))?
+        .total_cheese();
     info!(
         width = game_config.width(),
         height = game_config.height(),
         max_turns = game_config.max_turns(),
+        cheese = total_cheese,
         seed,
         "game configured"
     );

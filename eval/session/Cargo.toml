@@ -3,6 +3,7 @@ name = "pyrat-eval"
 version = "0.1.0"
 edition = "2021"
 publish = false
+default-run = "pyrat-eval"
 
 [lints]
 workspace = true
