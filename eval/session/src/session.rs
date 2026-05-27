@@ -324,8 +324,7 @@ impl EvalSession {
 
         validate_planner_against_stored_spec(&planner, &tournament_record, &tournament_players)?;
 
-        let store_sink: Arc<dyn MatchSink<EvalMatchDescriptor>> =
-            Arc::new(StoreSink::new(store));
+        let store_sink: Arc<dyn MatchSink<EvalMatchDescriptor>> = Arc::new(StoreSink::new(store));
         let mut sinks = Vec::with_capacity(1 + extra_sinks.len());
         sinks.push((SinkRole::Required, store_sink));
         sinks.extend(extra_sinks);

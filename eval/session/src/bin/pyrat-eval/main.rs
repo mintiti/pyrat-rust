@@ -12,7 +12,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::Duration;
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
@@ -39,6 +39,153 @@ struct Cli {
 enum Command {
     /// Run a single match between two bot commands.
     RunOne(RunOneArgs),
+    /// Tournament operations.
+    Tournament(Box<TournamentArgs>),
+}
+
+#[derive(Args)]
+struct TournamentArgs {
+    #[command(subcommand)]
+    command: TournamentSubcommand,
+}
+
+#[derive(Subcommand)]
+enum TournamentSubcommand {
+    /// Run a tournament: round-robin or gauntlet.
+    Run(RunArgs),
+}
+
+/// CLI args for `pyrat-eval tournament run`.
+///
+/// Every override field is `Option<T>` with no clap default. The
+/// distinction between "user passed --games 5" and "user did not pass
+/// --games" is what lets the resolver layer precedence (defaults → config
+/// → flags). If clap filled defaults here, the resolver would silently
+/// shadow config values.
+///
+/// `--bot id=working_dir` is shorthand: command defaults to `cargo run
+/// --release`. For arbitrary commands (Python, env vars, custom flags),
+/// use a TOML config with `command = "..."` instead.
+#[derive(Args)]
+#[allow(dead_code)] // Wired across Chunks 4-7; remove once run_tournament fills in.
+struct RunArgs {
+    /// Bot shorthand: `id=working_dir`. Defaults command to `cargo run --release`.
+    /// Repeatable. For arbitrary commands, use --config with a TOML.
+    #[arg(long = "bot", value_parser = parse_bot_arg)]
+    bots: Vec<BotArg>,
+
+    /// `round-robin` or `gauntlet`. Underscore form also accepted.
+    #[arg(long)]
+    format: Option<String>,
+
+    /// Target games per matchup (round-robin) or per opponent (gauntlet).
+    #[arg(long)]
+    games: Option<u32>,
+
+    /// Max consecutive failures per matchup before the planner stops retrying.
+    #[arg(long)]
+    max_failures: Option<u32>,
+
+    /// Max matches in flight at once.
+    #[arg(long)]
+    max_parallel: Option<u32>,
+
+    /// Deterministic tournament seed. Implicit (random) by default.
+    #[arg(long)]
+    seed: Option<u64>,
+
+    /// Load a TOML config file. Flags override config values.
+    #[arg(long)]
+    config: Option<PathBuf>,
+
+    /// Materialize the resolved tournament back to a TOML file before running.
+    /// Mutually exclusive with `--resume`.
+    #[arg(long, conflicts_with = "resume")]
+    save_as: Option<PathBuf>,
+
+    /// Resume an existing tournament by id. Mutually exclusive with `--save-as`.
+    #[arg(long)]
+    resume: Option<i64>,
+
+    /// Write a Level-A results JSON summary to this path after the tournament finishes.
+    #[arg(long)]
+    results_json: Option<PathBuf>,
+
+    /// SQLite store path. Default: `<config-stem>.db` next to --config, else `ratings.db` in CWD.
+    #[arg(long)]
+    store_path: Option<PathBuf>,
+
+    /// Directory to write per-match replay JSON. Default: no replay sink.
+    #[arg(long)]
+    replay_dir: Option<PathBuf>,
+
+    // ── Game config (mutually exclusive: preset OR width+height+cheese) ──
+    /// Named preset: tiny, small, medium, large, huge, open, asymmetric.
+    #[arg(long)]
+    preset: Option<String>,
+    #[arg(long)]
+    width: Option<u8>,
+    #[arg(long)]
+    height: Option<u8>,
+    #[arg(long)]
+    cheese: Option<u16>,
+    /// Symmetric maze (only valid with --width/--height/--cheese; presets pin their own).
+    #[arg(long)]
+    symmetric: Option<bool>,
+    /// Override max_turns (defaults to preset's value, or 300 for custom dims).
+    #[arg(long)]
+    max_turns: Option<NonZeroU16>,
+
+    // ── Timing overrides ──
+    #[arg(long)]
+    move_timeout_ms: Option<u32>,
+    #[arg(long)]
+    preprocessing_timeout_ms: Option<u32>,
+    #[arg(long)]
+    startup_timeout_ms: Option<u32>,
+    #[arg(long)]
+    configure_timeout_ms: Option<u32>,
+    #[arg(long)]
+    network_grace_ms: Option<u32>,
+
+    // ── Gauntlet selection ──
+    /// Challenger id (gauntlet format only).
+    #[arg(long)]
+    challenger: Option<String>,
+    /// Opponent id (gauntlet format only). Repeatable.
+    #[arg(long = "opponent")]
+    opponents: Vec<String>,
+
+    // ── Elo anchor overrides ──
+    /// Anchor player id for Elo. Defaults to first player (round-robin) or challenger (gauntlet).
+    #[arg(long)]
+    anchor: Option<String>,
+    /// Anchor Elo rating. Default: 1000.0.
+    #[arg(long)]
+    anchor_elo: Option<f64>,
+}
+
+#[derive(Clone, Debug)]
+#[allow(dead_code)] // Wired in Chunk 4.
+struct BotArg {
+    id: String,
+    working_dir: PathBuf,
+}
+
+fn parse_bot_arg(raw: &str) -> Result<BotArg, String> {
+    let (id, working_dir) = raw
+        .split_once('=')
+        .ok_or_else(|| format!("expected `id=working_dir`, got `{raw}`"))?;
+    if id.is_empty() {
+        return Err(format!("empty bot id in `{raw}`"));
+    }
+    if working_dir.is_empty() {
+        return Err(format!("empty working_dir in `{raw}`"));
+    }
+    Ok(BotArg {
+        id: id.into(),
+        working_dir: PathBuf::from(working_dir),
+    })
 }
 
 #[derive(Parser)]
@@ -172,6 +319,9 @@ async fn main() -> ExitCode {
     let cli = Cli::parse();
     let result = match cli.command {
         Command::RunOne(args) => run_one(args).await,
+        Command::Tournament(args) => match args.command {
+            TournamentSubcommand::Run(args) => run_tournament(args).await,
+        },
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -231,5 +381,46 @@ async fn run_one(args: RunOneArgs) -> Result<(), Box<dyn std::error::Error>> {
             Ok(())
         },
         Err(failure) => Err(format!("Match failed: {:?}", failure.reason).into()),
+    }
+}
+
+/// Tournament-run executor. Stub for Chunk 3 — body lands across
+/// Chunks 4–7 (resolver, execution, save-as, standings).
+async fn run_tournament(_args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
+    Err("tournament run is not implemented yet; landing across Chunks 4–7".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_bot_arg_splits_on_first_equals() {
+        let parsed = parse_bot_arg("greedy=botpack/greedy").unwrap();
+        assert_eq!(parsed.id, "greedy");
+        assert_eq!(parsed.working_dir, PathBuf::from("botpack/greedy"));
+    }
+
+    #[test]
+    fn parse_bot_arg_allows_equals_in_working_dir() {
+        let parsed = parse_bot_arg("bot=/tmp/path=with=equals").unwrap();
+        assert_eq!(parsed.id, "bot");
+        assert_eq!(parsed.working_dir, PathBuf::from("/tmp/path=with=equals"));
+    }
+
+    #[test]
+    fn parse_bot_arg_rejects_missing_equals() {
+        let err = parse_bot_arg("just-an-id").unwrap_err();
+        assert!(err.contains("expected `id=working_dir`"));
+    }
+
+    #[test]
+    fn parse_bot_arg_rejects_empty_id_or_dir() {
+        assert!(parse_bot_arg("=botpack/x")
+            .unwrap_err()
+            .contains("empty bot id"));
+        assert!(parse_bot_arg("a=")
+            .unwrap_err()
+            .contains("empty working_dir"));
     }
 }
