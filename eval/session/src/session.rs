@@ -286,18 +286,57 @@ impl EvalSession {
         elo_options: EloOptions,
         session_config: SessionConfig,
     ) -> Result<Self, SessionError> {
+        Self::start_with_extra_sinks(
+            store,
+            mode,
+            planner,
+            orch_config,
+            elo_options,
+            session_config,
+            Vec::new(),
+        )
+        .await
+    }
+
+    /// Start a session with caller-supplied extra sinks alongside the
+    /// always-present `StoreSink`.
+    ///
+    /// Sink policy: `StoreSink` is constructed by the session, marked
+    /// `SinkRole::Required`, and prepended. `extra_sinks` are appended in
+    /// the order given. Required-vs-Optional semantics flow through to
+    /// `CompositeSink` — Required sink failures abort the tournament,
+    /// Optional sink failures are logged.
+    ///
+    /// Used by the CLI to add an optional `ReplaySink` for forensic JSON
+    /// dumps, and by the library-level e2e smoke test. Behaves identically
+    /// to [`Self::start`] when `extra_sinks` is empty.
+    pub async fn start_with_extra_sinks<P: Planner + 'static>(
+        store: Arc<Mutex<EvalStore>>,
+        mode: SessionMode,
+        planner: P,
+        orch_config: OrchestratorConfig,
+        elo_options: EloOptions,
+        session_config: SessionConfig,
+        extra_sinks: Vec<(SinkRole, Arc<dyn MatchSink<EvalMatchDescriptor>>)>,
+    ) -> Result<Self, SessionError> {
         let (tournament_record, tournament_players, initial_state) =
             reconstruct_tournament_state(store.clone(), mode.tournament_id).await?;
 
         validate_planner_against_stored_spec(&planner, &tournament_record, &tournament_players)?;
 
-        Self::launch(
-            store,
+        let store_sink: Arc<dyn MatchSink<EvalMatchDescriptor>> =
+            Arc::new(StoreSink::new(store));
+        let mut sinks = Vec::with_capacity(1 + extra_sinks.len());
+        sinks.push((SinkRole::Required, store_sink));
+        sinks.extend(extra_sinks);
+
+        Self::launch_with_sinks(
             initial_state,
             planner,
             orch_config,
             elo_options,
             session_config,
+            sinks,
         )
     }
 
@@ -405,27 +444,6 @@ async fn await_run_loop(h: JoinHandle<Result<(), SessionError>>) -> Result<(), S
 }
 
 impl EvalSession {
-    fn launch<P: Planner + 'static>(
-        store: Arc<Mutex<EvalStore>>,
-        initial_state: TournamentState,
-        planner: P,
-        orch_config: OrchestratorConfig,
-        elo_options: EloOptions,
-        session_config: SessionConfig,
-    ) -> Result<Self, SessionError> {
-        let store_sink: Arc<dyn MatchSink<EvalMatchDescriptor>> =
-            Arc::new(StoreSink::new(store.clone()));
-        let sinks = vec![(SinkRole::Required, store_sink)];
-        Self::launch_with_sinks(
-            initial_state,
-            planner,
-            orch_config,
-            elo_options,
-            session_config,
-            sinks,
-        )
-    }
-
     /// Test seam: build the orchestrator from caller-supplied sinks instead
     /// of the default `StoreSink`. Lets unit tests plant a deliberately
     /// failing sink to exercise [`SessionConfig::max_consecutive_sink_flush_failures`].
