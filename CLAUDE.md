@@ -14,7 +14,7 @@ PyRat is a monorepo containing the complete PyRat ecosystem for a competitive ma
 - **sdk/python/**: Python bot SDK (`pyrat_sdk` package)
 - **eval/orchestrator/**: Concurrent match executor (`pyrat-orchestrator` crate)
 - **eval/store/**: SQLite-backed result store + Elo computation (`pyrat-eval-store` crate)
-- **eval/session/**: Eval session crate + `pyrat-eval` CLI (`run-one` replaces the former `pyrat-headless`)
+- **eval/session/**: Eval session crate + `pyrat-eval` CLI (`run-one` for single matches, `tournament run` for round-robin / gauntlet with Elo standings)
 
 This monorepo structure enables clean separation of concerns while maintaining a cohesive ecosystem.
 
@@ -162,7 +162,24 @@ cargo run -p pyrat-eval -- run-one \
 cargo run -p pyrat-eval -- run-one \
     "cd botpack/greedy-py && uv run python bot.py" \
     "cd botpack/smart-random-py && uv run python bot.py"
+
+# Run a tournament (round-robin) from flags
+cargo run -p pyrat-eval -- tournament run \
+    --bot greedy=botpack/greedy \
+    --bot smart_random=botpack/smart-random \
+    --format round-robin --games 5
+
+# Run a tournament from a TOML config (committed spec)
+cargo run -p pyrat-eval -- tournament run --config ladder.toml
+
+# Materialize a flag-driven tournament to TOML for reuse / source control
+cargo run -p pyrat-eval -- tournament run --bot a=path --bot b=path --save-as spec.toml
+
+# Resume an existing tournament by id (mutually exclusive with --save-as)
+cargo run -p pyrat-eval -- tournament run --config ladder.toml --resume 7
 ```
+
+The `tournament run` subcommand is library-first: the `pyrat-eval` crate exports `EvalSession`, `RoundRobinPlanner`, `GauntletPlanner`, etc., for GUI / alpharat / other Rust consumers. The CLI is an automation surface over it. See `.mt/ux/intent.md` for the north star and the consumer breakdown.
 
 ### CI Debugging
 ```bash
@@ -276,9 +293,9 @@ Match hosting library. Manages bot connections, setup handshake, and the turn lo
 **Key pattern:** The host is a pipe — it streams `MatchEvent`s through a channel. Consumers decide what to record or display.
 
 ### Eval CLI (`eval/session/`)
-Single binary `pyrat-eval` with subcommands. The `run-one` subcommand launches two bot subprocesses, runs a match via the orchestrator + host library, and optionally writes a legacy-shape JSON game record. Replaced the former `pyrat-headless` crate.
-
-Command: `cargo run -p pyrat-eval -- run-one bot1_cmd bot2_cmd`
+Single binary `pyrat-eval` with subcommands:
+- `run-one bot1_cmd bot2_cmd`: launches two bot subprocesses, runs a match via the orchestrator + host library, and optionally writes a legacy-shape JSON game record. Replaced the former `pyrat-headless` crate.
+- `tournament run`: round-robin or gauntlet between N bots. Library-first design — the CLI is a surface over `EvalSession`. Builds a `TournamentSpec` from flags (`--bot id=working_dir`) or a TOML config (`--config foo.toml`), resolves precedence (defaults → config → flags), and drives the session to completion. Supports `--save-as` (materialize the resolved spec for source control), `--resume <id>` (continue an aborted tournament; reuses stored seed and game_config_id), `--results-json` (Level-A summary), and `--replay-dir` (per-match forensic JSON via `ReplaySink`).
 
 ### SDKs
 
