@@ -14,7 +14,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use pyrat_eval::ResolvedPlayer;
-use pyrat_eval_store::{EloOptions, TournamentId};
+use pyrat_eval_store::TournamentId;
 use pyrat_orchestrator::PlayerSpec;
 
 use crate::game_config_build::ResolvedGameChoice;
@@ -79,7 +79,8 @@ pub struct ResolvedRun {
     pub seed: SeedSource,
     pub store_path: PathBuf,
     pub replay_dir: Option<PathBuf>,
-    pub elo: EloOptions,
+    pub anchor: String,
+    pub anchor_elo: f64,
     pub results_json: Option<PathBuf>,
     pub save_as: Option<PathBuf>,
     pub resume: Option<TournamentId>,
@@ -208,7 +209,7 @@ pub fn resolve_loaded(
     let explicit_seed = args.seed.or(cfg.seed);
     let seed = resolve_seed(explicit_seed, resume.is_some(), seed_gen)?;
 
-    let elo = resolve_elo(&args, &cfg, &players, &format)?;
+    let (anchor, anchor_elo) = resolve_elo_inputs(&args, &cfg, &players, &format)?;
 
     let store_path = resolve_store_path(
         args.store_path.as_deref(),
@@ -240,7 +241,8 @@ pub fn resolve_loaded(
         seed,
         store_path,
         replay_dir,
-        elo,
+        anchor,
+        anchor_elo,
         results_json,
         save_as,
         resume,
@@ -461,12 +463,12 @@ fn resolve_seed(
     }
 }
 
-fn resolve_elo(
+fn resolve_elo_inputs(
     args: &RunArgs,
     cfg: &TournamentConfig,
     players: &[ResolvedPlayer],
     format: &FormatChoice,
-) -> Result<EloOptions, ResolveError> {
+) -> Result<(String, f64), ResolveError> {
     let cfg_elo = cfg.elo.clone().unwrap_or_default();
     let anchor = args
         .anchor
@@ -486,7 +488,7 @@ fn resolve_elo(
         .anchor_elo
         .or(cfg_elo.anchor_elo)
         .unwrap_or(DEFAULT_ANCHOR_ELO);
-    Ok(EloOptions::new(anchor).anchor_elo(anchor_elo))
+    Ok((anchor, anchor_elo))
 }
 
 fn resolve_store_path(
@@ -839,10 +841,8 @@ mod tests {
         let args = args_with_two_bots();
         let mut gen = fixed_seed_gen(0);
         let resolved = resolve_loaded(args, None, &mut gen).expect("resolve");
-        // EloOptions has private fields; the only way to assert is via
-        // Display/Debug. Use Debug.
-        let dbg = format!("{:?}", resolved.elo);
-        assert!(dbg.contains("alpha"), "expected anchor `alpha`, got: {dbg}");
+        assert_eq!(resolved.anchor, "alpha");
+        assert_eq!(resolved.anchor_elo, DEFAULT_ANCHOR_ELO);
     }
 
     #[test]
@@ -853,8 +853,7 @@ mod tests {
         args.opponents = vec!["alpha".into()];
         let mut gen = fixed_seed_gen(0);
         let resolved = resolve_loaded(args, None, &mut gen).expect("resolve");
-        let dbg = format!("{:?}", resolved.elo);
-        assert!(dbg.contains("beta"), "expected anchor `beta`, got: {dbg}");
+        assert_eq!(resolved.anchor, "beta");
     }
 
     #[test]
