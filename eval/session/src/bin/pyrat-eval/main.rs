@@ -5,28 +5,31 @@
 //!   writing a JSON game record.
 
 mod game_config_build;
+mod orchestrator_config_build;
 mod tournament_config;
 mod tournament_resolve;
+mod tournament_run;
 
+use clap::{Args, Parser, Subcommand};
 use std::num::NonZeroU16;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::time::Duration;
-
-use clap::{Args, Parser, Subcommand};
 use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 use pyrat::game::builder::GameConfig;
 
 use pyrat_eval::LegacyRecordSink;
-use pyrat_host::match_host::{MatchResult, PlayingConfig, SetupTiming};
+use pyrat_host::match_host::MatchResult;
 use pyrat_host::wire::{GameResult, TimingMode};
 use pyrat_orchestrator::{
     AdHocDescriptor, DriverEvent, MatchSink, Matchup, NoOpSink, Orchestrator, OrchestratorConfig,
     PlayerSpec, Timing,
 };
+
+use crate::game_config_build::ResolvedGameChoice;
+use crate::tournament_resolve::ResolvedTiming;
 
 // ── CLI ──────────────────────────────────────────────
 
@@ -227,32 +230,31 @@ struct RunOneArgs {
 }
 
 fn build_game_config(args: &RunOneArgs) -> Result<GameConfig, String> {
-    let mut cfg = if let Some(ref preset) = args.preset {
-        GameConfig::preset(preset)?
-    } else {
-        GameConfig::classic(args.width, args.height, args.cheese)
+    let choice = match &args.preset {
+        Some(preset) => ResolvedGameChoice::Preset {
+            name: preset.clone(),
+            max_turns_override: args.max_turns,
+        },
+        None => ResolvedGameChoice::Custom {
+            width: args.width,
+            height: args.height,
+            cheese: args.cheese,
+            symmetric: true,
+            max_turns: args.max_turns,
+        },
     };
-    if let Some(n) = args.max_turns {
-        cfg = cfg.with_max_turns(n.get());
-    }
-    Ok(cfg)
+    game_config_build::build_game_config(&choice)
 }
 
 fn build_orchestrator_config(args: &RunOneArgs) -> OrchestratorConfig {
-    OrchestratorConfig {
-        max_parallel: 1,
-        setup_timing: SetupTiming {
-            configure_timeout: Duration::from_millis(u64::from(args.configure_timeout_ms)),
-            preprocessing_timeout: Duration::from_millis(u64::from(args.preprocessing_timeout_ms)),
-        },
-        playing_config: PlayingConfig {
-            move_timeout: Duration::from_millis(u64::from(args.move_timeout_ms)),
-            network_grace: Duration::from_millis(u64::from(args.network_grace_ms)),
-            ..Default::default()
-        },
-        handshake_timeout: Duration::from_millis(u64::from(args.startup_timeout_ms)),
-        ..Default::default()
-    }
+    let timing = ResolvedTiming {
+        move_timeout_ms: args.move_timeout_ms,
+        preprocessing_timeout_ms: args.preprocessing_timeout_ms,
+        startup_timeout_ms: args.startup_timeout_ms,
+        configure_timeout_ms: args.configure_timeout_ms,
+        network_grace_ms: args.network_grace_ms,
+    };
+    orchestrator_config_build::build_orchestrator_config(&timing, 1)
 }
 
 fn build_matchup(
@@ -385,10 +387,20 @@ async fn run_one(args: RunOneArgs) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-/// Tournament-run executor. Stub for Chunk 3 — body lands across
-/// Chunks 4–7 (resolver, execution, save-as, standings).
-async fn run_tournament(_args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
-    Err("tournament run is not implemented yet; landing across Chunks 4–7".into())
+/// Tournament-run entry. Resolves args → runs the tournament → returns
+/// (Level-A rendering lands in Chunk 7; --save-as in Chunk 6).
+async fn run_tournament(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
+    let mut seed_gen = || masked_random_seed();
+    let resolved = tournament_resolve::resolve(args, &mut seed_gen)?;
+    let state = tournament_run::run_tournament_main(resolved).await?;
+    println!("Tournament {:?} finished.", state.tournament_id);
+    Ok(())
+}
+
+/// Default seed generator. Mirrors `plan::matchup_seed`'s 63-bit mask so
+/// the value fits SQLite's signed INTEGER column.
+fn masked_random_seed() -> u64 {
+    rand::random::<u64>() & (i64::MAX as u64)
 }
 
 #[cfg(test)]
