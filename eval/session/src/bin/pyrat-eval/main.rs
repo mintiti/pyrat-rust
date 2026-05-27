@@ -4,6 +4,8 @@
 //! - `run-one`: runs a single match between two subprocess bots, optionally
 //!   writing a JSON game record.
 
+mod tournament_config;
+
 use std::num::NonZeroU16;
 use std::path::PathBuf;
 use std::process::ExitCode;
