@@ -387,4 +387,3 @@ fn results_json_written_when_flag_set() {
     );
     assert!(parsed["standings"].is_array(), "standings is array");
 }
-
