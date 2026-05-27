@@ -387,13 +387,12 @@ async fn run_one(args: RunOneArgs) -> Result<(), Box<dyn std::error::Error>> {
     }
 }
 
-/// Tournament-run entry. Resolves args → runs the tournament → returns
-/// (Level-A rendering lands in Chunk 7; --save-as in Chunk 6).
+/// Tournament-run entry. Resolves args → runs the tournament. Standings
+/// rendering happens inside `run_tournament_main`.
 async fn run_tournament(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
-    let mut seed_gen = || masked_random_seed();
+    let mut seed_gen = masked_random_seed;
     let resolved = tournament_resolve::resolve(args, &mut seed_gen)?;
-    let state = tournament_run::run_tournament_main(resolved).await?;
-    println!("Tournament {:?} finished.", state.tournament_id);
+    tournament_run::run_tournament_main(resolved).await?;
     Ok(())
 }
 
