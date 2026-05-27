@@ -4,7 +4,9 @@
 //! - `run-one`: runs a single match between two subprocess bots, optionally
 //!   writing a JSON game record.
 
+mod game_config_build;
 mod tournament_config;
+mod tournament_resolve;
 
 use std::num::NonZeroU16;
 use std::path::PathBuf;
@@ -68,108 +70,107 @@ enum TournamentSubcommand {
 /// use a TOML config with `command = "..."` instead.
 #[derive(Args)]
 #[allow(dead_code)] // Wired across Chunks 4-7; remove once run_tournament fills in.
-struct RunArgs {
+pub(crate) struct RunArgs {
     /// Bot shorthand: `id=working_dir`. Defaults command to `cargo run --release`.
     /// Repeatable. For arbitrary commands, use --config with a TOML.
     #[arg(long = "bot", value_parser = parse_bot_arg)]
-    bots: Vec<BotArg>,
+    pub(crate) bots: Vec<BotArg>,
 
     /// `round-robin` or `gauntlet`. Underscore form also accepted.
     #[arg(long)]
-    format: Option<String>,
+    pub(crate) format: Option<String>,
 
     /// Target games per matchup (round-robin) or per opponent (gauntlet).
     #[arg(long)]
-    games: Option<u32>,
+    pub(crate) games: Option<u32>,
 
     /// Max consecutive failures per matchup before the planner stops retrying.
     #[arg(long)]
-    max_failures: Option<u32>,
+    pub(crate) max_failures: Option<u32>,
 
     /// Max matches in flight at once.
     #[arg(long)]
-    max_parallel: Option<u32>,
+    pub(crate) max_parallel: Option<u32>,
 
     /// Deterministic tournament seed. Implicit (random) by default.
     #[arg(long)]
-    seed: Option<u64>,
+    pub(crate) seed: Option<u64>,
 
     /// Load a TOML config file. Flags override config values.
     #[arg(long)]
-    config: Option<PathBuf>,
+    pub(crate) config: Option<PathBuf>,
 
     /// Materialize the resolved tournament back to a TOML file before running.
     /// Mutually exclusive with `--resume`.
     #[arg(long, conflicts_with = "resume")]
-    save_as: Option<PathBuf>,
+    pub(crate) save_as: Option<PathBuf>,
 
     /// Resume an existing tournament by id. Mutually exclusive with `--save-as`.
     #[arg(long)]
-    resume: Option<i64>,
+    pub(crate) resume: Option<i64>,
 
     /// Write a Level-A results JSON summary to this path after the tournament finishes.
     #[arg(long)]
-    results_json: Option<PathBuf>,
+    pub(crate) results_json: Option<PathBuf>,
 
     /// SQLite store path. Default: `<config-stem>.db` next to --config, else `ratings.db` in CWD.
     #[arg(long)]
-    store_path: Option<PathBuf>,
+    pub(crate) store_path: Option<PathBuf>,
 
     /// Directory to write per-match replay JSON. Default: no replay sink.
     #[arg(long)]
-    replay_dir: Option<PathBuf>,
+    pub(crate) replay_dir: Option<PathBuf>,
 
     // ── Game config (mutually exclusive: preset OR width+height+cheese) ──
     /// Named preset: tiny, small, medium, large, huge, open, asymmetric.
     #[arg(long)]
-    preset: Option<String>,
+    pub(crate) preset: Option<String>,
     #[arg(long)]
-    width: Option<u8>,
+    pub(crate) width: Option<u8>,
     #[arg(long)]
-    height: Option<u8>,
+    pub(crate) height: Option<u8>,
     #[arg(long)]
-    cheese: Option<u16>,
+    pub(crate) cheese: Option<u16>,
     /// Symmetric maze (only valid with --width/--height/--cheese; presets pin their own).
     #[arg(long)]
-    symmetric: Option<bool>,
+    pub(crate) symmetric: Option<bool>,
     /// Override max_turns (defaults to preset's value, or 300 for custom dims).
     #[arg(long)]
-    max_turns: Option<NonZeroU16>,
+    pub(crate) max_turns: Option<NonZeroU16>,
 
     // ── Timing overrides ──
     #[arg(long)]
-    move_timeout_ms: Option<u32>,
+    pub(crate) move_timeout_ms: Option<u32>,
     #[arg(long)]
-    preprocessing_timeout_ms: Option<u32>,
+    pub(crate) preprocessing_timeout_ms: Option<u32>,
     #[arg(long)]
-    startup_timeout_ms: Option<u32>,
+    pub(crate) startup_timeout_ms: Option<u32>,
     #[arg(long)]
-    configure_timeout_ms: Option<u32>,
+    pub(crate) configure_timeout_ms: Option<u32>,
     #[arg(long)]
-    network_grace_ms: Option<u32>,
+    pub(crate) network_grace_ms: Option<u32>,
 
     // ── Gauntlet selection ──
     /// Challenger id (gauntlet format only).
     #[arg(long)]
-    challenger: Option<String>,
+    pub(crate) challenger: Option<String>,
     /// Opponent id (gauntlet format only). Repeatable.
     #[arg(long = "opponent")]
-    opponents: Vec<String>,
+    pub(crate) opponents: Vec<String>,
 
     // ── Elo anchor overrides ──
     /// Anchor player id for Elo. Defaults to first player (round-robin) or challenger (gauntlet).
     #[arg(long)]
-    anchor: Option<String>,
+    pub(crate) anchor: Option<String>,
     /// Anchor Elo rating. Default: 1000.0.
     #[arg(long)]
-    anchor_elo: Option<f64>,
+    pub(crate) anchor_elo: Option<f64>,
 }
 
 #[derive(Clone, Debug)]
-#[allow(dead_code)] // Wired in Chunk 4.
-struct BotArg {
-    id: String,
-    working_dir: PathBuf,
+pub(crate) struct BotArg {
+    pub(crate) id: String,
+    pub(crate) working_dir: PathBuf,
 }
 
 fn parse_bot_arg(raw: &str) -> Result<BotArg, String> {
