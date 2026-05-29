@@ -265,6 +265,54 @@ fn resume_with_mismatched_seed_fails_clearly() {
     );
 }
 
+/// On resume, the planner reuses the stored `game_config_id` (Chunk 5
+/// keeps that behavior). But if the user's CLI flags or config resolve
+/// to a *different* runtime `GameConfig`, the orchestrator would play
+/// matches whose attempts get recorded under a stored row that doesn't
+/// describe what was played. The content-hash check rejects this.
+#[test]
+fn resume_with_drifted_game_config_fails() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg_path = tmp.path().join("ladder.toml");
+    let store_path = tmp.path().join("ratings.db");
+    let toml = minimal_toml(&format!(
+        "store_path = {:?}\nseed = 42",
+        store_path.to_string_lossy()
+    ));
+    write_toml(&cfg_path, &toml);
+
+    // First run pins the stored game_config_id to a hash of (preset tiny,
+    // max_turns = 10). Run is allowed to finish.
+    let args = ["--config", cfg_path.to_str().unwrap()];
+    let out = run_tournament(&args);
+    assert_success(&out, &args);
+
+    // Resume with the same store but a CLI override that drifts the
+    // runtime config (max_turns now 99). The planner is still built
+    // with the stored game_config_id (the planner's id-string check
+    // passes), but the runtime-config content-hash check trips.
+    let args = [
+        "--config",
+        cfg_path.to_str().unwrap(),
+        "--resume",
+        "1",
+        "--max-turns",
+        "99",
+    ];
+    let out = run_tournament(&args);
+    assert!(
+        !out.status.success(),
+        "resume with drifted game_config should fail.\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("game_config"),
+        "stderr should mention game_config drift: {stderr}"
+    );
+}
+
 #[test]
 fn resume_without_seed_uses_stored_seed() {
     // Run with --seed 42, then resume with no --seed. Should not error;

@@ -649,6 +649,40 @@ fn validate_planner_against_stored_spec(
             tournament.game_config_id
         )));
     }
+    // Content-hash the planner's *runtime* GameConfig and compare against
+    // the stored id. The check above is tautological when the planner was
+    // built using the stored id (which is exactly what tournament_run does
+    // on resume); this one catches "stored id reused but runtime config
+    // resolves to different geometry." Without it, the orchestrator plays
+    // matches on geometry the stored row doesn't describe.
+    let resolved_record = crate::mapping::game_config_to_record(planner.expected_game_config())
+        .map_err(|e| {
+            SessionError::TournamentMismatch(format!(
+                "game_config: cannot hash planner's runtime config: {e}"
+            ))
+        })?;
+    let resolved_hash = resolved_record.content_hash();
+    if resolved_hash != tournament.game_config_id {
+        return Err(SessionError::TournamentMismatch(format!(
+            "game_config: resolved runtime config hashes to {resolved_hash}, stored is {}",
+            tournament.game_config_id
+        )));
+    }
+    // Compare params as typed data — string-compare would trip on benign
+    // formatting differences. `#[serde(default)]` lets pre-fix rows with
+    // `"{}"` decode to `max_failures_per_pair: 0` rather than erroring.
+    let stored_params = crate::plan::TournamentParams::from_json(&tournament.params_json)
+        .map_err(|e| {
+            SessionError::TournamentMismatch(format!(
+                "params_json: cannot decode stored value: {e}"
+            ))
+        })?;
+    let planner_params = planner.expected_params();
+    if planner_params != stored_params {
+        return Err(SessionError::TournamentMismatch(format!(
+            "params: planner expected {planner_params:?}, stored is {stored_params:?}"
+        )));
+    }
     if planner.expected_tournament_seed() != tournament.tournament_seed {
         return Err(SessionError::TournamentMismatch(format!(
             "tournament_seed: planner expected {}, stored is {}",

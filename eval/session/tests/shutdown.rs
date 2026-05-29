@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use pyrat_eval::{EvalSession, SessionConfig, SessionMode, TournamentSpec};
+use pyrat_eval::{EvalSession, SessionConfig, SessionMode, TournamentParams, TournamentSpec};
 use pyrat_eval_store::{EloOptions, EvalStore};
 
 use crate::common::{embedded_player, fast_orch_config, round_robin, small_game_config};
@@ -32,7 +32,12 @@ async fn shutdown_returns_promptly_with_pending_matchups() {
     let spec = TournamentSpec {
         format: "round_robin".into(),
         target_games_per_matchup: Some(TARGET),
-        params_json: "{}".into(),
+        // Matches the helper's `round_robin` planner
+        // (`max_failures_per_pair: 3`) so resume validation passes.
+        params_json: TournamentParams {
+            max_failures_per_pair: 3,
+        }
+        .to_json(),
         game_config: small_game_config(),
         tournament_seed: 0xC0FFEE,
     };

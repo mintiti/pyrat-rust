@@ -8,7 +8,7 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use pyrat_eval::{
     mapping::synthetic_attempt, matchup_seed, EvalSession, MatchupKey, MatchupOutcome, Planner,
-    SessionConfig, SessionMode, TournamentSpec, TournamentState,
+    SessionConfig, SessionMode, TournamentParams, TournamentSpec, TournamentState,
 };
 use pyrat_eval_store::{EloOptions, EvalStore, NewAttemptOutcome, NewPlayer, NewTournament};
 use pyrat_orchestrator::MatchIdAllocator;
@@ -351,7 +351,12 @@ async fn subscribe_immediately_after_resume_sees_standings() {
     let spec = TournamentSpec {
         format: "round_robin".into(),
         target_games_per_matchup: Some(1),
-        params_json: "{}".into(),
+        // Matches the helper's `round_robin` planner config below
+        // (max_failures_per_pair: 3) so resume validation passes.
+        params_json: TournamentParams {
+            max_failures_per_pair: 3,
+        }
+        .to_json(),
         game_config: small_game_config(),
         tournament_seed: 0xC0FFEE,
     };

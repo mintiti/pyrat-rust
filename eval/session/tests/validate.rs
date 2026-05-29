@@ -252,6 +252,105 @@ async fn rejects_gauntlet_planner_for_round_robin_tournament() {
     .await;
 }
 
+/// Stored runtime config has max_turns=5; planner is built with the
+/// *stored* `game_config_id` (so the id-string check passes) but a
+/// runtime `GameConfig` of different geometry (max_turns=99). The new
+/// content-hash check should reject this — without it, attempts would
+/// be recorded against a stored row that doesn't describe what was
+/// played.
+#[tokio::test]
+async fn rejects_planner_with_drifted_runtime_game_config() {
+    use pyrat::{Coordinates, GameBuilder};
+
+    let store = Arc::new(Mutex::new(EvalStore::open_in_memory().unwrap()));
+    let players = vec![embedded_player("a"), embedded_player("b")];
+    let created =
+        EvalSession::create_tournament(store.clone(), round_robin_spec(), players.clone())
+            .await
+            .expect("create_tournament");
+
+    // Different runtime config (max_turns=99 vs the stored small's 5).
+    // Same shape otherwise so `game_config_to_record` succeeds.
+    let drifted_runtime = GameBuilder::new(3, 3)
+        .with_max_turns(99)
+        .with_open_maze()
+        .with_custom_positions(Coordinates::new(0, 0), Coordinates::new(2, 2))
+        .with_random_cheese(1, false)
+        .build();
+
+    // Build planner with the *stored* game_config_id (string equality
+    // passes) but the drifted runtime config.
+    let planner = pyrat_eval::RoundRobinPlanner::new(pyrat_eval::RoundRobinPlannerConfig {
+        players,
+        game_config: drifted_runtime,
+        game_config_id: created.game_config_id,
+        timing: crate::common::fast_timing(),
+        tournament_id: created.tournament_id,
+        target_per_pair: 1,
+        max_failures_per_pair: 3,
+        tournament_seed: 0xC0FFEE,
+    });
+
+    expect_mismatch_containing(
+        || {
+            EvalSession::start(
+                store.clone(),
+                SessionMode {
+                    tournament_id: created.tournament_id,
+                },
+                planner,
+                fast_orch_config(),
+                EloOptions::new("a"),
+                SessionConfig::default(),
+            )
+        },
+        "hashes to",
+    )
+    .await;
+}
+
+/// Stored `params_json` decodes to `max_failures_per_pair: 3` (set by
+/// `round_robin_spec`). A planner built with `max_failures_per_pair: 99`
+/// should be rejected — resume with a different retry budget would
+/// silently change tournament semantics.
+#[tokio::test]
+async fn rejects_planner_with_different_params() {
+    let store = Arc::new(Mutex::new(EvalStore::open_in_memory().unwrap()));
+    let players = vec![embedded_player("a"), embedded_player("b")];
+    let created =
+        EvalSession::create_tournament(store.clone(), round_robin_spec(), players.clone())
+            .await
+            .expect("create_tournament");
+
+    let planner = pyrat_eval::RoundRobinPlanner::new(pyrat_eval::RoundRobinPlannerConfig {
+        players,
+        game_config: small_game_config(),
+        game_config_id: created.game_config_id,
+        timing: crate::common::fast_timing(),
+        tournament_id: created.tournament_id,
+        target_per_pair: 1,
+        max_failures_per_pair: 99, // diverges from spec's 3
+        tournament_seed: 0xC0FFEE,
+    });
+
+    expect_mismatch_containing(
+        || {
+            EvalSession::start(
+                store.clone(),
+                SessionMode {
+                    tournament_id: created.tournament_id,
+                },
+                planner,
+                fast_orch_config(),
+                EloOptions::new("a"),
+                SessionConfig::default(),
+            )
+        },
+        "params:",
+    )
+    .await;
+}
+
 /// Happy path: a planner that matches the stored spec resumes cleanly.
 #[tokio::test]
 async fn accepts_matching_planner() {

@@ -133,6 +133,15 @@ pub trait Planner: Send {
     /// against the stored `tournaments.game_config_id` on resume.
     fn expected_game_config_id(&self) -> &str;
 
+    /// Runtime `GameConfig` the planner will hand to the orchestrator.
+    /// The session content-hashes this on resume and cross-checks against
+    /// the stored `tournaments.game_config_id` — without this, drift
+    /// where the planner is built with the stored `game_config_id` but a
+    /// freshly resolved runtime config of different geometry would pass
+    /// validation tautologically, and matchups would be recorded against
+    /// a stored row that doesn't describe what was actually played.
+    fn expected_game_config(&self) -> &GameConfig;
+
     /// Tournament-level seed driving `matchup_seed`. Compared against the
     /// stored `tournaments.tournament_seed` on resume. Two resumes with
     /// different seeds would replay different games and silently fragment
@@ -276,6 +285,10 @@ impl Planner for RoundRobinPlanner {
         &self.config.game_config_id
     }
 
+    fn expected_game_config(&self) -> &GameConfig {
+        &self.config.game_config
+    }
+
     fn expected_tournament_seed(&self) -> u64 {
         self.config.tournament_seed
     }
@@ -397,6 +410,10 @@ impl Planner for GauntletPlanner {
 
     fn expected_game_config_id(&self) -> &str {
         &self.config.game_config_id
+    }
+
+    fn expected_game_config(&self) -> &GameConfig {
+        &self.config.game_config
     }
 
     fn expected_tournament_seed(&self) -> u64 {

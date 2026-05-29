@@ -29,7 +29,7 @@ use pyrat::{Coordinates, Direction};
 use pyrat_bot_api::Options;
 use pyrat_eval::{
     EvalMatchDescriptor, EvalSession, ResolvedPlayer, RoundRobinPlanner, RoundRobinPlannerConfig,
-    SessionConfig, SessionMode, TournamentSpec,
+    SessionConfig, SessionMode, TournamentParams, TournamentSpec,
 };
 use pyrat_eval_store::{EloOptions, EvalStore};
 use pyrat_host::match_host::MatchEvent;
@@ -136,7 +136,10 @@ async fn end_to_end_round_robin_with_replay_sink() {
     let spec = TournamentSpec {
         format: "round_robin".into(),
         target_games_per_matchup: Some(target_per_pair),
-        params_json: "{}".into(),
+        params_json: TournamentParams {
+            max_failures_per_pair: 1,
+        }
+        .to_json(),
         game_config: game_config.clone(),
         tournament_seed,
     };
