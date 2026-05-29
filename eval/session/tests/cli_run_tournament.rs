@@ -139,6 +139,64 @@ command = "{bot}"
     );
 }
 
+/// An invalid game config (e.g. too much cheese for the board) must
+/// surface before `bootstrap_new` commits a tournament row. Otherwise a
+/// failed validation leaves a dangling tournament behind that will never
+/// see any attempts.
+#[test]
+fn invalid_game_config_fails_before_tournament_row() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg_path = tmp.path().join("ladder.toml");
+    let store_path = tmp.path().join("ratings.db");
+    let bot = test_bot_bin();
+    // 3x3 board with 100 cheese: the engine refuses to populate it.
+    let toml = format!(
+        r#"format = "round_robin"
+target_games_per_matchup = 1
+max_parallel = 1
+store_path = {store:?}
+seed = 7
+
+[game]
+width = 3
+height = 3
+cheese = 100
+
+[timing]
+move_timeout_ms = 2000
+preprocessing_timeout_ms = 5000
+startup_timeout_ms = 10000
+configure_timeout_ms = 3000
+
+[[players]]
+id = "alice"
+command = "{bot}"
+
+[[players]]
+id = "bob"
+command = "{bot}"
+"#,
+        store = store_path.to_string_lossy(),
+    );
+    write_toml(&cfg_path, &toml);
+
+    let args = ["--config", cfg_path.to_str().unwrap()];
+    let out = run_tournament(&args);
+    assert!(
+        !out.status.success(),
+        "expected non-zero exit for invalid game config"
+    );
+
+    // Open the store the CLI would have created (or not) and prove no
+    // tournament row leaked.
+    let store = pyrat_eval_store::EvalStore::open(&store_path).expect("open store");
+    let tournaments = store.list_tournaments().expect("list_tournaments");
+    assert!(
+        tournaments.is_empty(),
+        "tournament row leaked after pre-bootstrap validation: {tournaments:?}"
+    );
+}
+
 // ── --save-as ────────────────────────────────────────────────────────
 
 #[test]

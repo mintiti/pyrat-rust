@@ -53,9 +53,15 @@ pub async fn run_tournament_main(
 
     // Realize the seed and the (tournament_id, game_config_id) pair. On
     // resume, the store is the source of truth; on a new tournament,
-    // create_tournament returns both.
+    // we validate the game config *before* bootstrap so an invalid
+    // config (e.g. too much cheese for the board) doesn't leave a
+    // dangling tournament row behind.
     let (tournament_id, game_config_id, tournament_seed) = match resolved.resume {
-        Some(id) => realize_resume(&store, id, &resolved.seed)?,
+        Some(id) => {
+            let (id, gc_id, seed) = realize_resume(&store, id, &resolved.seed)?;
+            validate_game_config_with_seed(&game_config, seed)?;
+            (id, gc_id, seed)
+        },
         None => {
             let seed = match resolved.seed {
                 SeedSource::Explicit(s) | SeedSource::Generated(s) => s,
@@ -63,16 +69,10 @@ pub async fn run_tournament_main(
                     return Err("internal: FromStoreOnResume on non-resume path".into())
                 },
             };
+            validate_game_config_with_seed(&game_config, seed)?;
             bootstrap_new(&store, &resolved, &game_config, seed).await?
         },
     };
-
-    // Pre-spawn validation. Fail before bots launch if the game config
-    // refuses the resolved seed (e.g. too many cheese for the board).
-    game_config
-        .clone()
-        .create(Some(tournament_seed))
-        .map_err(|e| format!("invalid game config: {e}"))?;
 
     let orch_config = build_orchestrator_config(&resolved.timing, resolved.max_parallel);
     let per_match_timing = Timing {
@@ -155,6 +155,21 @@ pub async fn run_tournament_main(
 
 fn build_elo_options(resolved: &ResolvedRun) -> EloOptions {
     EloOptions::new(resolved.anchor.clone()).anchor_elo(resolved.anchor_elo)
+}
+
+/// Fail before bots launch if the game config refuses the resolved seed
+/// (e.g. too many cheese for the board). Runs on both the new-tournament
+/// path (before `bootstrap_new` so an invalid config doesn't leave a
+/// dangling row) and the resume path.
+fn validate_game_config_with_seed(
+    game_config: &pyrat::game::builder::GameConfig,
+    seed: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    game_config
+        .clone()
+        .create(Some(seed))
+        .map_err(|e| format!("invalid game config: {e}"))?;
+    Ok(())
 }
 
 /// Capture state BEFORE consuming the session via `join`. The state
