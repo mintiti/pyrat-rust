@@ -84,7 +84,9 @@ pub async fn run_tournament_main(
     // Extra sinks: optional ReplaySink in the configured directory.
     let mut extra_sinks: Vec<(SinkRole, Arc<dyn MatchSink<EvalMatchDescriptor>>)> = Vec::new();
     if let Some(dir) = resolved.replay_dir.as_ref() {
-        let writer = Arc::new(DirectoryWriter::new(dir.clone())?);
+        let writer = Arc::new(DirectoryWriter::new(dir.clone()).map_err(|e| {
+            format!("--replay-dir: failed to open {}: {e}", dir.display())
+        })?);
         let replay: Arc<dyn MatchSink<EvalMatchDescriptor>> = Arc::new(
             ReplaySink::new(writer)
                 .with_engine_version(format!("pyrat-eval/{}", env!("CARGO_PKG_VERSION"))),
@@ -234,14 +236,14 @@ fn realize_resume(
         let store = store.lock();
         store
             .get_tournament(id)?
-            .ok_or_else(|| format!("tournament {id:?} not found in store"))?
+            .ok_or_else(|| format!("tournament {} not found in store", id.0))?
     };
     let seed = match seed_source {
         SeedSource::Explicit(s) => {
             if *s != stored.tournament_seed {
                 return Err(format!(
-                    "seed mismatch on resume: --seed {} does not match stored {} (tournament {:?})",
-                    s, stored.tournament_seed, id
+                    "seed mismatch on resume: --seed {} does not match stored {} (tournament {})",
+                    s, stored.tournament_seed, id.0
                 )
                 .into());
             }
@@ -260,10 +262,16 @@ fn write_save_as(
     save_path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let save_dir = save_path.parent().unwrap_or_else(|| Path::new("."));
-    fs::create_dir_all(save_dir)?;
+    fs::create_dir_all(save_dir).map_err(|e| {
+        format!(
+            "--save-as: failed to create parent directory {}: {e}",
+            save_dir.display()
+        )
+    })?;
     let cfg = to_saveable_config(resolved, save_dir);
     let toml_text = toml::to_string_pretty(&cfg)?;
-    fs::write(save_path, toml_text)?;
+    fs::write(save_path, toml_text)
+        .map_err(|e| format!("--save-as: failed to write {}: {e}", save_path.display()))?;
     Ok(())
 }
 
@@ -466,8 +474,14 @@ fn print_table(state: &TournamentState, counts: &AttemptsCount) {
     println!();
     let mut standings = state.standings.clone();
     if standings.is_empty() {
-        let total_attempts = counts.success + counts.failure;
-        println!("No standings yet — {total_attempts} attempts so far.");
+        // Names the cause so the user knows where to look. The common case
+        // is `success == 0 && failure > 0` (every matchup hit the retry
+        // budget); flagging "Elo needs at least one success per matchup"
+        // makes that actionable.
+        println!(
+            "No standings yet — {} successful attempts ({} failed). Elo needs at least one success per matchup.",
+            counts.success, counts.failure
+        );
         return;
     }
     standings.sort_by(|a, b| {
@@ -522,11 +536,17 @@ fn write_results_json(
     };
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
-            fs::create_dir_all(parent)?;
+            fs::create_dir_all(parent).map_err(|e| {
+                format!(
+                    "--results-json: failed to create parent directory {}: {e}",
+                    parent.display()
+                )
+            })?;
         }
     }
     let serialized = serde_json::to_string_pretty(&payload)?;
-    fs::write(path, serialized)?;
+    fs::write(path, serialized)
+        .map_err(|e| format!("--results-json: failed to write {}: {e}", path.display()))?;
     Ok(())
 }
 

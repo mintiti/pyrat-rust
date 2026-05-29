@@ -104,8 +104,9 @@ fn minimal_toml_round_robin_runs_through() {
 #[test]
 fn invalid_config_fails_before_spawn() {
     // Duplicate player ids in the TOML — the resolver catches this
-    // before any bot launches. Sentinel: the database file should
-    // not be created either (we stop before EvalStore::open).
+    // before any bot launches. Sentinel: the default store file
+    // (<cfg_stem>.db next to the config) should not be created — we
+    // stop before EvalStore::open.
     let tmp = tempfile::tempdir().unwrap();
     let cfg_path = tmp.path().join("dup.toml");
     let bot = test_bot_bin();
@@ -136,6 +137,12 @@ command = "{bot}"
     assert!(
         stderr.contains("duplicate player id"),
         "stderr should mention duplicate player id: {stderr}"
+    );
+    // Sentinel: no store file materialized.
+    let default_store = tmp.path().join("dup.db");
+    assert!(
+        !default_store.exists(),
+        "store file should not exist after resolver-rejected config: {default_store:?}",
     );
 }
 
@@ -318,7 +325,7 @@ fn resume_with_mismatched_seed_fails_clearly() {
     );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("seed mismatch") || stderr.contains("seed"),
+        stderr.contains("seed mismatch"),
         "stderr should mention seed mismatch: {stderr}"
     );
 }
@@ -372,10 +379,17 @@ fn resume_with_drifted_game_config_fails() {
 }
 
 #[test]
-fn resume_without_seed_uses_stored_seed() {
-    // Run with --seed 42, then resume with no --seed. Should not error;
-    // the planner reuses the stored seed and there's nothing left to
-    // play (resume on a finished tournament is a no-op).
+fn resume_without_seed_flag_succeeds() {
+    // First run with --seed 42, then resume with no --seed flag. Verifies
+    // the e2e path: a resume invocation without --seed doesn't error and
+    // the stored tournament_seed is preserved. (The deep negative
+    // assertion — "no fresh seed was generated" — is pinned at the
+    // resolver unit level by `resume_without_explicit_seed_defers_to_store`,
+    // which passes a panicking seed_gen.)
+    //
+    // Keeps --games unchanged across the two invocations; drifting it
+    // would trip target_per_pair validation instead of exercising the
+    // seed path.
     let tmp = tempfile::tempdir().unwrap();
     let cfg_path = tmp.path().join("ladder.toml");
     let store_path = tmp.path().join("ratings.db");
@@ -389,6 +403,18 @@ fn resume_without_seed_uses_stored_seed() {
     let args = ["--config", cfg_path.to_str().unwrap(), "--resume", "1"];
     let out = run_tournament(&args);
     assert_success(&out, &args);
+
+    // Verify the stored tournament_seed is still 42 — the resume run
+    // didn't overwrite it with a freshly generated value.
+    let store = pyrat_eval_store::EvalStore::open(&store_path).expect("open store");
+    let tournament = store
+        .get_tournament(pyrat_eval_store::TournamentId(1))
+        .expect("query tournament")
+        .expect("tournament row");
+    assert_eq!(
+        tournament.tournament_seed, 42,
+        "stored tournament_seed should be preserved across resume"
+    );
 }
 
 // ── Gauntlet ─────────────────────────────────────────────────────────
