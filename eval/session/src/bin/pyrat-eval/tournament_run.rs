@@ -403,17 +403,43 @@ fn absolutize_path(path: &Path) -> PathBuf {
     path.to_path_buf()
 }
 
-/// Rebase `path` relative to `save_dir` if `path` is inside `save_dir`,
-/// otherwise return its absolute form. Avoids the `pathdiff` dep: ten
-/// lines of stdlib do the job for the cases we hit (CLI flag paths,
-/// already-absolute store paths, working_dirs).
+/// Rebase `path` relative to `save_dir`, walking up with `..` when the
+/// two live in sibling or unrelated subtrees. Without this, a
+/// `--save-as configs/ladder.toml` from the repo root would serialize
+/// `working_dir = "/absolute/path/to/botpack/greedy"` because `botpack/`
+/// and `configs/` don't share a strip_prefix-compatible prefix — and
+/// the saved spec would then only work on the author's machine.
+///
+/// Equivalent to `pathdiff::diff_paths`; ~15 lines of std, no new dep.
 fn make_relative_or_absolute(path: &Path, save_dir: &Path) -> PathBuf {
     let abs_path = absolutize_path(path);
     let abs_save_dir = fs::canonicalize(save_dir).unwrap_or_else(|_| save_dir.to_path_buf());
-    match abs_path.strip_prefix(&abs_save_dir) {
-        Ok(rel) => rel.to_path_buf(),
-        Err(_) => abs_path,
+    make_relative_to(&abs_path, &abs_save_dir)
+}
+
+/// Compute a relative path from `base` to `target`. Both paths must be
+/// absolute and already canonicalized (or absolutized) — callers handle
+/// that step so this function is purely structural.
+fn make_relative_to(target: &Path, base: &Path) -> PathBuf {
+    use std::path::Component;
+    let target_components: Vec<Component<'_>> = target.components().collect();
+    let base_components: Vec<Component<'_>> = base.components().collect();
+    let common = target_components
+        .iter()
+        .zip(base_components.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+    let mut result = PathBuf::new();
+    for _ in &base_components[common..] {
+        result.push("..");
     }
+    for c in &target_components[common..] {
+        result.push(c.as_os_str());
+    }
+    if result.as_os_str().is_empty() {
+        result.push(".");
+    }
+    result
 }
 
 // ── Standings rendering (Level A) ────────────────────────────────────
@@ -666,8 +692,11 @@ mod tests {
     }
 
     #[test]
-    fn save_as_keeps_paths_outside_save_dir_absolute() {
-        // save_dir points at a tempdir; the bot working_dir points elsewhere.
+    fn save_as_rebases_paths_outside_save_dir_with_dotdot() {
+        // save_dir and bot_dir live in unrelated tempdirs (sibling-ish
+        // under /var/folders or /tmp). The rebased path must walk up
+        // with `..` and back down — without this, the saved TOML would
+        // contain absolute paths that only work on the original machine.
         let save_dir = tempfile::tempdir().expect("save dir");
         let bots_root = tempfile::tempdir().expect("bots dir");
         let bot_dir = bots_root.path().join("greedy");
@@ -687,12 +716,52 @@ mod tests {
         };
         let cfg = to_saveable_config(&resolved, save_dir.path());
 
-        // working_dir is outside save_dir → absolute.
+        // Round-trip: the relative working_dir, joined to save_dir,
+        // must canonicalize back to bot_dir.
         let written = cfg.players[0]
             .working_dir
             .as_ref()
             .expect("working_dir present");
-        assert!(written.is_absolute(), "got: {written:?}");
+        let resolved_back = std::fs::canonicalize(save_dir.path().join(written))
+            .expect("canonicalize round-trip");
+        let bot_dir_canon = std::fs::canonicalize(&bot_dir).expect("canonicalize bot_dir");
+        assert_eq!(resolved_back, bot_dir_canon);
+        // And the path should contain `..` since it crosses subtrees.
+        assert!(
+            written.components().any(|c| matches!(c, std::path::Component::ParentDir)),
+            "expected `..` in rebased path, got: {written:?}",
+        );
+    }
+
+    #[test]
+    fn make_relative_to_sibling_directory() {
+        let target = Path::new("/tmp/botpack/greedy");
+        let base = Path::new("/tmp/configs");
+        assert_eq!(
+            make_relative_to(target, base),
+            PathBuf::from("../botpack/greedy")
+        );
+    }
+
+    #[test]
+    fn make_relative_to_nested_directory() {
+        let target = Path::new("/tmp/configs/foo");
+        let base = Path::new("/tmp");
+        assert_eq!(make_relative_to(target, base), PathBuf::from("configs/foo"));
+    }
+
+    #[test]
+    fn make_relative_to_parent_directory() {
+        let target = Path::new("/tmp/a");
+        let base = Path::new("/tmp/a/b");
+        assert_eq!(make_relative_to(target, base), PathBuf::from(".."));
+    }
+
+    #[test]
+    fn make_relative_to_same_directory_is_dot() {
+        let target = Path::new("/tmp/a");
+        let base = Path::new("/tmp/a");
+        assert_eq!(make_relative_to(target, base), PathBuf::from("."));
     }
 
     #[test]
