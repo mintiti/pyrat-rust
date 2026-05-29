@@ -390,65 +390,126 @@ fn positive(value: u32, field: &str) -> Result<u32, ResolveError> {
     }
 }
 
+/// Resolve the game choice in two independent decisions:
+///   1. *Shape* (`preset` XOR custom dims): whole-choice precedence per
+///      source — if the CLI supplied any shape field, the CLI shape
+///      wins entirely; else if `[game]` did, the TOML shape wins
+///      entirely; else default to `Preset { name: "tiny" }`.
+///   2. `max_turns` overlay: CLI overrides TOML overrides the
+///      preset/default's own value.
 fn resolve_game(
     args: &RunArgs,
     cfg: Option<&GameSection>,
 ) -> Result<ResolvedGameChoice, ResolveError> {
     let empty = GameSection::default();
     let g = cfg.unwrap_or(&empty);
-    let preset = args.preset.clone().or_else(|| g.preset.clone());
-    let width = args.width.or(g.width);
-    let height = args.height.or(g.height);
-    let cheese = args.cheese.or(g.cheese);
-    let symmetric = args.symmetric.or(g.symmetric);
-    let max_turns = args
+
+    let cli_has_shape = args.preset.is_some()
+        || args.width.is_some()
+        || args.height.is_some()
+        || args.cheese.is_some()
+        || args.symmetric.is_some();
+    let cfg_has_shape = g.preset.is_some()
+        || g.width.is_some()
+        || g.height.is_some()
+        || g.cheese.is_some()
+        || g.symmetric.is_some();
+
+    let mut shape = if cli_has_shape {
+        resolve_game_shape_from_one_source(
+            args.preset.clone(),
+            args.width,
+            args.height,
+            args.cheese,
+            args.symmetric,
+            "CLI flags",
+        )?
+    } else if cfg_has_shape {
+        resolve_game_shape_from_one_source(
+            g.preset.clone(),
+            g.width,
+            g.height,
+            g.cheese,
+            g.symmetric,
+            "[game] section",
+        )?
+    } else {
+        ResolvedGameChoice::Preset {
+            name: "tiny".into(),
+            max_turns_override: None,
+        }
+    };
+
+    let overlay = args
         .max_turns
         .or_else(|| g.max_turns.and_then(std::num::NonZeroU16::new));
+    if let Some(mt) = overlay {
+        apply_max_turns_overlay(&mut shape, mt);
+    }
 
+    Ok(shape)
+}
+
+/// Resolve the game *shape* against a single source (CLI or TOML).
+/// Caller guarantees at least one of the inputs is `Some` — otherwise
+/// the source wouldn't have been selected.
+fn resolve_game_shape_from_one_source(
+    preset: Option<String>,
+    width: Option<u8>,
+    height: Option<u8>,
+    cheese: Option<u16>,
+    symmetric: Option<bool>,
+    source_label: &str,
+) -> Result<ResolvedGameChoice, ResolveError> {
     let has_preset = preset.is_some();
     let has_any_dim = width.is_some() || height.is_some() || cheese.is_some();
     let has_all_dims = width.is_some() && height.is_some() && cheese.is_some();
 
     match (has_preset, has_any_dim) {
-        (true, true) => Err(ResolveError::v(
-            "game config: use either `preset` or (width, height, cheese), not both",
-        )),
+        (true, true) => Err(ResolveError::v(format!(
+            "game config: {source_label} sets both `preset` and (width, height, cheese); use one or the other"
+        ))),
         (false, false) => {
-            if symmetric.is_some() {
-                return Err(ResolveError::v(
-                    "game config: `symmetric` is only valid with custom (width, height, cheese)",
-                ));
-            }
-            Ok(ResolvedGameChoice::Preset {
-                name: "tiny".into(),
-                max_turns_override: max_turns,
-            })
+            // Reached only when this source's *only* contribution is
+            // `symmetric`. Symmetric without dims is invalid.
+            Err(ResolveError::v(format!(
+                "game config: {source_label} sets `symmetric` without (width, height, cheese); set the dims or remove `symmetric`"
+            )))
         },
         (true, false) => {
             if symmetric.is_some() {
-                return Err(ResolveError::v(
-                    "game config: `symmetric` is only valid with custom (width, height, cheese)",
-                ));
+                return Err(ResolveError::v(format!(
+                    "game config: {source_label} sets `symmetric` with a preset; presets pin their own symmetry"
+                )));
             }
             Ok(ResolvedGameChoice::Preset {
                 name: preset.unwrap(),
-                max_turns_override: max_turns,
+                max_turns_override: None,
             })
         },
         (false, true) => {
             if !has_all_dims {
-                return Err(ResolveError::v(
-                    "game config: provide all of (width, height, cheese) or use `preset`",
-                ));
+                return Err(ResolveError::v(format!(
+                    "game config: {source_label} provides partial dims; set all of (width, height, cheese) or use `preset`"
+                )));
             }
             Ok(ResolvedGameChoice::Custom {
                 width: width.unwrap(),
                 height: height.unwrap(),
                 cheese: cheese.unwrap(),
                 symmetric: symmetric.unwrap_or(true),
-                max_turns,
+                max_turns: None,
             })
         },
+    }
+}
+
+fn apply_max_turns_overlay(shape: &mut ResolvedGameChoice, mt: std::num::NonZeroU16) {
+    match shape {
+        ResolvedGameChoice::Preset {
+            max_turns_override, ..
+        } => *max_turns_override = Some(mt),
+        ResolvedGameChoice::Custom { max_turns, .. } => *max_turns = Some(mt),
     }
 }
 
@@ -787,16 +848,152 @@ mod tests {
 
     #[test]
     fn game_config_both_preset_and_dims_rejected() {
+        // `args_with_two_bots()` already sets `preset = Some("tiny")`,
+        // so adding dims here puts both fields in the same source (CLI).
         let mut args = args_with_two_bots();
         args.width = Some(7);
         args.height = Some(7);
         args.cheese = Some(3);
         let mut gen = fixed_seed_gen(0);
         let err = expect_err(resolve_loaded(args, None, &mut gen));
+        let s = err.to_string();
         assert!(
-            err.to_string().contains("not both") || err.to_string().contains("preset"),
+            s.contains("CLI flags") && s.contains("preset"),
             "got: {err}"
         );
+    }
+
+    #[test]
+    fn cli_dims_win_over_toml_preset() {
+        let cfg = TournamentConfig {
+            game: Some(GameSection {
+                preset: Some("tiny".into()),
+                ..GameSection::default()
+            }),
+            ..TournamentConfig::default()
+        };
+        let loaded = Some(LoadedConfig {
+            config: cfg,
+            dir: PathBuf::from("/tmp"),
+            stem: Some("ladder".into()),
+        });
+        let mut args = args_with_two_bots();
+        args.preset = None;
+        args.width = Some(7);
+        args.height = Some(7);
+        args.cheese = Some(5);
+        let mut gen = fixed_seed_gen(0);
+        let resolved = resolve_loaded(args, loaded, &mut gen).expect("resolve");
+        match resolved.game {
+            ResolvedGameChoice::Custom {
+                width: 7,
+                height: 7,
+                cheese: 5,
+                ..
+            } => {},
+            other => panic!("expected Custom 7x7 cheese=5, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_preset_alone_wins_over_toml_dims() {
+        let cfg = TournamentConfig {
+            game: Some(GameSection {
+                width: Some(11),
+                height: Some(11),
+                cheese: Some(9),
+                ..GameSection::default()
+            }),
+            ..TournamentConfig::default()
+        };
+        let loaded = Some(LoadedConfig {
+            config: cfg,
+            dir: PathBuf::from("/tmp"),
+            stem: Some("ladder".into()),
+        });
+        let mut args = args_with_two_bots();
+        args.preset = Some("small".into());
+        let mut gen = fixed_seed_gen(0);
+        let resolved = resolve_loaded(args, loaded, &mut gen).expect("resolve");
+        match resolved.game {
+            ResolvedGameChoice::Preset { ref name, .. } if name == "small" => {},
+            other => panic!("expected Preset small, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn toml_game_used_when_no_cli_game_flags() {
+        let cfg = TournamentConfig {
+            game: Some(GameSection {
+                width: Some(7),
+                height: Some(7),
+                cheese: Some(5),
+                ..GameSection::default()
+            }),
+            ..TournamentConfig::default()
+        };
+        let loaded = Some(LoadedConfig {
+            config: cfg,
+            dir: PathBuf::from("/tmp"),
+            stem: Some("ladder".into()),
+        });
+        let mut args = args_with_two_bots();
+        args.preset = None;
+        let mut gen = fixed_seed_gen(0);
+        let resolved = resolve_loaded(args, loaded, &mut gen).expect("resolve");
+        match resolved.game {
+            ResolvedGameChoice::Custom {
+                width: 7,
+                height: 7,
+                cheese: 5,
+                ..
+            } => {},
+            other => panic!("expected Custom 7x7 cheese=5, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn max_turns_alone_uses_default_shape() {
+        let mut args = args_with_two_bots();
+        args.preset = None;
+        args.max_turns = std::num::NonZeroU16::new(50);
+        let mut gen = fixed_seed_gen(0);
+        let resolved = resolve_loaded(args, None, &mut gen).expect("resolve");
+        match resolved.game {
+            ResolvedGameChoice::Preset {
+                ref name,
+                max_turns_override: Some(mt),
+            } if name == "tiny" && mt.get() == 50 => {},
+            other => panic!("expected Preset tiny with max_turns=50, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_max_turns_overlays_toml_shape() {
+        let cfg = TournamentConfig {
+            game: Some(GameSection {
+                preset: Some("small".into()),
+                ..GameSection::default()
+            }),
+            ..TournamentConfig::default()
+        };
+        let loaded = Some(LoadedConfig {
+            config: cfg,
+            dir: PathBuf::from("/tmp"),
+            stem: Some("ladder".into()),
+        });
+        let mut args = args_with_two_bots();
+        args.preset = None;
+        args.max_turns = std::num::NonZeroU16::new(99);
+        let mut gen = fixed_seed_gen(0);
+        let resolved = resolve_loaded(args, loaded, &mut gen).expect("resolve");
+        match resolved.game {
+            ResolvedGameChoice::Preset {
+                ref name,
+                max_turns_override: Some(mt),
+            } if name == "small" && mt.get() == 99 => {},
+            other => panic!("expected Preset small with max_turns=99, got {other:?}"),
+        }
     }
 
     #[test]
