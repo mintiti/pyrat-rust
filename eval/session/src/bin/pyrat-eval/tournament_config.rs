@@ -10,10 +10,6 @@
 //! parent directory at resolve time. CLI flags carry their own paths
 //! resolved from CWD; see `tournament_resolve` for the rules.
 
-// Wired into the binary across Chunks 3–6. Suppressing during the
-// incremental landing; remove once `from_resolved` materializes.
-#![allow(dead_code)]
-
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};

@@ -6,8 +6,6 @@
 //! Precedence per field: explicit flag wins, else config value, else
 //! default. Defaults live here, not in clap — see [`crate::RunArgs`].
 
-#![allow(dead_code)] // build_game_config arrives in Chunk 5; consumers wire in.
-
 use std::collections::HashSet;
 use std::env;
 use std::fs;
@@ -415,9 +413,17 @@ fn resolve_game(
         (true, true) => Err(ResolveError::v(
             "game config: use either `preset` or (width, height, cheese), not both",
         )),
-        (false, false) => Err(ResolveError::v(
-            "game config: set `preset` or all of (width, height, cheese)",
-        )),
+        (false, false) => {
+            if symmetric.is_some() {
+                return Err(ResolveError::v(
+                    "game config: `symmetric` is only valid with custom (width, height, cheese)",
+                ));
+            }
+            Ok(ResolvedGameChoice::Preset {
+                name: "tiny".into(),
+                max_turns_override: max_turns,
+            })
+        },
         (true, false) => {
             if symmetric.is_some() {
                 return Err(ResolveError::v(
@@ -794,15 +800,45 @@ mod tests {
     }
 
     #[test]
-    fn game_config_neither_preset_nor_dims_rejected() {
+    fn defaults_to_tiny_when_no_game_input() {
         let mut args = args_with_two_bots();
         args.preset = None;
         let mut gen = fixed_seed_gen(0);
-        let err = expect_err(resolve_loaded(args, None, &mut gen));
-        assert!(
-            err.to_string().contains("preset") || err.to_string().contains("width"),
-            "got: {err}"
-        );
+        let resolved = resolve_loaded(args, None, &mut gen).expect("resolve");
+        match resolved.game {
+            ResolvedGameChoice::Preset {
+                name,
+                max_turns_override: None,
+            } => assert_eq!(name, "tiny"),
+            other => panic!("expected Preset {{ name: tiny }}, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn defaults_to_tiny_only_when_neither_side_specifies() {
+        let mut args = args_with_two_bots();
+        args.preset = None;
+        let cfg = TournamentConfig {
+            game: Some(GameSection {
+                preset: Some("small".into()),
+                ..GameSection::default()
+            }),
+            ..TournamentConfig::default()
+        };
+        let loaded = Some(LoadedConfig {
+            config: cfg,
+            dir: PathBuf::from("/tmp"),
+            stem: Some("ladder".into()),
+        });
+        let mut gen = fixed_seed_gen(0);
+        let resolved = resolve_loaded(args, loaded, &mut gen).expect("resolve");
+        match resolved.game {
+            ResolvedGameChoice::Preset {
+                name,
+                max_turns_override: None,
+            } => assert_eq!(name, "small"),
+            other => panic!("expected Preset {{ name: small }}, got {other:?}"),
+        }
     }
 
     #[test]
