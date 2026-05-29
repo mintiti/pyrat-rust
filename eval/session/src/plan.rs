@@ -14,6 +14,7 @@ use std::time::SystemTime;
 use pyrat::game::builder::GameConfig;
 use pyrat_eval_store::TournamentId;
 use pyrat_orchestrator::{MatchId, Matchup, PlayerSpec, Timing};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::descriptor::EvalMatchDescriptor;
@@ -48,6 +49,33 @@ pub fn matchup_seed(
     let bytes = hasher.finalize();
     let raw = u64::from_le_bytes(bytes[..8].try_into().expect("sha256 yields 32 bytes"));
     raw & (i64::MAX as u64)
+}
+
+/// Tournament-level parameters that planners care about and that need to
+/// survive into `tournaments.params_json` for resume validation.
+///
+/// Today this is just `max_failures_per_pair` (the retry budget per
+/// matchup). Stored as JSON so future additions are additive: an older
+/// row with `{}` deserializes to defaults via `#[serde(default)]`, and a
+/// newer planner's expected params can grow new fields without breaking
+/// older stored rows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TournamentParams {
+    /// Maximum number of failed attempts per matchup before the planner
+    /// gives up. Affects retry budget; resuming with a different value
+    /// would silently change tournament semantics.
+    #[serde(default)]
+    pub max_failures_per_pair: u32,
+}
+
+impl TournamentParams {
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).expect("TournamentParams serializes")
+    }
+
+    pub fn from_json(s: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(s)
+    }
 }
 
 /// One participant resolved from a `PlayerId` to a runnable `PlayerSpec`.
@@ -124,6 +152,20 @@ pub trait Planner: Send {
     /// a `round_robin` tournament's participants would pass validation
     /// and silently skip the opponent-vs-opponent pairings.
     fn expected_format(&self) -> &str;
+
+    /// Tournament-level params (currently `max_failures_per_pair`) the
+    /// planner needs to be true for resume to be safe. The session
+    /// compares this against the stored `tournaments.params_json` row.
+    ///
+    /// Default returns `TournamentParams { max_failures_per_pair: 0 }`,
+    /// which matches what `serde(default)`-deserializing a stored `"{}"`
+    /// produces. Test mocks can rely on the default; real planners
+    /// override.
+    fn expected_params(&self) -> TournamentParams {
+        TournamentParams {
+            max_failures_per_pair: 0,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -245,6 +287,12 @@ impl Planner for RoundRobinPlanner {
     fn expected_format(&self) -> &str {
         "round_robin"
     }
+
+    fn expected_params(&self) -> TournamentParams {
+        TournamentParams {
+            max_failures_per_pair: self.config.max_failures_per_pair,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -364,6 +412,12 @@ impl Planner for GauntletPlanner {
 
     fn expected_format(&self) -> &str {
         "gauntlet"
+    }
+
+    fn expected_params(&self) -> TournamentParams {
+        TournamentParams {
+            max_failures_per_pair: self.config.max_failures_per_pair,
+        }
     }
 }
 
@@ -760,5 +814,60 @@ mod tests {
         assert_ne!(s1, s3);
         // High bit always masked.
         assert!(s1 <= i64::MAX as u64);
+    }
+
+    #[test]
+    fn tournament_params_round_trips_json() {
+        let p = TournamentParams {
+            max_failures_per_pair: 7,
+        };
+        let s = p.to_json();
+        let back = TournamentParams::from_json(&s).expect("decode");
+        assert_eq!(p, back);
+    }
+
+    #[test]
+    fn tournament_params_deserializes_empty_object_with_serde_default() {
+        // Back-compat: any externally-stored row with `"{}"` decodes
+        // to defaults (max_failures_per_pair = 0).
+        let p = TournamentParams::from_json("{}").expect("decode");
+        assert_eq!(
+            p,
+            TournamentParams {
+                max_failures_per_pair: 0
+            }
+        );
+    }
+
+    #[test]
+    fn round_robin_planner_surfaces_max_failures_in_expected_params() {
+        let p = tiny_round_robin(2, 3);
+        assert_eq!(
+            p.expected_params(),
+            TournamentParams {
+                max_failures_per_pair: 3
+            }
+        );
+    }
+
+    #[test]
+    fn gauntlet_planner_surfaces_max_failures_in_expected_params() {
+        let planner = GauntletPlanner::new(GauntletPlannerConfig {
+            challenger: embedded("champ"),
+            opponents: vec![embedded("a"), embedded("b")],
+            game_config: GameConfig::classic(7, 5, 3),
+            game_config_id: "gc".into(),
+            timing: timing(),
+            tournament_id: TournamentId(1),
+            target_each: 2,
+            max_failures_per_pair: 4,
+            tournament_seed: 0xC0FFEE,
+        });
+        assert_eq!(
+            planner.expected_params(),
+            TournamentParams {
+                max_failures_per_pair: 4
+            }
+        );
     }
 }

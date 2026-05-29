@@ -20,8 +20,8 @@ use parking_lot::Mutex;
 use pyrat_eval::MatchupOutcome;
 use pyrat_eval::{
     EvalMatchDescriptor, EvalSession, GauntletPlanner, GauntletPlannerConfig, ResolvedPlayer,
-    RoundRobinPlanner, RoundRobinPlannerConfig, SessionConfig, SessionMode, TournamentSpec,
-    TournamentState,
+    RoundRobinPlanner, RoundRobinPlannerConfig, SessionConfig, SessionMode, TournamentParams,
+    TournamentSpec, TournamentState,
 };
 use pyrat_eval_store::{EloOptions, EvalStore, TournamentId};
 use pyrat_host::wire::TimingMode;
@@ -192,10 +192,13 @@ async fn bootstrap_new(
             ("gauntlet".to_string(), v)
         },
     };
+    let params = TournamentParams {
+        max_failures_per_pair: resolved.max_failures_per_pair,
+    };
     let spec = TournamentSpec {
         format: format_str,
         target_games_per_matchup: Some(resolved.target_games_per_matchup),
-        params_json: "{}".into(),
+        params_json: params.to_json(),
         game_config: game_config.clone(),
         tournament_seed: seed,
     };
