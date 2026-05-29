@@ -179,7 +179,7 @@ cargo run -p pyrat-eval -- tournament run --bot a=path --bot b=path --save-as sp
 cargo run -p pyrat-eval -- tournament run --config ladder.toml --resume 7
 ```
 
-The `tournament run` subcommand is library-first: the `pyrat-eval` crate exports `EvalSession`, `RoundRobinPlanner`, `GauntletPlanner`, etc., for GUI / alpharat / other Rust consumers. The CLI is an automation surface over it. See `.mt/ux/intent.md` for the north star and the consumer breakdown.
+The `tournament run` subcommand is library-first: the `pyrat-eval` crate exports `EvalSession`, `RoundRobinPlanner`, `GauntletPlanner`, etc., for GUI / alpharat / other Rust consumers. The CLI is an automation surface over it.
 
 ### CI Debugging
 ```bash

@@ -87,6 +87,7 @@ A tournament (round-robin or gauntlet) with Elo standings:
 
 ```bash
 # Quick path: flags. --bot id=working_dir defaults command to `cargo run --release`.
+# Game defaults to --preset tiny when no [game] section / game flags are given.
 cargo run -p pyrat-eval -- tournament run \
   --bot greedy=botpack/greedy \
   --bot smart_random=botpack/smart-random \
