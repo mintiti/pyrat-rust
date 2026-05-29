@@ -440,14 +440,27 @@ fn resolve_game(
         }
     };
 
-    let overlay = args
-        .max_turns
-        .or_else(|| g.max_turns.and_then(std::num::NonZeroU16::new));
+    let overlay = match args.max_turns {
+        Some(mt) => Some(mt),
+        None => parse_toml_max_turns(g.max_turns)?,
+    };
     if let Some(mt) = overlay {
         apply_max_turns_overlay(&mut shape, mt);
     }
 
     Ok(shape)
+}
+
+/// Convert a TOML `[game].max_turns` value into `NonZeroU16`. Treats an
+/// explicit `0` as a validation error rather than silently dropping it
+/// (which is the asymmetric counterpart of clap rejecting
+/// `--max-turns 0` at parse time).
+fn parse_toml_max_turns(raw: Option<u16>) -> Result<Option<std::num::NonZeroU16>, ResolveError> {
+    match raw {
+        None => Ok(None),
+        Some(0) => Err(ResolveError::v("[game].max_turns must be > 0")),
+        Some(n) => Ok(std::num::NonZeroU16::new(n)),
+    }
 }
 
 /// Resolve the game *shape* against a single source (CLI or TOML).
@@ -993,6 +1006,56 @@ mod tests {
                 max_turns_override: Some(mt),
             } if name == "small" && mt.get() == 99 => {},
             other => panic!("expected Preset small with max_turns=99, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn toml_max_turns_zero_rejected() {
+        let cfg = TournamentConfig {
+            game: Some(GameSection {
+                preset: Some("tiny".into()),
+                max_turns: Some(0),
+                ..GameSection::default()
+            }),
+            ..TournamentConfig::default()
+        };
+        let loaded = Some(LoadedConfig {
+            config: cfg,
+            dir: PathBuf::from("/tmp"),
+            stem: Some("ladder".into()),
+        });
+        let mut args = args_with_two_bots();
+        args.preset = None;
+        let mut gen = fixed_seed_gen(0);
+        let err = expect_err(resolve_loaded(args, loaded, &mut gen));
+        assert!(err.to_string().contains("max_turns"), "got: {err}");
+    }
+
+    #[test]
+    fn toml_max_turns_positive_accepted() {
+        let cfg = TournamentConfig {
+            game: Some(GameSection {
+                preset: Some("small".into()),
+                max_turns: Some(77),
+                ..GameSection::default()
+            }),
+            ..TournamentConfig::default()
+        };
+        let loaded = Some(LoadedConfig {
+            config: cfg,
+            dir: PathBuf::from("/tmp"),
+            stem: Some("ladder".into()),
+        });
+        let mut args = args_with_two_bots();
+        args.preset = None;
+        let mut gen = fixed_seed_gen(0);
+        let resolved = resolve_loaded(args, loaded, &mut gen).expect("resolve");
+        match resolved.game {
+            ResolvedGameChoice::Preset {
+                ref name,
+                max_turns_override: Some(mt),
+            } if name == "small" && mt.get() == 77 => {},
+            other => panic!("expected Preset small with max_turns=77, got {other:?}"),
         }
     }
 
