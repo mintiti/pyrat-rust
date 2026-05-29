@@ -1,0 +1,18 @@
+[package]
+name = "fixture-bot-a"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "fixture-bot-a"
+path = "src/main.rs"
+
+[dependencies]
+pyrat-sdk = { path = "../../../../../sdk/rust" }
+
+# Isolated workspace so this fixture is not picked up by the root
+# Cargo workspace. The flags-only e2e test in
+# `tests/cli_run_tournament.rs` invokes `cargo run --release` from this
+# directory; default-run above resolves to `fixture-bot-a`.
+[workspace]

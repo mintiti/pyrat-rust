@@ -76,6 +76,15 @@ fn assert_success(out: &std::process::Output, args: &[&str]) {
     );
 }
 
+/// Absolute path to a fixture bot crate. Built as an isolated
+/// `[workspace]` so it doesn't collide with `pyrat-eval`'s `default-run`
+/// — when the CLI's `--bot id=working_dir` shorthand defaults the
+/// command to `cargo run --release`, Cargo picks `fixture-bot-{a,b}`
+/// from the local Cargo.toml's `[[bin]]`.
+fn fixture_bot_dir(name: &str) -> String {
+    format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"))
+}
+
 // ── Smoke tests ──────────────────────────────────────────────────────
 
 #[test]
@@ -96,6 +105,38 @@ fn minimal_toml_round_robin_runs_through() {
     assert!(
         stdout.contains("Tournament") && stdout.contains("finished"),
         "stdout should mention tournament status.\nstdout: {stdout}"
+    );
+}
+
+/// Pins the README one-liner: flags-only invocation without `--config`,
+/// `--bot id=working_dir` shorthand against bot crates outside the root
+/// workspace. Defaults to `--preset tiny` per Chunk 1.
+#[test]
+fn flags_only_runs_through() {
+    let bot_a = format!("alpha={}", fixture_bot_dir("bot-a"));
+    let bot_b = format!("beta={}", fixture_bot_dir("bot-b"));
+    let tmp = tempfile::tempdir().unwrap();
+    let store_path = tmp.path().join("ratings.db");
+    let store_path_str = store_path.to_str().unwrap();
+
+    let args = [
+        "--bot",
+        &bot_a,
+        "--bot",
+        &bot_b,
+        "--games",
+        "1",
+        "--seed",
+        "7",
+        "--store-path",
+        store_path_str,
+    ];
+    let out = run_tournament(&args);
+    assert_success(&out, &args);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Tournament") && stdout.contains("finished"),
+        "stdout should mention tournament status: {stdout}"
     );
 }
 

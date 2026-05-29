@@ -1,0 +1,15 @@
+[package]
+name = "fixture-bot-b"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[[bin]]
+name = "fixture-bot-b"
+path = "src/main.rs"
+
+[dependencies]
+pyrat-sdk = { path = "../../../../../sdk/rust" }
+
+# Isolated workspace; see bot-a/Cargo.toml for the rationale.
+[workspace]
