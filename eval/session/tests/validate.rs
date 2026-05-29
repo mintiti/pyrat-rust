@@ -1,7 +1,19 @@
 //! `EvalSession::start` cross-checks the planner against the stored
-//! tournament spec on resume. Any divergence (players, game_config_id,
-//! tournament_seed, target_games_per_matchup) must surface as
+//! tournament spec on resume. Any divergence must surface as
 //! `SessionError::TournamentMismatch` before the run loop is launched.
+//!
+//! Checks the validator performs today:
+//! - `format` (round_robin vs gauntlet)
+//! - `tournament_id`
+//! - `expected_game_config_id` string equality
+//! - **runtime `GameConfig` content hash** vs stored `game_config_id`
+//!   (catches drift where the planner reuses the stored id but the
+//!   resolved runtime config has different geometry)
+//! - `tournament_seed`
+//! - `target_games_per_matchup` (when both sides surface a value)
+//! - `expected_params()` vs decoded `params_json` (currently
+//!   `max_failures_per_pair`)
+//! - players in slot order
 
 mod common;
 

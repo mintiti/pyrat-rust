@@ -1,12 +1,15 @@
 //! End-to-end subprocess tests for `pyrat-eval tournament run`.
 //!
-//! Each test invokes the built `pyrat-eval` binary with TOML configs
-//! that point `command` at the in-crate `test-bot` binary directly, so
-//! no fixture bot crates are needed. Flag-form `--bot id=working_dir`
-//! tests are out of scope here — the parser is exercised by binary
-//! unit tests; an end-to-end flags-form test belongs in a follow-up
-//! with fixture bot crates that don't collide with `pyrat-eval`'s
-//! default-run target.
+//! Two kinds of tests live here:
+//! - TOML-driven tests that point `command` at the in-crate `test-bot`
+//!   binary explicitly. Covers `--config`, `--save-as`, `--resume`,
+//!   game-config drift on resume, and pre-bootstrap validation.
+//! - The flags-only e2e (`flags_only_runs_through`) that exercises
+//!   `--bot id=working_dir` shorthand. Because the shorthand defaults
+//!   the command to `cargo run --release`, pointing it at `eval/session`
+//!   would spawn `pyrat-eval` itself (the crate's `default-run`); the
+//!   test points at the isolated-workspace fixture crates under
+//!   `tests/fixtures/{bot-a,bot-b}/` instead.
 
 use std::path::Path;
 use std::process::Command;
