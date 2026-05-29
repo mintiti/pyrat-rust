@@ -84,9 +84,10 @@ pub async fn run_tournament_main(
     // Extra sinks: optional ReplaySink in the configured directory.
     let mut extra_sinks: Vec<(SinkRole, Arc<dyn MatchSink<EvalMatchDescriptor>>)> = Vec::new();
     if let Some(dir) = resolved.replay_dir.as_ref() {
-        let writer = Arc::new(DirectoryWriter::new(dir.clone()).map_err(|e| {
-            format!("--replay-dir: failed to open {}: {e}", dir.display())
-        })?);
+        let writer = Arc::new(
+            DirectoryWriter::new(dir.clone())
+                .map_err(|e| format!("--replay-dir: failed to open {}: {e}", dir.display()))?,
+        );
         let replay: Arc<dyn MatchSink<EvalMatchDescriptor>> = Arc::new(
             ReplaySink::new(writer)
                 .with_engine_version(format!("pyrat-eval/{}", env!("CARGO_PKG_VERSION"))),
@@ -722,13 +723,15 @@ mod tests {
             .working_dir
             .as_ref()
             .expect("working_dir present");
-        let resolved_back = std::fs::canonicalize(save_dir.path().join(written))
-            .expect("canonicalize round-trip");
+        let resolved_back =
+            std::fs::canonicalize(save_dir.path().join(written)).expect("canonicalize round-trip");
         let bot_dir_canon = std::fs::canonicalize(&bot_dir).expect("canonicalize bot_dir");
         assert_eq!(resolved_back, bot_dir_canon);
         // And the path should contain `..` since it crosses subtrees.
         assert!(
-            written.components().any(|c| matches!(c, std::path::Component::ParentDir)),
+            written
+                .components()
+                .any(|c| matches!(c, std::path::Component::ParentDir)),
             "expected `..` in rebased path, got: {written:?}",
         );
     }

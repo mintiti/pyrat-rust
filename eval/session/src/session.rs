@@ -671,8 +671,8 @@ fn validate_planner_against_stored_spec(
     // Compare params as typed data — string-compare would trip on benign
     // formatting differences. `#[serde(default)]` lets pre-fix rows with
     // `"{}"` decode to `max_failures_per_pair: 0` rather than erroring.
-    let stored_params = crate::plan::TournamentParams::from_json(&tournament.params_json)
-        .map_err(|e| {
+    let stored_params =
+        crate::plan::TournamentParams::from_json(&tournament.params_json).map_err(|e| {
             SessionError::TournamentMismatch(format!(
                 "params_json: cannot decode stored value: {e}"
             ))
