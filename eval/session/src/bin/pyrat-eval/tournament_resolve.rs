@@ -93,7 +93,7 @@ pub struct ResolvedTiming {
 }
 
 /// All decisions resolved. Carries enough information to execute the
-/// tournament *and* (via the projection in Chunk 6) round-trip back to
+/// tournament *and* (via `tournament_save`'s projection) round-trip back to
 /// a `TournamentConfig` for `--save-as`.
 pub struct ResolvedRun {
     pub players: Vec<ResolvedPlayer>,
@@ -119,8 +119,11 @@ pub enum ResolveError {
         path: PathBuf,
         source: std::io::Error,
     },
-    #[error("failed to parse config file: {0}")]
-    ConfigParse(#[from] toml::de::Error),
+    #[error("failed to parse config file {}: {source}", path.display())]
+    ConfigParse {
+        path: PathBuf,
+        source: toml::de::Error,
+    },
     #[error("bot `{bot_id}`: working_dir `{}` does not exist or is not a directory", path.display())]
     WorkingDirMissing { bot_id: String, path: PathBuf },
     #[error("{0}")]
@@ -151,7 +154,11 @@ pub fn load_config(path: &Path) -> Result<LoadedConfig, ResolveError> {
         path: abs.clone(),
         source,
     })?;
-    let config: TournamentConfig = toml::from_str(&raw)?;
+    let config: TournamentConfig =
+        toml::from_str(&raw).map_err(|source| ResolveError::ConfigParse {
+            path: abs.clone(),
+            source,
+        })?;
     let dir = abs
         .parent()
         .map(Path::to_path_buf)
@@ -190,23 +197,25 @@ pub fn resolve_loaded(
     validate_players(&players)?;
     let format = resolve_format_choice(&args, &cfg, &players)?;
 
+    // The labels name both surfaces: the user may have typed the flag
+    // or written the TOML key.
     let target_games_per_matchup = positive(
         args.games
             .or(cfg.target_games_per_matchup)
             .unwrap_or(DEFAULT_GAMES),
-        "target_games_per_matchup",
+        "--games / target_games_per_matchup",
     )?;
     let max_failures_per_pair = positive(
         args.max_failures
             .or(cfg.max_failures_per_pair)
             .unwrap_or(DEFAULT_MAX_FAILURES),
-        "max_failures_per_pair",
+        "--max-failures / max_failures_per_pair",
     )?;
     let max_parallel = positive(
         args.max_parallel
             .or(cfg.max_parallel)
             .unwrap_or(DEFAULT_MAX_PARALLEL),
-        "max_parallel",
+        "--max-parallel / max_parallel",
     )?;
 
     let game = resolve_game(&args, cfg.game.as_ref())?;
@@ -661,7 +670,6 @@ fn absolutize(path: &Path, base: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tournament_config::{EloSection, GauntletSection, TimingSection};
 
     fn expect_err(result: Result<ResolvedRun, ResolveError>) -> ResolveError {
         match result {
@@ -1438,18 +1446,4 @@ mod tests {
         );
     }
 
-    // Silence unused-import warning on EloSection, GauntletSection, TimingSection
-    // — they're held here so the tests above can construct them when adding
-    // coverage; not all are wired yet.
-    #[allow(dead_code)]
-    fn _unused_silencers() -> (EloSection, GauntletSection, TimingSection) {
-        (
-            EloSection::default(),
-            GauntletSection {
-                challenger: String::new(),
-                opponents: vec![],
-            },
-            TimingSection::default(),
-        )
-    }
 }

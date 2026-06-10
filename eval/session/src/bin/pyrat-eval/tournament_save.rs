@@ -31,7 +31,7 @@ pub(crate) fn write_save_as(
             save_dir.display()
         )
     })?;
-    let cfg = to_saveable_config(resolved, save_dir);
+    let cfg = to_saveable_config(resolved, save_dir)?;
     let toml_text = toml::to_string_pretty(&cfg)?;
     fs::write(save_path, toml_text)
         .map_err(|e| format!("--save-as: failed to write {}: {e}", save_path.display()))?;
@@ -43,7 +43,13 @@ pub(crate) fn write_save_as(
 /// `save_dir` if possible, otherwise written absolute. Implicit and
 /// store-on-resume seeds are intentionally omitted (a saved blueprint
 /// stays decoupled from any one instance's seed).
-fn to_saveable_config(resolved: &ResolvedRun, save_dir: &Path) -> TournamentConfig {
+///
+/// Errs when a player can't be expressed in the TOML schema (embedded
+/// bots) — refusing beats writing a spec that only fails on reload.
+fn to_saveable_config(
+    resolved: &ResolvedRun,
+    save_dir: &Path,
+) -> Result<TournamentConfig, String> {
     let format = match &resolved.format {
         FormatChoice::RoundRobin => "round_robin",
         FormatChoice::Gauntlet { .. } => "gauntlet",
@@ -64,7 +70,7 @@ fn to_saveable_config(resolved: &ResolvedRun, save_dir: &Path) -> TournamentConf
         .players
         .iter()
         .map(|p| player_entry_from(p, save_dir))
-        .collect();
+        .collect::<Result<Vec<_>, _>>()?;
     let gauntlet = match &resolved.format {
         FormatChoice::Gauntlet {
             challenger,
@@ -88,7 +94,7 @@ fn to_saveable_config(resolved: &ResolvedRun, save_dir: &Path) -> TournamentConf
         | LaunchMode::Resume { .. } => None,
     };
 
-    TournamentConfig {
+    Ok(TournamentConfig {
         store_path: Some(make_relative_or_absolute(&resolved.store_path, save_dir)),
         replay_dir: resolved
             .replay_dir
@@ -104,7 +110,7 @@ fn to_saveable_config(resolved: &ResolvedRun, save_dir: &Path) -> TournamentConf
         elo,
         players,
         gauntlet,
-    }
+    })
 }
 
 fn game_section_from(game: &ResolvedGame) -> GameSection {
@@ -131,30 +137,28 @@ fn game_section_from(game: &ResolvedGame) -> GameSection {
     }
 }
 
-fn player_entry_from(player: &ResolvedPlayer, save_dir: &Path) -> PlayerEntry {
+fn player_entry_from(player: &ResolvedPlayer, save_dir: &Path) -> Result<PlayerEntry, String> {
     use pyrat_orchestrator::PlayerSpec;
-    let (command, working_dir) = match &player.spec {
+    match &player.spec {
         PlayerSpec::Subprocess {
             command,
             working_dir,
             ..
-        } => (
-            command.clone(),
-            working_dir
+        } => Ok(PlayerEntry {
+            id: player.id.clone(),
+            command: command.clone(),
+            working_dir: working_dir
                 .as_ref()
                 .map(|p| make_relative_or_absolute(p, save_dir)),
-        ),
-        // Embedded bots can't be serialized (factories are closures);
-        // fall through to an empty command, which the resolver will
-        // reject on reload. A user who builds an embedded-bot tournament
-        // and then asks for --save-as is misusing the surface; document
-        // this once we have a real embedded-bot path.
-        _ => (String::new(), None),
-    };
-    PlayerEntry {
-        id: player.id.clone(),
-        command,
-        working_dir,
+        }),
+        // Embedded bots can't be serialized (factories are closures).
+        // Unreachable from today's resolver (it only builds Subprocess),
+        // but refusing here beats a future library path silently writing
+        // a spec that only fails on reload.
+        _ => Err(format!(
+            "--save-as: player `{}` is not a subprocess bot and cannot be written to TOML",
+            player.id
+        )),
     }
 }
 
@@ -259,7 +263,7 @@ mod tests {
     #[test]
     fn save_as_omits_implicit_seed() {
         let resolved = fixture_resolved(Some(PathBuf::from("/tmp/out.toml")));
-        let cfg = to_saveable_config(&resolved, Path::new("/tmp"));
+        let cfg = to_saveable_config(&resolved, Path::new("/tmp")).expect("project");
         assert!(cfg.seed.is_none(), "Generated seed should not be saved");
     }
 
@@ -269,7 +273,7 @@ mod tests {
         resolved.mode = LaunchMode::New {
             seed: NewSeed::Explicit(42),
         };
-        let cfg = to_saveable_config(&resolved, Path::new("/tmp"));
+        let cfg = to_saveable_config(&resolved, Path::new("/tmp")).expect("project");
         assert_eq!(cfg.seed, Some(42));
     }
 
@@ -280,7 +284,7 @@ mod tests {
             id: pyrat_eval_store::TournamentId(1),
             seed_assert: None,
         };
-        let cfg = to_saveable_config(&resolved, Path::new("/tmp"));
+        let cfg = to_saveable_config(&resolved, Path::new("/tmp")).expect("project");
         assert!(cfg.seed.is_none());
     }
 
@@ -303,7 +307,7 @@ mod tests {
             store_path: store.clone(),
             ..fixture_resolved(None)
         };
-        let cfg = to_saveable_config(&resolved, tmp.path());
+        let cfg = to_saveable_config(&resolved, tmp.path()).expect("project");
 
         // Both paths should be relative to save_dir.
         assert_eq!(cfg.store_path.as_deref(), Some(Path::new("ratings.db")));
@@ -336,7 +340,7 @@ mod tests {
             store_path: bot_dir.join("ratings.db"),
             ..fixture_resolved(None)
         };
-        let cfg = to_saveable_config(&resolved, save_dir.path());
+        let cfg = to_saveable_config(&resolved, save_dir.path()).expect("project");
 
         // Round-trip: the relative working_dir, joined to save_dir,
         // must canonicalize back to bot_dir.
@@ -401,7 +405,7 @@ mod tests {
             store_path: nonexistent_store.clone(),
             ..fixture_resolved(None)
         };
-        let cfg = to_saveable_config(&resolved, save_dir.path());
+        let cfg = to_saveable_config(&resolved, save_dir.path()).expect("project");
 
         // Should produce a relative path.
         assert_eq!(

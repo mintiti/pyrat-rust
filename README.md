@@ -100,6 +100,28 @@ cargo run -p pyrat-eval -- tournament run --config ladder.toml
 cargo run -p pyrat-eval -- tournament run --bot ... --save-as ladder.toml
 ```
 
+A `ladder.toml` looks like this (paths are relative to the file; the
+easiest way to get a starting spec is `--save-as`, which writes the
+fully resolved run back out):
+
+```toml
+format = "round_robin"
+target_games_per_matchup = 5
+
+[game]
+preset = "tiny"
+
+[[players]]
+id = "greedy"
+command = "cargo run --release"
+working_dir = "../botpack/greedy"
+
+[[players]]
+id = "smart_random"
+command = "cargo run --release"
+working_dir = "../botpack/smart-random"
+```
+
 ## The game
 
 A Rat and a Python drop into opposite corners of a maze. Cheese is scattered across the board, and both players move at the same time. Try to get more cheeses than your opponent!

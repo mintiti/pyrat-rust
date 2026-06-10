@@ -7,10 +7,9 @@
 //!   start.
 //! - **Resume (`--resume <id>`)**: query the store for the existing
 //!   tournament, reuse its `game_config_id` and `tournament_seed`, build
-//!   the planner matching the stored spec, start.
-//!
-//! Seed handling, gauntlet player ordering, pre-spawn validation, and
-//! state capture follow the contract pinned in the source plan.
+//!   the planner matching the stored spec, start. The spec itself is
+//!   re-derived from the user's flags/config and *verified* against the
+//!   store (the store carries results and identity, not bot commands).
 
 use std::fs;
 use std::path::Path;
@@ -49,7 +48,15 @@ pub async fn run_tournament_main(
     }
 
     let game_config = build_game_config(&resolved.game)?;
-    let store = Arc::new(Mutex::new(EvalStore::open(&resolved.store_path)?));
+    // The store path is often implicit (config stem, or ./ratings.db);
+    // an open failure must name it or the user can't tell what broke.
+    let store = EvalStore::open(&resolved.store_path).map_err(|e| {
+        format!(
+            "failed to open store {}: {e}",
+            resolved.store_path.display()
+        )
+    })?;
+    let store = Arc::new(Mutex::new(store));
 
     // Realize the seed and the (tournament_id, game_config_id) pair. On
     // resume, the store is the source of truth; on a new tournament,

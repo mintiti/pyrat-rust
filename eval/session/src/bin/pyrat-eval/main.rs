@@ -3,6 +3,9 @@
 //! Subcommands:
 //! - `run-one`: runs a single match between two subprocess bots, optionally
 //!   writing a JSON game record.
+//! - `tournament run`: round-robin or gauntlet between N bots, driven by
+//!   flags or a TOML config, with Elo standings out (see
+//!   `tournament_resolve` for the precedence rules).
 
 mod game_config_build;
 mod orchestrator_config_build;
@@ -73,26 +76,26 @@ enum TournamentSubcommand {
 /// --release`. For arbitrary commands (Python, env vars, custom flags),
 /// use a TOML config with `command = "..."` instead.
 #[derive(Args)]
-#[allow(dead_code)] // Wired across Chunks 4-7; remove once run_tournament fills in.
 pub(crate) struct RunArgs {
     /// Bot shorthand: `id=working_dir`. Defaults command to `cargo run --release`.
-    /// Repeatable. For arbitrary commands, use --config with a TOML.
+    /// Repeatable. Replaces the config's [[players]] list entirely (no merging).
+    /// For arbitrary commands, use --config with a TOML.
     #[arg(long = "bot", value_parser = parse_bot_arg)]
     pub(crate) bots: Vec<BotArg>,
 
-    /// `round-robin` or `gauntlet`. Underscore form also accepted.
+    /// `round-robin` or `gauntlet`. Underscore form also accepted. Default: round-robin.
     #[arg(long)]
     pub(crate) format: Option<String>,
 
-    /// Target games per matchup (round-robin) or per opponent (gauntlet).
+    /// Target games per matchup (round-robin) or per opponent (gauntlet). Default: 5.
     #[arg(long)]
     pub(crate) games: Option<u32>,
 
-    /// Max consecutive failures per matchup before the planner stops retrying.
+    /// Max consecutive failures per matchup before the planner stops retrying. Default: 1.
     #[arg(long)]
     pub(crate) max_failures: Option<u32>,
 
-    /// Max matches in flight at once.
+    /// Max matches in flight at once. Default: 2.
     #[arg(long)]
     pub(crate) max_parallel: Option<u32>,
 
@@ -109,7 +112,9 @@ pub(crate) struct RunArgs {
     #[arg(long, conflicts_with = "resume")]
     pub(crate) save_as: Option<PathBuf>,
 
-    /// Resume an existing tournament by id. Mutually exclusive with `--save-as`.
+    /// Resume an existing tournament by id. Pass the same --config/flags the
+    /// tournament was created with — the store carries results, not the spec.
+    /// Mutually exclusive with `--save-as`.
     #[arg(long)]
     pub(crate) resume: Option<i64>,
 
@@ -127,12 +132,16 @@ pub(crate) struct RunArgs {
 
     // ── Game config (mutually exclusive: preset OR width+height+cheese) ──
     /// Named preset: tiny, small, medium, large, huge, open, asymmetric.
+    /// Default: tiny (when no game flags or [game] section are given).
     #[arg(long)]
     pub(crate) preset: Option<String>,
+    /// Board width (use with --height and --cheese; excludes --preset).
     #[arg(long)]
     pub(crate) width: Option<u8>,
+    /// Board height (use with --width and --cheese; excludes --preset).
     #[arg(long)]
     pub(crate) height: Option<u8>,
+    /// Cheese count (use with --width and --height; excludes --preset).
     #[arg(long)]
     pub(crate) cheese: Option<u16>,
     /// Symmetric maze (only valid with --width/--height/--cheese; presets pin their own).
@@ -143,14 +152,19 @@ pub(crate) struct RunArgs {
     pub(crate) max_turns: Option<NonZeroU16>,
 
     // ── Timing overrides ──
+    /// Per-move think budget in ms. Default: 1000.
     #[arg(long)]
     pub(crate) move_timeout_ms: Option<u32>,
+    /// Preprocessing budget in ms before turn 1. Default: 10000.
     #[arg(long)]
     pub(crate) preprocessing_timeout_ms: Option<u32>,
+    /// How long a bot may take to start and connect, in ms. Default: 30000.
     #[arg(long)]
     pub(crate) startup_timeout_ms: Option<u32>,
+    /// Configure-phase handshake budget in ms. Default: 5000.
     #[arg(long)]
     pub(crate) configure_timeout_ms: Option<u32>,
+    /// Network grace in ms added on top of the think deadline. Default: 50.
     #[arg(long)]
     pub(crate) network_grace_ms: Option<u32>,
 

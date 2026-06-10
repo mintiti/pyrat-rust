@@ -2,7 +2,7 @@
 //!
 //! The struct is serde-symmetric: `Deserialize` reads a `--config` file,
 //! `Serialize` writes one back for `--save-as`. Every optional-on-input
-//! field is `Option<T>`; defaults live in the resolver (Chunk 4), not here.
+//! field is `Option<T>`; defaults live in `tournament_resolve`, not here.
 //! Validation runs as part of `resolve()` — the schema only describes the
 //! shape of the file.
 //!
