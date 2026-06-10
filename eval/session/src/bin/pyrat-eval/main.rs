@@ -29,7 +29,7 @@ use pyrat_orchestrator::{
     PlayerSpec, Timing,
 };
 
-use crate::game_config_build::ResolvedGameChoice;
+use crate::game_config_build::{GameShape, ResolvedGame};
 use crate::tournament_resolve::ResolvedTiming;
 
 // ── CLI ──────────────────────────────────────────────
@@ -231,20 +231,21 @@ struct RunOneArgs {
 }
 
 fn build_game_config(args: &RunOneArgs) -> Result<GameConfig, String> {
-    let choice = match &args.preset {
-        Some(preset) => ResolvedGameChoice::Preset {
+    let shape = match &args.preset {
+        Some(preset) => GameShape::Preset {
             name: preset.clone(),
-            max_turns_override: args.max_turns,
         },
-        None => ResolvedGameChoice::Custom {
+        None => GameShape::Custom {
             width: args.width,
             height: args.height,
             cheese: args.cheese,
             symmetric: true,
-            max_turns: args.max_turns,
         },
     };
-    game_config_build::build_game_config(&choice)
+    game_config_build::build_game_config(&ResolvedGame {
+        shape,
+        max_turns: args.max_turns,
+    })
 }
 
 fn build_orchestrator_config(args: &RunOneArgs) -> OrchestratorConfig {

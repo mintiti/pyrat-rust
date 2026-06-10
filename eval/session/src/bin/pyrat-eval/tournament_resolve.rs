@@ -15,13 +15,14 @@ use pyrat_eval::ResolvedPlayer;
 use pyrat_eval_store::TournamentId;
 use pyrat_orchestrator::PlayerSpec;
 
-use crate::game_config_build::ResolvedGameChoice;
+use crate::game_config_build::{GameShape, ResolvedGame};
 use crate::tournament_config::{GameSection, PlayerEntry, TournamentConfig};
 use crate::{BotArg, RunArgs};
 
 // ── Defaults (live in the resolver, not in clap) ─────────────────────
 
 const DEFAULT_GAMES: u32 = 5;
+const DEFAULT_GAME_PRESET: &str = "tiny";
 const DEFAULT_MAX_FAILURES: u32 = 1;
 const DEFAULT_MAX_PARALLEL: u32 = 2;
 const DEFAULT_MOVE_TIMEOUT_MS: u32 = 1000;
@@ -94,7 +95,7 @@ pub struct ResolvedTiming {
 /// a `TournamentConfig` for `--save-as`.
 pub struct ResolvedRun {
     pub players: Vec<ResolvedPlayer>,
-    pub game: ResolvedGameChoice,
+    pub game: ResolvedGame,
     pub timing: ResolvedTiming,
     pub format: FormatChoice,
     pub target_games_per_matchup: u32,
@@ -420,13 +421,17 @@ fn positive(value: u32, field: &str) -> Result<u32, ResolveError> {
 ///   1. *Shape* (`preset` XOR custom dims): whole-choice precedence per
 ///      source — if the CLI supplied any shape field, the CLI shape
 ///      wins entirely; else if `[game]` did, the TOML shape wins
-///      entirely; else default to `Preset { name: "tiny" }`.
+///      entirely; else default to the `tiny` preset.
 ///   2. `max_turns` overlay: CLI overrides TOML overrides the
 ///      preset/default's own value.
-fn resolve_game(
-    args: &RunArgs,
-    cfg: Option<&GameSection>,
-) -> Result<ResolvedGameChoice, ResolveError> {
+///
+/// Why whole-choice instead of the per-field merge every other option
+/// uses: merging shape fields across sources would synthesize either an
+/// invalid preset-plus-dims hybrid or a geometry nobody specified. And
+/// the game config is the content-hashed identity of an Elo pool —
+/// forcing one source to state the full shape keeps "which pool is
+/// this" an explicit, single-source decision.
+fn resolve_game(args: &RunArgs, cfg: Option<&GameSection>) -> Result<ResolvedGame, ResolveError> {
     let empty = GameSection::default();
     let g = cfg.unwrap_or(&empty);
 
@@ -441,7 +446,7 @@ fn resolve_game(
         || g.cheese.is_some()
         || g.symmetric.is_some();
 
-    let mut shape = if cli_has_shape {
+    let shape = if cli_has_shape {
         resolve_game_shape_from_one_source(
             args.preset.clone(),
             args.width,
@@ -460,21 +465,17 @@ fn resolve_game(
             "[game] section",
         )?
     } else {
-        ResolvedGameChoice::Preset {
-            name: "tiny".into(),
-            max_turns_override: None,
+        GameShape::Preset {
+            name: DEFAULT_GAME_PRESET.into(),
         }
     };
 
-    let overlay = match args.max_turns {
+    let max_turns = match args.max_turns {
         Some(mt) => Some(mt),
         None => parse_toml_max_turns(g.max_turns)?,
     };
-    if let Some(mt) = overlay {
-        apply_max_turns_overlay(&mut shape, mt);
-    }
 
-    Ok(shape)
+    Ok(ResolvedGame { shape, max_turns })
 }
 
 /// Convert a TOML `[game].max_turns` value into `NonZeroU16`. Treats an
@@ -499,7 +500,7 @@ fn resolve_game_shape_from_one_source(
     cheese: Option<u16>,
     symmetric: Option<bool>,
     source_label: &str,
-) -> Result<ResolvedGameChoice, ResolveError> {
+) -> Result<GameShape, ResolveError> {
     let has_preset = preset.is_some();
     let has_any_dim = width.is_some() || height.is_some() || cheese.is_some();
     let has_all_dims = width.is_some() && height.is_some() && cheese.is_some();
@@ -521,9 +522,8 @@ fn resolve_game_shape_from_one_source(
                     "game config: {source_label} sets `symmetric` with a preset; presets pin their own symmetry"
                 )));
             }
-            Ok(ResolvedGameChoice::Preset {
+            Ok(GameShape::Preset {
                 name: preset.unwrap(),
-                max_turns_override: None,
             })
         },
         (false, true) => {
@@ -532,23 +532,13 @@ fn resolve_game_shape_from_one_source(
                     "game config: {source_label} provides partial dims; set all of (width, height, cheese) or use `preset`"
                 )));
             }
-            Ok(ResolvedGameChoice::Custom {
+            Ok(GameShape::Custom {
                 width: width.unwrap(),
                 height: height.unwrap(),
                 cheese: cheese.unwrap(),
                 symmetric: symmetric.unwrap_or(true),
-                max_turns: None,
             })
         },
-    }
-}
-
-fn apply_max_turns_overlay(shape: &mut ResolvedGameChoice, mt: std::num::NonZeroU16) {
-    match shape {
-        ResolvedGameChoice::Preset {
-            max_turns_override, ..
-        } => *max_turns_override = Some(mt),
-        ResolvedGameChoice::Custom { max_turns, .. } => *max_turns = Some(mt),
     }
 }
 
@@ -958,15 +948,18 @@ mod tests {
         args.cheese = Some(5);
         let mut gen = fixed_seed_gen(0);
         let resolved = resolve_loaded(args, loaded, &mut gen).expect("resolve");
-        match resolved.game {
-            ResolvedGameChoice::Custom {
-                width: 7,
-                height: 7,
-                cheese: 5,
-                ..
-            } => {},
-            other => panic!("expected Custom 7x7 cheese=5, got {other:?}"),
-        }
+        assert_eq!(
+            resolved.game,
+            ResolvedGame {
+                shape: GameShape::Custom {
+                    width: 7,
+                    height: 7,
+                    cheese: 5,
+                    symmetric: true
+                },
+                max_turns: None
+            }
+        );
     }
 
     #[test]
@@ -989,10 +982,15 @@ mod tests {
         args.preset = Some("small".into());
         let mut gen = fixed_seed_gen(0);
         let resolved = resolve_loaded(args, loaded, &mut gen).expect("resolve");
-        match resolved.game {
-            ResolvedGameChoice::Preset { ref name, .. } if name == "small" => {},
-            other => panic!("expected Preset small, got {other:?}"),
-        }
+        assert_eq!(
+            resolved.game,
+            ResolvedGame {
+                shape: GameShape::Preset {
+                    name: "small".into()
+                },
+                max_turns: None
+            }
+        );
     }
 
     #[test]
@@ -1015,15 +1013,18 @@ mod tests {
         args.preset = None;
         let mut gen = fixed_seed_gen(0);
         let resolved = resolve_loaded(args, loaded, &mut gen).expect("resolve");
-        match resolved.game {
-            ResolvedGameChoice::Custom {
-                width: 7,
-                height: 7,
-                cheese: 5,
-                ..
-            } => {},
-            other => panic!("expected Custom 7x7 cheese=5, got {other:?}"),
-        }
+        assert_eq!(
+            resolved.game,
+            ResolvedGame {
+                shape: GameShape::Custom {
+                    width: 7,
+                    height: 7,
+                    cheese: 5,
+                    symmetric: true
+                },
+                max_turns: None
+            }
+        );
     }
 
     #[test]
@@ -1033,13 +1034,15 @@ mod tests {
         args.max_turns = std::num::NonZeroU16::new(50);
         let mut gen = fixed_seed_gen(0);
         let resolved = resolve_loaded(args, None, &mut gen).expect("resolve");
-        match resolved.game {
-            ResolvedGameChoice::Preset {
-                ref name,
-                max_turns_override: Some(mt),
-            } if name == "tiny" && mt.get() == 50 => {},
-            other => panic!("expected Preset tiny with max_turns=50, got {other:?}"),
-        }
+        assert_eq!(
+            resolved.game,
+            ResolvedGame {
+                shape: GameShape::Preset {
+                    name: "tiny".into()
+                },
+                max_turns: std::num::NonZeroU16::new(50)
+            }
+        );
     }
 
     #[test]
@@ -1061,13 +1064,15 @@ mod tests {
         args.max_turns = std::num::NonZeroU16::new(99);
         let mut gen = fixed_seed_gen(0);
         let resolved = resolve_loaded(args, loaded, &mut gen).expect("resolve");
-        match resolved.game {
-            ResolvedGameChoice::Preset {
-                ref name,
-                max_turns_override: Some(mt),
-            } if name == "small" && mt.get() == 99 => {},
-            other => panic!("expected Preset small with max_turns=99, got {other:?}"),
-        }
+        assert_eq!(
+            resolved.game,
+            ResolvedGame {
+                shape: GameShape::Preset {
+                    name: "small".into()
+                },
+                max_turns: std::num::NonZeroU16::new(99)
+            }
+        );
     }
 
     #[test]
@@ -1111,13 +1116,15 @@ mod tests {
         args.preset = None;
         let mut gen = fixed_seed_gen(0);
         let resolved = resolve_loaded(args, loaded, &mut gen).expect("resolve");
-        match resolved.game {
-            ResolvedGameChoice::Preset {
-                ref name,
-                max_turns_override: Some(mt),
-            } if name == "small" && mt.get() == 77 => {},
-            other => panic!("expected Preset small with max_turns=77, got {other:?}"),
-        }
+        assert_eq!(
+            resolved.game,
+            ResolvedGame {
+                shape: GameShape::Preset {
+                    name: "small".into()
+                },
+                max_turns: std::num::NonZeroU16::new(77)
+            }
+        );
     }
 
     #[test]
@@ -1126,13 +1133,15 @@ mod tests {
         args.preset = None;
         let mut gen = fixed_seed_gen(0);
         let resolved = resolve_loaded(args, None, &mut gen).expect("resolve");
-        match resolved.game {
-            ResolvedGameChoice::Preset {
-                name,
-                max_turns_override: None,
-            } => assert_eq!(name, "tiny"),
-            other => panic!("expected Preset {{ name: tiny }}, got {other:?}"),
-        }
+        assert_eq!(
+            resolved.game,
+            ResolvedGame {
+                shape: GameShape::Preset {
+                    name: "tiny".into()
+                },
+                max_turns: None
+            }
+        );
     }
 
     #[test]
@@ -1153,13 +1162,15 @@ mod tests {
         });
         let mut gen = fixed_seed_gen(0);
         let resolved = resolve_loaded(args, loaded, &mut gen).expect("resolve");
-        match resolved.game {
-            ResolvedGameChoice::Preset {
-                name,
-                max_turns_override: None,
-            } => assert_eq!(name, "small"),
-            other => panic!("expected Preset {{ name: small }}, got {other:?}"),
-        }
+        assert_eq!(
+            resolved.game,
+            ResolvedGame {
+                shape: GameShape::Preset {
+                    name: "small".into()
+                },
+                max_turns: None
+            }
+        );
     }
 
     #[test]
@@ -1181,16 +1192,18 @@ mod tests {
         args.symmetric = Some(true);
         let mut gen = fixed_seed_gen(0);
         let resolved = resolve_loaded(args, None, &mut gen).expect("resolve");
-        match resolved.game {
-            ResolvedGameChoice::Custom {
-                width: 7,
-                height: 7,
-                cheese: 5,
-                symmetric: true,
-                max_turns: None,
-            } => {},
-            other => panic!("unexpected game: {other:?}"),
-        }
+        assert_eq!(
+            resolved.game,
+            ResolvedGame {
+                shape: GameShape::Custom {
+                    width: 7,
+                    height: 7,
+                    cheese: 5,
+                    symmetric: true
+                },
+                max_turns: None
+            }
+        );
     }
 
     #[test]

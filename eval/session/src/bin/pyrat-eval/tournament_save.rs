@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 
 use pyrat_eval::ResolvedPlayer;
 
-use crate::game_config_build::ResolvedGameChoice;
+use crate::game_config_build::{GameShape, ResolvedGame};
 use crate::tournament_config::{
     EloSection, GameSection, GauntletSection, PlayerEntry, TimingSection, TournamentConfig,
 };
@@ -107,28 +107,25 @@ fn to_saveable_config(resolved: &ResolvedRun, save_dir: &Path) -> TournamentConf
     }
 }
 
-fn game_section_from(choice: &ResolvedGameChoice) -> GameSection {
-    match choice {
-        ResolvedGameChoice::Preset {
-            name,
-            max_turns_override,
-        } => GameSection {
+fn game_section_from(game: &ResolvedGame) -> GameSection {
+    let max_turns = game.max_turns.map(|n| n.get());
+    match &game.shape {
+        GameShape::Preset { name } => GameSection {
             preset: Some(name.clone()),
-            max_turns: max_turns_override.map(|n| n.get()),
+            max_turns,
             ..Default::default()
         },
-        ResolvedGameChoice::Custom {
+        GameShape::Custom {
             width,
             height,
             cheese,
             symmetric,
-            max_turns,
         } => GameSection {
             width: Some(*width),
             height: Some(*height),
             cheese: Some(*cheese),
             symmetric: Some(*symmetric),
-            max_turns: max_turns.map(|n| n.get()),
+            max_turns,
             ..Default::default()
         },
     }
@@ -230,9 +227,11 @@ mod tests {
                     working_dir: Some(PathBuf::from("/tmp/work/botpack/greedy")),
                 },
             }],
-            game: ResolvedGameChoice::Preset {
-                name: "tiny".into(),
-                max_turns_override: NonZeroU16::new(50),
+            game: ResolvedGame {
+                shape: GameShape::Preset {
+                    name: "tiny".into(),
+                },
+                max_turns: NonZeroU16::new(50),
             },
             timing: ResolvedTiming {
                 move_timeout_ms: 1000,
