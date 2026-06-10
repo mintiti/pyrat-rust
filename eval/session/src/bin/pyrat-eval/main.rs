@@ -185,6 +185,41 @@ pub(crate) struct RunArgs {
     pub(crate) anchor_elo: Option<f64>,
 }
 
+/// All-`None` `RunArgs` ("the user typed nothing") for resolver-layer
+/// tests in this crate.
+#[cfg(test)]
+pub(crate) fn empty_run_args() -> RunArgs {
+    RunArgs {
+        bots: vec![],
+        format: None,
+        games: None,
+        max_failures: None,
+        max_parallel: None,
+        seed: None,
+        config: None,
+        save_as: None,
+        resume: None,
+        results_json: None,
+        store_path: None,
+        replay_dir: None,
+        preset: None,
+        width: None,
+        height: None,
+        cheese: None,
+        symmetric: None,
+        max_turns: None,
+        move_timeout_ms: None,
+        preprocessing_timeout_ms: None,
+        startup_timeout_ms: None,
+        configure_timeout_ms: None,
+        network_grace_ms: None,
+        challenger: None,
+        opponents: vec![],
+        anchor: None,
+        anchor_elo: None,
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct BotArg {
     pub(crate) id: String,
@@ -463,5 +498,17 @@ mod tests {
         assert!(parse_bot_arg("a=")
             .unwrap_err()
             .contains("empty working_dir"));
+    }
+
+    /// The default generator must honor the 63-bit mask — explicit
+    /// seeds are bounds-checked in the resolver, but generated ones
+    /// only have this mask between them and the store's signed-INTEGER
+    /// rejection. 64 samples: an unmasked generator would trip with
+    /// probability 1 - 2^-64.
+    #[test]
+    fn masked_random_seed_fits_sqlite_signed_integer() {
+        for _ in 0..64 {
+            assert!(masked_random_seed() <= i64::MAX as u64);
+        }
     }
 }

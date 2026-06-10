@@ -414,6 +414,128 @@ mod tests {
         );
     }
 
+    /// Field-wise projection completeness: every durable field of an
+    /// all-non-default `ResolvedRun` survives project → TOML →
+    /// re-resolve. A field added to `ResolvedRun` but forgotten in
+    /// `to_saveable_config` fails here — the resolver would silently
+    /// refill its default, which the success-only roundtrip e2e can't
+    /// detect.
+    #[test]
+    fn projection_round_trips_every_field() {
+        use crate::tournament_resolve::{resolve_loaded, LoadedConfig, ResolvedTiming};
+
+        // A root that exists nowhere, so canonicalize never rewrites
+        // paths and the comparison stays purely structural.
+        let work = Path::new("/nonexistent-pyrat/work");
+        let players = vec![
+            ResolvedPlayer {
+                id: "champ".into(),
+                spec: PlayerSpec::Subprocess {
+                    agent_id: "champ".into(),
+                    command: "./champ --fast".into(),
+                    working_dir: Some(work.join("bots/champ")),
+                },
+            },
+            ResolvedPlayer {
+                id: "rando".into(),
+                spec: PlayerSpec::Subprocess {
+                    agent_id: "rando".into(),
+                    command: "./rando".into(),
+                    working_dir: Some(work.join("bots/rando")),
+                },
+            },
+        ];
+        let resolved = ResolvedRun {
+            players,
+            game: ResolvedGame {
+                shape: GameShape::Custom {
+                    width: 9,
+                    height: 7,
+                    cheese: 13,
+                    symmetric: false,
+                },
+                max_turns: NonZeroU16::new(123),
+            },
+            timing: ResolvedTiming {
+                move_timeout_ms: 11,
+                preprocessing_timeout_ms: 22,
+                startup_timeout_ms: 33,
+                configure_timeout_ms: 44,
+                network_grace_ms: 55,
+            },
+            format: FormatChoice::Gauntlet {
+                challenger: "champ".into(),
+                opponents: vec!["rando".into()],
+            },
+            target_games_per_matchup: 7,
+            max_failures_per_pair: 4,
+            max_parallel: 3,
+            mode: LaunchMode::New {
+                seed: NewSeed::Explicit(99),
+            },
+            store_path: work.join("scores/ratings.db"),
+            replay_dir: Some(work.join("replays")),
+            anchor: "rando".into(),
+            anchor_elo: 1234.5,
+            results_json: None,
+            save_as: None,
+        };
+
+        let cfg = to_saveable_config(&resolved, work).expect("project");
+        let toml_text = toml::to_string_pretty(&cfg).expect("serialize");
+        let reparsed = toml::from_str(&toml_text).expect("parse");
+
+        let loaded = LoadedConfig {
+            config: reparsed,
+            dir: work.to_path_buf(),
+            stem: Some("ladder".into()),
+        };
+        let mut never = || panic!("explicit seed must persist; generator must not run");
+        let back = resolve_loaded(crate::empty_run_args(), Some(loaded), &mut never)
+            .expect("re-resolve the saved spec");
+
+        assert_eq!(back.game, resolved.game);
+        assert_eq!(back.timing, resolved.timing);
+        assert_eq!(back.format, resolved.format);
+        assert_eq!(back.target_games_per_matchup, 7);
+        assert_eq!(back.max_failures_per_pair, 4);
+        assert_eq!(back.max_parallel, 3);
+        assert_eq!(
+            back.mode,
+            LaunchMode::New {
+                seed: NewSeed::Explicit(99)
+            }
+        );
+        assert_eq!(back.store_path, resolved.store_path);
+        assert_eq!(back.replay_dir, resolved.replay_dir);
+        assert_eq!(back.anchor, "rando");
+        assert_eq!(back.anchor_elo, 1234.5);
+        // ResolvedPlayer carries a closure-bearing spec (no PartialEq);
+        // compare the durable fields.
+        assert_eq!(back.players.len(), resolved.players.len());
+        for (b, orig) in back.players.iter().zip(&resolved.players) {
+            assert_eq!(b.id, orig.id);
+            match (&b.spec, &orig.spec) {
+                (
+                    PlayerSpec::Subprocess {
+                        command: bc,
+                        working_dir: bw,
+                        ..
+                    },
+                    PlayerSpec::Subprocess {
+                        command: oc,
+                        working_dir: ow,
+                        ..
+                    },
+                ) => {
+                    assert_eq!(bc, oc);
+                    assert_eq!(bw, ow);
+                },
+                _ => panic!("expected subprocess players"),
+            }
+        }
+    }
+
     #[test]
     fn write_save_as_round_trips_through_toml() {
         let tmp = tempfile::tempdir().expect("tempdir");

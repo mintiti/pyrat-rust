@@ -670,6 +670,7 @@ fn absolutize(path: &Path, base: &Path) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tournament_config::{EloSection, GauntletSection, TimingSection};
 
     fn expect_err(result: Result<ResolvedRun, ResolveError>) -> ResolveError {
         match result {
@@ -679,35 +680,7 @@ mod tests {
     }
 
     fn empty_args() -> RunArgs {
-        RunArgs {
-            bots: vec![],
-            format: None,
-            games: None,
-            max_failures: None,
-            max_parallel: None,
-            seed: None,
-            config: None,
-            save_as: None,
-            resume: None,
-            results_json: None,
-            store_path: None,
-            replay_dir: None,
-            preset: None,
-            width: None,
-            height: None,
-            cheese: None,
-            symmetric: None,
-            max_turns: None,
-            move_timeout_ms: None,
-            preprocessing_timeout_ms: None,
-            startup_timeout_ms: None,
-            configure_timeout_ms: None,
-            network_grace_ms: None,
-            challenger: None,
-            opponents: vec![],
-            anchor: None,
-            anchor_elo: None,
-        }
+        crate::empty_run_args()
     }
 
     fn args_with_two_bots() -> RunArgs {
@@ -733,6 +706,208 @@ mod tests {
             emitted = true;
             value
         }
+    }
+
+    /// Helper: pull `(command, working_dir)` out of a subprocess player.
+    fn subprocess_parts(p: &ResolvedPlayer) -> (&str, Option<&Path>) {
+        match &p.spec {
+            PlayerSpec::Subprocess {
+                command,
+                working_dir,
+                ..
+            } => (command.as_str(), working_dir.as_deref()),
+            _ => panic!("expected subprocess player"),
+        }
+    }
+
+    /// One `--bot` flag discards ALL config players — whole-list
+    /// replacement, not a merge. (The plausible misreading is "add one
+    /// extra bot to the committed ladder via a flag".)
+    #[test]
+    fn bot_flags_replace_config_players_entirely() {
+        let cfg = TournamentConfig {
+            players: vec![
+                PlayerEntry {
+                    id: "cfg_a".into(),
+                    command: "./a".into(),
+                    working_dir: None,
+                },
+                PlayerEntry {
+                    id: "cfg_b".into(),
+                    command: "./b".into(),
+                    working_dir: None,
+                },
+            ],
+            game: Some(GameSection {
+                preset: Some("tiny".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let loaded = Some(LoadedConfig {
+            config: cfg,
+            dir: PathBuf::from("/tmp"),
+            stem: Some("ladder".into()),
+        });
+        let args = args_with_two_bots(); // alpha + beta flags
+        let mut gen = fixed_seed_gen(0);
+        let resolved = resolve_loaded(args, loaded, &mut gen).expect("resolve");
+        let ids: Vec<&str> = resolved.players.iter().map(|p| p.id.as_str()).collect();
+        assert_eq!(ids, vec!["alpha", "beta"], "config players must be gone");
+    }
+
+    /// Config `[[players]]` working_dir resolves relative to the config
+    /// file's directory, not CWD — the read-back half of `--save-as`
+    /// portability (saved specs carry config-relative paths).
+    #[test]
+    fn config_player_working_dir_resolves_relative_to_config_dir() {
+        let cfg = TournamentConfig {
+            players: vec![
+                PlayerEntry {
+                    id: "a".into(),
+                    command: "run-a".into(),
+                    working_dir: Some("bots/a".into()),
+                },
+                PlayerEntry {
+                    id: "b".into(),
+                    command: "run-b".into(),
+                    working_dir: None,
+                },
+            ],
+            game: Some(GameSection {
+                preset: Some("tiny".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let loaded = Some(LoadedConfig {
+            config: cfg,
+            dir: PathBuf::from("/cfg/home"),
+            stem: Some("ladder".into()),
+        });
+        let args = empty_args();
+        let mut gen = fixed_seed_gen(0);
+        let resolved = resolve_loaded(args, loaded, &mut gen).expect("resolve");
+        let (cmd_a, dir_a) = subprocess_parts(&resolved.players[0]);
+        assert_eq!(cmd_a, "run-a");
+        assert_eq!(dir_a, Some(Path::new("/cfg/home/bots/a")));
+        let (cmd_b, dir_b) = subprocess_parts(&resolved.players[1]);
+        assert_eq!(cmd_b, "run-b");
+        assert_eq!(dir_b, None);
+    }
+
+    /// Each `[timing]` field maps to its own resolved field — five
+    /// distinct values catch crossed-wire mapping that per-field
+    /// precedence tests (same value everywhere) cannot.
+    #[test]
+    fn timing_section_maps_each_field_to_its_own_slot() {
+        let cfg = TournamentConfig {
+            timing: Some(TimingSection {
+                move_timeout_ms: Some(11),
+                preprocessing_timeout_ms: Some(22),
+                startup_timeout_ms: Some(33),
+                configure_timeout_ms: Some(44),
+                network_grace_ms: Some(55),
+            }),
+            game: Some(GameSection {
+                preset: Some("tiny".into()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let loaded = Some(LoadedConfig {
+            config: cfg,
+            dir: PathBuf::from("/tmp"),
+            stem: Some("ladder".into()),
+        });
+        let args = args_with_two_bots();
+        let mut gen = fixed_seed_gen(0);
+        let resolved = resolve_loaded(args, loaded, &mut gen).expect("resolve");
+        assert_eq!(
+            resolved.timing,
+            ResolvedTiming {
+                move_timeout_ms: 11,
+                preprocessing_timeout_ms: 22,
+                startup_timeout_ms: 33,
+                configure_timeout_ms: 44,
+                network_grace_ms: 55,
+            }
+        );
+    }
+
+    /// `[elo]` section is read; flags override it.
+    #[test]
+    fn elo_section_used_and_flags_override() {
+        let cfg = TournamentConfig {
+            elo: Some(EloSection {
+                anchor: Some("beta".into()),
+                anchor_elo: Some(1500.0),
+            }),
+            ..Default::default()
+        };
+        let loaded = || {
+            Some(LoadedConfig {
+                config: cfg.clone(),
+                dir: PathBuf::from("/tmp"),
+                stem: Some("ladder".into()),
+            })
+        };
+        let args = args_with_two_bots();
+        let mut gen = fixed_seed_gen(0);
+        let resolved = resolve_loaded(args, loaded(), &mut gen).expect("resolve");
+        assert_eq!(resolved.anchor, "beta");
+        assert_eq!(resolved.anchor_elo, 1500.0);
+
+        let mut args = args_with_two_bots();
+        args.anchor = Some("alpha".into());
+        args.anchor_elo = Some(800.0);
+        let mut gen = fixed_seed_gen(0);
+        let resolved = resolve_loaded(args, loaded(), &mut gen).expect("resolve");
+        assert_eq!(resolved.anchor, "alpha");
+        assert_eq!(resolved.anchor_elo, 800.0);
+    }
+
+    /// `[gauntlet]` section is read; --challenger/--opponent override it.
+    #[test]
+    fn gauntlet_section_used_and_flags_override() {
+        let cfg = TournamentConfig {
+            format: Some("gauntlet".into()),
+            gauntlet: Some(GauntletSection {
+                challenger: "alpha".into(),
+                opponents: vec!["beta".into()],
+            }),
+            ..Default::default()
+        };
+        let loaded = || {
+            Some(LoadedConfig {
+                config: cfg.clone(),
+                dir: PathBuf::from("/tmp"),
+                stem: Some("ladder".into()),
+            })
+        };
+        let args = args_with_two_bots();
+        let mut gen = fixed_seed_gen(0);
+        let resolved = resolve_loaded(args, loaded(), &mut gen).expect("resolve");
+        assert_eq!(
+            resolved.format,
+            FormatChoice::Gauntlet {
+                challenger: "alpha".into(),
+                opponents: vec!["beta".into()],
+            }
+        );
+
+        let mut args = args_with_two_bots();
+        args.challenger = Some("beta".into());
+        args.opponents = vec!["alpha".into()];
+        let mut gen = fixed_seed_gen(0);
+        let resolved = resolve_loaded(args, loaded(), &mut gen).expect("resolve");
+        assert_eq!(
+            resolved.format,
+            FormatChoice::Gauntlet {
+                challenger: "beta".into(),
+                opponents: vec!["alpha".into()],
+            }
+        );
     }
 
     /// `resolve()` (the disk-touching entry) rejects bots whose
@@ -1252,6 +1427,129 @@ mod tests {
         let mut gen = fixed_seed_gen(0);
         let err = expect_err(resolve_loaded(args, None, &mut gen));
         assert!(err.to_string().contains("symmetric"), "got: {err}");
+    }
+
+    /// A source whose only shape contribution is `symmetric` hits the
+    /// (no preset, no dims) branch: invalid, with a fix in the message.
+    #[test]
+    fn game_config_symmetric_without_dims_rejected() {
+        let mut args = args_with_two_bots();
+        args.preset = None;
+        args.symmetric = Some(true);
+        let mut gen = fixed_seed_gen(0);
+        let err = expect_err(resolve_loaded(args, None, &mut gen));
+        assert!(
+            err.to_string().contains("without (width, height, cheese)"),
+            "got: {err}"
+        );
+    }
+
+    /// max_turns is an *overlay*, exempt from whole-choice shape
+    /// precedence: a TOML `[game].max_turns` rides on top of a CLI-won
+    /// shape — even when its sibling shape fields lost. The most
+    /// surprising corner of the precedence model, pinned deliberately.
+    #[test]
+    fn toml_max_turns_overlays_cli_shape() {
+        let cfg = TournamentConfig {
+            game: Some(GameSection {
+                max_turns: Some(42),
+                ..GameSection::default()
+            }),
+            ..TournamentConfig::default()
+        };
+        let loaded = Some(LoadedConfig {
+            config: cfg,
+            dir: PathBuf::from("/tmp"),
+            stem: Some("ladder".into()),
+        });
+        let mut args = args_with_two_bots();
+        args.preset = None;
+        args.width = Some(7);
+        args.height = Some(7);
+        args.cheese = Some(5);
+        let mut gen = fixed_seed_gen(0);
+        let resolved = resolve_loaded(args, loaded, &mut gen).expect("resolve");
+        assert_eq!(
+            resolved.game,
+            ResolvedGame {
+                shape: GameShape::Custom {
+                    width: 7,
+                    height: 7,
+                    cheese: 5,
+                    symmetric: true
+                },
+                max_turns: std::num::NonZeroU16::new(42)
+            }
+        );
+    }
+
+    /// Same overlay rule when the TOML section *does* carry shape
+    /// fields: the TOML shape loses whole-choice to the CLI, but its
+    /// max_turns still applies.
+    #[test]
+    fn toml_max_turns_survives_when_its_shape_loses_to_cli() {
+        let cfg = TournamentConfig {
+            game: Some(GameSection {
+                preset: Some("small".into()),
+                max_turns: Some(42),
+                ..GameSection::default()
+            }),
+            ..TournamentConfig::default()
+        };
+        let loaded = Some(LoadedConfig {
+            config: cfg,
+            dir: PathBuf::from("/tmp"),
+            stem: Some("ladder".into()),
+        });
+        let mut args = args_with_two_bots();
+        args.preset = None;
+        args.width = Some(7);
+        args.height = Some(7);
+        args.cheese = Some(5);
+        let mut gen = fixed_seed_gen(0);
+        let resolved = resolve_loaded(args, loaded, &mut gen).expect("resolve");
+        assert_eq!(
+            resolved.game,
+            ResolvedGame {
+                shape: GameShape::Custom {
+                    width: 7,
+                    height: 7,
+                    cheese: 5,
+                    symmetric: true
+                },
+                max_turns: std::num::NonZeroU16::new(42)
+            }
+        );
+    }
+
+    fn expect_load_err(result: Result<LoadedConfig, ResolveError>) -> ResolveError {
+        match result {
+            Ok(_) => panic!("expected error, got Ok"),
+            Err(e) => e,
+        }
+    }
+
+    #[test]
+    fn load_config_missing_file_names_path() {
+        let err = expect_load_err(load_config(Path::new("/definitely/not/here.toml")));
+        assert!(matches!(err, ResolveError::ConfigRead { .. }), "got: {err:?}");
+        assert!(
+            err.to_string().contains("/definitely/not/here.toml"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn load_config_bad_toml_names_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("broken.toml");
+        std::fs::write(&path, "format = [not valid toml").unwrap();
+        let err = expect_load_err(load_config(&path));
+        assert!(matches!(err, ResolveError::ConfigParse { .. }), "got: {err:?}");
+        assert!(
+            err.to_string().contains("broken.toml"),
+            "the parse error must name the file: {err}"
+        );
     }
 
     #[test]
