@@ -203,8 +203,15 @@ async fn end_to_end_round_robin_with_replay_sink() {
     ));
     let observed_clone = observed.clone();
     let drain = tokio::spawn(async move {
-        while let Ok(event) = live.recv().await {
-            observed_clone.lock().push(event);
+        loop {
+            match live.recv().await {
+                Ok(event) => observed_clone.lock().push(event),
+                // Lagging must not silently truncate observation — the
+                // MatchOver invariant below would pass vacuously on the
+                // missed tail.
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+            }
         }
     });
 
@@ -215,9 +222,8 @@ async fn end_to_end_round_robin_with_replay_sink() {
         .expect("session did not finish within 30s")
         .expect("session join error");
 
-    // Drop the background drain by letting recv error after the
-    // broadcast sender is dropped (the session has been consumed).
-    drop(state_rx.clone());
+    // join() consumed the session, dropping the broadcast sender — the
+    // drain task sees Closed and exits; the timeout only bounds it.
     let _ = tokio::time::timeout(std::time::Duration::from_secs(1), drain).await;
 
     let final_state = state_rx.borrow().clone();
@@ -249,6 +255,12 @@ async fn end_to_end_round_robin_with_replay_sink() {
     // surface MatchEvent::MatchOver. The canonical terminal lives on
     // DriverEvent (lossless) and SessionEvent (re-published).
     let observed = observed.lock();
+    // Positive control: a "never happens" assertion over an empty
+    // observation set proves nothing.
+    assert!(
+        !observed.is_empty(),
+        "live broadcast observer saw no events at all"
+    );
     let match_over_count = observed
         .iter()
         .filter(|e| {

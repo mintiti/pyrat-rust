@@ -269,64 +269,11 @@ command = "{bot}"
 // ── --save-as ────────────────────────────────────────────────────────
 
 #[test]
-fn save_as_omits_implicit_seed() {
-    // No --seed flag, no seed in config: the generated seed must not
-    // appear in the saved TOML (a saved blueprint is decoupled from
-    // any one run's seed).
-    let tmp = tempfile::tempdir().unwrap();
-    let cfg_path = tmp.path().join("in.toml");
-    let store_path = tmp.path().join("ratings.db");
-    let toml = minimal_toml(&format!("store_path = {:?}", store_path.to_string_lossy()));
-    write_toml(&cfg_path, &toml);
-    let save_path = tmp.path().join("out.toml");
-
-    let args = [
-        "--config",
-        cfg_path.to_str().unwrap(),
-        "--save-as",
-        save_path.to_str().unwrap(),
-    ];
-    let out = run_tournament(&args);
-    assert_success(&out, &args);
-
-    let saved = std::fs::read_to_string(&save_path).expect("read saved toml");
-    assert!(
-        !saved.contains("\nseed ="),
-        "implicit seed should not appear in saved TOML:\n{saved}"
-    );
-}
-
-#[test]
-fn save_as_keeps_explicit_seed() {
-    let tmp = tempfile::tempdir().unwrap();
-    let cfg_path = tmp.path().join("in.toml");
-    let store_path = tmp.path().join("ratings.db");
-    let toml = minimal_toml(&format!("store_path = {:?}", store_path.to_string_lossy()));
-    write_toml(&cfg_path, &toml);
-    let save_path = tmp.path().join("out.toml");
-
-    let args = [
-        "--config",
-        cfg_path.to_str().unwrap(),
-        "--seed",
-        "42",
-        "--save-as",
-        save_path.to_str().unwrap(),
-    ];
-    let out = run_tournament(&args);
-    assert_success(&out, &args);
-
-    let saved = std::fs::read_to_string(&save_path).expect("read saved toml");
-    assert!(
-        saved.contains("seed = 42"),
-        "explicit seed should appear in saved TOML:\n{saved}"
-    );
-}
-
-#[test]
 fn save_as_roundtrip() {
     // Write the saved spec, then reload it via --config and run again.
-    // The second run must succeed (same store, same blueprint, more games).
+    // This pins the flag→file wiring; seed-projection semantics
+    // (explicit persists, generated/resume omitted) and field-wise
+    // completeness are owned by the tournament_save unit tests.
     let tmp = tempfile::tempdir().unwrap();
     let cfg_path = tmp.path().join("in.toml");
     let store_path = tmp.path().join("ratings.db");
@@ -345,6 +292,13 @@ fn save_as_roundtrip() {
     ];
     let out = run_tournament(&args);
     assert_success(&out, &args);
+
+    // The explicit config seed flowed through the wiring into the file.
+    let saved = std::fs::read_to_string(&save_path).expect("read saved toml");
+    assert!(
+        saved.contains("seed = 17"),
+        "explicit seed should appear in saved TOML:\n{saved}"
+    );
 
     // Second invocation: --config saved.toml. Should not error.
     let args = ["--config", save_path.to_str().unwrap()];
@@ -580,6 +534,17 @@ fn resume_without_seed_flag_succeeds() {
         tournament.tournament_seed, 42,
         "stored tournament_seed should be preserved across resume"
     );
+    // Completion-aware resume: the first run finished the tournament,
+    // so the resume must play zero new games — a resume that replayed
+    // everything would also exit 0 without this.
+    let attempts = store
+        .get_attempts(pyrat_eval_store::TournamentId(1), None)
+        .expect("query attempts");
+    assert_eq!(
+        attempts.len(),
+        1,
+        "resume of a finished tournament must not replay matchups"
+    );
 }
 
 // ── Gauntlet ─────────────────────────────────────────────────────────
@@ -625,6 +590,17 @@ opponents = ["rival"]
     let args = ["--config", cfg_path.to_str().unwrap(), "--seed", "5"];
     let out = run_tournament(&args);
     assert_success(&out, &args);
+    // This is the only config-driven [gauntlet] e2e: pin that the match
+    // actually played and both participants reached the standings.
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("1 success, 0 failure"),
+        "gauntlet should complete its single matchup.\nstdout: {stdout}"
+    );
+    assert!(
+        stdout.contains("champ") && stdout.contains("rival"),
+        "standings should list both players.\nstdout: {stdout}"
+    );
 }
 
 // ── Path resolution ──────────────────────────────────────────────────
@@ -682,5 +658,42 @@ fn results_json_written_when_flag_set() {
         parsed["tournament_id"].as_i64().is_some(),
         "tournament_id present"
     );
-    assert!(parsed["standings"].is_array(), "standings is array");
+    // Deterministic under the pinned seeds: one matchup, one success,
+    // both players rated.
+    assert_eq!(parsed["attempts"]["success"], 1);
+    assert_eq!(parsed["standings"].as_array().unwrap().len(), 2);
+}
+
+// ── Replay dir ───────────────────────────────────────────────────────
+
+#[test]
+fn replay_dir_writes_per_match_json() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg_path = tmp.path().join("ladder.toml");
+    let store_path = tmp.path().join("ratings.db");
+    let replay_dir = tmp.path().join("replays");
+    let toml = minimal_toml(&format!(
+        "store_path = {:?}\nseed = 13",
+        store_path.to_string_lossy()
+    ));
+    write_toml(&cfg_path, &toml);
+
+    let args = [
+        "--config",
+        cfg_path.to_str().unwrap(),
+        "--replay-dir",
+        replay_dir.to_str().unwrap(),
+    ];
+    let out = run_tournament(&args);
+    assert_success(&out, &args);
+
+    let replays: Vec<_> = std::fs::read_dir(&replay_dir)
+        .expect("replay dir created")
+        .filter_map(Result::ok)
+        .filter(|e| e.path().extension().is_some_and(|x| x == "json"))
+        .collect();
+    assert!(
+        !replays.is_empty(),
+        "at least one replay JSON should land in --replay-dir"
+    );
 }
