@@ -164,16 +164,65 @@ pub trait Planner: Send {
 
     /// Tournament-level params (currently `max_failures_per_pair`) the
     /// planner needs to be true for resume to be safe. The session
-    /// compares this against the stored `tournaments.params_json` row.
-    ///
-    /// Default returns `TournamentParams { max_failures_per_pair: 0 }`,
-    /// which matches what `serde(default)`-deserializing a stored `"{}"`
-    /// produces. Test mocks can rely on the default; real planners
-    /// override.
+    /// compares this against the stored `tournaments.params_json` row
+    /// on every `start`, so a planner that gets this wrong fails every
+    /// resume — required rather than defaulted so the mistake is a
+    /// compile error, not a runtime mismatch. (Stored `"{}"` rows still
+    /// decode to defaults via `serde(default)` on `TournamentParams`.)
+    fn expected_params(&self) -> TournamentParams;
+}
+
+/// Forwarding impl so callers can pick a planner at runtime (e.g. the
+/// CLI choosing round-robin vs gauntlet) and hand the box straight to
+/// `EvalSession::start`.
+impl Planner for Box<dyn Planner> {
+    fn next_batch(
+        &mut self,
+        state: &TournamentState,
+        capacity: usize,
+        allocate_match_id: &mut dyn FnMut() -> MatchId,
+    ) -> Vec<Matchup<EvalMatchDescriptor>> {
+        (**self).next_batch(state, capacity, allocate_match_id)
+    }
+
+    fn on_observation(&mut self, observation: &Observation) {
+        (**self).on_observation(observation)
+    }
+
+    fn is_done(&self, state: &TournamentState) -> bool {
+        (**self).is_done(state)
+    }
+
+    fn tournament_id(&self) -> TournamentId {
+        (**self).tournament_id()
+    }
+
+    fn expected_players(&self) -> Vec<&str> {
+        (**self).expected_players()
+    }
+
+    fn expected_game_config_id(&self) -> &str {
+        (**self).expected_game_config_id()
+    }
+
+    fn expected_game_config(&self) -> &GameConfig {
+        (**self).expected_game_config()
+    }
+
+    fn expected_tournament_seed(&self) -> u64 {
+        (**self).expected_tournament_seed()
+    }
+
+    fn expected_target_per_pair(&self) -> Option<u32> {
+        (**self).expected_target_per_pair()
+    }
+
+    fn expected_format(&self) -> &str {
+        (**self).expected_format()
+    }
+
     fn expected_params(&self) -> TournamentParams {
-        TournamentParams {
-            max_failures_per_pair: 0,
-        }
+        (**self).expected_params()
     }
 }
 
@@ -865,6 +914,34 @@ mod tests {
                 max_failures_per_pair: 3
             }
         );
+    }
+
+    /// The `Box<dyn Planner>` forwarding impl behaves identically to the
+    /// unboxed planner — pins the runtime-choice path the CLI uses.
+    #[test]
+    fn boxed_planner_forwards_to_inner() {
+        let mut unboxed = tiny_round_robin(1, 3);
+        let mut boxed: Box<dyn Planner> = Box::new(tiny_round_robin(1, 3));
+
+        assert_eq!(boxed.tournament_id(), unboxed.tournament_id());
+        assert_eq!(boxed.expected_players(), unboxed.expected_players());
+        assert_eq!(boxed.expected_format(), unboxed.expected_format());
+        assert_eq!(boxed.expected_params(), unboxed.expected_params());
+        assert_eq!(
+            boxed.expected_tournament_seed(),
+            unboxed.expected_tournament_seed()
+        );
+        assert_eq!(
+            boxed.expected_target_per_pair(),
+            unboxed.expected_target_per_pair()
+        );
+
+        let alloc = MatchIdAllocator::new();
+        let state = TournamentState::empty(TournamentId(1));
+        let batch_boxed = boxed.next_batch(&state, 100, &mut || alloc.allocate());
+        let batch_unboxed = unboxed.next_batch(&state, 100, &mut || alloc.allocate());
+        assert_eq!(batch_boxed.len(), batch_unboxed.len());
+        assert!(!boxed.is_done(&state));
     }
 
     #[test]

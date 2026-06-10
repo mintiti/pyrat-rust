@@ -13,6 +13,12 @@
 //!   `TournamentState`) and `live_events()` (pass-through to the orchestrator
 //!   broadcast for per-turn UI consumers).
 
+// Re-export the orchestrator so consumers (GUI, alpharat) don't need a
+// version-matched direct dependency for the types in our signatures
+// (`OrchestratorConfig`, `MatchSink`, `SinkRole`, ...). Same pattern as
+// `pyrat_host::wire`.
+pub use pyrat_orchestrator as orchestrator;
+
 pub mod descriptor;
 pub mod legacy_record;
 pub mod mapping;

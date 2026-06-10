@@ -19,9 +19,9 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use pyrat_eval::MatchupOutcome;
 use pyrat_eval::{
-    EvalMatchDescriptor, EvalSession, GauntletPlanner, GauntletPlannerConfig, ResolvedPlayer,
-    RoundRobinPlanner, RoundRobinPlannerConfig, SessionConfig, SessionMode, TournamentParams,
-    TournamentSpec, TournamentState,
+    EvalMatchDescriptor, EvalSession, GauntletPlanner, GauntletPlannerConfig, Planner,
+    ResolvedPlayer, RoundRobinPlanner, RoundRobinPlannerConfig, SessionConfig, SessionMode,
+    TournamentParams, TournamentSpec, TournamentState,
 };
 use pyrat_eval_store::{EloOptions, EvalStore, TournamentId};
 use pyrat_host::wire::TimingMode;
@@ -95,39 +95,26 @@ pub async fn run_tournament_main(
         extra_sinks.push((SinkRole::Optional, replay));
     }
 
-    // Branch on planner type. Post-start logic (state capture, join) is
-    // identical so factor it out via `await_session`.
-    let final_state = match &resolved.format {
-        FormatChoice::RoundRobin => {
-            let planner = RoundRobinPlanner::new(RoundRobinPlannerConfig {
-                players: resolved.players.clone(),
-                game_config: game_config.clone(),
-                game_config_id,
-                timing: per_match_timing,
-                tournament_id,
-                target_per_pair: resolved.target_games_per_matchup,
-                max_failures_per_pair: resolved.max_failures_per_pair,
-                tournament_seed,
-            });
-            let session = EvalSession::start_with_extra_sinks(
-                store.clone(),
-                SessionMode { tournament_id },
-                planner,
-                orch_config,
-                build_elo_options(&resolved),
-                SessionConfig::default(),
-                extra_sinks,
-            )
-            .await?;
-            await_session(session).await?
-        },
+    // The format only decides which planner gets built; the start/await
+    // path is shared via `Box<dyn Planner>`.
+    let planner: Box<dyn Planner> = match &resolved.format {
+        FormatChoice::RoundRobin => Box::new(RoundRobinPlanner::new(RoundRobinPlannerConfig {
+            players: resolved.players.clone(),
+            game_config: game_config.clone(),
+            game_config_id,
+            timing: per_match_timing,
+            tournament_id,
+            target_per_pair: resolved.target_games_per_matchup,
+            max_failures_per_pair: resolved.max_failures_per_pair,
+            tournament_seed,
+        })),
         FormatChoice::Gauntlet {
             challenger,
             opponents,
         } => {
             let (challenger_p, opponent_ps) =
                 split_gauntlet_players(&resolved.players, challenger, opponents)?;
-            let planner = GauntletPlanner::new(GauntletPlannerConfig {
+            Box::new(GauntletPlanner::new(GauntletPlannerConfig {
                 challenger: challenger_p,
                 opponents: opponent_ps,
                 game_config: game_config.clone(),
@@ -137,20 +124,20 @@ pub async fn run_tournament_main(
                 target_each: resolved.target_games_per_matchup,
                 max_failures_per_pair: resolved.max_failures_per_pair,
                 tournament_seed,
-            });
-            let session = EvalSession::start_with_extra_sinks(
-                store.clone(),
-                SessionMode { tournament_id },
-                planner,
-                orch_config,
-                build_elo_options(&resolved),
-                SessionConfig::default(),
-                extra_sinks,
-            )
-            .await?;
-            await_session(session).await?
+            }))
         },
     };
+    let session = EvalSession::start_with_extra_sinks(
+        store.clone(),
+        SessionMode { tournament_id },
+        planner,
+        orch_config,
+        build_elo_options(&resolved),
+        SessionConfig::default(),
+        extra_sinks,
+    )
+    .await?;
+    let final_state = await_session(session).await?;
 
     render_standings(&final_state, resolved.results_json.as_deref())?;
     Ok(final_state)
