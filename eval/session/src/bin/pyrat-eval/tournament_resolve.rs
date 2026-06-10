@@ -25,11 +25,13 @@ const DEFAULT_GAMES: u32 = 5;
 const DEFAULT_GAME_PRESET: &str = "tiny";
 const DEFAULT_MAX_FAILURES: u32 = 1;
 const DEFAULT_MAX_PARALLEL: u32 = 2;
-const DEFAULT_MOVE_TIMEOUT_MS: u32 = 1000;
-const DEFAULT_PREP_TIMEOUT_MS: u32 = 10_000;
-const DEFAULT_STARTUP_TIMEOUT_MS: u32 = 30_000;
-const DEFAULT_CONFIGURE_TIMEOUT_MS: u32 = 5_000;
-const DEFAULT_NETWORK_GRACE_MS: u32 = 50;
+// The timing defaults are pub(crate): run-one's clap defaults use the
+// same constants so the two subcommands can't drift on timing numbers.
+pub(crate) const DEFAULT_MOVE_TIMEOUT_MS: u32 = 1000;
+pub(crate) const DEFAULT_PREP_TIMEOUT_MS: u32 = 10_000;
+pub(crate) const DEFAULT_STARTUP_TIMEOUT_MS: u32 = 30_000;
+pub(crate) const DEFAULT_CONFIGURE_TIMEOUT_MS: u32 = 5_000;
+pub(crate) const DEFAULT_NETWORK_GRACE_MS: u32 = 50;
 const DEFAULT_ANCHOR_ELO: f64 = 1000.0;
 const DEFAULT_STORE_FILENAME: &str = "ratings.db";
 const FLAGS_BOT_DEFAULT_COMMAND: &str = "cargo run --release";

@@ -211,13 +211,13 @@ struct RunOneArgs {
     /// Override max_turns (defaults to the preset's value, or 300 for --width/--height).
     #[arg(long)]
     max_turns: Option<NonZeroU16>,
-    #[arg(long, default_value_t = 1000)]
+    #[arg(long, default_value_t = tournament_resolve::DEFAULT_MOVE_TIMEOUT_MS)]
     move_timeout_ms: u32,
-    #[arg(long, default_value_t = 10000)]
+    #[arg(long, default_value_t = tournament_resolve::DEFAULT_PREP_TIMEOUT_MS)]
     preprocessing_timeout_ms: u32,
-    #[arg(long, default_value_t = 30000)]
+    #[arg(long, default_value_t = tournament_resolve::DEFAULT_STARTUP_TIMEOUT_MS)]
     startup_timeout_ms: u32,
-    #[arg(long, default_value_t = 5000)]
+    #[arg(long, default_value_t = tournament_resolve::DEFAULT_CONFIGURE_TIMEOUT_MS)]
     configure_timeout_ms: u32,
     /// Named preset: tiny, small, medium, large, huge, open, asymmetric
     #[arg(long)]
@@ -226,7 +226,7 @@ struct RunOneArgs {
     #[arg(long)]
     output: Option<PathBuf>,
     /// Network grace period in ms added on top of the think deadline
-    #[arg(long, default_value_t = 50)]
+    #[arg(long, default_value_t = tournament_resolve::DEFAULT_NETWORK_GRACE_MS)]
     network_grace_ms: u32,
 }
 
@@ -315,10 +315,14 @@ fn print_result(result: &MatchResult) {
 
 #[tokio::main]
 async fn main() -> ExitCode {
+    // Diagnostics go to stderr: stdout carries results (run-one score
+    // lines, tournament standings) that scripts parse, and tournament
+    // mode interleaves enough per-match warns to corrupt it otherwise.
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
         )
+        .with_writer(std::io::stderr)
         .init();
 
     let cli = Cli::parse();
@@ -385,7 +389,7 @@ async fn run_one(args: RunOneArgs) -> Result<(), Box<dyn std::error::Error>> {
             }
             Ok(())
         },
-        Err(failure) => Err(format!("Match failed: {:?}", failure.reason).into()),
+        Err(failure) => Err(format!("Match failed: {}", failure.reason).into()),
     }
 }
 

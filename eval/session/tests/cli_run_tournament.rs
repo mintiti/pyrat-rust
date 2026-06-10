@@ -116,6 +116,11 @@ fn minimal_toml_round_robin_runs_through() {
         stderr.contains("started (store:"),
         "stderr should announce the tournament id and store.\nstderr: {stderr}"
     );
+    // stdout is the machine-readable surface: tracing must stay on stderr.
+    assert!(
+        !stdout.contains(" INFO "),
+        "tracing output leaked onto stdout.\nstdout: {stdout}"
+    );
 }
 
 /// Pins the README one-liner: flags-only invocation without `--config`,
