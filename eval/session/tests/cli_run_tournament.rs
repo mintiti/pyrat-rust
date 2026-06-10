@@ -422,6 +422,46 @@ fn resume_with_drifted_game_config_fails() {
     );
 }
 
+/// Resume mismatches surface in CLI vocabulary: a drifted --games value
+/// is reported as `--games`, not as the library's
+/// `target_games_per_matchup`.
+#[test]
+fn resume_with_drifted_games_names_the_flag() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg_path = tmp.path().join("ladder.toml");
+    let store_path = tmp.path().join("ratings.db");
+    let toml = minimal_toml(&format!(
+        "store_path = {:?}\nseed = 42",
+        store_path.to_string_lossy()
+    ));
+    write_toml(&cfg_path, &toml);
+
+    // First run: target_games_per_matchup = 1 (from minimal_toml).
+    let args = ["--config", cfg_path.to_str().unwrap()];
+    let out = run_tournament(&args);
+    assert_success(&out, &args);
+
+    // Resume with --games 5 — diverges from the stored target.
+    let args = [
+        "--config",
+        cfg_path.to_str().unwrap(),
+        "--resume",
+        "1",
+        "--games",
+        "5",
+    ];
+    let out = run_tournament(&args);
+    assert!(
+        !out.status.success(),
+        "resume with drifted --games should fail"
+    );
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("resume rejected") && stderr.contains("--games"),
+        "stderr should name the --games flag: {stderr}"
+    );
+}
+
 #[test]
 fn resume_without_seed_flag_succeeds() {
     // First run with --seed 42, then resume with no --seed flag. Verifies

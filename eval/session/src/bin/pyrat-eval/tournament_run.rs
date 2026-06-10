@@ -21,7 +21,8 @@ use pyrat_eval::MatchupOutcome;
 use pyrat_eval::{
     gauntlet_slot_order, EvalMatchDescriptor, EvalSession, GauntletPlanner,
     GauntletPlannerConfig, Planner, ResolvedPlayer, RoundRobinPlanner, RoundRobinPlannerConfig,
-    SessionConfig, SessionMode, TournamentParams, TournamentSpec, TournamentState,
+    SessionConfig, SessionError, SessionMode, TournamentMismatch, TournamentParams,
+    TournamentSpec, TournamentState,
 };
 use pyrat_eval_store::{EloOptions, EvalStore, TournamentId};
 use pyrat_host::wire::TimingMode;
@@ -121,7 +122,7 @@ pub async fn run_tournament_main(
             }))
         },
     };
-    let session = EvalSession::start_with_extra_sinks(
+    let session = match EvalSession::start_with_extra_sinks(
         store.clone(),
         SessionMode { tournament_id },
         planner,
@@ -130,7 +131,18 @@ pub async fn run_tournament_main(
         SessionConfig::default(),
         extra_sinks,
     )
-    .await?;
+    .await
+    {
+        // On resume, mismatches come from the user's flags/config
+        // diverging from the stored tournament — translate the library
+        // vocabulary into the flags they actually typed.
+        Err(SessionError::TournamentMismatch(m))
+            if matches!(resolved.mode, LaunchMode::Resume { .. }) =>
+        {
+            return Err(format!("resume rejected: {}", translate_mismatch(&m)).into());
+        },
+        other => other?,
+    };
     let final_state = await_session(session).await?;
 
     render_standings(&final_state, resolved.results_json.as_deref())?;
@@ -372,6 +384,36 @@ fn write_results_json(
     Ok(())
 }
 
+/// Map the library's mismatch vocabulary onto CLI flags. The library
+/// `Display` (field names like `target_games_per_matchup`) stays intact
+/// for library consumers; CLI users typed `--games`.
+fn translate_mismatch(m: &TournamentMismatch) -> String {
+    match m {
+        TournamentMismatch::TargetPerPair { planner, stored } => format!(
+            "--games {planner} does not match the stored target {stored}; rerun with --games {stored}"
+        ),
+        TournamentMismatch::Params { planner, stored } => format!(
+            "--max-failures {} does not match the stored value {}; rerun with --max-failures {}",
+            planner.max_failures_per_pair,
+            stored.max_failures_per_pair,
+            stored.max_failures_per_pair
+        ),
+        TournamentMismatch::Format { planner, stored } => {
+            format!("--format {planner} does not match the stored format {stored}")
+        },
+        TournamentMismatch::Players { planner, stored } => format!(
+            "player set {planner:?} does not match stored players {stored:?} (check --bot / --challenger / --opponent or [[players]])"
+        ),
+        TournamentMismatch::GameConfigDrift { .. } => format!(
+            "{m}\nadjust --preset/--width/--height/--cheese/--max-turns (or [game]) to match the stored config"
+        ),
+        // TournamentId / GameConfigId / Seed / Invalid: the library form
+        // is already the clearest rendering (and Seed is normally
+        // pre-empted by realize_resume's own check).
+        other => other.to_string(),
+    }
+}
+
 fn split_gauntlet_players(
     players: &[ResolvedPlayer],
     challenger_id: &str,
@@ -395,6 +437,31 @@ fn split_gauntlet_players(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The CLI translation names the flags the user typed, with the
+    /// stored value to rerun with.
+    #[test]
+    fn translate_mismatch_names_cli_flags() {
+        let target = TournamentMismatch::TargetPerPair {
+            planner: 5,
+            stored: 1,
+        };
+        let s = translate_mismatch(&target);
+        assert!(s.contains("--games 5"), "got: {s}");
+        assert!(s.contains("rerun with --games 1"), "got: {s}");
+
+        let params = TournamentMismatch::Params {
+            planner: TournamentParams {
+                max_failures_per_pair: 3,
+            },
+            stored: TournamentParams {
+                max_failures_per_pair: 1,
+            },
+        };
+        let s = translate_mismatch(&params);
+        assert!(s.contains("--max-failures 3"), "got: {s}");
+        assert!(s.contains("rerun with --max-failures 1"), "got: {s}");
+    }
 
     #[test]
     fn count_attempts_counts_success_and_failure_separately() {
