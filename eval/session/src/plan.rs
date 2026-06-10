@@ -376,6 +376,21 @@ pub struct GauntletPlannerConfig {
     pub tournament_seed: u64,
 }
 
+/// Canonical slot order for a gauntlet: challenger in slot 0, opponents
+/// in declaration order.
+///
+/// This is the single source of truth shared by
+/// `GauntletPlanner::expected_players` (the resume-validation side) and
+/// tournament bootstrap (the create side, which registers
+/// `tournament_players` rows). Both sides must agree or resume fails
+/// with a players mismatch.
+pub fn gauntlet_slot_order<'a>(
+    challenger: &'a ResolvedPlayer,
+    opponents: &'a [ResolvedPlayer],
+) -> impl Iterator<Item = &'a ResolvedPlayer> {
+    std::iter::once(challenger).chain(opponents.iter())
+}
+
 pub struct GauntletPlanner {
     config: GauntletPlannerConfig,
     pending: HashMap<MatchupKey, HashSet<u32>>,
@@ -451,9 +466,8 @@ impl Planner for GauntletPlanner {
     }
 
     fn expected_players(&self) -> Vec<&str> {
-        // Slot 0 is the challenger; opponents follow in declaration order.
-        std::iter::once(self.config.challenger.id.as_str())
-            .chain(self.config.opponents.iter().map(|p| p.id.as_str()))
+        gauntlet_slot_order(&self.config.challenger, &self.config.opponents)
+            .map(|p| p.id.as_str())
             .collect()
     }
 
@@ -942,6 +956,30 @@ mod tests {
         let batch_unboxed = unboxed.next_batch(&state, 100, &mut || alloc.allocate());
         assert_eq!(batch_boxed.len(), batch_unboxed.len());
         assert!(!boxed.is_done(&state));
+    }
+
+    /// `expected_players` and `gauntlet_slot_order` agree — pins the
+    /// create/resume symmetry both sides rely on.
+    #[test]
+    fn gauntlet_expected_players_matches_slot_order() {
+        let challenger = embedded("champ");
+        let opponents = vec![embedded("a"), embedded("b")];
+        let planner = GauntletPlanner::new(GauntletPlannerConfig {
+            challenger: challenger.clone(),
+            opponents: opponents.clone(),
+            game_config: GameConfig::classic(7, 5, 3),
+            game_config_id: "gc".into(),
+            timing: timing(),
+            tournament_id: TournamentId(1),
+            target_each: 1,
+            max_failures_per_pair: 1,
+            tournament_seed: 1,
+        });
+        let from_order: Vec<&str> = gauntlet_slot_order(&challenger, &opponents)
+            .map(|p| p.id.as_str())
+            .collect();
+        assert_eq!(planner.expected_players(), from_order);
+        assert_eq!(from_order, vec!["champ", "a", "b"]);
     }
 
     #[test]

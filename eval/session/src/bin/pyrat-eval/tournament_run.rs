@@ -19,9 +19,9 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use pyrat_eval::MatchupOutcome;
 use pyrat_eval::{
-    EvalMatchDescriptor, EvalSession, GauntletPlanner, GauntletPlannerConfig, Planner,
-    ResolvedPlayer, RoundRobinPlanner, RoundRobinPlannerConfig, SessionConfig, SessionMode,
-    TournamentParams, TournamentSpec, TournamentState,
+    gauntlet_slot_order, EvalMatchDescriptor, EvalSession, GauntletPlanner,
+    GauntletPlannerConfig, Planner, ResolvedPlayer, RoundRobinPlanner, RoundRobinPlannerConfig,
+    SessionConfig, SessionMode, TournamentParams, TournamentSpec, TournamentState,
 };
 use pyrat_eval_store::{EloOptions, EvalStore, TournamentId};
 use pyrat_host::wire::TimingMode;
@@ -174,10 +174,10 @@ async fn await_session(
     Ok(final_state)
 }
 
-/// Bootstrap a fresh tournament and return its identity. The
-/// `[challenger, ...opponents]` ordering for gauntlet is honored here
-/// because the planner's `expected_players()` returns that order and
-/// resume validation compares slot-to-slot.
+/// Bootstrap a fresh tournament and return its identity. Gauntlet slot
+/// ordering comes from `gauntlet_slot_order` — the same function the
+/// planner's `expected_players()` uses, so create and resume-validation
+/// agree by construction.
 async fn bootstrap_new(
     store: &Arc<Mutex<EvalStore>>,
     resolved: &ResolvedRun,
@@ -190,10 +190,8 @@ async fn bootstrap_new(
             challenger,
             opponents,
         } => {
-            let (c, mut ops) = split_gauntlet_players(&resolved.players, challenger, opponents)?;
-            let mut v = Vec::with_capacity(1 + ops.len());
-            v.push(c);
-            v.append(&mut ops);
+            let (c, ops) = split_gauntlet_players(&resolved.players, challenger, opponents)?;
+            let v: Vec<ResolvedPlayer> = gauntlet_slot_order(&c, &ops).cloned().collect();
             ("gauntlet".to_string(), v)
         },
     };

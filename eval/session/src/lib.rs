@@ -36,8 +36,8 @@ pub use mapping::{
 };
 pub use observation::Observation;
 pub use plan::{
-    matchup_seed, GauntletPlanner, GauntletPlannerConfig, Planner, ResolvedPlayer,
-    RoundRobinPlanner, RoundRobinPlannerConfig, TournamentParams,
+    gauntlet_slot_order, matchup_seed, GauntletPlanner, GauntletPlannerConfig, Planner,
+    ResolvedPlayer, RoundRobinPlanner, RoundRobinPlannerConfig, TournamentParams,
 };
 pub use session::{
     CreatedTournament, EvalSession, SessionConfig, SessionError, SessionEvent, SessionMode,

@@ -691,7 +691,12 @@ fn validate_planner_against_stored_spec(
         )));
     }
     // target_games_per_matchup: both sides know it only when both surface
-    // a value. Don't enforce when either side is None.
+    // a value. Don't enforce when either side is None — a stored NULL
+    // means "unknown" (hand-planted rows that never went through
+    // `create_tournament`), and failing those would make them
+    // unresumable. Planners constructed by the CLI always surface Some,
+    // so the check is effective on every CLI-created tournament. This
+    // softening is deliberate; don't tighten it.
     if let (Some(planner_target), Some(stored_target)) = (
         planner.expected_target_per_pair(),
         tournament.target_games_per_matchup,
