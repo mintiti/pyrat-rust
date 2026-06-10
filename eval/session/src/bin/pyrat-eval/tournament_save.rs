@@ -18,7 +18,7 @@ use crate::game_config_build::ResolvedGameChoice;
 use crate::tournament_config::{
     EloSection, GameSection, GauntletSection, PlayerEntry, TimingSection, TournamentConfig,
 };
-use crate::tournament_resolve::{FormatChoice, ResolvedRun, SeedSource};
+use crate::tournament_resolve::{FormatChoice, LaunchMode, NewSeed, ResolvedRun};
 
 pub(crate) fn write_save_as(
     resolved: &ResolvedRun,
@@ -75,9 +75,17 @@ fn to_saveable_config(resolved: &ResolvedRun, save_dir: &Path) -> TournamentConf
         }),
         FormatChoice::RoundRobin => None,
     };
-    let seed = match resolved.seed {
-        SeedSource::Explicit(s) => Some(s),
-        SeedSource::Generated(_) | SeedSource::FromStoreOnResume => None,
+    // Total match documents the policy: a blueprint never inherits an
+    // instance's seed. (Resume + --save-as is unreachable via clap's
+    // conflicts_with, but the projection stays total and honest.)
+    let seed = match resolved.mode {
+        LaunchMode::New {
+            seed: NewSeed::Explicit(s),
+        } => Some(s),
+        LaunchMode::New {
+            seed: NewSeed::Generated(_),
+        }
+        | LaunchMode::Resume { .. } => None,
     };
 
     TournamentConfig {
@@ -237,14 +245,15 @@ mod tests {
             target_games_per_matchup: 5,
             max_failures_per_pair: 1,
             max_parallel: 2,
-            seed: SeedSource::Generated(123),
+            mode: LaunchMode::New {
+                seed: NewSeed::Generated(123),
+            },
             store_path: PathBuf::from("/tmp/work/ratings.db"),
             replay_dir: None,
             anchor: "greedy".into(),
             anchor_elo: 1000.0,
             results_json: None,
             save_as,
-            resume: None,
         }
     }
 
@@ -258,15 +267,20 @@ mod tests {
     #[test]
     fn save_as_keeps_explicit_seed() {
         let mut resolved = fixture_resolved(Some(PathBuf::from("/tmp/out.toml")));
-        resolved.seed = SeedSource::Explicit(42);
+        resolved.mode = LaunchMode::New {
+            seed: NewSeed::Explicit(42),
+        };
         let cfg = to_saveable_config(&resolved, Path::new("/tmp"));
         assert_eq!(cfg.seed, Some(42));
     }
 
     #[test]
-    fn save_as_omits_from_store_on_resume_seed() {
+    fn save_as_omits_seed_on_resume_mode() {
         let mut resolved = fixture_resolved(Some(PathBuf::from("/tmp/out.toml")));
-        resolved.seed = SeedSource::FromStoreOnResume;
+        resolved.mode = LaunchMode::Resume {
+            id: pyrat_eval_store::TournamentId(1),
+            seed_assert: None,
+        };
         let cfg = to_saveable_config(&resolved, Path::new("/tmp"));
         assert!(cfg.seed.is_none());
     }

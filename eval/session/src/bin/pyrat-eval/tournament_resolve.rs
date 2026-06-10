@@ -35,14 +35,40 @@ const FLAGS_BOT_DEFAULT_COMMAND: &str = "cargo run --release";
 
 // ── Output types ─────────────────────────────────────────────────────
 
-/// Where the runtime seed comes from. `Generated` is only produced on a
-/// non-resume path; `FromStoreOnResume` defers seed realization to the
-/// execution layer (which reads it off the stored tournament row).
+/// How the run launches: a fresh tournament with a realized seed, or a
+/// resume whose seed lives in the store. Folding seed and resume into
+/// one type makes the illegal combinations (generated seed on resume,
+/// store-deferred seed on a new run) unrepresentable — the execution
+/// layer matches on this instead of defending with internal errors.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub enum SeedSource {
+pub enum LaunchMode {
+    New {
+        seed: NewSeed,
+    },
+    /// Resume tournament `id`. `seed_assert` is NOT a seed source — the
+    /// store owns the seed on resume; an explicit seed (from `--seed` or
+    /// config) is only an assertion to verify against the stored value.
+    Resume {
+        id: TournamentId,
+        seed_assert: Option<u64>,
+    },
+}
+
+/// Seed for a fresh tournament: stated by the user, or generated. The
+/// distinction matters to `--save-as` (explicit seeds persist in the
+/// blueprint, generated ones don't).
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub enum NewSeed {
     Explicit(u64),
     Generated(u64),
-    FromStoreOnResume,
+}
+
+impl NewSeed {
+    pub fn value(self) -> u64 {
+        match self {
+            Self::Explicit(s) | Self::Generated(s) => s,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -74,14 +100,13 @@ pub struct ResolvedRun {
     pub target_games_per_matchup: u32,
     pub max_failures_per_pair: u32,
     pub max_parallel: u32,
-    pub seed: SeedSource,
+    pub mode: LaunchMode,
     pub store_path: PathBuf,
     pub replay_dir: Option<PathBuf>,
     pub anchor: String,
     pub anchor_elo: f64,
     pub results_json: Option<PathBuf>,
     pub save_as: Option<PathBuf>,
-    pub resume: Option<TournamentId>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -203,9 +228,11 @@ pub fn resolve_loaded(
             .unwrap_or(DEFAULT_NETWORK_GRACE_MS),
     };
 
-    let resume = args.resume.map(TournamentId);
-    let explicit_seed = args.seed.or(cfg.seed);
-    let seed = resolve_seed(explicit_seed, resume.is_some(), seed_gen)?;
+    let mode = resolve_launch(
+        args.seed.or(cfg.seed),
+        args.resume.map(TournamentId),
+        seed_gen,
+    )?;
 
     let (anchor, anchor_elo) = resolve_elo_inputs(&args, &cfg, &players, &format)?;
 
@@ -236,14 +263,13 @@ pub fn resolve_loaded(
         target_games_per_matchup,
         max_failures_per_pair,
         max_parallel,
-        seed,
+        mode,
         store_path,
         replay_dir,
         anchor,
         anchor_elo,
         results_json,
         save_as,
-        resume,
     })
 }
 
@@ -526,21 +552,28 @@ fn apply_max_turns_overlay(shape: &mut ResolvedGameChoice, mt: std::num::NonZero
     }
 }
 
-fn resolve_seed(
+fn resolve_launch(
     explicit: Option<u64>,
-    has_resume: bool,
+    resume: Option<TournamentId>,
     seed_gen: &mut dyn FnMut() -> u64,
-) -> Result<SeedSource, ResolveError> {
-    match (explicit, has_resume) {
-        (Some(s), _) => {
-            if s > i64::MAX as u64 {
-                return Err(ResolveError::v(format!("seed {s} exceeds i64::MAX")));
-            }
-            Ok(SeedSource::Explicit(s))
-        },
-        (None, true) => Ok(SeedSource::FromStoreOnResume),
-        (None, false) => Ok(SeedSource::Generated(seed_gen())),
+) -> Result<LaunchMode, ResolveError> {
+    if let Some(s) = explicit {
+        if s > i64::MAX as u64 {
+            return Err(ResolveError::v(format!("seed {s} exceeds i64::MAX")));
+        }
     }
+    Ok(match resume {
+        Some(id) => LaunchMode::Resume {
+            id,
+            seed_assert: explicit,
+        },
+        None => LaunchMode::New {
+            seed: match explicit {
+                Some(s) => NewSeed::Explicit(s),
+                None => NewSeed::Generated(seed_gen()),
+            },
+        },
+    })
 }
 
 fn resolve_elo_inputs(
@@ -696,10 +729,12 @@ mod tests {
         );
         assert_eq!(resolved.timing.network_grace_ms, DEFAULT_NETWORK_GRACE_MS);
         assert_eq!(resolved.format, FormatChoice::RoundRobin);
-        match resolved.seed {
-            SeedSource::Generated(42) => {},
-            other => panic!("expected Generated(42), got {other:?}"),
-        }
+        assert_eq!(
+            resolved.mode,
+            LaunchMode::New {
+                seed: NewSeed::Generated(42)
+            }
+        );
     }
 
     #[test]
@@ -759,7 +794,12 @@ mod tests {
         args.seed = Some(456);
         let mut never_called = || panic!("seed_gen called when explicit seed present");
         let resolved = resolve_loaded(args, loaded, &mut never_called).expect("resolve");
-        assert_eq!(resolved.seed, SeedSource::Explicit(456));
+        assert_eq!(
+            resolved.mode,
+            LaunchMode::New {
+                seed: NewSeed::Explicit(456)
+            }
+        );
     }
 
     #[test]
@@ -776,7 +816,12 @@ mod tests {
         let args = args_with_two_bots();
         let mut never_called = || panic!("seed_gen called when explicit seed present");
         let resolved = resolve_loaded(args, loaded, &mut never_called).expect("resolve");
-        assert_eq!(resolved.seed, SeedSource::Explicit(123));
+        assert_eq!(
+            resolved.mode,
+            LaunchMode::New {
+                seed: NewSeed::Explicit(123)
+            }
+        );
     }
 
     #[test]
@@ -785,8 +830,13 @@ mod tests {
         args.resume = Some(7);
         let mut never_called = || panic!("seed_gen called on resume path");
         let resolved = resolve_loaded(args, None, &mut never_called).expect("resolve");
-        assert_eq!(resolved.seed, SeedSource::FromStoreOnResume);
-        assert_eq!(resolved.resume, Some(TournamentId(7)));
+        assert_eq!(
+            resolved.mode,
+            LaunchMode::Resume {
+                id: TournamentId(7),
+                seed_assert: None
+            }
+        );
     }
 
     #[test]
@@ -796,7 +846,13 @@ mod tests {
         args.seed = Some(99);
         let mut never_called = || panic!("seed_gen called with explicit seed present");
         let resolved = resolve_loaded(args, None, &mut never_called).expect("resolve");
-        assert_eq!(resolved.seed, SeedSource::Explicit(99));
+        assert_eq!(
+            resolved.mode,
+            LaunchMode::Resume {
+                id: TournamentId(7),
+                seed_assert: Some(99)
+            }
+        );
     }
 
     #[test]
@@ -804,7 +860,12 @@ mod tests {
         let args = args_with_two_bots();
         let mut gen = fixed_seed_gen(0xC0FFEE);
         let resolved = resolve_loaded(args, None, &mut gen).expect("resolve");
-        assert_eq!(resolved.seed, SeedSource::Generated(0xC0FFEE));
+        assert_eq!(
+            resolved.mode,
+            LaunchMode::New {
+                seed: NewSeed::Generated(0xC0FFEE)
+            }
+        );
     }
 
     #[test]
@@ -1292,7 +1353,12 @@ mod tests {
         args.seed = Some(i64::MAX as u64);
         let mut g = fixed_seed_gen(0);
         let resolved = resolve_loaded(args, None, &mut g).expect("resolve");
-        assert_eq!(resolved.seed, SeedSource::Explicit(i64::MAX as u64));
+        assert_eq!(
+            resolved.mode,
+            LaunchMode::New {
+                seed: NewSeed::Explicit(i64::MAX as u64)
+            }
+        );
     }
 
     // Silence unused-import warning on EloSection, GauntletSection, TimingSection

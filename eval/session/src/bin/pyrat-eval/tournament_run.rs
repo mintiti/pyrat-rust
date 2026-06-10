@@ -30,7 +30,7 @@ use serde::Serialize;
 
 use crate::game_config_build::build_game_config;
 use crate::orchestrator_config_build::build_orchestrator_config;
-use crate::tournament_resolve::{FormatChoice, ResolvedRun, SeedSource};
+use crate::tournament_resolve::{FormatChoice, LaunchMode, ResolvedRun};
 use crate::tournament_save::write_save_as;
 
 /// Execute the tournament described by `resolved`. Returns the final
@@ -54,19 +54,15 @@ pub async fn run_tournament_main(
     // we validate the game config *before* bootstrap so an invalid
     // config (e.g. too much cheese for the board) doesn't leave a
     // dangling tournament row behind.
-    let (tournament_id, game_config_id, tournament_seed) = match resolved.resume {
-        Some(id) => {
-            let (id, gc_id, seed) = realize_resume(&store, id, &resolved.seed)?;
+    let (tournament_id, game_config_id, tournament_seed) = match resolved.mode {
+        LaunchMode::Resume { id, seed_assert } => {
+            let (id, gc_id, seed) =
+                realize_resume(&store, id, seed_assert, &resolved.store_path)?;
             validate_game_config_with_seed(&game_config, seed)?;
             (id, gc_id, seed)
         },
-        None => {
-            let seed = match resolved.seed {
-                SeedSource::Explicit(s) | SeedSource::Generated(s) => s,
-                SeedSource::FromStoreOnResume => {
-                    return Err("internal: FromStoreOnResume on non-resume path".into())
-                },
-            };
+        LaunchMode::New { seed } => {
+            let seed = seed.value();
             validate_game_config_with_seed(&game_config, seed)?;
             bootstrap_new(&store, &resolved, &game_config, seed).await?
         },
@@ -207,34 +203,37 @@ async fn bootstrap_new(
     Ok((created.tournament_id, created.game_config_id, seed))
 }
 
-/// On resume, the store carries the seed and game_config_id. Validate
-/// explicit-seed mismatches before the bots launch so users get a clear
-/// error rather than a cryptic `TournamentMismatch` from the planner
-/// guard.
+/// On resume, the store carries the seed and game_config_id. An explicit
+/// seed is only an assertion: validate it against the stored value
+/// before the bots launch so users get a clear error rather than a
+/// cryptic `TournamentMismatch` from the planner guard.
 fn realize_resume(
     store: &Arc<Mutex<EvalStore>>,
     id: TournamentId,
-    seed_source: &SeedSource,
+    seed_assert: Option<u64>,
+    store_path: &Path,
 ) -> Result<(TournamentId, String, u64), Box<dyn std::error::Error>> {
     let stored = {
         let store = store.lock();
-        store
-            .get_tournament(id)?
-            .ok_or_else(|| format!("tournament {} not found in store", id.0))?
+        store.get_tournament(id)?.ok_or_else(|| {
+            // The likely cause is resuming against the wrong store file
+            // (e.g. forgot --config, so the default ratings.db in CWD
+            // was opened) — naming the path makes that visible.
+            format!("tournament {} not found in {}", id.0, store_path.display())
+        })?
     };
-    let seed = match seed_source {
-        SeedSource::Explicit(s) => {
-            if *s != stored.tournament_seed {
+    let seed = match seed_assert {
+        Some(s) => {
+            if s != stored.tournament_seed {
                 return Err(format!(
-                    "seed mismatch on resume: --seed {} does not match stored {} (tournament {})",
+                    "seed mismatch on resume: explicit seed {} (from --seed or config) does not match stored {} (tournament {})",
                     s, stored.tournament_seed, id.0
                 )
                 .into());
             }
-            *s
+            s
         },
-        SeedSource::FromStoreOnResume => stored.tournament_seed,
-        SeedSource::Generated(_) => return Err("internal: Generated seed on resume path".into()),
+        None => stored.tournament_seed,
     };
     Ok((id, stored.game_config_id, seed))
 }
