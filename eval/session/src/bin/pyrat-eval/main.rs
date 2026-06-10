@@ -9,6 +9,7 @@ mod orchestrator_config_build;
 mod tournament_config;
 mod tournament_resolve;
 mod tournament_run;
+mod tournament_save;
 
 use clap::{Args, Parser, Subcommand};
 use std::num::NonZeroU16;
