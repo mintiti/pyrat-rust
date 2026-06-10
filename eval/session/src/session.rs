@@ -248,11 +248,12 @@ pub enum TournamentMismatch {
     /// The planner's *runtime* `GameConfig` hashes differently from the
     /// stored `game_config_id`. `stored` is the stored row's geometry
     /// when the config row is retrievable (it always is for tournaments
-    /// created through this crate — the FK guarantees it).
+    /// created through this crate — the FK guarantees it). Records are
+    /// boxed to keep the error type small on the happy path.
     GameConfigDrift {
-        planner: GameConfigRecord,
+        planner: Box<GameConfigRecord>,
         planner_hash: String,
-        stored: Option<GameConfigRecord>,
+        stored: Option<Box<GameConfigRecord>>,
         stored_id: String,
     },
     Params {
@@ -819,9 +820,9 @@ fn validate_planner_against_stored_spec(
     let resolved_hash = resolved_record.content_hash();
     if resolved_hash != tournament.game_config_id {
         return Err(TournamentMismatch::GameConfigDrift {
-            planner: resolved_record,
+            planner: Box::new(resolved_record),
             planner_hash: resolved_hash,
-            stored: stored_game_config.cloned(),
+            stored: stored_game_config.cloned().map(Box::new),
             stored_id: tournament.game_config_id.clone(),
         }
         .into());
