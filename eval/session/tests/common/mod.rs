@@ -12,7 +12,8 @@ use pyrat::game::builder::GameConfig;
 use pyrat::{Coordinates, Direction, GameBuilder};
 use pyrat_bot_api::Options;
 use pyrat_eval::{
-    GameConfigId, ResolvedPlayer, RoundRobinPlanner, RoundRobinPlannerConfig, TournamentSpec,
+    GameConfigId, ResolvedPlayer, RoundRobinPlanner, RoundRobinPlannerConfig, TournamentParams,
+    TournamentSpec,
 };
 use pyrat_eval_store::{EvalStore, GameConfigRecord};
 use pyrat_host::player::{EmbeddedBot, EmbeddedCtx};
@@ -119,7 +120,12 @@ pub fn round_robin_spec() -> TournamentSpec {
     TournamentSpec {
         format: "round_robin".into(),
         target_games_per_matchup: Some(1),
-        params_json: "{}".into(),
+        // Matches `round_robin_planner`'s `max_failures_per_pair: 3`
+        // so the validator's params check passes.
+        params_json: TournamentParams {
+            max_failures_per_pair: 3,
+        }
+        .to_json(),
         game_config: small_game_config(),
         tournament_seed: 0xC0FFEE,
     }

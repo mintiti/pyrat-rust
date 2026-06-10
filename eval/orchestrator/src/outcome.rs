@@ -71,3 +71,23 @@ pub enum FailureReason {
     SinkFlushError(String),
     Internal(String),
 }
+
+/// Human-readable rendering for surfaces that show a failure to a user
+/// (CLI error messages, logs). The variant names stay the operational
+/// vocabulary; this is the prose form.
+impl std::fmt::Display for FailureReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SpawnFailed => write!(f, "bot process failed to spawn"),
+            Self::HandshakeTimeout => {
+                write!(f, "bot did not complete the startup handshake in time")
+            },
+            Self::Disconnected(slot) => write!(f, "{slot:?} disconnected mid-match"),
+            Self::ProtocolError(e) => write!(f, "protocol error: {e}"),
+            Self::Panic => write!(f, "match task panicked"),
+            Self::Cancelled => write!(f, "match was cancelled"),
+            Self::SinkFlushError(e) => write!(f, "result sink failed: {e}"),
+            Self::Internal(e) => write!(f, "internal error: {e}"),
+        }
+    }
+}

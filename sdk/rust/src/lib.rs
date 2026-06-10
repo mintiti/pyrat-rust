@@ -434,7 +434,10 @@ fn think_and_send<T: bot::Runner>(
     state_hash: u64,
     limits: SearchLimits,
 ) {
-    let raw_ms = u64::from(limits.timeout_ms.unwrap_or_else(|| state.move_timeout_ms()));
+    // Schema semantics (pyrat.fbs SearchLimits): each axis 0 / unset means
+    // unconstrained. None therefore maps to 0 (think until Stop), NOT to the
+    // Configure-time move_timeout_ms default.
+    let raw_ms = u64::from(limits.timeout_ms.unwrap_or(0));
     let think_start = Instant::now();
     let deadline = if raw_ms == 0 {
         think_start + Duration::from_secs(86400)

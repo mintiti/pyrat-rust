@@ -186,6 +186,22 @@ impl EvalStore {
             .collect()
     }
 
+    /// Single-row read by content-hash id. Used by resume paths that need
+    /// the stored geometry back out (e.g. drift diagnostics) without
+    /// scanning the full table.
+    pub fn get_game_config(&self, id: &str) -> Result<Option<GameConfigRecord>, EvalError> {
+        let json: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT config_json FROM game_configs WHERE id = ?1",
+                params![id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        json.map(|j| serde_json::from_str(&j).map_err(EvalError::from))
+            .transpose()
+    }
+
     /// Delete a player and cascade to their `game_results`. Errors with
     /// [`DeletePlayerError::InTournamentHistory`] if the player is referenced
     /// by `tournament_players` or `match_attempts`.
@@ -919,6 +935,16 @@ mod tests {
         let players = store.get_players().unwrap();
         assert_eq!(players.len(), 1);
         assert_eq!(players[0].display_name, "Alice"); // original name kept
+    }
+
+    #[test]
+    fn get_game_config_reads_back_by_id_and_misses_with_none() {
+        let store = EvalStore::open_in_memory().unwrap();
+        let config = sample_config();
+        let id = store.ensure_game_config(&config).unwrap();
+        let read_back = store.get_game_config(&id).unwrap();
+        assert_eq!(read_back, Some(config));
+        assert_eq!(store.get_game_config("no-such-id").unwrap(), None);
     }
 
     #[test]

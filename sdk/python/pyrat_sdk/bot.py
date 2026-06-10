@@ -441,9 +441,10 @@ def _run_lifecycle(
 
         elif kind == "Go":
             stop_event.clear()
-            timeout_ms = (item.get("limits") or {}).get("timeout_ms") or match_config[
-                "move_timeout_ms"
-            ]
+            # Schema semantics: SearchLimits timeout_ms 0 / unset means
+            # unconstrained (think until Stop), not "use the Configure
+            # default". Context treats 0 as no deadline.
+            timeout_ms = (item.get("limits") or {}).get("timeout_ms") or 0
             ctx = Context(
                 timeout_ms,
                 conn,
@@ -457,9 +458,8 @@ def _run_lifecycle(
         elif kind == "GoState":
             state.load_turn_state(item["turn_state"])
             stop_event.clear()
-            timeout_ms = (item.get("limits") or {}).get("timeout_ms") or match_config[
-                "move_timeout_ms"
-            ]
+            # Same unconstrained-limits semantics as "Go" above.
+            timeout_ms = (item.get("limits") or {}).get("timeout_ms") or 0
             ctx = Context(
                 timeout_ms,
                 conn,

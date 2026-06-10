@@ -75,10 +75,51 @@ uv sync --all-extras
 
 ## See it run
 
+A single match:
+
 ```bash
 cargo run -p pyrat-eval -- run-one \
   "cd botpack/greedy && cargo run --release" \
   "cd botpack/smart-random && cargo run --release"
+```
+
+A tournament (round-robin or gauntlet) with Elo standings:
+
+```bash
+# Quick path: flags. --bot id=working_dir defaults command to `cargo run --release`.
+# Game defaults to --preset tiny when no [game] section / game flags are given.
+cargo run -p pyrat-eval -- tournament run \
+  --bot greedy=botpack/greedy \
+  --bot smart_random=botpack/smart-random \
+  --format round-robin --games 5
+
+# Committed spec: a TOML file. Flags override config values.
+cargo run -p pyrat-eval -- tournament run --config ladder.toml
+
+# Materialize the resolved spec to disk for source control:
+cargo run -p pyrat-eval -- tournament run --bot ... --save-as ladder.toml
+```
+
+A `ladder.toml` looks like this (paths are relative to the file; the
+easiest way to get a starting spec is `--save-as`, which writes the
+fully resolved run back out):
+
+```toml
+format = "round_robin"
+target_games_per_matchup = 5
+
+[game]
+preset = "tiny"
+
+[[players]]
+id = "greedy"
+command = "cargo run --release"
+working_dir = "../botpack/greedy"
+
+[[players]]
+id = "smart_random"
+command = "cargo run --release"
+working_dir = "../botpack/smart-random"
 ```
 
 ## The game

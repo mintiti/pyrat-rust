@@ -14,6 +14,7 @@ use std::time::SystemTime;
 use pyrat::game::builder::GameConfig;
 use pyrat_eval_store::TournamentId;
 use pyrat_orchestrator::{MatchId, Matchup, PlayerSpec, Timing};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::descriptor::EvalMatchDescriptor;
@@ -48,6 +49,33 @@ pub fn matchup_seed(
     let bytes = hasher.finalize();
     let raw = u64::from_le_bytes(bytes[..8].try_into().expect("sha256 yields 32 bytes"));
     raw & (i64::MAX as u64)
+}
+
+/// Tournament-level parameters that planners care about and that need to
+/// survive into `tournaments.params_json` for resume validation.
+///
+/// Today this is just `max_failures_per_pair` (the retry budget per
+/// matchup). Stored as JSON so future additions are additive: an older
+/// row with `{}` deserializes to defaults via `#[serde(default)]`, and a
+/// newer planner's expected params can grow new fields without breaking
+/// older stored rows.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TournamentParams {
+    /// Maximum number of failed attempts per matchup before the planner
+    /// gives up. Affects retry budget; resuming with a different value
+    /// would silently change tournament semantics.
+    #[serde(default)]
+    pub max_failures_per_pair: u32,
+}
+
+impl TournamentParams {
+    pub fn to_json(&self) -> String {
+        serde_json::to_string(self).expect("TournamentParams serializes")
+    }
+
+    pub fn from_json(s: &str) -> Result<Self, serde_json::Error> {
+        serde_json::from_str(s)
+    }
 }
 
 /// One participant resolved from a `PlayerId` to a runnable `PlayerSpec`.
@@ -105,6 +133,15 @@ pub trait Planner: Send {
     /// against the stored `tournaments.game_config_id` on resume.
     fn expected_game_config_id(&self) -> &str;
 
+    /// Runtime `GameConfig` the planner will hand to the orchestrator.
+    /// The session content-hashes this on resume and cross-checks against
+    /// the stored `tournaments.game_config_id` — without this, drift
+    /// where the planner is built with the stored `game_config_id` but a
+    /// freshly resolved runtime config of different geometry would pass
+    /// validation tautologically, and matchups would be recorded against
+    /// a stored row that doesn't describe what was actually played.
+    fn expected_game_config(&self) -> &GameConfig;
+
     /// Tournament-level seed driving `matchup_seed`. Compared against the
     /// stored `tournaments.tournament_seed` on resume. Two resumes with
     /// different seeds would replay different games and silently fragment
@@ -124,6 +161,69 @@ pub trait Planner: Send {
     /// a `round_robin` tournament's participants would pass validation
     /// and silently skip the opponent-vs-opponent pairings.
     fn expected_format(&self) -> &str;
+
+    /// Tournament-level params (currently `max_failures_per_pair`) the
+    /// planner needs to be true for resume to be safe. The session
+    /// compares this against the stored `tournaments.params_json` row
+    /// on every `start`, so a planner that gets this wrong fails every
+    /// resume — required rather than defaulted so the mistake is a
+    /// compile error, not a runtime mismatch. (Stored `"{}"` rows still
+    /// decode to defaults via `serde(default)` on `TournamentParams`.)
+    fn expected_params(&self) -> TournamentParams;
+}
+
+/// Forwarding impl so callers can pick a planner at runtime (e.g. the
+/// CLI choosing round-robin vs gauntlet) and hand the box straight to
+/// `EvalSession::start`.
+impl Planner for Box<dyn Planner> {
+    fn next_batch(
+        &mut self,
+        state: &TournamentState,
+        capacity: usize,
+        allocate_match_id: &mut dyn FnMut() -> MatchId,
+    ) -> Vec<Matchup<EvalMatchDescriptor>> {
+        (**self).next_batch(state, capacity, allocate_match_id)
+    }
+
+    fn on_observation(&mut self, observation: &Observation) {
+        (**self).on_observation(observation)
+    }
+
+    fn is_done(&self, state: &TournamentState) -> bool {
+        (**self).is_done(state)
+    }
+
+    fn tournament_id(&self) -> TournamentId {
+        (**self).tournament_id()
+    }
+
+    fn expected_players(&self) -> Vec<&str> {
+        (**self).expected_players()
+    }
+
+    fn expected_game_config_id(&self) -> &str {
+        (**self).expected_game_config_id()
+    }
+
+    fn expected_game_config(&self) -> &GameConfig {
+        (**self).expected_game_config()
+    }
+
+    fn expected_tournament_seed(&self) -> u64 {
+        (**self).expected_tournament_seed()
+    }
+
+    fn expected_target_per_pair(&self) -> Option<u32> {
+        (**self).expected_target_per_pair()
+    }
+
+    fn expected_format(&self) -> &str {
+        (**self).expected_format()
+    }
+
+    fn expected_params(&self) -> TournamentParams {
+        (**self).expected_params()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +334,10 @@ impl Planner for RoundRobinPlanner {
         &self.config.game_config_id
     }
 
+    fn expected_game_config(&self) -> &GameConfig {
+        &self.config.game_config
+    }
+
     fn expected_tournament_seed(&self) -> u64 {
         self.config.tournament_seed
     }
@@ -244,6 +348,12 @@ impl Planner for RoundRobinPlanner {
 
     fn expected_format(&self) -> &str {
         "round_robin"
+    }
+
+    fn expected_params(&self) -> TournamentParams {
+        TournamentParams {
+            max_failures_per_pair: self.config.max_failures_per_pair,
+        }
     }
 }
 
@@ -264,6 +374,21 @@ pub struct GauntletPlannerConfig {
     pub target_each: u32,
     pub max_failures_per_pair: u32,
     pub tournament_seed: u64,
+}
+
+/// Canonical slot order for a gauntlet: challenger in slot 0, opponents
+/// in declaration order.
+///
+/// This is the single source of truth shared by
+/// `GauntletPlanner::expected_players` (the resume-validation side) and
+/// tournament bootstrap (the create side, which registers
+/// `tournament_players` rows). Both sides must agree or resume fails
+/// with a players mismatch.
+pub fn gauntlet_slot_order<'a>(
+    challenger: &'a ResolvedPlayer,
+    opponents: &'a [ResolvedPlayer],
+) -> impl Iterator<Item = &'a ResolvedPlayer> {
+    std::iter::once(challenger).chain(opponents.iter())
 }
 
 pub struct GauntletPlanner {
@@ -341,14 +466,17 @@ impl Planner for GauntletPlanner {
     }
 
     fn expected_players(&self) -> Vec<&str> {
-        // Slot 0 is the challenger; opponents follow in declaration order.
-        std::iter::once(self.config.challenger.id.as_str())
-            .chain(self.config.opponents.iter().map(|p| p.id.as_str()))
+        gauntlet_slot_order(&self.config.challenger, &self.config.opponents)
+            .map(|p| p.id.as_str())
             .collect()
     }
 
     fn expected_game_config_id(&self) -> &str {
         &self.config.game_config_id
+    }
+
+    fn expected_game_config(&self) -> &GameConfig {
+        &self.config.game_config
     }
 
     fn expected_tournament_seed(&self) -> u64 {
@@ -364,6 +492,12 @@ impl Planner for GauntletPlanner {
 
     fn expected_format(&self) -> &str {
         "gauntlet"
+    }
+
+    fn expected_params(&self) -> TournamentParams {
+        TournamentParams {
+            max_failures_per_pair: self.config.max_failures_per_pair,
+        }
     }
 }
 
@@ -760,5 +894,112 @@ mod tests {
         assert_ne!(s1, s3);
         // High bit always masked.
         assert!(s1 <= i64::MAX as u64);
+    }
+
+    #[test]
+    fn tournament_params_round_trips_json() {
+        let p = TournamentParams {
+            max_failures_per_pair: 7,
+        };
+        let s = p.to_json();
+        let back = TournamentParams::from_json(&s).expect("decode");
+        assert_eq!(p, back);
+    }
+
+    #[test]
+    fn tournament_params_deserializes_empty_object_with_serde_default() {
+        // Back-compat: any externally-stored row with `"{}"` decodes
+        // to defaults (max_failures_per_pair = 0).
+        let p = TournamentParams::from_json("{}").expect("decode");
+        assert_eq!(
+            p,
+            TournamentParams {
+                max_failures_per_pair: 0
+            }
+        );
+    }
+
+    #[test]
+    fn round_robin_planner_surfaces_max_failures_in_expected_params() {
+        let p = tiny_round_robin(2, 3);
+        assert_eq!(
+            p.expected_params(),
+            TournamentParams {
+                max_failures_per_pair: 3
+            }
+        );
+    }
+
+    /// The `Box<dyn Planner>` forwarding impl behaves identically to the
+    /// unboxed planner — pins the runtime-choice path the CLI uses.
+    #[test]
+    fn boxed_planner_forwards_to_inner() {
+        let mut unboxed = tiny_round_robin(1, 3);
+        let mut boxed: Box<dyn Planner> = Box::new(tiny_round_robin(1, 3));
+
+        assert_eq!(boxed.tournament_id(), unboxed.tournament_id());
+        assert_eq!(boxed.expected_players(), unboxed.expected_players());
+        assert_eq!(boxed.expected_format(), unboxed.expected_format());
+        assert_eq!(boxed.expected_params(), unboxed.expected_params());
+        assert_eq!(
+            boxed.expected_tournament_seed(),
+            unboxed.expected_tournament_seed()
+        );
+        assert_eq!(
+            boxed.expected_target_per_pair(),
+            unboxed.expected_target_per_pair()
+        );
+
+        let alloc = MatchIdAllocator::new();
+        let state = TournamentState::empty(TournamentId(1));
+        let batch_boxed = boxed.next_batch(&state, 100, &mut || alloc.allocate());
+        let batch_unboxed = unboxed.next_batch(&state, 100, &mut || alloc.allocate());
+        assert_eq!(batch_boxed.len(), batch_unboxed.len());
+        assert!(!boxed.is_done(&state));
+    }
+
+    /// `expected_players` and `gauntlet_slot_order` agree — pins the
+    /// create/resume symmetry both sides rely on.
+    #[test]
+    fn gauntlet_expected_players_matches_slot_order() {
+        let challenger = embedded("champ");
+        let opponents = vec![embedded("a"), embedded("b")];
+        let planner = GauntletPlanner::new(GauntletPlannerConfig {
+            challenger: challenger.clone(),
+            opponents: opponents.clone(),
+            game_config: GameConfig::classic(7, 5, 3),
+            game_config_id: "gc".into(),
+            timing: timing(),
+            tournament_id: TournamentId(1),
+            target_each: 1,
+            max_failures_per_pair: 1,
+            tournament_seed: 1,
+        });
+        let from_order: Vec<&str> = gauntlet_slot_order(&challenger, &opponents)
+            .map(|p| p.id.as_str())
+            .collect();
+        assert_eq!(planner.expected_players(), from_order);
+        assert_eq!(from_order, vec!["champ", "a", "b"]);
+    }
+
+    #[test]
+    fn gauntlet_planner_surfaces_max_failures_in_expected_params() {
+        let planner = GauntletPlanner::new(GauntletPlannerConfig {
+            challenger: embedded("champ"),
+            opponents: vec![embedded("a"), embedded("b")],
+            game_config: GameConfig::classic(7, 5, 3),
+            game_config_id: "gc".into(),
+            timing: timing(),
+            tournament_id: TournamentId(1),
+            target_each: 2,
+            max_failures_per_pair: 4,
+            tournament_seed: 0xC0FFEE,
+        });
+        assert_eq!(
+            planner.expected_params(),
+            TournamentParams {
+                max_failures_per_pair: 4
+            }
+        );
     }
 }
