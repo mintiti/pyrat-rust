@@ -38,6 +38,7 @@ where
 {
     match builder().await {
         Err(SessionError::TournamentMismatch(reason)) => {
+            let reason = reason.to_string();
             assert!(
                 reason.contains(expected_substr),
                 "expected '{expected_substr}' in mismatch reason, got: {reason}"
@@ -303,6 +304,9 @@ async fn rejects_planner_with_drifted_runtime_game_config() {
         tournament_seed: 0xC0FFEE,
     });
 
+    // The message must carry expected-vs-got geometry, not just two
+    // opaque hashes — `max_turns=99` (resolved) and `max_turns=5`
+    // (stored) is what lets a user trace the drift back to their flags.
     expect_mismatch_containing(
         || {
             EvalSession::start(
@@ -319,6 +323,66 @@ async fn rejects_planner_with_drifted_runtime_game_config() {
         "hashes to",
     )
     .await;
+}
+
+/// Same drift setup as above, asserting the geometry rendering: the
+/// mismatch message shows both the resolved and the stored max_turns so
+/// the user sees *what* drifted, not just that hashes differ.
+#[tokio::test]
+async fn drifted_game_config_message_shows_geometry_expected_vs_got() {
+    use pyrat::{Coordinates, GameBuilder};
+
+    let store = Arc::new(Mutex::new(EvalStore::open_in_memory().unwrap()));
+    let players = vec![embedded_player("a"), embedded_player("b")];
+    let created =
+        EvalSession::create_tournament(store.clone(), round_robin_spec(), players.clone())
+            .await
+            .expect("create_tournament");
+
+    let drifted_runtime = GameBuilder::new(3, 3)
+        .with_max_turns(99)
+        .with_open_maze()
+        .with_custom_positions(Coordinates::new(0, 0), Coordinates::new(2, 2))
+        .with_random_cheese(1, false)
+        .build();
+
+    let planner = pyrat_eval::RoundRobinPlanner::new(pyrat_eval::RoundRobinPlannerConfig {
+        players,
+        game_config: drifted_runtime,
+        game_config_id: created.game_config_id,
+        timing: crate::common::fast_timing(),
+        tournament_id: created.tournament_id,
+        target_per_pair: 1,
+        max_failures_per_pair: 3,
+        tournament_seed: 0xC0FFEE,
+    });
+
+    let result = EvalSession::start(
+        store.clone(),
+        SessionMode {
+            tournament_id: created.tournament_id,
+        },
+        planner,
+        fast_orch_config(),
+        EloOptions::new("a"),
+        SessionConfig::default(),
+    )
+    .await;
+    match result {
+        Err(SessionError::TournamentMismatch(reason)) => {
+            let reason = reason.to_string();
+            assert!(
+                reason.contains("max_turns=99"),
+                "resolved geometry missing: {reason}"
+            );
+            assert!(
+                reason.contains("max_turns=5"),
+                "stored geometry missing: {reason}"
+            );
+        },
+        Err(other) => panic!("expected TournamentMismatch, got {other:?}"),
+        Ok(_session) => panic!("expected TournamentMismatch, got Ok"),
+    }
 }
 
 /// Stored `params_json` decodes to `max_failures_per_pair: 3` (set by

@@ -21,7 +21,8 @@ use parking_lot::Mutex;
 use pyrat::game::builder::GameConfig;
 use pyrat_eval_store::{
     AddTournamentPlayerError, CreateTournamentError, EloOptions, EvalError, EvalStore,
-    NewTournament, RegisterPlayerError, TournamentId, TournamentParticipant, TournamentRecord,
+    GameConfigRecord, NewTournament, RegisterPlayerError, TournamentId, TournamentParticipant,
+    TournamentRecord,
 };
 use pyrat_orchestrator::{
     CompositeSink, DriverEvent, FailureReason, MatchSink, Orchestrator, OrchestratorConfig,
@@ -34,7 +35,7 @@ use tokio_util::sync::CancellationToken;
 use crate::descriptor::EvalMatchDescriptor;
 use crate::mapping::MappingError;
 use crate::observation::Observation;
-use crate::plan::{Planner, ResolvedPlayer};
+use crate::plan::{Planner, ResolvedPlayer, TournamentParams};
 use crate::state::{MatchupKey, TournamentState};
 use crate::store_sink::StoreSink;
 
@@ -207,9 +208,10 @@ pub enum SessionError {
     /// The planner handed to `EvalSession::start` doesn't match the stored
     /// tournament's spec (players, game config, seed, or per-pair target).
     /// Reconstructing state from someone else's tournament would silently
-    /// fragment standings.
+    /// fragment standings. The payload is typed so callers (e.g. a CLI)
+    /// can translate library vocabulary into their own.
     #[error("planner does not match stored tournament: {0}")]
-    TournamentMismatch(String),
+    TournamentMismatch(#[from] TournamentMismatch),
 
     /// A single matchup has hit the configured ceiling of consecutive
     /// `SinkFlushError` terminals (see
@@ -223,6 +225,139 @@ pub enum SessionError {
         last_message: String,
     },
 }
+
+/// One precise way the planner diverges from the stored tournament spec.
+/// Every variant carries expected-vs-stored as data so consumers can
+/// render it in their own vocabulary (the CLI maps field names to flags);
+/// the `Display` impl is the library-voice rendering.
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum TournamentMismatch {
+    Format {
+        planner: String,
+        stored: String,
+    },
+    TournamentId {
+        planner: TournamentId,
+        stored: TournamentId,
+    },
+    GameConfigId {
+        planner: String,
+        stored: String,
+    },
+    /// The planner's *runtime* `GameConfig` hashes differently from the
+    /// stored `game_config_id`. `stored` is the stored row's geometry
+    /// when the config row is retrievable (it always is for tournaments
+    /// created through this crate — the FK guarantees it).
+    GameConfigDrift {
+        planner: GameConfigRecord,
+        planner_hash: String,
+        stored: Option<GameConfigRecord>,
+        stored_id: String,
+    },
+    Params {
+        planner: TournamentParams,
+        stored: TournamentParams,
+    },
+    Seed {
+        planner: u64,
+        stored: u64,
+    },
+    TargetPerPair {
+        planner: u32,
+        stored: u32,
+    },
+    Players {
+        planner: Vec<String>,
+        stored: Vec<String>,
+    },
+    /// A side of the comparison couldn't even be computed (undecodable
+    /// stored `params_json`, unhashable runtime config).
+    Invalid(String),
+}
+
+/// Compact one-line geometry rendering for drift diagnostics. Covers
+/// every `GameConfigRecord` field so the differing one is always visible.
+fn geometry(r: &GameConfigRecord) -> String {
+    format!(
+        "{}x{}, max_turns={}, cheese={} (symmetric={}), walls={}, mud={} (range {}), connected={}, symmetric={}",
+        r.width,
+        r.height,
+        r.max_turns,
+        r.cheese_count,
+        r.cheese_symmetric,
+        r.wall_density,
+        r.mud_density,
+        r.mud_range,
+        r.connected,
+        r.symmetric
+    )
+}
+
+impl std::fmt::Display for TournamentMismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Format { planner, stored } => {
+                write!(f, "format: planner expected {planner:?}, stored is {stored:?}")
+            },
+            Self::TournamentId { planner, stored } => {
+                write!(
+                    f,
+                    "tournament_id: planner expected {planner:?}, stored is {stored:?}"
+                )
+            },
+            Self::GameConfigId { planner, stored } => {
+                write!(
+                    f,
+                    "game_config_id: planner expected {planner:?}, stored is {stored:?}"
+                )
+            },
+            Self::GameConfigDrift {
+                planner,
+                planner_hash,
+                stored,
+                stored_id,
+            } => {
+                write!(
+                    f,
+                    "game_config: resolved runtime config hashes to {planner_hash}, stored is {stored_id}\n  resolved: {}",
+                    geometry(planner)
+                )?;
+                if let Some(stored) = stored {
+                    write!(f, "\n  stored:   {}", geometry(stored))?;
+                }
+                Ok(())
+            },
+            Self::Params { planner, stored } => {
+                write!(
+                    f,
+                    "params: planner expected {planner:?}, stored is {stored:?}"
+                )
+            },
+            Self::Seed { planner, stored } => {
+                write!(
+                    f,
+                    "tournament_seed: planner expected {planner}, stored is {stored}"
+                )
+            },
+            Self::TargetPerPair { planner, stored } => {
+                write!(
+                    f,
+                    "target_games_per_matchup: planner expected {planner}, stored is {stored}"
+                )
+            },
+            Self::Players { planner, stored } => {
+                write!(
+                    f,
+                    "players: planner expected {planner:?}, stored is {stored:?}"
+                )
+            },
+            Self::Invalid(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
+impl std::error::Error for TournamentMismatch {}
 
 // ---------------------------------------------------------------------------
 // EvalSession
@@ -273,11 +408,12 @@ impl EvalSession {
     /// `session_config` carries session-level tunables (defaults are fine
     /// for most callers).
     ///
-    /// Validates the planner against the stored tournament's spec
-    /// (tournament_id, players, game_config_id, tournament_seed,
-    /// target_games_per_matchup). Returns `SessionError::TournamentMismatch`
-    /// on any divergence so a drifted planner can't silently fragment the
-    /// tournament's history.
+    /// Validates the planner against the stored tournament's spec: format,
+    /// tournament_id, players in slot order, game_config_id, the runtime
+    /// `GameConfig`'s content hash, tournament_seed, params, and
+    /// target_games_per_matchup (when both sides surface one). Returns
+    /// `SessionError::TournamentMismatch` on any divergence so a drifted
+    /// planner can't silently fragment the tournament's history.
     pub async fn start<P: Planner + 'static>(
         store: Arc<Mutex<EvalStore>>,
         mode: SessionMode,
@@ -319,10 +455,15 @@ impl EvalSession {
         session_config: SessionConfig,
         extra_sinks: Vec<(SinkRole, Arc<dyn MatchSink<EvalMatchDescriptor>>)>,
     ) -> Result<Self, SessionError> {
-        let (tournament_record, tournament_players, initial_state) =
-            reconstruct_tournament_state(store.clone(), mode.tournament_id).await?;
+        let stored = reconstruct_tournament_state(store.clone(), mode.tournament_id).await?;
 
-        validate_planner_against_stored_spec(&planner, &tournament_record, &tournament_players)?;
+        validate_planner_against_stored_spec(
+            &planner,
+            &stored.record,
+            &stored.players,
+            stored.game_config.as_ref(),
+        )?;
+        let initial_state = stored.state;
 
         let store_sink: Arc<dyn MatchSink<EvalMatchDescriptor>> = Arc::new(StoreSink::new(store));
         let mut sinks = Vec::with_capacity(1 + extra_sinks.len());
@@ -585,33 +726,43 @@ async fn bootstrap_new_tournament(
     })?
 }
 
+/// Everything `start` needs back out of the store for one tournament:
+/// the record, its participants, the stored game-config geometry (for
+/// drift diagnostics), and the folded attempt history.
+struct StoredTournament {
+    record: TournamentRecord,
+    players: Vec<TournamentParticipant>,
+    game_config: Option<GameConfigRecord>,
+    state: TournamentState,
+}
+
 /// Reconstruct state from store rows for a resume.
 ///
-/// Loads the tournament record, its participants, and all attempts in one
-/// blocking call. The caller cross-checks the planner against the
-/// returned record before launching.
+/// Loads the tournament record, its participants, the stored game
+/// config, and all attempts in one blocking call. The caller
+/// cross-checks the planner against the returned record before
+/// launching.
 async fn reconstruct_tournament_state(
     store: Arc<Mutex<EvalStore>>,
     tournament_id: TournamentId,
-) -> Result<
-    (
-        TournamentRecord,
-        Vec<TournamentParticipant>,
-        TournamentState,
-    ),
-    SessionError,
-> {
+) -> Result<StoredTournament, SessionError> {
     tokio::task::spawn_blocking(move || {
         let store = store.lock();
         let tournament = store
             .get_tournament(tournament_id)?
             .ok_or(SessionError::TournamentNotFound(tournament_id))?;
         let tournament_players = store.get_tournament_players(tournament.id)?;
+        let game_config = store.get_game_config(&tournament.game_config_id)?;
         let mut state = TournamentState::empty(tournament.id);
         for attempt in store.get_attempts(tournament.id, None)? {
             state.fold_attempt(&attempt);
         }
-        Ok::<_, SessionError>((tournament, tournament_players, state))
+        Ok::<_, SessionError>(StoredTournament {
+            record: tournament,
+            players: tournament_players,
+            game_config,
+            state,
+        })
     })
     .await
     .map_err(|e| SessionError::TaskPanicked {
@@ -627,27 +778,28 @@ fn validate_planner_against_stored_spec(
     planner: &impl Planner,
     tournament: &TournamentRecord,
     tournament_players: &[TournamentParticipant],
+    stored_game_config: Option<&GameConfigRecord>,
 ) -> Result<(), SessionError> {
     if planner.expected_format() != tournament.format {
-        return Err(SessionError::TournamentMismatch(format!(
-            "format: planner expected {:?}, stored is {:?}",
-            planner.expected_format(),
-            tournament.format
-        )));
+        return Err(TournamentMismatch::Format {
+            planner: planner.expected_format().to_owned(),
+            stored: tournament.format.clone(),
+        }
+        .into());
     }
     if planner.tournament_id() != tournament.id {
-        return Err(SessionError::TournamentMismatch(format!(
-            "tournament_id: planner expected {:?}, stored is {:?}",
-            planner.tournament_id(),
-            tournament.id
-        )));
+        return Err(TournamentMismatch::TournamentId {
+            planner: planner.tournament_id(),
+            stored: tournament.id,
+        }
+        .into());
     }
     if planner.expected_game_config_id() != tournament.game_config_id {
-        return Err(SessionError::TournamentMismatch(format!(
-            "game_config_id: planner expected {:?}, stored is {:?}",
-            planner.expected_game_config_id(),
-            tournament.game_config_id
-        )));
+        return Err(TournamentMismatch::GameConfigId {
+            planner: planner.expected_game_config_id().to_owned(),
+            stored: tournament.game_config_id.clone(),
+        }
+        .into());
     }
     // Content-hash the planner's *runtime* GameConfig and compare against
     // the stored id. The check above is tautological when the planner was
@@ -657,38 +809,40 @@ fn validate_planner_against_stored_spec(
     // matches on geometry the stored row doesn't describe.
     let resolved_record = crate::mapping::game_config_to_record(planner.expected_game_config())
         .map_err(|e| {
-            SessionError::TournamentMismatch(format!(
+            TournamentMismatch::Invalid(format!(
                 "game_config: cannot hash planner's runtime config: {e}"
             ))
         })?;
     let resolved_hash = resolved_record.content_hash();
     if resolved_hash != tournament.game_config_id {
-        return Err(SessionError::TournamentMismatch(format!(
-            "game_config: resolved runtime config hashes to {resolved_hash}, stored is {}",
-            tournament.game_config_id
-        )));
+        return Err(TournamentMismatch::GameConfigDrift {
+            planner: resolved_record,
+            planner_hash: resolved_hash,
+            stored: stored_game_config.cloned(),
+            stored_id: tournament.game_config_id.clone(),
+        }
+        .into());
     }
     // Compare params as typed data — string-compare would trip on benign
     // formatting differences. `#[serde(default)]` lets pre-fix rows with
     // `"{}"` decode to `max_failures_per_pair: 0` rather than erroring.
-    let stored_params =
-        crate::plan::TournamentParams::from_json(&tournament.params_json).map_err(|e| {
-            SessionError::TournamentMismatch(format!(
-                "params_json: cannot decode stored value: {e}"
-            ))
-        })?;
+    let stored_params = TournamentParams::from_json(&tournament.params_json).map_err(|e| {
+        TournamentMismatch::Invalid(format!("params_json: cannot decode stored value: {e}"))
+    })?;
     let planner_params = planner.expected_params();
     if planner_params != stored_params {
-        return Err(SessionError::TournamentMismatch(format!(
-            "params: planner expected {planner_params:?}, stored is {stored_params:?}"
-        )));
+        return Err(TournamentMismatch::Params {
+            planner: planner_params,
+            stored: stored_params,
+        }
+        .into());
     }
     if planner.expected_tournament_seed() != tournament.tournament_seed {
-        return Err(SessionError::TournamentMismatch(format!(
-            "tournament_seed: planner expected {}, stored is {}",
-            planner.expected_tournament_seed(),
-            tournament.tournament_seed
-        )));
+        return Err(TournamentMismatch::Seed {
+            planner: planner.expected_tournament_seed(),
+            stored: tournament.tournament_seed,
+        }
+        .into());
     }
     // target_games_per_matchup: both sides know it only when both surface
     // a value. Don't enforce when either side is None — a stored NULL
@@ -702,9 +856,11 @@ fn validate_planner_against_stored_spec(
         tournament.target_games_per_matchup,
     ) {
         if planner_target != stored_target {
-            return Err(SessionError::TournamentMismatch(format!(
-                "target_games_per_matchup: planner expected {planner_target}, stored is {stored_target}",
-            )));
+            return Err(TournamentMismatch::TargetPerPair {
+                planner: planner_target,
+                stored: stored_target,
+            }
+            .into());
         }
     }
     // Players: stored rows are sorted by slot (`get_tournament_players`'s
@@ -715,9 +871,11 @@ fn validate_planner_against_stored_spec(
         .collect();
     let expected_ids = planner.expected_players();
     if expected_ids != stored_ids {
-        return Err(SessionError::TournamentMismatch(format!(
-            "players: planner expected {expected_ids:?}, stored is {stored_ids:?}",
-        )));
+        return Err(TournamentMismatch::Players {
+            planner: expected_ids.iter().map(|s| (*s).to_owned()).collect(),
+            stored: stored_ids.iter().map(|s| (*s).to_owned()).collect(),
+        }
+        .into());
     }
     Ok(())
 }

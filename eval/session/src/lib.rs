@@ -41,7 +41,7 @@ pub use plan::{
 };
 pub use session::{
     CreatedTournament, EvalSession, SessionConfig, SessionError, SessionEvent, SessionMode,
-    TournamentSpec,
+    TournamentMismatch, TournamentSpec,
 };
 pub use state::{
     GameConfigId, MatchupAttempt, MatchupHistory, MatchupKey, MatchupOutcome, PlayerId,
