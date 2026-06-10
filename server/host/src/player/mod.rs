@@ -113,18 +113,24 @@ pub enum PlayerError {
 /// # Sideband routing
 ///
 /// Players receive an [`EventSink`] at construction and route observer-facing
-/// messages directly to it. `recv()` surfaces only game-driving messages
-/// (`Identify`, `Ready`, `PreprocessingDone`, `SyncOk`, `Resync`, `Action`).
+/// messages directly to it **at ingestion** — the moment the transport task
+/// (TCP session task / embedded bot call site) sees the message, independent
+/// of when (or whether) Match calls `recv()`. This is what makes live
+/// analysis streaming work: bots can think for minutes between `recv()`
+/// windows and their `Info` still reaches observers as it is produced.
+/// `recv()` surfaces only game-driving messages (`Identify`, `Ready`,
+/// `PreprocessingDone`, `SyncOk`, `Resync`, `Action`).
 ///
 /// # Provisional
 ///
 /// `BotMsg::Provisional` is dual-use and **never** returned from `recv()`:
 /// - **Observer-facing**: every receive is forwarded to `EventSink` as
-///   `MatchEvent::BotProvisional`.
+///   `MatchEvent::BotProvisional` at ingestion.
 /// - **Game-driving (poll-style)**: each impl stores the latest provisional
-///   keyed by `(turn, state_hash)`. Match calls [`Player::take_provisional`]
-///   only on the Stop-during-think fallback path. The slot is cleared on the
-///   next `Go` / `GoState` (whole-turn boundary) or by a successful `take`.
+///   keyed by `(turn, state_hash)`, also at ingestion. Match calls
+///   [`Player::take_provisional`] only on the Stop-during-think fallback
+///   path. The slot is cleared on the next `Go` / `GoState` (whole-turn
+///   boundary) or by a successful `take`.
 #[async_trait]
 pub trait Player: Send + Sync {
     /// Identity of this player in the match (bot-declared + host-assigned slot).
@@ -140,7 +146,7 @@ pub trait Player: Send + Sync {
     /// - `Err(_)`: a protocol, transport, or timeout failure occurred.
     ///
     /// Sideband messages (`Info`, `RenderCommands`, `Provisional`) are
-    /// forwarded to `EventSink` and never returned here.
+    /// forwarded to `EventSink` at ingestion and never returned here.
     async fn recv(&mut self) -> Result<Option<BotMsg>, PlayerError>;
 
     /// Take the latest provisional direction if it matches `expected_turn`
@@ -164,9 +170,10 @@ pub trait Player: Send + Sync {
 
 /// Turn-scoped storage of the latest provisional direction.
 ///
-/// Each Player impl holds one `Option<ProvisionalSlot>`. `recv()` updates it
-/// when a `BotMsg::Provisional` arrives; `take_provisional` reads and clears
-/// it; sending `Go`/`GoState` also clears it (whole-turn boundary).
+/// Each Player impl holds one shared `Option<ProvisionalSlot>`, written at
+/// ingestion (TCP session task / `EmbeddedCtx::send_provisional`);
+/// `take_provisional` reads and clears it; sending `Go`/`GoState` also
+/// clears it (whole-turn boundary).
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ProvisionalSlot {
     pub direction: Direction,

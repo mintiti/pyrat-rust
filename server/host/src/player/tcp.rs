@@ -9,14 +9,20 @@
 //! connections by `agent_id` and runs handshakes concurrently on a `JoinSet`,
 //! so a slow or silent connection cannot block valid bots.
 //!
-//! # Provisional handling
+//! # Sideband handling
 //!
-//! Mirrors [`super::EmbeddedPlayer`]: every `BotMsg::Provisional` is consumed
-//! inside `recv()`, stored in a turn-scoped slot, forwarded to `EventSink` as
-//! `MatchEvent::BotProvisional`, and never returned to Match. The slot is
-//! cleared on a new `Go`/`GoState` (whole-turn boundary) or by a successful
-//! [`Player::take_provisional`].
+//! Sideband messages (`Info`, `Provisional`, `RenderCommands`) are consumed
+//! by the session task at ingestion — the moment a frame is decoded —
+//! independent of when (or whether) Match calls `recv()`. `Info` is forwarded
+//! to `EventSink` as `MatchEvent::BotInfo`; `Provisional` is stored in a
+//! turn-scoped slot shared with [`Player::take_provisional`] and forwarded as
+//! `MatchEvent::BotProvisional`; `RenderCommands` is dropped (no event
+//! variant yet). None of them enter the bounded game-driving channel, so a
+//! chatty bot can stream analysis without backpressuring its own Actions.
+//! The provisional slot is cleared on a new `Go`/`GoState` (whole-turn
+//! boundary) or by a successful [`Player::take_provisional`].
 
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -282,14 +288,15 @@ pub struct TcpPlayer {
     identity: PlayerIdentity,
     /// Outbound: TcpPlayer pushes `HostMsg`, session task pulls and writes.
     host_tx: mpsc::Sender<HostMsg>,
-    /// Inbound: session task pushes `BotMsg`, recv() pulls.
+    /// Inbound: session task pushes game-driving `BotMsg`s, recv() pulls.
+    /// Sideband (Info / Provisional / RenderCommands) never enters this
+    /// channel — the session task consumes it at ingestion.
     bot_rx: mpsc::Receiver<BotMsg>,
     session: Option<JoinHandle<Result<(), PlayerError>>>,
-    /// Sink for observer-facing events (Provisional forwarding lives in
-    /// `recv`; Info / RenderCommands forwarding happens here too).
-    event_sink: EventSink,
-    /// Latest provisional direction (Foundation F2).
-    latest_provisional: Option<ProvisionalSlot>,
+    /// Latest provisional direction (Foundation F2). Written by the session
+    /// task at ingestion, read by `take_provisional`, cleared by `send` on a
+    /// new `Go`/`GoState`.
+    latest_provisional: Arc<Mutex<Option<ProvisionalSlot>>>,
 }
 
 impl TcpPlayer {
@@ -307,14 +314,22 @@ impl TcpPlayer {
     {
         let (host_tx, host_rx) = mpsc::channel(DEFAULT_CHANNEL_DEPTH);
         let (bot_tx, bot_rx) = mpsc::channel(DEFAULT_CHANNEL_DEPTH);
-        let session = tokio::spawn(session_task(reader, writer, host_rx, bot_tx));
+        let latest_provisional = Arc::new(Mutex::new(None));
+        let session = tokio::spawn(session_task(
+            reader,
+            writer,
+            host_rx,
+            bot_tx,
+            event_sink,
+            identity.slot,
+            Arc::clone(&latest_provisional),
+        ));
         Self {
             identity,
             host_tx,
             bot_rx,
             session: Some(session),
-            event_sink,
-            latest_provisional: None,
+            latest_provisional,
         }
     }
 
@@ -356,9 +371,11 @@ impl Player for TcpPlayer {
 
     async fn send(&mut self, msg: HostMsg) -> Result<(), PlayerError> {
         // Whole-turn boundary: a new Go/GoState invalidates any stored
-        // provisional from the previous turn (Foundation F2).
+        // provisional from the previous turn (Foundation F2). A provisional
+        // ingested after this clear is stale but harmless: `take_provisional`
+        // validates (turn, state_hash) before handing it out.
         if matches!(msg, HostMsg::Go { .. } | HostMsg::GoState { .. }) {
-            self.latest_provisional = None;
+            *self.latest_provisional.lock().expect("provisional lock") = None;
         }
         self.host_tx
             .send(msg)
@@ -367,70 +384,32 @@ impl Player for TcpPlayer {
     }
 
     async fn recv(&mut self) -> Result<Option<BotMsg>, PlayerError> {
-        loop {
-            let Some(msg) = self.bot_rx.recv().await else {
-                // Session task closed bot_tx → it has exited.
-                self.reap_session().await?;
-                return Ok(None);
-            };
-            match msg {
-                BotMsg::Provisional {
-                    direction,
-                    player,
-                    turn,
-                    state_hash,
-                } => {
-                    self.check_slot(player)?;
-                    self.latest_provisional = Some(ProvisionalSlot {
-                        direction,
-                        turn,
-                        state_hash,
-                    });
-                    self.event_sink.emit(MatchEvent::BotProvisional {
-                        sender: player,
-                        turn,
-                        state_hash,
-                        direction,
-                    });
-                    continue;
-                },
-                BotMsg::Info(info) => {
-                    // Sideband; `info.player` is the analysis subject, not
-                    // a sender claim. Bots may analyze either player, so no
-                    // slot check here. See protocol.md:202-212.
-                    let turn = info.turn;
-                    let state_hash = info.state_hash;
-                    self.event_sink.emit(MatchEvent::BotInfo {
-                        sender: self.identity.slot,
-                        turn,
-                        state_hash,
-                        info,
-                    });
-                    continue;
-                },
-                BotMsg::RenderCommands { .. } => {
-                    // Sideband; `player` field is the analysis subject, not
-                    // a sender claim. No slot check. Today we drop it
-                    // (no `MatchEvent::BotRenderCommands` variant yet);
-                    // wiring that is a separate concern.
-                    continue;
-                },
-                BotMsg::Action { player, .. } => {
-                    self.check_slot(player)?;
-                    return Ok(Some(msg));
-                },
-                BotMsg::Identify { .. } => {
-                    return Err(PlayerError::ProtocolError(
-                        "Identify after handshake".into(),
-                    ));
-                },
-                other => return Ok(Some(other)),
-            }
+        // Sideband (Info / Provisional / RenderCommands) is consumed by the
+        // session task at ingestion and never reaches this channel — only
+        // game-driving messages arrive here.
+        let Some(msg) = self.bot_rx.recv().await else {
+            // Session task closed bot_tx → it has exited.
+            self.reap_session().await?;
+            return Ok(None);
+        };
+        match msg {
+            BotMsg::Action { player, .. } => {
+                self.check_slot(player)?;
+                Ok(Some(msg))
+            },
+            BotMsg::Identify { .. } => Err(PlayerError::ProtocolError(
+                "Identify after handshake".into(),
+            )),
+            other => Ok(Some(other)),
         }
     }
 
     fn take_provisional(&mut self, expected_turn: u16, expected_hash: u64) -> Option<Direction> {
-        ProvisionalSlot::match_take(&mut self.latest_provisional, expected_turn, expected_hash)
+        ProvisionalSlot::match_take(
+            &mut self.latest_provisional.lock().expect("provisional lock"),
+            expected_turn,
+            expected_hash,
+        )
     }
 
     async fn close(self: Box<Self>) -> Result<(), PlayerError> {
@@ -439,7 +418,6 @@ impl Player for TcpPlayer {
             host_tx,
             bot_rx,
             session,
-            event_sink: _,
             latest_provisional: _,
         } = *self;
 
@@ -473,21 +451,28 @@ impl Player for TcpPlayer {
 
 /// Per-connection session loop.
 ///
-/// Reads frames from `reader`, decodes via `pyrat_protocol::codec`, and
-/// pushes `BotMsg` onto `bot_tx`. In parallel pulls `HostMsg` from `host_rx`,
-/// serializes, and writes through `writer`.
+/// Reads frames from `reader`, decodes via [`pyrat_protocol::codec`], and
+/// handles each message at ingestion: sideband (`Info` / `Provisional` /
+/// `RenderCommands`) is forwarded to `event_sink` / the shared provisional
+/// slot immediately, game-driving messages are pushed onto `bot_tx`. In
+/// parallel pulls `HostMsg` from `host_rx`, serializes, and writes through
+/// `writer`.
 ///
 /// Exits when either:
 /// - `host_rx` is closed (TcpPlayer dropped or `close` called) → drains any
 ///   queued outbound and returns `Ok(())`.
 /// - The peer closes the socket cleanly → returns `Ok(())` (caller surfaces
 ///   as `recv() -> Ok(None)` once `bot_tx` is dropped).
-/// - Any I/O or codec error → returns the corresponding `PlayerError`.
+/// - Any I/O or codec error, or a Provisional tagged for another slot →
+///   returns the corresponding `PlayerError`.
 async fn session_task<R, W>(
     mut reader: FrameReader<R>,
     mut writer: FrameWriter<W>,
     mut host_rx: mpsc::Receiver<HostMsg>,
     bot_tx: mpsc::Sender<BotMsg>,
+    event_sink: EventSink,
+    slot: PlayerSlot,
+    latest_provisional: Arc<Mutex<Option<ProvisionalSlot>>>,
 ) -> Result<(), PlayerError>
 where
     R: AsyncRead + Unpin,
@@ -511,18 +496,55 @@ where
                     return Err(map_frame_error(e, "outbound write"));
                 }
             }
-            // Inbound: read next frame from peer, decode, push to bot_tx.
-            // FrameReader::read_frame is documented cancel-safe.
+            // Inbound: read next frame from peer, decode, handle at
+            // ingestion. FrameReader::read_frame is documented cancel-safe.
             frame = reader.read_frame() => {
                 let bytes = match frame {
                     Ok(b) => b.to_vec(),
                     Err(FrameError::Disconnected) => return Ok(()),
                     Err(e) => return Err(map_frame_error(e, "inbound read")),
                 };
-                let packet = root_as_host_or_bot(&bytes)?;
-                if bot_tx.send(packet).await.is_err() {
-                    // recv side dropped; nothing more to do.
-                    return Ok(());
+                match root_as_host_or_bot(&bytes)? {
+                    BotMsg::Provisional { direction, player, turn, state_hash } => {
+                        if player != slot {
+                            return Err(PlayerError::ProtocolError(format!(
+                                "message tagged for {player:?}, but this connection owns {slot:?}"
+                            )));
+                        }
+                        // Store before emit: take_provisional must observe
+                        // the value as soon as the event is visible.
+                        *latest_provisional.lock().expect("provisional lock") =
+                            Some(ProvisionalSlot { direction, turn, state_hash });
+                        event_sink.emit(MatchEvent::BotProvisional {
+                            sender: player,
+                            turn,
+                            state_hash,
+                            direction,
+                        });
+                    },
+                    BotMsg::Info(info) => {
+                        // Sideband; `info.player` is the analysis subject,
+                        // not a sender claim. Bots may analyze either player,
+                        // so no slot check here. See protocol.md:202-212.
+                        let turn = info.turn;
+                        let state_hash = info.state_hash;
+                        event_sink.emit(MatchEvent::BotInfo {
+                            sender: slot,
+                            turn,
+                            state_hash,
+                            info,
+                        });
+                    },
+                    BotMsg::RenderCommands { .. } => {
+                        // Sideband; dropped today (no MatchEvent variant
+                        // yet). Wiring that is a separate concern.
+                    },
+                    msg => {
+                        if bot_tx.send(msg).await.is_err() {
+                            // recv side dropped; nothing more to do.
+                            return Ok(());
+                        }
+                    },
                 }
             }
         }

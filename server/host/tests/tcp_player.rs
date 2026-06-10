@@ -616,6 +616,164 @@ async fn tcp_player_render_commands_with_other_slot_does_not_error() {
     assert!(matches!(got, BotMsg::PreprocessingDone), "{got:?}");
 }
 
+// ── Ingestion-time sideband forwarding ────────────────────────────────
+//
+// Sideband must reach the EventSink without anyone calling `recv()`. This is
+// what GUI analysis mode relies on: bots think (and stream Info) for long
+// stretches during which Match isn't polling the player.
+
+/// Await the next event matching `pick` on the sink, with a deadline.
+async fn await_event<T>(
+    events_rx: &mut mpsc::UnboundedReceiver<MatchEvent>,
+    pick: impl Fn(MatchEvent) -> Option<T>,
+) -> T {
+    timeout(Duration::from_secs(2), async {
+        loop {
+            let event = events_rx.recv().await.expect("event sink closed");
+            if let Some(out) = pick(event) {
+                return out;
+            }
+        }
+    })
+    .await
+    .expect("event timeout")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tcp_player_info_reaches_event_sink_without_recv() {
+    let (events_tx, mut events_rx) = mpsc::unbounded_channel::<MatchEvent>();
+    let (_player, mut bot) = one_tcp_player(EventSink::new(events_tx)).await;
+
+    bot.send(BotMsg::Info(Info {
+        player: PlayerSlot::Player1,
+        multipv: 1,
+        target: None,
+        depth: 9,
+        nodes: 1234,
+        score: Some(0.25),
+        pv: vec![],
+        message: "live".into(),
+        turn: 3,
+        state_hash: 0xF00D,
+    }))
+    .await;
+
+    // No recv() call anywhere — the session task must forward at ingestion.
+    let info = await_event(&mut events_rx, |e| match e {
+        MatchEvent::BotInfo { sender, info, .. } => {
+            assert_eq!(sender, PlayerSlot::Player1);
+            Some(info)
+        },
+        _ => None,
+    })
+    .await;
+    assert_eq!(info.message, "live");
+    assert_eq!(info.depth, 9);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tcp_player_provisional_taken_without_recv() {
+    let (events_tx, mut events_rx) = mpsc::unbounded_channel::<MatchEvent>();
+    let (mut player, mut bot) = one_tcp_player(EventSink::new(events_tx)).await;
+
+    bot.send(BotMsg::Provisional {
+        direction: Direction::Left,
+        player: PlayerSlot::Player1,
+        turn: 4,
+        state_hash: 0xBEEF,
+    })
+    .await;
+
+    // The BotProvisional event is the synchronization point: the session
+    // task stores into the shared slot before emitting, so once the event
+    // is visible the provisional must be takeable — no recv() involved.
+    await_event(&mut events_rx, |e| match e {
+        MatchEvent::BotProvisional { direction, .. } => {
+            assert_eq!(direction, Direction::Left);
+            Some(())
+        },
+        _ => None,
+    })
+    .await;
+    assert_eq!(player.take_provisional(4, 0xBEEF), Some(Direction::Left));
+}
+
+/// A chatty bot must not be able to wedge the session by streaming sideband:
+/// Info/Provisional never enter the bounded game-driving channel, so well
+/// over `DEFAULT_CHANNEL_DEPTH` (64) of them followed by an Action still
+/// leaves the Action deliverable through `recv()`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tcp_player_sideband_flood_does_not_block_session() {
+    let (events_tx, mut events_rx) = mpsc::unbounded_channel::<MatchEvent>();
+    let (mut player, mut bot) = one_tcp_player(EventSink::new(events_tx)).await;
+
+    const FLOOD: u32 = 200;
+    for i in 0..FLOOD {
+        bot.send(BotMsg::Info(Info {
+            player: PlayerSlot::Player1,
+            multipv: 1,
+            target: None,
+            depth: 1,
+            nodes: i,
+            score: None,
+            pv: vec![],
+            message: String::new(),
+            turn: 1,
+            state_hash: 0xABCD,
+        }))
+        .await;
+    }
+    bot.send(BotMsg::Action {
+        direction: Direction::Up,
+        player: PlayerSlot::Player1,
+        turn: 1,
+        state_hash: 0xABCD,
+        think_ms: 1,
+    })
+    .await;
+
+    let got = timeout(Duration::from_secs(2), player.recv())
+        .await
+        .expect("recv timeout — session blocked by sideband flood?")
+        .expect("recv ok")
+        .expect("recv some");
+    assert!(matches!(got, BotMsg::Action { .. }), "{got:?}");
+
+    // Every Info made it to the sink (none dropped to backpressure).
+    let mut seen = 0;
+    while let Ok(event) = events_rx.try_recv() {
+        if matches!(event, MatchEvent::BotInfo { .. }) {
+            seen += 1;
+        }
+    }
+    assert_eq!(seen, FLOOD, "expected all {FLOOD} Info events");
+}
+
+/// Provisional carries a sender claim (unlike Info); a wrong-slot tag is a
+/// protocol violation. With ingestion-time handling it now tears down the
+/// session task; `recv()` surfaces the error via reap.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn tcp_player_off_slot_provisional_is_protocol_error() {
+    let (mut player, mut bot) = one_tcp_player(EventSink::noop()).await;
+
+    bot.send(BotMsg::Provisional {
+        direction: Direction::Down,
+        player: PlayerSlot::Player2,
+        turn: 0,
+        state_hash: 0,
+    })
+    .await;
+
+    let err = timeout(Duration::from_secs(2), player.recv())
+        .await
+        .expect("recv timeout")
+        .expect_err("expected ProtocolError");
+    assert!(
+        matches!(err, PlayerError::ProtocolError(ref msg) if msg.contains("Player2")),
+        "{err:?}"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn tcp_player_close_drops_session_task() {
     let (player, mut bot) = one_tcp_player(EventSink::noop()).await;

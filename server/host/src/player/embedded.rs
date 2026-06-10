@@ -18,11 +18,14 @@
 //! ## Sideband
 //!
 //! [`EmbeddedCtx`] exposes `send_info` / `send_provisional` / `should_stop`
-//! with the same API surface as the SDK `Context`. Calls are routed to the
-//! [`EventSink`](super::EventSink) instead of an mpsc-backed codec.
+//! with the same API surface as the SDK `Context`. Both are handled at the
+//! call site — `send_info` emits to the [`EventSink`](super::EventSink),
+//! `send_provisional` stores into the shared turn-scoped slot and emits —
+//! so sideband is observable the moment the bot produces it, independent of
+//! `recv()` timing. Mirrors the TCP session task's ingestion-time handling.
 
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
@@ -66,11 +69,13 @@ pub trait EmbeddedBot: Options + Send + 'static {
 /// atomic the dispatcher flips on [`HostMsg::Stop`] and an optional per-turn
 /// deadline derived from the match config. Sideband routing:
 /// - `send_info` forwarded to [`EventSink`] as `MatchEvent::BotInfo`.
-/// - `send_provisional` forwarded to the Match's `recv()` queue as
-///   [`BotMsg::Provisional`] (Match uses the latest as timeout fallback).
+/// - `send_provisional` stored into the turn-scoped slot shared with
+///   [`Player::take_provisional`] (Match uses the latest as timeout
+///   fallback), then forwarded to [`EventSink`] as
+///   `MatchEvent::BotProvisional`.
 pub struct EmbeddedCtx {
     pub(crate) event_sink: EventSink,
-    pub(crate) bot_tx: mpsc::UnboundedSender<BotMsg>,
+    pub(crate) latest_provisional: Arc<Mutex<Option<ProvisionalSlot>>>,
     pub(crate) turn: u16,
     pub(crate) state_hash: u64,
     pub(crate) player: PlayerSlot,
@@ -120,26 +125,24 @@ impl EmbeddedCtx {
         );
     }
 
-    /// Send a provisional (best-so-far) direction. Emitted as
-    /// [`BotMsg::Provisional`] on the game-driving channel: Match holds the
-    /// latest as its timeout fallback.
+    /// Send a provisional (best-so-far) direction. Stored into the shared
+    /// turn-scoped slot (Match's timeout fallback via `take_provisional`),
+    /// then emitted to the [`EventSink`] as `MatchEvent::BotProvisional`.
+    /// Store before emit: observers of the event must be able to take the
+    /// provisional immediately.
     pub fn send_provisional(&self, direction: Direction) {
-        if self
-            .bot_tx
-            .send(BotMsg::Provisional {
-                direction,
-                player: self.player,
+        *self.latest_provisional.lock().expect("provisional lock") = Some(ProvisionalSlot {
+            direction,
+            turn: self.turn,
+            state_hash: self.state_hash,
+        });
+        self.event_sink
+            .emit(crate::match_host::MatchEvent::BotProvisional {
+                sender: self.player,
                 turn: self.turn,
                 state_hash: self.state_hash,
-            })
-            .is_err()
-        {
-            tracing::debug!(
-                player = ?self.player,
-                turn = self.turn,
-                "provisional dropped: bot_tx closed"
-            );
-        }
+                direction,
+            });
     }
 }
 
@@ -239,12 +242,10 @@ pub struct EmbeddedPlayer {
     /// Cooperative-stop signal shared with the dispatcher and any in-flight
     /// `EmbeddedCtx`. `close` flips this so bots polling `should_stop` exit.
     stopped: Arc<AtomicBool>,
-    /// Sink for observer-facing events (Provisional forwarding lives here in
-    /// `recv`; Info routing happens inside the dispatcher).
-    event_sink: EventSink,
-    /// Latest provisional direction (Foundation F2). `recv` populates it,
+    /// Latest provisional direction (Foundation F2). Written by
+    /// `EmbeddedCtx::send_provisional` at the bot's call site,
     /// `take_provisional` consumes it, sending `Go`/`GoState` clears it.
-    latest_provisional: Option<ProvisionalSlot>,
+    latest_provisional: Arc<Mutex<Option<ProvisionalSlot>>>,
 }
 
 impl EmbeddedPlayer {
@@ -304,13 +305,15 @@ impl EmbeddedPlayer {
         let (host_tx, host_rx) = mpsc::unbounded_channel();
         let (bot_tx, bot_rx) = mpsc::unbounded_channel();
         let stopped = Arc::new(AtomicBool::new(false));
+        let latest_provisional = Arc::new(Mutex::new(None));
         let dispatcher = tokio::spawn(dispatcher_task(
             bot,
             identity.clone(),
-            event_sink.clone(),
+            event_sink,
             host_rx,
             bot_tx,
             stopped.clone(),
+            Arc::clone(&latest_provisional),
         ));
         Self {
             identity,
@@ -318,8 +321,7 @@ impl EmbeddedPlayer {
             bot_rx,
             dispatcher: Some(dispatcher),
             stopped,
-            event_sink,
-            latest_provisional: None,
+            latest_provisional,
         }
     }
 
@@ -339,8 +341,10 @@ impl Player for EmbeddedPlayer {
     async fn send(&mut self, msg: HostMsg) -> Result<(), PlayerError> {
         // Whole-turn boundary: any provisional from the previous turn is
         // invalid once the host commits to a new turn (via Go/GoState).
+        // A provisional stored after this clear is stale but harmless:
+        // `take_provisional` validates (turn, state_hash).
         if matches!(msg, HostMsg::Go { .. } | HostMsg::GoState { .. }) {
-            self.latest_provisional = None;
+            *self.latest_provisional.lock().expect("provisional lock") = None;
         }
         self.host_tx
             .send(msg)
@@ -348,44 +352,25 @@ impl Player for EmbeddedPlayer {
     }
 
     async fn recv(&mut self) -> Result<Option<BotMsg>, PlayerError> {
-        loop {
-            match self.bot_rx.recv().await {
-                Some(BotMsg::Provisional {
-                    direction,
-                    player,
-                    turn,
-                    state_hash,
-                }) => {
-                    // Update turn-scoped slot AND forward as observer event.
-                    // Match never sees Provisional through recv(); the slot is
-                    // the only game-driving access path.
-                    self.latest_provisional = Some(ProvisionalSlot {
-                        direction,
-                        turn,
-                        state_hash,
-                    });
-                    self.event_sink
-                        .emit(crate::match_host::MatchEvent::BotProvisional {
-                            sender: player,
-                            turn,
-                            state_hash,
-                            direction,
-                        });
-                    continue;
-                },
-                Some(msg) => return Ok(Some(msg)),
-                None => {
-                    // Dispatcher has dropped its sender → it has exited.
-                    // Surface its exit reason, if any.
-                    self.reap_dispatcher().await?;
-                    return Ok(None);
-                },
-            }
+        // Provisional never reaches this channel: `EmbeddedCtx::send_provisional`
+        // stores into the shared slot and emits the observer event directly.
+        match self.bot_rx.recv().await {
+            Some(msg) => Ok(Some(msg)),
+            None => {
+                // Dispatcher has dropped its sender → it has exited.
+                // Surface its exit reason, if any.
+                self.reap_dispatcher().await?;
+                Ok(None)
+            },
         }
     }
 
     fn take_provisional(&mut self, expected_turn: u16, expected_hash: u64) -> Option<Direction> {
-        ProvisionalSlot::match_take(&mut self.latest_provisional, expected_turn, expected_hash)
+        ProvisionalSlot::match_take(
+            &mut self.latest_provisional.lock().expect("provisional lock"),
+            expected_turn,
+            expected_hash,
+        )
     }
 
     async fn close(self: Box<Self>) -> Result<(), PlayerError> {
@@ -395,7 +380,6 @@ impl Player for EmbeddedPlayer {
             dispatcher,
             stopped,
             identity: _,
-            event_sink: _,
             latest_provisional: _,
         } = *self;
         // Signal cooperative bots first so they get the earliest possible
@@ -404,10 +388,8 @@ impl Player for EmbeddedPlayer {
         // store completes if we drop host_tx first.
         stopped.store(true, Ordering::Relaxed);
         drop(host_tx);
-        // Don't drain bot_rx: queued BotMsgs at close time are observer state
-        // nobody is consuming, and any in-flight EmbeddedCtx in spawn_blocking
-        // holds a bot_tx clone that keeps the channel open until the bot
-        // returns — that's the unbounded-wait bug we're fixing.
+        // Don't drain bot_rx: queued BotMsgs at close time are game-driving
+        // state nobody is consuming anymore.
         drop(bot_rx);
 
         let Some(mut handle) = dispatcher else {
@@ -467,12 +449,14 @@ async fn dispatcher_task<B: EmbeddedBot>(
     host_rx: mpsc::UnboundedReceiver<HostMsg>,
     bot_tx: mpsc::UnboundedSender<BotMsg>,
     stopped: Arc<AtomicBool>,
+    latest_provisional: Arc<Mutex<Option<ProvisionalSlot>>>,
 ) -> Result<(), PlayerError> {
     let core = DispatcherCore {
         event_sink,
         host_rx,
         bot_tx,
         stopped,
+        latest_provisional,
     };
 
     let initial = Setup::<B, Initial>::new(bot, core);
@@ -508,6 +492,9 @@ struct DispatcherCore {
     host_rx: mpsc::UnboundedReceiver<HostMsg>,
     bot_tx: mpsc::UnboundedSender<BotMsg>,
     stopped: Arc<AtomicBool>,
+    /// Turn-scoped provisional slot shared with the `EmbeddedPlayer` handle;
+    /// handed to each `EmbeddedCtx` so `send_provisional` stores directly.
+    latest_provisional: Arc<Mutex<Option<ProvisionalSlot>>>,
 }
 
 // ── Setup typestate ───────────────────────────────────
@@ -994,7 +981,7 @@ impl<B: EmbeddedBot> Playing<B, Synced> {
         );
         let ctx = EmbeddedCtx {
             event_sink: self.core.event_sink.clone(),
-            bot_tx: self.core.bot_tx.clone(),
+            latest_provisional: Arc::clone(&self.core.latest_provisional),
             turn: self.game.turn,
             state_hash,
             player: self.player_slot,
