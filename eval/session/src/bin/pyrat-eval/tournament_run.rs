@@ -70,6 +70,15 @@ pub async fn run_tournament_main(
         },
     };
 
+    // Operational guidance, not tracing: the id is what --resume needs
+    // after an abort, so it must survive RUST_LOG filtering. stderr
+    // keeps stdout machine-clean for the standings/JSON consumers.
+    eprintln!(
+        "tournament {} started (store: {})",
+        tournament_id.0,
+        resolved.store_path.display()
+    );
+
     let orch_config = build_orchestrator_config(&resolved.timing, resolved.max_parallel);
     let per_match_timing = Timing {
         mode: TimingMode::Wait,
@@ -136,17 +145,35 @@ pub async fn run_tournament_main(
     {
         // On resume, mismatches come from the user's flags/config
         // diverging from the stored tournament — translate the library
-        // vocabulary into the flags they actually typed.
+        // vocabulary into the flags they actually typed. (No resume
+        // hint here: a rejected resume ran nothing.)
         Err(SessionError::TournamentMismatch(m))
             if matches!(resolved.mode, LaunchMode::Resume { .. }) =>
         {
             return Err(format!("resume rejected: {}", translate_mismatch(&m)).into());
         },
-        other => other?,
+        Err(e) => {
+            return Err(with_resume_hint(&e.to_string(), &resolved.store_path, tournament_id).into())
+        },
+        Ok(session) => session,
     };
-    let final_state = await_session(session).await?;
+    let final_state = await_session(session)
+        .await
+        .map_err(|e| with_resume_hint(&e.to_string(), &resolved.store_path, tournament_id))?;
 
     render_standings(&final_state, resolved.results_json.as_deref())
+}
+
+/// Append resume guidance to a session-phase error. By this point the
+/// tournament row exists and any completed games are durably in the
+/// store, so an aborted run is resumable — but only if the user knows
+/// the id and where the store lives.
+fn with_resume_hint(e: &str, store_path: &Path, id: TournamentId) -> String {
+    format!(
+        "{e}\npartial results in {}; resume with --resume {}",
+        store_path.display(),
+        id.0
+    )
 }
 
 fn build_elo_options(resolved: &ResolvedRun) -> EloOptions {
@@ -445,6 +472,20 @@ fn split_gauntlet_players(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The hint carries everything a user needs to pick the run back
+    /// up: the store location and the exact --resume invocation.
+    #[test]
+    fn with_resume_hint_names_store_and_id() {
+        let hinted = with_resume_hint(
+            "orchestrator error: boom",
+            Path::new("/tmp/ratings.db"),
+            TournamentId(7),
+        );
+        assert!(hinted.starts_with("orchestrator error: boom\n"), "got: {hinted}");
+        assert!(hinted.contains("partial results in /tmp/ratings.db"), "got: {hinted}");
+        assert!(hinted.contains("--resume 7"), "got: {hinted}");
+    }
 
     /// The CLI translation names the flags the user typed, with the
     /// stored value to rerun with.

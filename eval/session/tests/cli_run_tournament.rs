@@ -109,6 +109,13 @@ fn minimal_toml_round_robin_runs_through() {
         stdout.contains("Tournament") && stdout.contains("finished"),
         "stdout should mention tournament status.\nstdout: {stdout}"
     );
+    // The id needed for --resume is announced on stderr at start, so an
+    // aborted run still leaves the user holding it.
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("started (store:"),
+        "stderr should announce the tournament id and store.\nstderr: {stderr}"
+    );
 }
 
 /// Pins the README one-liner: flags-only invocation without `--config`,
