@@ -207,7 +207,13 @@ impl Match<Created> {
     pub async fn setup(mut self) -> Result<Match<Ready>, MatchError> {
         let expected_hash = self.ctx.game.state_hash();
         let configure_timeout = self.ctx.setup_timing.configure_timeout;
-        let preprocessing_timeout = self.ctx.setup_timing.preprocessing_timeout;
+        // Bots measure the preprocessing budget from when THEY receive
+        // GoPreprocess — strictly after the host's clock starts — and a bot
+        // is entitled to use all of it. Without a delivery buffer, a bot
+        // that burns 100% of the budget loses a timer coin flip to the host.
+        // Same role network_grace plays on top of the move deadline.
+        let preprocessing_timeout =
+            self.ctx.setup_timing.preprocessing_timeout + self.ctx.playing_config.network_grace;
 
         // Emit BotIdentified for each slot. Identities are post-Welcome —
         // every player handed to Match::new has already completed the
@@ -512,6 +518,21 @@ impl Match<Playing> {
                         });
                     }
                     return Ok(());
+                },
+                BotMsg::Action { turn, .. } if turn <= pa.turn => {
+                    // A late Action for the turn that was just resolved: the
+                    // bot lost the deadline race and FaultPolicy already
+                    // decided its move (provisional / Stay). Wrong-state
+                    // policy: log and ignore — collection drops stale
+                    // Actions the same way, and lag must not escalate into
+                    // a fatal protocol error one window later.
+                    warn!(
+                        ?slot,
+                        msg_turn = turn,
+                        advance_turn = pa.turn,
+                        "stale Action ignored during sync handshake"
+                    );
+                    // Loop: keep waiting for SyncOk / Resync.
                 },
                 BotMsg::Resync { my_hash } => {
                     if resync_used {

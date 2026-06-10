@@ -805,6 +805,215 @@ async fn stale_action_from_previous_turn_is_dropped_without_cascade() {
     );
 }
 
+/// A late Action landing in the post-Advance sync window must be dropped
+/// with a warning, not escalate to `UnexpectedMessage`. This is the
+/// deadline-race shape from real eval runs: the bot's turn-N Action misses
+/// the collection grace (slot resolves as TimedOut), the host queues the
+/// advance, and the Action arrives while the host awaits SyncOk for turn N.
+/// Wrong-state policy: log, ignore, keep waiting — same staleness rule
+/// collection already applies.
+#[tokio::test]
+async fn stale_action_during_sync_handshake_is_dropped() {
+    let game = make_game();
+    let expected_hash = game.state_hash();
+    let cfg = build_match_config(&game, TimingMode::Wait, 500, 1000);
+
+    let (p1_player, p1_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player1, "p1"));
+    let (p2_player, p2_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player2, "p2"));
+
+    let p1: Box<dyn Player> = Box::new(p1_player);
+    let p2: Box<dyn Player> = Box::new(p2_player);
+
+    let m = Match::new(
+        game,
+        [p1, p2],
+        cfg,
+        [vec![], vec![]],
+        fast_setup(),
+        fast_playing(),
+        None,
+    );
+
+    let driver = tokio::spawn(async move {
+        let mut p1 = p1_handle;
+        let mut p2 = p2_handle;
+
+        // Setup + preprocess.
+        let _ = p1.expect_send().await;
+        let _ = p2.expect_send().await;
+        p1.respond(BotMsg::Ready {
+            state_hash: expected_hash,
+        });
+        p2.respond(BotMsg::Ready {
+            state_hash: expected_hash,
+        });
+        let _ = p1.expect_send().await;
+        let _ = p2.expect_send().await;
+        p1.respond(BotMsg::PreprocessingDone);
+        p2.respond(BotMsg::PreprocessingDone);
+
+        // Turn 0: clean play.
+        let go1 = p1.expect_send().await;
+        let _ = p2.expect_send().await;
+        let go_hash_t0 = match go1 {
+            HostMsg::Go { state_hash, .. } => state_hash,
+            other => panic!("expected Go, got {other:?}"),
+        };
+        p1.respond(BotMsg::Action {
+            direction: Direction::Stay,
+            player: PlayerSlot::Player1,
+            turn: 0,
+            state_hash: go_hash_t0,
+            think_ms: 1,
+        });
+        p2.respond(BotMsg::Action {
+            direction: Direction::Stay,
+            player: PlayerSlot::Player2,
+            turn: 0,
+            state_hash: go_hash_t0,
+            think_ms: 1,
+        });
+
+        // Turn 1: Advance arrives. P1's "late" turn-0 Action lands BEFORE
+        // its SyncOk — exactly the deadline-race ordering. Must be dropped.
+        let advance1 = p1.expect_send().await;
+        let _ = p2.expect_send().await;
+        let new_hash_t1 = match advance1 {
+            HostMsg::Advance { new_hash, .. } => new_hash,
+            other => panic!("expected Advance, got {other:?}"),
+        };
+        p1.respond(BotMsg::Action {
+            direction: Direction::Stay,
+            player: PlayerSlot::Player1,
+            turn: 0,
+            state_hash: go_hash_t0,
+            think_ms: 995,
+        });
+        p1.respond(BotMsg::SyncOk { hash: new_hash_t1 });
+        p2.respond(BotMsg::SyncOk { hash: new_hash_t1 });
+
+        // Remaining turns: clean play to completion.
+        for t in 1..5_u16 {
+            let go = p1.expect_send().await;
+            let _ = p2.expect_send().await;
+            let go_hash = match go {
+                HostMsg::Go { state_hash, .. } => state_hash,
+                other => panic!("expected Go, got {other:?}"),
+            };
+            p1.respond(BotMsg::Action {
+                direction: Direction::Stay,
+                player: PlayerSlot::Player1,
+                turn: t,
+                state_hash: go_hash,
+                think_ms: 1,
+            });
+            p2.respond(BotMsg::Action {
+                direction: Direction::Stay,
+                player: PlayerSlot::Player2,
+                turn: t,
+                state_hash: go_hash,
+                think_ms: 1,
+            });
+            if t < 4 {
+                let advance = p1.expect_send().await;
+                let _ = p2.expect_send().await;
+                let next_hash = match advance {
+                    HostMsg::Advance { new_hash, .. } => new_hash,
+                    other => panic!("expected Advance, got {other:?}"),
+                };
+                p1.respond(BotMsg::SyncOk { hash: next_hash });
+                p2.respond(BotMsg::SyncOk { hash: next_hash });
+            }
+        }
+
+        // Keep handles alive so the match can wrap up normally.
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let _keep_alive = (p1, p2);
+    });
+
+    let result = timeout(Duration::from_secs(3), m.run())
+        .await
+        .expect("run hung")
+        .expect("stale Action during sync handshake must not abort the match");
+
+    driver.abort();
+    let _ = driver.await;
+
+    assert!(
+        result.turns_played >= 4,
+        "match should have completed past the sync-window stale Action"
+    );
+}
+
+/// A bot that uses its full preprocessing budget replies strictly after the
+/// host's own deadline (the bot's clock starts later). The host must extend
+/// the await by `network_grace` so honest 100%-budget bots aren't a timer
+/// coin flip. Done at deadline+~150ms with a 400ms grace → accepted.
+#[tokio::test]
+async fn preprocessing_done_within_grace_is_accepted() {
+    let game = make_game();
+    let expected_hash = game.state_hash();
+    let cfg = build_match_config(&game, TimingMode::Wait, 500, 100);
+
+    let (p1_player, p1_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player1, "p1"));
+    let (p2_player, p2_handle) = ScriptedPlayer::pair(identity(PlayerSlot::Player2, "p2"));
+
+    let p1: Box<dyn Player> = Box::new(p1_player);
+    let p2: Box<dyn Player> = Box::new(p2_player);
+
+    let setup_timing = SetupTiming {
+        configure_timeout: Duration::from_secs(2),
+        preprocessing_timeout: Duration::from_millis(100),
+    };
+    let playing = PlayingConfig {
+        network_grace: Duration::from_millis(400),
+        ..Default::default()
+    };
+
+    let m = Match::new(
+        game,
+        [p1, p2],
+        cfg,
+        [vec![], vec![]],
+        setup_timing,
+        playing,
+        None,
+    );
+
+    let driver = tokio::spawn(async move {
+        let mut p1 = p1_handle;
+        let mut p2 = p2_handle;
+
+        let _ = p1.expect_send().await; // Configure
+        let _ = p2.expect_send().await;
+        p1.respond(BotMsg::Ready {
+            state_hash: expected_hash,
+        });
+        p2.respond(BotMsg::Ready {
+            state_hash: expected_hash,
+        });
+
+        let _ = p1.expect_send().await; // GoPreprocess
+        let _ = p2.expect_send().await;
+        // Reply after the 100ms budget but well within the 400ms grace.
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        p1.respond(BotMsg::PreprocessingDone);
+        p2.respond(BotMsg::PreprocessingDone);
+
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let _keep_alive = (p1, p2);
+    });
+
+    let ready = timeout(Duration::from_secs(2), m.setup())
+        .await
+        .expect("setup hung")
+        .expect("PreprocessingDone within grace must be accepted");
+    drop(ready);
+
+    driver.abort();
+    let _ = driver.await;
+}
+
 /// Setup-phase disconnect: P1 receives `Configure` but drops before sending
 /// `Ready`. Match must surface this as `BotDisconnected` (recv-side clean
 /// close) or `SetupTimeout` (silent slot exhausts the configure_timeout),
