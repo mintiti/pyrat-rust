@@ -18,10 +18,10 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use pyrat_eval::MatchupOutcome;
 use pyrat_eval::{
-    gauntlet_slot_order, EvalMatchDescriptor, EvalSession, GauntletPlanner,
-    GauntletPlannerConfig, Planner, ResolvedPlayer, RoundRobinPlanner, RoundRobinPlannerConfig,
-    SessionConfig, SessionError, SessionMode, TournamentMismatch, TournamentParams,
-    TournamentSpec, TournamentState,
+    gauntlet_slot_order, EvalMatchDescriptor, EvalSession, GauntletPlanner, GauntletPlannerConfig,
+    Planner, ResolvedPlayer, RoundRobinPlanner, RoundRobinPlannerConfig, SessionConfig,
+    SessionError, SessionMode, TournamentMismatch, TournamentParams, TournamentSpec,
+    TournamentState,
 };
 use pyrat_eval_store::{EloOptions, EvalStore, TournamentId};
 use pyrat_host::wire::TimingMode;
@@ -65,8 +65,7 @@ pub async fn run_tournament_main(
     // dangling tournament row behind.
     let (tournament_id, game_config_id, tournament_seed) = match resolved.mode {
         LaunchMode::Resume { id, seed_assert } => {
-            let (id, gc_id, seed) =
-                realize_resume(&store, id, seed_assert, &resolved.store_path)?;
+            let (id, gc_id, seed) = realize_resume(&store, id, seed_assert, &resolved.store_path)?;
             validate_game_config_with_seed(&game_config, seed)?;
             (id, gc_id, seed)
         },
@@ -160,7 +159,9 @@ pub async fn run_tournament_main(
             return Err(format!("resume rejected: {}", translate_mismatch(&m)).into());
         },
         Err(e) => {
-            return Err(with_resume_hint(&e.to_string(), &resolved.store_path, tournament_id).into())
+            return Err(
+                with_resume_hint(&e.to_string(), &resolved.store_path, tournament_id).into(),
+            )
         },
         Ok(session) => session,
     };
@@ -489,8 +490,14 @@ mod tests {
             Path::new("/tmp/ratings.db"),
             TournamentId(7),
         );
-        assert!(hinted.starts_with("orchestrator error: boom\n"), "got: {hinted}");
-        assert!(hinted.contains("partial results in /tmp/ratings.db"), "got: {hinted}");
+        assert!(
+            hinted.starts_with("orchestrator error: boom\n"),
+            "got: {hinted}"
+        );
+        assert!(
+            hinted.contains("partial results in /tmp/ratings.db"),
+            "got: {hinted}"
+        );
         assert!(hinted.contains("--resume 7"), "got: {hinted}");
     }
 
@@ -605,5 +612,4 @@ mod tests {
         // Zero successes must be distinguishable from a real result set.
         assert_eq!(parsed["status"], "finished_no_results");
     }
-
 }

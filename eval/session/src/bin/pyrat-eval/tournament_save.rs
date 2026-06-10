@@ -46,10 +46,7 @@ pub(crate) fn write_save_as(
 ///
 /// Errs when a player can't be expressed in the TOML schema (embedded
 /// bots) — refusing beats writing a spec that only fails on reload.
-fn to_saveable_config(
-    resolved: &ResolvedRun,
-    save_dir: &Path,
-) -> Result<TournamentConfig, String> {
+fn to_saveable_config(resolved: &ResolvedRun, save_dir: &Path) -> Result<TournamentConfig, String> {
     let format = match &resolved.format {
         FormatChoice::RoundRobin => "round_robin",
         FormatChoice::Gauntlet { .. } => "gauntlet",

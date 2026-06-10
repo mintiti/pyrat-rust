@@ -298,7 +298,10 @@ impl std::fmt::Display for TournamentMismatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Format { planner, stored } => {
-                write!(f, "format: planner expected {planner:?}, stored is {stored:?}")
+                write!(
+                    f,
+                    "format: planner expected {planner:?}, stored is {stored:?}"
+                )
             },
             Self::TournamentId { planner, stored } => {
                 write!(

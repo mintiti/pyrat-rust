@@ -1532,7 +1532,10 @@ mod tests {
     #[test]
     fn load_config_missing_file_names_path() {
         let err = expect_load_err(load_config(Path::new("/definitely/not/here.toml")));
-        assert!(matches!(err, ResolveError::ConfigRead { .. }), "got: {err:?}");
+        assert!(
+            matches!(err, ResolveError::ConfigRead { .. }),
+            "got: {err:?}"
+        );
         assert!(
             err.to_string().contains("/definitely/not/here.toml"),
             "got: {err}"
@@ -1545,7 +1548,10 @@ mod tests {
         let path = tmp.path().join("broken.toml");
         std::fs::write(&path, "format = [not valid toml").unwrap();
         let err = expect_load_err(load_config(&path));
-        assert!(matches!(err, ResolveError::ConfigParse { .. }), "got: {err:?}");
+        assert!(
+            matches!(err, ResolveError::ConfigParse { .. }),
+            "got: {err:?}"
+        );
         assert!(
             err.to_string().contains("broken.toml"),
             "the parse error must name the file: {err}"
@@ -1743,5 +1749,4 @@ mod tests {
             }
         );
     }
-
 }
