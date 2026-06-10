@@ -119,6 +119,8 @@ pub enum ResolveError {
     },
     #[error("failed to parse config file: {0}")]
     ConfigParse(#[from] toml::de::Error),
+    #[error("bot `{bot_id}`: working_dir `{}` does not exist or is not a directory", path.display())]
+    WorkingDirMissing { bot_id: String, path: PathBuf },
     #[error("{0}")]
     Validation(String),
 }
@@ -166,7 +168,9 @@ pub fn resolve(
         Some(p) => Some(load_config(p)?),
         None => None,
     };
-    resolve_loaded(args, loaded, seed_gen)
+    let resolved = resolve_loaded(args, loaded, seed_gen)?;
+    validate_working_dirs(&resolved.players)?;
+    Ok(resolved)
 }
 
 pub fn resolve_loaded(
@@ -392,6 +396,31 @@ fn config_entry_to_player(entry: &PlayerEntry, config_dir: &Path) -> ResolvedPla
             working_dir,
         },
     }
+}
+
+/// Fail fast on a typo'd bot path: without this, a wrong working_dir
+/// bootstraps a tournament row, burns the retry budget on spawn
+/// failures, and reports "finished".
+///
+/// Filesystem check, so it lives in `resolve()` (the disk-touching
+/// entry) — NOT in `resolve_loaded`, which stays filesystem-pure for
+/// unit tests that pass fake paths through it.
+fn validate_working_dirs(players: &[ResolvedPlayer]) -> Result<(), ResolveError> {
+    for p in players {
+        if let PlayerSpec::Subprocess {
+            working_dir: Some(dir),
+            ..
+        } = &p.spec
+        {
+            if !dir.is_dir() {
+                return Err(ResolveError::WorkingDirMissing {
+                    bot_id: p.id.clone(),
+                    path: dir.clone(),
+                });
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_players(players: &[ResolvedPlayer]) -> Result<(), ResolveError> {
@@ -694,6 +723,39 @@ mod tests {
             emitted = true;
             value
         }
+    }
+
+    /// `resolve()` (the disk-touching entry) rejects bots whose
+    /// working_dir doesn't exist, naming the bot and the path. The
+    /// fake-dir helpers used everywhere else go through `resolve_loaded`,
+    /// which deliberately skips this check.
+    #[test]
+    fn resolve_rejects_missing_working_dir() {
+        let args = args_with_two_bots(); // "alpha-dir" doesn't exist
+        let mut gen = fixed_seed_gen(0);
+        let err = expect_err(resolve(args, &mut gen));
+        let s = err.to_string();
+        assert!(s.contains("`alpha`"), "should name the bot id, got: {s}");
+        assert!(s.contains("alpha-dir"), "should name the path, got: {s}");
+    }
+
+    #[test]
+    fn resolve_accepts_existing_working_dirs() {
+        let dir_a = tempfile::tempdir().unwrap();
+        let dir_b = tempfile::tempdir().unwrap();
+        let mut args = args_with_two_bots();
+        args.bots = vec![
+            BotArg {
+                id: "alpha".into(),
+                working_dir: dir_a.path().to_path_buf(),
+            },
+            BotArg {
+                id: "beta".into(),
+                working_dir: dir_b.path().to_path_buf(),
+            },
+        ];
+        let mut gen = fixed_seed_gen(0);
+        resolve(args, &mut gen).expect("existing dirs should pass");
     }
 
     #[test]
