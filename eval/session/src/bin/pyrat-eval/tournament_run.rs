@@ -34,15 +34,16 @@ use crate::orchestrator_config_build::build_orchestrator_config;
 use crate::tournament_resolve::{FormatChoice, LaunchMode, ResolvedRun};
 use crate::tournament_save::write_save_as;
 
-/// Execute the tournament described by `resolved`. Returns the final
-/// `TournamentState` for the caller to render (standings, JSON).
+/// Execute the tournament described by `resolved`. Returns the attempt
+/// counts so the caller can derive an exit code (rendering — standings
+/// table, results JSON — happens in here).
 ///
 /// If `resolved.save_as` is set, materializes the spec to TOML
 /// **before** the tournament runs so the user gets the spec file even
 /// if the run aborts.
 pub async fn run_tournament_main(
     resolved: ResolvedRun,
-) -> Result<TournamentState, Box<dyn std::error::Error>> {
+) -> Result<AttemptsCount, Box<dyn std::error::Error>> {
     if let Some(save_path) = resolved.save_as.as_ref() {
         write_save_as(&resolved, save_path)?;
     }
@@ -145,8 +146,7 @@ pub async fn run_tournament_main(
     };
     let final_state = await_session(session).await?;
 
-    render_standings(&final_state, resolved.results_json.as_deref())?;
-    Ok(final_state)
+    render_standings(&final_state, resolved.results_json.as_deref())
 }
 
 fn build_elo_options(resolved: &ResolvedRun) -> EloOptions {
@@ -261,9 +261,9 @@ struct ResultsJson<'a> {
 }
 
 #[derive(Serialize)]
-struct AttemptsCount {
-    success: u64,
-    failure: u64,
+pub(crate) struct AttemptsCount {
+    pub(crate) success: u64,
+    pub(crate) failure: u64,
 }
 
 #[derive(Serialize)]
@@ -275,13 +275,13 @@ struct StandingsRow<'a> {
 fn render_standings(
     state: &TournamentState,
     results_json_path: Option<&Path>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<AttemptsCount, Box<dyn std::error::Error>> {
     let counts = count_attempts(state);
     print_table(state, &counts);
     if let Some(path) = results_json_path {
         write_results_json(state, &counts, path)?;
     }
-    Ok(())
+    Ok(counts)
 }
 
 fn count_attempts(state: &TournamentState) -> AttemptsCount {
@@ -359,9 +359,17 @@ fn write_results_json(
             elo: r.elo,
         })
         .collect();
+    // "finished" with zero successes means every matchup exhausted its
+    // retry budget — a script consuming this JSON must be able to tell
+    // that apart from a real result set.
+    let status = if counts.success == 0 {
+        "finished_no_results"
+    } else {
+        "finished"
+    };
     let payload = ResultsJson {
         tournament_id: id,
-        status: "finished",
+        status,
         attempts: AttemptsCount {
             success: counts.success,
             failure: counts.failure,
@@ -546,6 +554,8 @@ mod tests {
         let parsed: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(parsed["standings"].as_array().unwrap().len(), 0);
+        // Zero successes must be distinguishable from a real result set.
+        assert_eq!(parsed["status"], "finished_no_results");
     }
 
 }

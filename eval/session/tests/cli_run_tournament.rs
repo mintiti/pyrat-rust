@@ -422,6 +422,69 @@ fn resume_with_drifted_game_config_fails() {
     );
 }
 
+/// A tournament where every match fails (bots that can't start) must
+/// not report success: exit code 1 and results JSON status
+/// "finished_no_results", so `pyrat-eval ... && publish` can't silently
+/// publish an empty ladder.
+#[test]
+fn all_failures_exit_nonzero_with_no_results_status() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg_path = tmp.path().join("ladder.toml");
+    let store_path = tmp.path().join("ratings.db");
+    let json_path = tmp.path().join("results.json");
+    // Commands point at a binary that doesn't exist; no working_dir, so
+    // the resolver's is_dir() check doesn't apply and the failure
+    // happens at spawn/startup. Tight startup timeout bounds the test.
+    let toml = format!(
+        r#"format = "round_robin"
+target_games_per_matchup = 1
+max_failures_per_pair = 1
+max_parallel = 1
+store_path = {store:?}
+seed = 7
+
+[game]
+preset = "tiny"
+max_turns = 10
+
+[timing]
+move_timeout_ms = 1000
+preprocessing_timeout_ms = 1000
+startup_timeout_ms = 2000
+configure_timeout_ms = 1000
+
+[[players]]
+id = "alice"
+command = "/nonexistent/bot-binary"
+
+[[players]]
+id = "bob"
+command = "/nonexistent/bot-binary"
+"#,
+        store = store_path.to_string_lossy()
+    );
+    write_toml(&cfg_path, &toml);
+
+    let args = [
+        "--config",
+        cfg_path.to_str().unwrap(),
+        "--results-json",
+        json_path.to_str().unwrap(),
+    ];
+    let out = run_tournament(&args);
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "all-failed tournament must exit 1.\nstdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr),
+    );
+    let parsed: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&json_path).unwrap()).unwrap();
+    assert_eq!(parsed["status"], "finished_no_results");
+    assert_eq!(parsed["attempts"]["success"], 0);
+}
+
 /// Resume mismatches surface in CLI vocabulary: a drifted --games value
 /// is reported as `--games`, not as the library's
 /// `target_games_per_matchup`.

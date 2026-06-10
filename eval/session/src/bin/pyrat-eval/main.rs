@@ -323,13 +323,13 @@ async fn main() -> ExitCode {
 
     let cli = Cli::parse();
     let result = match cli.command {
-        Command::RunOne(args) => run_one(args).await,
+        Command::RunOne(args) => run_one(args).await.map(|()| ExitCode::SUCCESS),
         Command::Tournament(args) => match args.command {
             TournamentSubcommand::Run(args) => run_tournament(args).await,
         },
     };
     match result {
-        Ok(()) => ExitCode::SUCCESS,
+        Ok(code) => code,
         Err(e) => {
             eprintln!("Error: {e}");
             ExitCode::FAILURE
@@ -390,12 +390,21 @@ async fn run_one(args: RunOneArgs) -> Result<(), Box<dyn std::error::Error>> {
 }
 
 /// Tournament-run entry. Resolves args → runs the tournament. Standings
-/// rendering happens inside `run_tournament_main`.
-async fn run_tournament(args: RunArgs) -> Result<(), Box<dyn std::error::Error>> {
+/// rendering happens inside `run_tournament_main`; the exit code is
+/// derived from the attempt counts it returns.
+async fn run_tournament(args: RunArgs) -> Result<ExitCode, Box<dyn std::error::Error>> {
     let mut seed_gen = masked_random_seed;
     let resolved = tournament_resolve::resolve(args, &mut seed_gen)?;
-    tournament_run::run_tournament_main(resolved).await?;
-    Ok(())
+    let counts = tournament_run::run_tournament_main(resolved).await?;
+    // A tournament that "finished" with zero successful games (every
+    // matchup exhausted its retry budget — typically bots that fail to
+    // start) must not look like success to scripts: `pyrat-eval ... &&
+    // publish` would silently publish an empty ladder.
+    Ok(if counts.success == 0 {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    })
 }
 
 /// Default seed generator. Mirrors `plan::matchup_seed`'s 63-bit mask so
