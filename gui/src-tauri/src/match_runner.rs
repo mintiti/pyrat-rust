@@ -86,6 +86,12 @@ pub async fn run_match(
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let p1_is_stub = players[0].command == STUB_SENTINEL;
     let p2_is_stub = players[1].command == STUB_SENTINEL;
+    // Analysis mode: bots think until told to stop (limits 0 = unconstrained
+    // per the wire schema), and stop_and_collect gets a wider grace window
+    // since Stop→Action latency depends on the bot's should_stop cadence.
+    // The grace is a deadline, not a sleep — responsive bots don't pay it.
+    let analysis = cmd_rx.is_some();
+    let move_timeout_ms = if analysis { 0 } else { MOVE_TIMEOUT_MS };
 
     // Disambiguate agent_ids when both slots use the same bot — accept_players
     // rejects duplicate agent_ids as HivemindNotSupported.
@@ -101,7 +107,7 @@ pub async fn run_match(
     let match_config = build_match_config(
         &game,
         TimingMode::Wait,
-        MOVE_TIMEOUT_MS,
+        move_timeout_ms,
         PREPROCESSING_TIMEOUT_MS,
     );
 
@@ -229,9 +235,17 @@ pub async fn run_match(
             configure_timeout: Duration::from_secs(5),
             preprocessing_timeout: Duration::from_millis(u64::from(PREPROCESSING_TIMEOUT_MS)),
         },
-        PlayingConfig {
-            move_timeout: Duration::from_millis(u64::from(MOVE_TIMEOUT_MS)),
-            ..PlayingConfig::default()
+        if analysis {
+            PlayingConfig {
+                move_timeout: Duration::ZERO,
+                network_grace: Duration::from_millis(500),
+                ..PlayingConfig::default()
+            }
+        } else {
+            PlayingConfig {
+                move_timeout: Duration::from_millis(u64::from(MOVE_TIMEOUT_MS)),
+                ..PlayingConfig::default()
+            }
         },
         Some(event_tx.clone()),
     );
