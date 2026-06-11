@@ -33,6 +33,14 @@ class GameResult(enum.IntEnum):
 
 # ── Context ────────────────────────────────────────────
 
+# Safety margin subtracted from the time budget so that a bot which searches
+# until should_stop() returns its action *before* the host's wall-clock
+# deadline (encode + send must fit in the gap). Mirrors the Rust SDK's
+# MOVE_SAFETY_MARGIN_MS. Without it, a budget-exhausting bot returns past the
+# nominal deadline on every turn and is accepted only thanks to the host's
+# network grace window.
+MOVE_SAFETY_MARGIN_MS = 5
+
 
 class Context:
     """Passed to ``think()`` and ``preprocess()``. Provides timing and info sending."""
@@ -47,8 +55,11 @@ class Context:
         state_hash: int = 0,
     ) -> None:
         self._think_start = time.monotonic()
+        self._budget_ms = timeout_ms
         self._deadline = self._think_start + (
-            86400.0 if timeout_ms == 0 else timeout_ms / 1000.0
+            86400.0
+            if timeout_ms == 0
+            else max(timeout_ms - MOVE_SAFETY_MARGIN_MS, 0) / 1000.0
         )
         self._conn = conn
         self._stop_event = stop_event
@@ -65,6 +76,14 @@ class Context:
         return time.monotonic() >= self._deadline or (
             self._stop_event is not None and self._stop_event.is_set()
         )
+
+    def _budget_exceeded(self) -> bool:
+        """True when think ran past the full time budget, not just the
+        margin-shaved deadline. A bot that searches until should_stop()
+        legitimately returns at the deadline — that is not overshoot."""
+        if self._budget_ms == 0:
+            return False
+        return (time.monotonic() - self._think_start) * 1000.0 > self._budget_ms
 
     def think_elapsed_ms(self) -> int:
         """Milliseconds elapsed since think started."""
@@ -158,7 +177,9 @@ class Bot:
             traceback.print_exc()
             direction = Direction.STAY
 
-        if ctx.should_stop():
+        # should_stop() being true here is normal for a bot that searches
+        # until the deadline; only warn on a genuine budget overshoot.
+        if ctx._budget_exceeded():
             print(
                 "think() exceeded time limit. The host may have used STAY.",
                 file=sys.stderr,
@@ -223,7 +244,9 @@ class HivemindBot:
             traceback.print_exc()
             moves = {}
 
-        if ctx.should_stop():
+        # should_stop() being true here is normal for a bot that searches
+        # until the deadline; only warn on a genuine budget overshoot.
+        if ctx._budget_exceeded():
             print(
                 "think() exceeded time limit. The host may have used STAY.",
                 file=sys.stderr,
@@ -365,17 +388,13 @@ def _run_lifecycle(
     # Welcome assigns the player slot.
     welcome = _read_one(conn)
     if welcome.get("kind") != "Welcome":
-        raise ConnectionError(
-            f"expected Welcome, got {welcome.get('kind')!r}"
-        )
+        raise ConnectionError(f"expected Welcome, got {welcome.get('kind')!r}")
     slot = welcome["player_slot"]
 
     # Configure carries options + match config in one message.
     configure = _read_one(conn)
     if configure.get("kind") != "Configure":
-        raise ConnectionError(
-            f"expected Configure, got {configure.get('kind')!r}"
-        )
+        raise ConnectionError(f"expected Configure, got {configure.get('kind')!r}")
     match_config = configure["match_config"]
     for name, value in configure.get("options", []):
         apply_set_option(bot, option_defs, name, value)
@@ -388,9 +407,7 @@ def _run_lifecycle(
 
     go_pre = _read_one(conn)
     if go_pre.get("kind") != "GoPreprocess":
-        raise ConnectionError(
-            f"expected GoPreprocess, got {go_pre.get('kind')!r}"
-        )
+        raise ConnectionError(f"expected GoPreprocess, got {go_pre.get('kind')!r}")
     if go_pre["state_hash"] != state.state_hash:
         print(
             f"[sdk] state_hash mismatch: bot {state.state_hash:#x} "

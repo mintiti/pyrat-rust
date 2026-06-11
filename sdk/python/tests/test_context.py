@@ -24,6 +24,28 @@ def test_zero_timeout_is_infinite():
     assert ctx.should_stop() is False
 
 
+def test_safety_margin_shaves_deadline():
+    """The deadline sits MOVE_SAFETY_MARGIN_MS before the budget, and a budget
+    at or below the margin means an immediate deadline — not an infinite one."""
+    ctx = Context(10_000, MockConnection([]))
+    assert ctx.time_remaining_ms() <= 10_000 - 5
+    ctx = Context(5, MockConnection([]))
+    assert ctx.should_stop() is True
+
+
+def test_budget_exceeded_is_not_should_stop():
+    """A bot returning at the (margin-shaved) deadline has NOT overshot the
+    budget; only running past the full budget counts. Zero budget never does."""
+    ctx = Context(10_000, MockConnection([]))
+    assert ctx._budget_exceeded() is False
+    ctx = Context(1, MockConnection([]))
+    time.sleep(0.01)
+    assert ctx.should_stop() is True
+    assert ctx._budget_exceeded() is True
+    ctx = Context(0, MockConnection([]))
+    assert ctx._budget_exceeded() is False
+
+
 def test_should_stop_flag_only():
     """Future deadline, stop event set -> should_stop returns True."""
     event = threading.Event()
