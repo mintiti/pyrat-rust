@@ -32,7 +32,9 @@ network_grace_ms = 50
 startup_timeout_ms = 120000
 
 [elo]
-anchor = "smart-random"
+# greedy at 1000 matches alpharat's benchmark convention, so ratings stay
+# comparable across the ecosystem.
+anchor = "greedy"
 anchor_elo = 1000.0
 
 [[players]]
