@@ -1,0 +1,66 @@
+# Botpack ladder — committed spec, run by CI on merge to main (.github/workflows/ladder.yml).
+#
+# Fresh store each run, fixed seed: the seed pins mazes, cheese, and schedule,
+# so standings reflect current bot code only. Bots use their own unseeded RNG,
+# so standings can wobble slightly between runs on identical code.
+#
+# All behavior-shaping values are pinned here on purpose: the committed spec
+# must not silently change if CLI defaults drift.
+
+seed = 7
+format = "round_robin"
+target_games_per_matchup = 5
+max_failures_per_pair = 1
+max_parallel = 2
+
+[game]
+# 11x9, 13 cheese, 150 max turns.
+preset = "tiny"
+
+[timing]
+# Tight budgets are the pinned "ladder conditions": both search bots deepen
+# until should_stop() every turn and in preprocess, so they consume whatever
+# budget they're given. 9 of 15 pairings involve a search bot — the per-turn
+# budget drives total runtime.
+move_timeout_ms = 200
+preprocessing_timeout_ms = 2000
+configure_timeout_ms = 5000
+network_grace_ms = 50
+# Botpack crates live outside the root workspace, so a cold `cargo run
+# --release` builds the SDK dep tree. CI pre-builds the bots, but keep margin
+# (same lesson as eval/session/tests/cli_run_tournament.rs).
+startup_timeout_ms = 120000
+
+[elo]
+anchor = "smart-random"
+anchor_elo = 1000.0
+
+[[players]]
+id = "greedy"
+command = "cargo run --release"
+working_dir = "greedy"
+
+[[players]]
+id = "smart-random"
+command = "cargo run --release"
+working_dir = "smart-random"
+
+[[players]]
+id = "search"
+command = "cargo run --release"
+working_dir = "search"
+
+[[players]]
+id = "greedy-py"
+command = "uv run python bot.py"
+working_dir = "greedy-py"
+
+[[players]]
+id = "smart-random-py"
+command = "uv run python bot.py"
+working_dir = "smart-random-py"
+
+[[players]]
+id = "search-py"
+command = "uv run python bot.py"
+working_dir = "search-py"
