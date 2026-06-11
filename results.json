@@ -1,0 +1,34 @@
+{
+  "tournament_id": 1,
+  "status": "finished",
+  "attempts": {
+    "success": 75,
+    "failure": 0
+  },
+  "standings": [
+    {
+      "player_id": "greedy-py",
+      "elo": 1177.4949937473427
+    },
+    {
+      "player_id": "greedy",
+      "elo": 1000.0
+    },
+    {
+      "player_id": "search-py",
+      "elo": 812.4826175857507
+    },
+    {
+      "player_id": "search",
+      "elo": 779.1883334732117
+    },
+    {
+      "player_id": "smart-random-py",
+      "elo": 483.1443440139549
+    },
+    {
+      "player_id": "smart-random",
+      "elo": 391.07743039642037
+    }
+  ]
+}
