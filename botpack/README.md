@@ -33,6 +33,16 @@ Listed from simplest to most complex.
 
 Looking for a specific SDK feature? The source code is the documentation: each bot's comments explain the strategy reasoning and SDK usage.
 
+## Ladder
+
+The bots above play each other in CI on every merge to main. Elo standings live at https://mintiti.github.io/pyrat-rust/.
+
+Match conditions are pinned in [`ladder.toml`](ladder.toml), and standings are recomputed from scratch each run. To reproduce locally, from the repo root:
+
+```bash
+cargo run -p pyrat-eval -- tournament run --config botpack/ladder.toml
+```
+
 ## bot.toml
 
 Every bot has a `bot.toml` that describes how to run it:

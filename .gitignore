@@ -297,6 +297,10 @@ rust-project.json
 # GUI (Tauri + React)
 node_modules/
 gui/dist/
+
+# pyrat-eval local rating stores (default store paths)
+ratings.db
+botpack/ladder.db
 gui/src-tauri/gen/
 
 # End of https://www.toptal.com/developers/gitignore/api/rust,rust-analyzer,jetbrains+all,python

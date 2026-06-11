@@ -93,8 +93,9 @@ cargo run -p pyrat-eval -- tournament run \
   --bot smart_random=botpack/smart-random \
   --format round-robin --games 5
 
-# Committed spec: a TOML file. Flags override config values.
-cargo run -p pyrat-eval -- tournament run --config ladder.toml
+# Committed spec: a TOML file. Flags override config values. The botpack
+# ladder spec is one of these:
+cargo run -p pyrat-eval -- tournament run --config botpack/ladder.toml
 
 # Materialize the resolved spec to disk for source control:
 cargo run -p pyrat-eval -- tournament run --bot ... --save-as ladder.toml
@@ -121,6 +122,14 @@ id = "smart_random"
 command = "cargo run --release"
 working_dir = "../botpack/smart-random"
 ```
+
+## Botpack ladder
+
+The botpack bots play each other in CI on every merge to main. Standings live at:
+
+**https://mintiti.github.io/pyrat-rust/**
+
+The conditions are pinned in [`botpack/ladder.toml`](botpack/ladder.toml), and the table is recomputed from scratch each run, so it always reflects the bots as they are on `main`.
 
 ## The game
 

@@ -1,0 +1,142 @@
+name: Botpack Ladder
+
+# Recomputes the botpack Elo ladder from scratch under the conditions pinned
+# in botpack/ladder.toml, and publishes standings to gh-pages.
+#
+# Two jobs on purpose: `run` executes bot code and gets read-only permissions;
+# `deploy` only touches the rendered artifact and is gated to pushes on main.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    # Pre-merge test path (workflow_dispatch is unavailable until this file is
+    # on the default branch). Filtered to everything that can shift results.
+    paths:
+      - '.github/workflows/ladder.yml'
+      - 'tools/render_ladder.py'
+      - 'botpack/**'
+      - 'eval/**'
+      - 'sdk/**'
+      - 'server/**'
+      - 'interface/**'
+      - 'engine/**'
+      - 'Cargo.lock'
+      - 'pyproject.toml'
+      - 'uv.lock'
+  workflow_dispatch:
+
+concurrency:
+  group: ladder-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  run:
+    name: Run ladder tournament
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@v6
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@stable
+
+    - name: Cache cargo registry
+      uses: actions/cache@v5
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('Cargo.lock') }}
+
+    - name: Cache cargo index
+      uses: actions/cache@v5
+      with:
+        path: ~/.cargo/git
+        key: ${{ runner.os }}-cargo-index-${{ hashFiles('Cargo.lock') }}
+
+    - name: Cache cargo build
+      uses: actions/cache@v5
+      with:
+        path: target
+        key: ${{ runner.os }}-cargo-build-target-${{ hashFiles('Cargo.lock') }}
+
+    - name: Cache botpack builds
+      # The botpack crates are isolated workspaces, so the root target cache
+      # never covers them. Key on their lockfiles plus the SDK path-dependency
+      # tree (sdk -> bot-api/wire/protocol/interface/engine).
+      uses: actions/cache@v5
+      with:
+        path: |
+          botpack/greedy/target
+          botpack/smart-random/target
+          botpack/search/target
+        key: ${{ runner.os }}-botpack-target-${{ hashFiles('botpack/*/Cargo.lock', 'sdk/**', 'server/wire/**', 'server/protocol/**', 'interface/**', 'engine/**') }}
+        restore-keys: |
+          ${{ runner.os }}-botpack-target-
+
+    - name: Set up Python
+      uses: actions/setup-python@v6
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        enable-cache: true
+        cache-dependency-glob: |
+          pyproject.toml
+          sdk/python/pyproject.toml
+
+    - name: Sync workspace dependencies
+      run: uv sync --all-extras
+
+    - name: Build SDK Python extension
+      run: uv run --directory sdk/python maturin develop --release
+
+    - name: Build pyrat-eval
+      run: cargo build --release -p pyrat-eval
+
+    - name: Build botpack bots
+      # Pre-build so build failures surface here, not as match startup timeouts.
+      run: |
+        for bot in greedy smart-random search; do
+          (cd "botpack/$bot" && cargo build --release)
+        done
+
+    - name: Run tournament
+      run: cargo run --release -p pyrat-eval -- tournament run --config botpack/ladder.toml --results-json ladder-results.json
+
+    - name: Render standings
+      run: uv run python tools/render_ladder.py ladder-results.json site | tee -a "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload standings
+      uses: actions/upload-artifact@v4
+      with:
+        name: ladder-site
+        path: site/
+
+  deploy:
+    name: Publish to gh-pages
+    runs-on: ubuntu-latest
+    needs: run
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+
+    steps:
+    - name: Download standings
+      uses: actions/download-artifact@v4
+      with:
+        name: ladder-site
+        path: site
+
+    - name: Deploy to gh-pages
+      uses: peaceiris/actions-gh-pages@v4
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./site
