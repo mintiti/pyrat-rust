@@ -662,6 +662,12 @@ fn results_json_written_when_flag_set() {
     // both players rated.
     assert_eq!(parsed["attempts"]["success"], 1);
     assert_eq!(parsed["standings"].as_array().unwrap().len(), 2);
+    // Each row carries uncertainty and games alongside the rating.
+    for row in parsed["standings"].as_array().unwrap() {
+        assert!(row["elo"].is_number(), "elo in {row}");
+        assert!(row["elo_stderr"].is_number(), "elo_stderr in {row}");
+        assert_eq!(row["games"], 1, "games in {row}");
+    }
 }
 
 // ── Replay dir ───────────────────────────────────────────────────────
