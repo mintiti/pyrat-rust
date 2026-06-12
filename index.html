@@ -5,35 +5,184 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PyRat Botpack Ladder</title>
 <style>
-  body { font-family: system-ui, sans-serif; max-width: 40rem; margin: 3rem auto; padding: 0 1rem; color: #222; }
-  table { border-collapse: collapse; width: 100%; }
-  th, td { text-align: left; padding: 0.4rem 0.8rem; border-bottom: 1px solid #ddd; }
-  th { border-bottom: 2px solid #222; }
-  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-  footer { margin-top: 2rem; font-size: 0.85rem; color: #666; }
-  code { background: #f4f4f4; padding: 0.1rem 0.3rem; border-radius: 3px; }
+  :root {
+    --bg: #0e1014;
+    --row: #171a21;
+    --row-top: #1d2027;
+    --text: #e8e6e1;
+    --muted: #8a8f98;
+    --cheese: #f4b942;
+    --cheese-dim: #b8862c;
+    --rust: #de9a66;
+    --python: #6da9d8;
+    --whisker: rgba(232, 230, 225, 0.55);
+    --anchor-line: rgba(232, 230, 225, 0.18);
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    max-width: 46rem;
+    margin: 0 auto;
+    padding: 3.5rem 1.25rem 2.5rem;
+  }
+  header h1 {
+    font-size: 1.7rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin: 0 0 0.4rem;
+  }
+  header p {
+    color: var(--muted);
+    margin: 0 0 2.2rem;
+    font-size: 0.95rem;
+    line-height: 1.5;
+  }
+  ol.board { list-style: none; margin: 0; padding: 0; }
+  li.row {
+    display: grid;
+    grid-template-columns: 2rem minmax(11rem, auto) 1fr auto;
+    gap: 0.9rem;
+    align-items: center;
+    background: var(--row);
+    border-radius: 10px;
+    padding: 0.8rem 1.1rem;
+    margin-bottom: 0.5rem;
+  }
+  li.row.top { background: var(--row-top); box-shadow: inset 0 0 0 1px rgba(244, 185, 66, 0.25); }
+  .rank {
+    color: var(--muted);
+    font-size: 0.95rem;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+  }
+  .row.top .rank { color: var(--cheese); font-weight: 700; }
+  .who { display: flex; align-items: baseline; gap: 0.5rem; min-width: 0; }
+  .name { font-weight: 600; font-size: 1.02rem; }
+  .chip {
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    padding: 0.1rem 0.4rem;
+    border-radius: 4px;
+    color: var(--bg);
+  }
+  .chip.rs { background: var(--rust); }
+  .chip.py { background: var(--python); }
+  .games { color: var(--muted); font-size: 0.78rem; white-space: nowrap; }
+  .track {
+    position: relative;
+    height: 1.5rem;
+    border-radius: 5px;
+    background: rgba(255, 255, 255, 0.04);
+    overflow: hidden;
+  }
+  .anchorline {
+    position: absolute;
+    top: 0; bottom: 0;
+    width: 0;
+    border-left: 1px dashed var(--anchor-line);
+  }
+  .bar {
+    position: absolute;
+    top: 0.25rem; bottom: 0.25rem;
+    left: 0;
+    border-radius: 0 3px 3px 0;
+    background: linear-gradient(90deg, var(--cheese-dim), var(--cheese));
+    opacity: 0.9;
+  }
+  .ci {
+    position: absolute;
+    top: 50%;
+    height: 0;
+    border-top: 2px solid var(--whisker);
+    transform: translateY(-1px);
+  }
+  .ci::before, .ci::after {
+    content: "";
+    position: absolute;
+    top: -4px;
+    height: 8px;
+    border-left: 2px solid var(--whisker);
+  }
+  .ci::before { left: 0; }
+  .ci::after { right: 0; }
+  .elo {
+    font-variant-numeric: tabular-nums;
+    font-weight: 650;
+    font-size: 1.02rem;
+    text-align: right;
+    white-space: nowrap;
+  }
+  .elo .pm { color: var(--muted); font-weight: 400; font-size: 0.82rem; }
+  footer {
+    margin-top: 2.2rem;
+    color: var(--muted);
+    font-size: 0.82rem;
+    line-height: 1.7;
+  }
+  footer a { color: var(--cheese); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+  @media (max-width: 540px) {
+    li.row { grid-template-columns: 1.4rem minmax(0, 1fr) auto; }
+    .track { display: none; }
+  }
 </style>
 </head>
 <body>
-<h1>PyRat Botpack Ladder</h1>
-<p>Elo standings of the botpack bots, recomputed from scratch on every merge
-to <code>main</code> under the conditions pinned in
-<code>botpack/ladder.toml</code>.</p>
-<table>
-<thead><tr><th class="num">#</th><th>Bot</th><th class="num">Elo</th></tr></thead>
-<tbody>
-<tr><td class="num">1</td><td>greedy-py</td><td class="num">1177</td></tr>
-<tr><td class="num">2</td><td>greedy</td><td class="num">1000</td></tr>
-<tr><td class="num">3</td><td>search-py</td><td class="num">812</td></tr>
-<tr><td class="num">4</td><td>search</td><td class="num">779</td></tr>
-<tr><td class="num">5</td><td>smart-random-py</td><td class="num">483</td></tr>
-<tr><td class="num">6</td><td>smart-random</td><td class="num">391</td></tr>
-</tbody>
-</table>
+<header>
+  <h1>&#129472; PyRat Botpack Ladder</h1>
+  <p>The <a href="https://github.com/mintiti/pyrat-rust/tree/main/botpack" style="color:var(--cheese);text-decoration:none">botpack bots</a>,
+  rated against each other under fixed conditions. Recomputed from scratch on
+  every merge to main.</p>
+</header>
+<main>
+<ol class="board">
+<li class="row top">
+  <span class="rank">1</span>
+  <div class="who"><span class="name">greedy</span><span class="chip py">py</span></div>
+  <div class="track"><div class="anchorline" style="left:83.1%"></div><div class="bar" style="width:84.7%"></div><div class="ci" style="left:74.7%;width:19.9%"></div></div>
+  <div class="elo">1020 <span class="pm">&plusmn;123</span> <span class="games">&middot; 75 games</span></div>
+</li>
+<li class="row">
+  <span class="rank">2</span>
+  <div class="who"><span class="name">greedy</span><span class="chip rs">rs</span></div>
+  <div class="track"><div class="anchorline" style="left:83.1%"></div><div class="bar" style="width:83.1%"></div><div class="ci" style="left:83.1%;width:0.0%"></div></div>
+  <div class="elo">1000 <span class="pm">&plusmn;0</span> <span class="games">&middot; 75 games</span></div>
+</li>
+<li class="row">
+  <span class="rank">3</span>
+  <div class="who"><span class="name">search</span><span class="chip rs">rs</span></div>
+  <div class="track"><div class="anchorline" style="left:83.1%"></div><div class="bar" style="width:61.9%"></div><div class="ci" style="left:52.8%;width:18.2%"></div></div>
+  <div class="elo">739 <span class="pm">&plusmn;112</span> <span class="games">&middot; 75 games</span></div>
+</li>
+<li class="row">
+  <span class="rank">4</span>
+  <div class="who"><span class="name">search</span><span class="chip py">py</span></div>
+  <div class="track"><div class="anchorline" style="left:83.1%"></div><div class="bar" style="width:50.2%"></div><div class="ci" style="left:40.7%;width:18.9%"></div></div>
+  <div class="elo">595 <span class="pm">&plusmn;117</span> <span class="games">&middot; 75 games</span></div>
+</li>
+<li class="row">
+  <span class="rank">5</span>
+  <div class="who"><span class="name">smart-random</span><span class="chip py">py</span></div>
+  <div class="track"><div class="anchorline" style="left:83.1%"></div><div class="bar" style="width:23.5%"></div><div class="ci" style="left:12.7%;width:21.6%"></div></div>
+  <div class="elo">266 <span class="pm">&plusmn;133</span> <span class="games">&middot; 75 games</span></div>
+</li>
+<li class="row">
+  <span class="rank">6</span>
+  <div class="who"><span class="name">smart-random</span><span class="chip rs">rs</span></div>
+  <div class="track"><div class="anchorline" style="left:83.1%"></div><div class="bar" style="width:17.0%"></div><div class="ci" style="left:5.4%;width:23.4%"></div></div>
+  <div class="elo">187 <span class="pm">&plusmn;144</span> <span class="games">&middot; 75 games</span></div>
+</li>
+</ol>
+</main>
 <footer>
-<p>Updated 2026-06-11 15:47 UTC &middot; commit <code>a7e76a03c</code> &middot;
-75 games played (0 failed attempts) &middot;
-<a href="results.json">results.json</a></p>
+<p>Updated 2026-06-12 11:20 UTC &middot; commit <a href="https://github.com/mintiti/pyrat-rust/commit/ccb8b57f324189850dd28997b62a7707f3be0d7a">ccb8b57f3</a> &middot;
+225 games (0 failed attempts) &middot; <a href="results.json">results.json</a></p>
+<p>&plusmn; is a ~95% interval (2&times;stderr), conditional on the anchor:
+greedy is pinned at 1000, matching alpharat's scale. The dashed line marks it.
+Conditions live in <a href="https://github.com/mintiti/pyrat-rust/blob/main/botpack/ladder.toml">ladder.toml</a>.</p>
 </footer>
 </body>
 </html>

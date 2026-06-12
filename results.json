@@ -2,33 +2,45 @@
   "tournament_id": 1,
   "status": "finished",
   "attempts": {
-    "success": 75,
+    "success": 225,
     "failure": 0
   },
   "standings": [
     {
       "player_id": "greedy-py",
-      "elo": 1177.4949937473427
+      "elo": 1020.208885732372,
+      "elo_stderr": 62.523489522915774,
+      "games": 75
     },
     {
       "player_id": "greedy",
-      "elo": 1000.0
-    },
-    {
-      "player_id": "search-py",
-      "elo": 812.4826175857507
+      "elo": 1000.0,
+      "elo_stderr": 0.00017371779276124588,
+      "games": 75
     },
     {
       "player_id": "search",
-      "elo": 779.1883334732117
+      "elo": 739.1919491023782,
+      "elo_stderr": 57.21198779630271,
+      "games": 75
+    },
+    {
+      "player_id": "search-py",
+      "elo": 595.248044093513,
+      "elo_stderr": 59.44243567674027,
+      "games": 75
     },
     {
       "player_id": "smart-random-py",
-      "elo": 483.1443440139549
+      "elo": 265.889318520733,
+      "elo_stderr": 67.81413906437812,
+      "games": 75
     },
     {
       "player_id": "smart-random",
-      "elo": 391.07743039642037
+      "elo": 186.67637079281803,
+      "elo_stderr": 73.38997365451836,
+      "games": 75
     }
   ]
 }
