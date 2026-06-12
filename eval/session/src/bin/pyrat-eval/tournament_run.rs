@@ -11,6 +11,7 @@
 //!   re-derived from the user's flags/config and *verified* against the
 //!   store (the store carries results and identity, not bot commands).
 
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -23,7 +24,7 @@ use pyrat_eval::{
     SessionError, SessionMode, TournamentMismatch, TournamentParams, TournamentSpec,
     TournamentState,
 };
-use pyrat_eval_store::{EloOptions, EvalStore, TournamentId};
+use pyrat_eval_store::{compute_elo_with_uncertainty, EloOptions, EvalStore, TournamentId};
 use pyrat_host::wire::TimingMode;
 use pyrat_orchestrator::{DirectoryWriter, MatchSink, ReplaySink, SinkRole, Timing};
 use serde::Serialize;
@@ -169,7 +170,11 @@ pub async fn run_tournament_main(
         .await
         .map_err(|e| with_resume_hint(&e.to_string(), &resolved.store_path, tournament_id))?;
 
-    render_standings(&final_state, resolved.results_json.as_deref())
+    render_standings(
+        &final_state,
+        resolved.results_json.as_deref(),
+        &build_elo_options(&resolved),
+    )
 }
 
 /// Append resume guidance to a session-phase error. By this point the
@@ -292,7 +297,7 @@ struct ResultsJson<'a> {
     tournament_id: i64,
     status: &'a str,
     attempts: AttemptsCount,
-    standings: Vec<StandingsRow<'a>>,
+    standings: &'a [StandingsEntry],
 }
 
 #[derive(Serialize)]
@@ -301,20 +306,60 @@ pub(crate) struct AttemptsCount {
     pub(crate) failure: u64,
 }
 
+/// One final-standings row: Elo with its standard error (conditional on
+/// the anchor, whose own stderr is near-zero) and games played.
 #[derive(Serialize)]
-struct StandingsRow<'a> {
-    player_id: &'a str,
+struct StandingsEntry {
+    player_id: String,
     elo: f64,
+    elo_stderr: f64,
+    games: u32,
+}
+
+/// Recompute Elo from history with uncertainty, once, at render time.
+/// The session's live standings deliberately skip the covariance work
+/// (they refresh on every MatchFinished); the final table pays for it
+/// a single time here. Same history, same options — identical ratings.
+fn compute_final_standings(state: &TournamentState, options: &EloOptions) -> Vec<StandingsEntry> {
+    let h2h = state.head_to_head();
+    let Ok((result, uncertainty)) = compute_elo_with_uncertainty(&h2h, options) else {
+        // Mirrors the session's recompute: no records or a disconnected
+        // player graph means no standings (the caller prints the hint).
+        return Vec::new();
+    };
+    let mut games: HashMap<&str, u32> = HashMap::new();
+    for r in &h2h {
+        *games.entry(r.player_a.as_str()).or_default() += r.total();
+        *games.entry(r.player_b.as_str()).or_default() += r.total();
+    }
+    let mut entries: Vec<StandingsEntry> = result
+        .ratings
+        .iter()
+        .map(|r| StandingsEntry {
+            player_id: r.player_id.clone(),
+            elo: r.elo,
+            elo_stderr: uncertainty.stderr(&r.player_id).unwrap_or(0.0),
+            games: games.get(r.player_id.as_str()).copied().unwrap_or(0),
+        })
+        .collect();
+    entries.sort_by(|a, b| {
+        b.elo
+            .partial_cmp(&a.elo)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    entries
 }
 
 fn render_standings(
     state: &TournamentState,
     results_json_path: Option<&Path>,
+    elo_options: &EloOptions,
 ) -> Result<AttemptsCount, Box<dyn std::error::Error>> {
     let counts = count_attempts(state);
-    print_table(state, &counts);
+    let standings = compute_final_standings(state, elo_options);
+    print_table(state, &counts, &standings);
     if let Some(path) = results_json_path {
-        write_results_json(state, &counts, path)?;
+        write_results_json(state, &counts, &standings, path)?;
     }
     Ok(counts)
 }
@@ -333,7 +378,7 @@ fn count_attempts(state: &TournamentState) -> AttemptsCount {
     AttemptsCount { success, failure }
 }
 
-fn print_table(state: &TournamentState, counts: &AttemptsCount) {
+fn print_table(state: &TournamentState, counts: &AttemptsCount, standings: &[StandingsEntry]) {
     let TournamentId(id) = state.tournament_id;
     println!("Tournament {id} — finished");
     println!(
@@ -341,7 +386,6 @@ fn print_table(state: &TournamentState, counts: &AttemptsCount) {
         counts.success, counts.failure
     );
     println!();
-    let mut standings = state.standings.clone();
     if standings.is_empty() {
         // Names the cause so the user knows where to look. The common case
         // is `success == 0 && failure > 0` (every matchup hit the retry
@@ -353,24 +397,21 @@ fn print_table(state: &TournamentState, counts: &AttemptsCount) {
         );
         return;
     }
-    standings.sort_by(|a, b| {
-        b.elo
-            .partial_cmp(&a.elo)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
     let max_id = standings
         .iter()
         .map(|r| r.player_id.len())
         .max()
         .unwrap_or(9);
     let id_width = max_id.max("player_id".len());
-    println!("  rank  {:<id_width$}      elo", "player_id");
-    for (i, rating) in standings.iter().enumerate() {
+    println!("  rank  {:<id_width$}      elo    ±err  games", "player_id");
+    for (i, r) in standings.iter().enumerate() {
         println!(
-            "  {:>4}  {:<id_width$}  {:>8.1}",
+            "  {:>4}  {:<id_width$}  {:>8.1}  {:>6.1}  {:>5}",
             i + 1,
-            rating.player_id,
-            rating.elo
+            r.player_id,
+            r.elo,
+            r.elo_stderr,
+            r.games
         );
     }
 }
@@ -378,22 +419,10 @@ fn print_table(state: &TournamentState, counts: &AttemptsCount) {
 fn write_results_json(
     state: &TournamentState,
     counts: &AttemptsCount,
+    standings: &[StandingsEntry],
     path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let TournamentId(id) = state.tournament_id;
-    let mut standings = state.standings.clone();
-    standings.sort_by(|a, b| {
-        b.elo
-            .partial_cmp(&a.elo)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    let rows: Vec<_> = standings
-        .iter()
-        .map(|r| StandingsRow {
-            player_id: &r.player_id,
-            elo: r.elo,
-        })
-        .collect();
     // "finished" with zero successes means every matchup exhausted its
     // retry budget — a script consuming this JSON must be able to tell
     // that apart from a real result set.
@@ -409,7 +438,7 @@ fn write_results_json(
             success: counts.success,
             failure: counts.failure,
         },
-        standings: rows,
+        standings,
     };
     if let Some(parent) = path.parent() {
         if !parent.as_os_str().is_empty() {
@@ -561,28 +590,39 @@ mod tests {
 
     #[test]
     fn results_json_includes_tournament_id_and_standings_descending() {
-        use pyrat_eval::TournamentState;
-        use pyrat_eval_store::EloRating;
+        use pyrat_eval::{MatchupKey, MatchupOutcome, TournamentState};
         let tmp = tempfile::tempdir().expect("tempdir");
         let path = tmp.path().join("results.json");
 
         let mut state = TournamentState::empty(TournamentId(11));
-        state.standings = vec![
-            EloRating {
-                player_id: "loser".into(),
-                elo: 800.0,
+        // Canonical key order is lexicographic: player1 = "loser". Three
+        // winner wins, one draw, one failure (skipped by Elo and games).
+        let key = MatchupKey::from_pair("winner", "loser", "gc", 0);
+        let success = |s1: f64, s2: f64| pyrat_eval::MatchupAttempt {
+            attempt_index: 0,
+            outcome: MatchupOutcome::Success {
+                player1_score: s1,
+                player2_score: s2,
             },
-            EloRating {
-                player_id: "winner".into(),
-                elo: 1200.0,
-            },
-        ];
-        let counts = AttemptsCount {
-            success: 4,
-            failure: 1,
         };
+        state.history.insert(
+            key,
+            vec![
+                success(0.0, 1.0),
+                success(0.0, 1.0),
+                success(0.0, 1.0),
+                success(0.5, 0.5),
+                pyrat_eval::MatchupAttempt {
+                    attempt_index: 4,
+                    outcome: MatchupOutcome::Failure,
+                },
+            ],
+        );
+        let counts = count_attempts(&state);
+        let options = EloOptions::new("loser".to_string()).anchor_elo(1000.0);
+        let standings = compute_final_standings(&state, &options);
 
-        write_results_json(&state, &counts, &path).expect("write");
+        write_results_json(&state, &counts, &standings, &path).expect("write");
         let raw = std::fs::read_to_string(&path).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
 
@@ -593,6 +633,18 @@ mod tests {
         // Standings sorted descending by elo.
         assert_eq!(parsed["standings"][0]["player_id"], "winner");
         assert_eq!(parsed["standings"][1]["player_id"], "loser");
+        // Anchor pins at 1000; the winner sits above it.
+        assert_eq!(parsed["standings"][1]["elo"], 1000.0);
+        assert!(parsed["standings"][0]["elo"].as_f64().unwrap() > 1000.0);
+        // Uncertainty: the anchor's stderr is near-zero (it's the fixed
+        // reference), the winner's is meaningfully larger. Games count
+        // successes only.
+        let anchor_err = parsed["standings"][1]["elo_stderr"].as_f64().unwrap();
+        let winner_err = parsed["standings"][0]["elo_stderr"].as_f64().unwrap();
+        assert!(anchor_err < 1.0, "anchor stderr ~0, got {anchor_err}");
+        assert!(winner_err > anchor_err);
+        assert_eq!(parsed["standings"][0]["games"], 4);
+        assert_eq!(parsed["standings"][1]["games"], 4);
     }
 
     #[test]
@@ -605,7 +657,10 @@ mod tests {
             success: 0,
             failure: 0,
         };
-        write_results_json(&state, &counts, &path).expect("write");
+        let options = EloOptions::new("anyone".to_string()).anchor_elo(1000.0);
+        let standings = compute_final_standings(&state, &options);
+        assert!(standings.is_empty());
+        write_results_json(&state, &counts, &standings, &path).expect("write");
         let parsed: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(parsed["standings"].as_array().unwrap().len(), 0);
