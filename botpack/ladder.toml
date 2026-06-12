@@ -9,7 +9,11 @@
 
 seed = 7
 format = "round_robin"
-target_games_per_matchup = 5
+# 15 games/matchup: stderr shrinks ~1/sqrt(G); 5 left ~±200-360 (95%) per
+# bot, wide enough that Bradley-Terry stretched the bottom pair by 300+
+# Elo off a 5-game direct sample (a 100-game duel showed them dead even).
+# Runtime is search-game-bound: worst case ~42 min, inside the CI timeout.
+target_games_per_matchup = 15
 max_failures_per_pair = 1
 max_parallel = 2
 
