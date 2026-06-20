@@ -164,12 +164,45 @@ CREATE INDEX idx_attempts_tournament ON match_attempts(tournament_id);
 CREATE INDEX idx_attempts_matchup    ON match_attempts(tournament_id, player1_id, player2_id);
 ";
 
-const MIGRATIONS: &[(u32, &str)] = &[(1, MIGRATION_1), (2, MIGRATION_2), (3, MIGRATION_3)];
+// Migration 4 adds an optional display name to tournaments. Nullable, so a
+// plain ADD COLUMN works (no rebuild): rows created without one — e.g. by the
+// CLI, which has no name flag — keep NULL. The GUI writes a human name
+// ("ckpt-1200") so anything reading the store can tell tournaments apart.
+const MIGRATION_4: &str = "
+ALTER TABLE tournaments ADD COLUMN name TEXT;
+";
+
+// Migration 5 adds the seat-orientation marker to match_attempts. Records
+// which player was Rat (slot 0); scores stay canonical, so this is purely
+// informational (auditing, replay-correct rendering). Nullable-free ADD
+// COLUMN with `DEFAULT 0` (= lex-min was Rat = `SeatOrientation::Canonical`),
+// which is exactly how every pre-migration row was played — no rebuild, no
+// pre-flight check.
+const MIGRATION_5: &str = "
+ALTER TABLE match_attempts ADD COLUMN orientation INTEGER NOT NULL DEFAULT 0;
+";
+
+const MIGRATIONS: &[(u32, &str)] = &[
+    (1, MIGRATION_1),
+    (2, MIGRATION_2),
+    (3, MIGRATION_3),
+    (4, MIGRATION_4),
+    (5, MIGRATION_5),
+];
 
 pub fn initialize(conn: &mut Connection) -> Result<(), EvalError> {
     // PRAGMAs are per-connection. `foreign_keys` cannot be set inside a
     // transaction, so apply both before the migration loop opens any.
-    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
+    //
+    // `busy_timeout` makes a connection wait-and-retry (rather than fail with
+    // SQLITE_BUSY) when another connection holds the write lock or is
+    // checkpointing. WAL allows concurrent readers, but a reader can still
+    // hit a momentary lock during a checkpoint — exactly the read-while-
+    // writing the GUI relies on (list / standings while the runner writes).
+    // 5s is generous for sub-second match writes and helps the CLI too.
+    conn.execute_batch(
+        "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
+    )?;
 
     let current: u32 = conn.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     for &(version, sql) in MIGRATIONS {

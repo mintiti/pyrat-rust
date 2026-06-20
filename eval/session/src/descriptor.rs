@@ -7,7 +7,7 @@
 
 use std::time::SystemTime;
 
-use pyrat_eval_store::TournamentId;
+use pyrat_eval_store::{SeatOrientation, TournamentId};
 use pyrat_orchestrator::{Descriptor, MatchId};
 use serde::{Deserialize, Serialize};
 
@@ -27,6 +27,12 @@ pub struct EvalMatchDescriptor {
     pub seed: u64,
     pub repetition_index: u32,
     pub attempt_index: u32,
+    /// Which player occupied the engine's Rat seat (slot 0). `player1_id`/
+    /// `player2_id` stay canonical (lex-min/lex-max) regardless; this records
+    /// the actual seating so paired games are auditable and score
+    /// canonicalization has a single source of truth. `Canonical` = lex-min
+    /// was Rat (the only orientation under `SeatPolicy::Legacy`).
+    pub orientation: SeatOrientation,
     pub planned_at: SystemTime,
 }
 
@@ -54,6 +60,7 @@ mod tests {
             seed: 0x0123_4567_89AB_CDEF,
             repetition_index: 1,
             attempt_index: 2,
+            orientation: SeatOrientation::Canonical,
             planned_at: SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000),
         }
     }

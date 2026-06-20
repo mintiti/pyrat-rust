@@ -36,9 +36,12 @@ pub use mapping::{
 };
 pub use observation::Observation;
 pub use plan::{
-    gauntlet_slot_order, matchup_seed, GauntletPlanner, GauntletPlannerConfig, Planner,
-    ResolvedPlayer, RoundRobinPlanner, RoundRobinPlannerConfig, TournamentParams,
+    gauntlet_slot_order, matchup_seed, split_gauntlet_players, GauntletPlanner,
+    GauntletPlannerConfig, Planner, PlayerNotInList, ResolvedPlayer, RoundRobinPlanner,
+    RoundRobinPlannerConfig, SeatPolicy, TournamentParams,
 };
+// Re-export the store's seat marker so consumers (CLI, GUI) name one type.
+pub use pyrat_eval_store::SeatOrientation;
 pub use session::{
     CreatedTournament, EvalSession, SessionConfig, SessionError, SessionEvent, SessionMode,
     TournamentMismatch, TournamentSpec,

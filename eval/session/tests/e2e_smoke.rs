@@ -134,10 +134,12 @@ async fn end_to_end_round_robin_with_replay_sink() {
     let tournament_seed = 0xBEEF;
 
     let spec = TournamentSpec {
+        name: None,
         format: "round_robin".into(),
         target_games_per_matchup: Some(target_per_pair),
         params_json: TournamentParams {
             max_failures_per_pair: 1,
+            seat_policy: pyrat_eval::SeatPolicy::Legacy,
         }
         .to_json(),
         game_config: game_config.clone(),
@@ -159,6 +161,7 @@ async fn end_to_end_round_robin_with_replay_sink() {
         tournament_id: created.tournament_id,
         target_per_pair,
         max_failures_per_pair: 1,
+        seat_policy: pyrat_eval::SeatPolicy::Legacy,
         tournament_seed,
     });
 

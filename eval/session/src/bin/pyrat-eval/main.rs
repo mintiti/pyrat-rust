@@ -87,9 +87,17 @@ pub(crate) struct RunArgs {
     #[arg(long)]
     pub(crate) format: Option<String>,
 
-    /// Target games per matchup (round-robin) or per opponent (gauntlet). Default: 5.
+    /// Legacy single-seat games per matchup (round-robin) or per opponent
+    /// (gauntlet). The lex-min bot is always Rat. Mutually exclusive with
+    /// `--mazes`. Prefer `--mazes` unless reproducing an old single-seat run.
     #[arg(long)]
     pub(crate) games: Option<u32>,
+
+    /// Paired (seat-debiased) mazes per matchup: each maze is played twice
+    /// with flipped seats, so 1 maze = 2 games. Mutually exclusive with
+    /// `--games`. Default when neither is set: 8 mazes (16 games).
+    #[arg(long, conflicts_with = "games")]
+    pub(crate) mazes: Option<u32>,
 
     /// Max consecutive failures per matchup before the planner stops retrying. Default: 1.
     #[arg(long)]
@@ -193,6 +201,7 @@ pub(crate) fn empty_run_args() -> RunArgs {
         bots: vec![],
         format: None,
         games: None,
+        mazes: None,
         max_failures: None,
         max_parallel: None,
         seed: None,

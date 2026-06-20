@@ -95,9 +95,64 @@ pub struct ResultFilter {
 )]
 pub struct TournamentId(pub i64);
 
+/// Which engine seat (Rat = slot 0) the lex-min player occupied in a game.
+///
+/// An informational marker stored alongside the canonical row. Scores and
+/// `player1_id`/`player2_id` are always written in canonical (lex-min,
+/// lex-max) order, so every read-side path (Elo, head-to-head, resume) is
+/// seat-agnostic. `orientation` only records *who was Rat*, for auditing and
+/// replay-correct rendering. Not part of the matchup UNIQUE constraint — two
+/// seatings of the same maze are distinguished by their `repetition_index`
+/// (the chess-paired `2k` / `2k+1` slots), not by this column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum SeatOrientation {
+    /// Lex-min player was Rat (slot 0). The historical default: every
+    /// pre-`MIGRATION_5` row was played this way, so it maps to DB value 0.
+    #[default]
+    Canonical,
+    /// Lex-max player was Rat (slot 0): the flipped seating of a chess pair.
+    Flipped,
+}
+
+impl SeatOrientation {
+    /// DB integer encoding. `0 = Canonical` is also the `MIGRATION_5` column
+    /// default, so existing rows decode correctly.
+    pub fn to_db(self) -> i64 {
+        match self {
+            SeatOrientation::Canonical => 0,
+            SeatOrientation::Flipped => 1,
+        }
+    }
+
+    /// Decode a DB integer. `None` for any value the schema cannot produce —
+    /// the single conversion site (`read_attempt_row`) turns this into a
+    /// typed read error rather than a silent mis-seat.
+    pub fn from_db(v: i64) -> Option<Self> {
+        match v {
+            0 => Some(SeatOrientation::Canonical),
+            1 => Some(SeatOrientation::Flipped),
+            _ => None,
+        }
+    }
+
+    /// Map seat-order values (slot 0, slot 1) to canonical order (lex-min,
+    /// lex-max). The single source of truth for the seat→canonical swap,
+    /// shared by every write/emit site so they cannot drift. Generic so the
+    /// same helper serves `f64` store scores and `f32` live-stream scores.
+    pub fn canonicalize<T>(self, slot0: T, slot1: T) -> (T, T) {
+        match self {
+            SeatOrientation::Canonical => (slot0, slot1),
+            SeatOrientation::Flipped => (slot1, slot0),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TournamentRecord {
     pub id: TournamentId,
+    /// Optional human-readable name (e.g. "ckpt-1200"). NULL for rows created
+    /// without one, such as CLI tournaments — they identify by id + created_at.
+    pub name: Option<String>,
     pub format: String,
     pub target_games_per_matchup: Option<u32>,
     /// Opaque planner-defined config. The store does not validate this field.
@@ -115,6 +170,9 @@ pub struct TournamentRecord {
 
 #[derive(Debug, Clone)]
 pub struct NewTournament {
+    /// Optional human-readable name. `None` leaves the column NULL (CLI path);
+    /// the GUI supplies one so stored tournaments are distinguishable.
+    pub name: Option<String>,
     pub format: String,
     pub target_games_per_matchup: Option<u32>,
     pub params_json: String,
@@ -162,6 +220,11 @@ impl AttemptStatus {
 }
 
 /// Common identifying fields shared by both attempt variants.
+///
+/// `seed` and `orientation` are carried here but are NOT part of the matchup
+/// UNIQUE constraint — they are forensic/informational fields (the seed is
+/// functionally derived; the orientation records who was Rat) that ride
+/// alongside the identity tuple.
 #[derive(Debug, Clone)]
 pub struct AttemptKey {
     pub tournament_id: TournamentId,
@@ -172,6 +235,9 @@ pub struct AttemptKey {
     pub repetition_index: u32,
     /// Per-matchup-key retry counter chosen by the session (next free integer).
     pub attempt_index: u32,
+    /// Which player was Rat (slot 0) in this game. Informational: scores are
+    /// stored canonical regardless. Defaults to `Canonical` for legacy rows.
+    pub orientation: SeatOrientation,
 }
 
 /// Input for `record_attempt`. The `outcome` variant is the type-level

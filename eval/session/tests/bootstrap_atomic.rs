@@ -37,6 +37,7 @@ async fn tournament_row_not_orphaned_on_mid_bootstrap_failure() {
     let players = vec![duplicate.clone(), duplicate];
 
     let spec = TournamentSpec {
+        name: None,
         format: "round_robin".into(),
         target_games_per_matchup: Some(1),
         params_json: "{}".into(),

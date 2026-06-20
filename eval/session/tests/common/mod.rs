@@ -112,18 +112,21 @@ pub fn round_robin(
         tournament_id,
         target_per_pair,
         max_failures_per_pair: 3,
+        seat_policy: pyrat_eval::SeatPolicy::Legacy,
         tournament_seed: 0xC0FFEE,
     })
 }
 
 pub fn round_robin_spec() -> TournamentSpec {
     TournamentSpec {
+        name: None,
         format: "round_robin".into(),
         target_games_per_matchup: Some(1),
         // Matches `round_robin_planner`'s `max_failures_per_pair: 3`
         // so the validator's params check passes.
         params_json: TournamentParams {
             max_failures_per_pair: 3,
+            seat_policy: pyrat_eval::SeatPolicy::Legacy,
         }
         .to_json(),
         game_config: small_game_config(),

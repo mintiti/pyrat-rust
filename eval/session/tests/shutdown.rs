@@ -30,12 +30,14 @@ async fn shutdown_returns_promptly_with_pending_matchups() {
     // `start` rejects the planner via TournamentMismatch.
     const TARGET: u32 = 50;
     let spec = TournamentSpec {
+        name: None,
         format: "round_robin".into(),
         target_games_per_matchup: Some(TARGET),
         // Matches the helper's `round_robin` planner
         // (`max_failures_per_pair: 3`) so resume validation passes.
         params_json: TournamentParams {
             max_failures_per_pair: 3,
+            seat_policy: pyrat_eval::SeatPolicy::Legacy,
         }
         .to_json(),
         game_config: small_game_config(),

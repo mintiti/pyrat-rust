@@ -19,9 +19,9 @@ use std::sync::Arc;
 use parking_lot::Mutex;
 use pyrat_eval::MatchupOutcome;
 use pyrat_eval::{
-    gauntlet_slot_order, EvalMatchDescriptor, EvalSession, GauntletPlanner, GauntletPlannerConfig,
-    Planner, ResolvedPlayer, RoundRobinPlanner, RoundRobinPlannerConfig, SessionConfig,
-    SessionError, SessionMode, TournamentMismatch, TournamentParams, TournamentSpec,
+    gauntlet_slot_order, split_gauntlet_players, EvalMatchDescriptor, EvalSession, GauntletPlanner,
+    GauntletPlannerConfig, Planner, ResolvedPlayer, RoundRobinPlanner, RoundRobinPlannerConfig,
+    SessionConfig, SessionError, SessionMode, TournamentMismatch, TournamentParams, TournamentSpec,
     TournamentState,
 };
 use pyrat_eval_store::{compute_elo_with_uncertainty, EloOptions, EvalStore, TournamentId};
@@ -64,18 +64,43 @@ pub async fn run_tournament_main(
     // we validate the game config *before* bootstrap so an invalid
     // config (e.g. too much cheese for the board) doesn't leave a
     // dangling tournament row behind.
-    let (tournament_id, game_config_id, tournament_seed) = match resolved.mode {
-        LaunchMode::Resume { id, seed_assert } => {
-            let (id, gc_id, seed) = realize_resume(&store, id, seed_assert, &resolved.store_path)?;
-            validate_game_config_with_seed(&game_config, seed)?;
-            (id, gc_id, seed)
-        },
-        LaunchMode::New { seed } => {
-            let seed = seed.value();
-            validate_game_config_with_seed(&game_config, seed)?;
-            bootstrap_new(&store, &resolved, &game_config, seed).await?
-        },
-    };
+    // On resume the stored schedule (slot count + seat policy) wins — the
+    // planner is built from it, not from the resolved defaults, so a no-flag
+    // resume just works even under the new Paired default. On a new run the
+    // resolved size is what bootstrap creates with.
+    let (tournament_id, game_config_id, tournament_seed, planner_target, planner_seat_policy) =
+        match resolved.mode {
+            LaunchMode::Resume { id, seed_assert } => {
+                let r = realize_resume(
+                    &store,
+                    id,
+                    seed_assert,
+                    resolved.requested_size,
+                    &resolved.store_path,
+                )?;
+                validate_game_config_with_seed(&game_config, r.seed)?;
+                (
+                    r.id,
+                    r.game_config_id,
+                    r.seed,
+                    r.target_games_per_matchup,
+                    r.seat_policy,
+                )
+            },
+            LaunchMode::New { seed } => {
+                let seed = seed.value();
+                validate_game_config_with_seed(&game_config, seed)?;
+                let (id, gc_id, seed) =
+                    bootstrap_new(&store, &resolved, &game_config, seed).await?;
+                (
+                    id,
+                    gc_id,
+                    seed,
+                    resolved.target_games_per_matchup,
+                    resolved.seat_policy,
+                )
+            },
+        };
 
     // Operational guidance, not tracing: the id is what --resume needs
     // after an abort, so it must survive RUST_LOG filtering. stderr
@@ -116,8 +141,9 @@ pub async fn run_tournament_main(
             game_config_id,
             timing: per_match_timing,
             tournament_id,
-            target_per_pair: resolved.target_games_per_matchup,
+            target_per_pair: planner_target,
             max_failures_per_pair: resolved.max_failures_per_pair,
+            seat_policy: planner_seat_policy,
             tournament_seed,
         })),
         FormatChoice::Gauntlet {
@@ -133,8 +159,9 @@ pub async fn run_tournament_main(
                 game_config_id,
                 timing: per_match_timing,
                 tournament_id,
-                target_each: resolved.target_games_per_matchup,
+                target_each: planner_target,
                 max_failures_per_pair: resolved.max_failures_per_pair,
+                seat_policy: planner_seat_policy,
                 tournament_seed,
             }))
         },
@@ -243,8 +270,11 @@ async fn bootstrap_new(
     };
     let params = TournamentParams {
         max_failures_per_pair: resolved.max_failures_per_pair,
+        seat_policy: resolved.seat_policy,
     };
     let spec = TournamentSpec {
+        // The CLI has no name flag; tournaments identify by id + created_at.
+        name: None,
         format: format_str,
         target_games_per_matchup: Some(resolved.target_games_per_matchup),
         params_json: params.to_json(),
@@ -255,16 +285,30 @@ async fn bootstrap_new(
     Ok((created.tournament_id, created.game_config_id, seed))
 }
 
-/// On resume, the store carries the seed and game_config_id. An explicit
-/// seed is only an assertion: validate it against the stored value
-/// before the bots launch so users get a clear error rather than a
-/// cryptic `TournamentMismatch` from the planner guard.
+/// What a resume realizes from the store: the identity to validate against
+/// plus the *stored* schedule (slot count + seat policy) the planner must be
+/// rebuilt from, so a no-flag resume reproduces the original tournament even
+/// when the current default differs.
+struct ResumeInfo {
+    id: TournamentId,
+    game_config_id: String,
+    seed: u64,
+    target_games_per_matchup: u32,
+    seat_policy: pyrat_eval::SeatPolicy,
+}
+
+/// On resume, the store carries the seed, game_config_id, and schedule. An
+/// explicit seed or size is only an *assertion*: validate it against the
+/// stored value before the bots launch so users get a clear error rather
+/// than a cryptic `TournamentMismatch` from the planner guard. The stored
+/// schedule is what the planner is actually built from.
 fn realize_resume(
     store: &Arc<Mutex<EvalStore>>,
     id: TournamentId,
     seed_assert: Option<u64>,
+    requested_size: Option<crate::tournament_resolve::SizeChoice>,
     store_path: &Path,
-) -> Result<(TournamentId, String, u64), Box<dyn std::error::Error>> {
+) -> Result<ResumeInfo, Box<dyn std::error::Error>> {
     let stored = {
         let store = store.lock();
         store.get_tournament(id)?.ok_or_else(|| {
@@ -287,7 +331,47 @@ fn realize_resume(
         },
         None => stored.tournament_seed,
     };
-    Ok((id, stored.game_config_id, seed))
+    let stored_params = TournamentParams::from_json(&stored.params_json).map_err(|e| {
+        format!(
+            "tournament {} has unreadable params_json: {e}; cannot resume",
+            id.0
+        )
+    })?;
+    let stored_target = stored.target_games_per_matchup.ok_or_else(|| {
+        format!(
+            "tournament {} has no stored game count; cannot resume safely",
+            id.0
+        )
+    })?;
+    let stored_policy = stored_params.seat_policy;
+    // A size flag on resume is an assertion, not a re-spec: reject a
+    // conflicting one rather than silently honoring the stored schedule.
+    if let Some(req) = requested_size {
+        if req.seat_policy != stored_policy || req.slots != stored_target {
+            return Err(format!(
+                "resume rejected: tournament {} was created with {}; the --games/--mazes size you passed ({}) does not match. Omit --games/--mazes to resume with the stored schedule.",
+                id.0,
+                describe_size(stored_policy, stored_target),
+                describe_size(req.seat_policy, req.slots),
+            )
+            .into());
+        }
+    }
+    Ok(ResumeInfo {
+        id,
+        game_config_id: stored.game_config_id,
+        seed,
+        target_games_per_matchup: stored_target,
+        seat_policy: stored_policy,
+    })
+}
+
+/// Human-readable size description for resume mismatch errors.
+fn describe_size(policy: pyrat_eval::SeatPolicy, slots: u32) -> String {
+    match policy {
+        pyrat_eval::SeatPolicy::Paired => format!("paired, {} mazes / {slots} games", slots / 2),
+        pyrat_eval::SeatPolicy::Legacy => format!("legacy, {slots} games"),
+    }
 }
 
 // ── Standings rendering (Level A) ────────────────────────────────────
@@ -486,26 +570,6 @@ fn translate_mismatch(m: &TournamentMismatch) -> String {
     }
 }
 
-fn split_gauntlet_players(
-    players: &[ResolvedPlayer],
-    challenger_id: &str,
-    opponent_ids: &[String],
-) -> Result<(ResolvedPlayer, Vec<ResolvedPlayer>), Box<dyn std::error::Error>> {
-    let find = |id: &str| -> Result<ResolvedPlayer, Box<dyn std::error::Error>> {
-        players
-            .iter()
-            .find(|p| p.id == id)
-            .cloned()
-            .ok_or_else(|| format!("player `{id}` missing from player list").into())
-    };
-    let challenger = find(challenger_id)?;
-    let opponents = opponent_ids
-        .iter()
-        .map(|id| find(id))
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok((challenger, opponents))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -545,9 +609,11 @@ mod tests {
         let params = TournamentMismatch::Params {
             planner: TournamentParams {
                 max_failures_per_pair: 3,
+                seat_policy: pyrat_eval::SeatPolicy::Legacy,
             },
             stored: TournamentParams {
                 max_failures_per_pair: 1,
+                seat_policy: pyrat_eval::SeatPolicy::Legacy,
             },
         };
         let s = translate_mismatch(&params);

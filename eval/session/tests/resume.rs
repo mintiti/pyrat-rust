@@ -44,6 +44,7 @@ async fn resume_skips_completed_matchups() {
         }
         let tid = s
             .create_tournament(&NewTournament {
+                name: None,
                 format: "round_robin".into(),
                 target_games_per_matchup: Some(1),
                 params_json: "{}".into(),
@@ -169,6 +170,7 @@ async fn resume_retries_durably_failed_matchup_at_next_attempt_index() {
         }
         let tid = s
             .create_tournament(&NewTournament {
+                name: None,
                 format: "round_robin".into(),
                 target_games_per_matchup: Some(1),
                 params_json: "{}".into(),
@@ -260,6 +262,7 @@ async fn resume_re_issues_kill9_matchup_at_attempt_zero_with_canonical_seed() {
         }
         let tid = s
             .create_tournament(&NewTournament {
+                name: None,
                 format: "round_robin".into(),
                 target_games_per_matchup: Some(1),
                 params_json: "{}".into(),
@@ -349,12 +352,14 @@ async fn subscribe_immediately_after_resume_sees_standings() {
     // Bootstrap a tournament and plant ONE success row directly so the
     // resumed state has something to recompute Elo from.
     let spec = TournamentSpec {
+        name: None,
         format: "round_robin".into(),
         target_games_per_matchup: Some(1),
         // Matches the helper's `round_robin` planner config below
         // (max_failures_per_pair: 3) so resume validation passes.
         params_json: TournamentParams {
             max_failures_per_pair: 3,
+            seat_policy: pyrat_eval::SeatPolicy::Legacy,
         }
         .to_json(),
         game_config: small_game_config(),

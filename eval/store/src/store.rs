@@ -9,8 +9,8 @@ use crate::types::{
     AddTournamentPlayerError, AttemptKey, AttemptOutcome, AttemptRecord, AttemptStatus,
     CreateTournamentError, DeletePlayerError, EvalError, GameConfigRecord, GameResultRecord,
     NewAttempt, NewAttemptOutcome, NewGameResult, NewPlayer, NewTournament, PlayerRecord,
-    RecordAttemptError, RegisterPlayerError, ResultFilter, TournamentId, TournamentParticipant,
-    TournamentRecord,
+    RecordAttemptError, RegisterPlayerError, ResultFilter, SeatOrientation, TournamentId,
+    TournamentParticipant, TournamentRecord,
 };
 
 /// SQLite-backed store for game results, players, tournaments, and match
@@ -248,7 +248,7 @@ impl EvalStore {
         self.conn
             .query_row(
                 "SELECT id, format, target_games_per_matchup, params_json,
-                        game_config_id, tournament_seed, created_at
+                        game_config_id, tournament_seed, created_at, name
                    FROM tournaments WHERE id = ?1",
                 params![id.0],
                 read_tournament_row,
@@ -260,7 +260,7 @@ impl EvalStore {
     pub fn list_tournaments(&self) -> Result<Vec<TournamentRecord>, EvalError> {
         let mut stmt = self.conn.prepare(
             "SELECT id, format, target_games_per_matchup, params_json,
-                    game_config_id, tournament_seed, created_at
+                    game_config_id, tournament_seed, created_at, name
                FROM tournaments ORDER BY id",
         )?;
         let rows = stmt.query_map([], read_tournament_row)?;
@@ -354,8 +354,8 @@ impl EvalStore {
                (tournament_id, game_config_id, player1_id, player2_id, seed,
                 repetition_index, attempt_index, status,
                 player1_score, player2_score, turns,
-                failure_reason, started_at, finished_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+                failure_reason, started_at, finished_at, orientation)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
             params![
                 key.tournament_id.0,
                 key.game_config_id,
@@ -371,6 +371,7 @@ impl EvalStore {
                 failure_reason,
                 started_at,
                 finished_at,
+                key.orientation.to_db(),
             ],
         );
         match result {
@@ -396,7 +397,7 @@ impl EvalStore {
             "SELECT id, tournament_id, game_config_id, player1_id, player2_id, seed,
                     repetition_index, attempt_index, status,
                     player1_score, player2_score, turns,
-                    failure_reason, started_at, finished_at
+                    failure_reason, started_at, finished_at, orientation
                FROM match_attempts WHERE tournament_id = ?1",
         );
         if status_filter.is_some() {
@@ -542,14 +543,15 @@ fn create_tournament_on(
     conn.execute(
         "INSERT INTO tournaments
            (format, target_games_per_matchup, params_json,
-            game_config_id, tournament_seed)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+            game_config_id, tournament_seed, name)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![
             t.format,
             t.target_games_per_matchup,
             t.params_json,
             t.game_config_id,
             seed_i64,
+            t.name,
         ],
     )
     .map_err(EvalError::from)?;
@@ -677,6 +679,7 @@ fn read_tournament_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TournamentRe
         game_config_id: row.get(4)?,
         tournament_seed: seed_i64 as u64,
         created_at: row.get(6)?,
+        name: row.get(7)?,
     })
 }
 
@@ -690,6 +693,17 @@ fn read_attempt_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AttemptRecord> 
             format!("invalid attempt status: {status_str}").into(),
         )
     })?;
+    // Orientation is the single seat→canonical decode site: an out-of-range
+    // integer surfaces as a typed read error here rather than a silent
+    // mis-seat anywhere downstream.
+    let orientation_raw: i64 = row.get(15)?;
+    let orientation = SeatOrientation::from_db(orientation_raw).ok_or_else(|| {
+        rusqlite::Error::FromSqlConversionFailure(
+            15,
+            rusqlite::types::Type::Integer,
+            format!("invalid seat orientation: {orientation_raw}").into(),
+        )
+    })?;
     let key = AttemptKey {
         tournament_id: TournamentId(row.get(1)?),
         game_config_id: row.get(2)?,
@@ -698,6 +712,7 @@ fn read_attempt_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AttemptRecord> 
         seed: seed_i64 as u64,
         repetition_index: row.get(6)?,
         attempt_index: row.get(7)?,
+        orientation,
     };
     // The `match_attempts` CHECK guarantees these reads are non-NULL on
     // success rows; on a hand-edited DB a NULL would surface as
@@ -840,6 +855,7 @@ mod tests {
         let config_id = store.ensure_game_config(&sample_config()).unwrap();
         let tid = store
             .create_tournament(&NewTournament {
+                name: None,
                 format: "round-robin".into(),
                 target_games_per_matchup: Some(10),
                 params_json: "{}".into(),
@@ -868,6 +884,7 @@ mod tests {
             seed,
             repetition_index: 0,
             attempt_index,
+            orientation: SeatOrientation::Canonical,
         }
     }
 
@@ -1207,7 +1224,7 @@ mod tests {
     #[test]
     fn migration_fresh_db_ends_at_latest_user_version() {
         let store = EvalStore::open_in_memory().unwrap();
-        assert_eq!(user_version(&store), 3);
+        assert_eq!(user_version(&store), 5);
 
         let tables: Vec<String> = store
             .conn
@@ -1275,7 +1292,7 @@ mod tests {
         assert_eq!(v, 0);
 
         let store = EvalStore::from_connection(conn).unwrap();
-        assert_eq!(user_version(&store), 3);
+        assert_eq!(user_version(&store), 5);
 
         // Migration 2 added these columns to players. Confirm they exist.
         let cols: Vec<String> = store
@@ -1301,14 +1318,14 @@ mod tests {
         let v: u32 = conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(v, 3);
+        assert_eq!(v, 5);
         // Second run on the same connection: each migration's `version > current`
         // guard makes the loop a no-op. Must not error.
         schema::initialize(&mut conn).unwrap();
         let v: u32 = conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(v, 3);
+        assert_eq!(v, 5);
     }
 
     /// Migration 3 refuses to run if `tournaments` has pre-migration rows,
@@ -1379,10 +1396,160 @@ mod tests {
         }
     }
 
+    /// Migrations 4 (name) and 5 (orientation) are plain `ADD COLUMN`s, but
+    /// migration 3 already proved row-loss is a real failure mode — so pin the
+    /// production path: a populated v3 DB (existing CLI ladder shape) survives
+    /// the upgrade with its rows intact, `name = NULL`, and legacy attempts
+    /// defaulting to `orientation = Canonical`.
+    #[test]
+    fn migration_v3_to_latest_preserves_rows_and_defaults() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        // Hand-build the v3 schema (tournaments carry game_config_id +
+        // tournament_seed; match_attempts has no orientation column yet).
+        conn.execute_batch(
+            "CREATE TABLE players (id TEXT PRIMARY KEY, display_name TEXT NOT NULL,
+                                   created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                                   agent_id TEXT, version TEXT, command TEXT, metadata_json TEXT);
+             CREATE TABLE game_configs (id TEXT PRIMARY KEY, config_json TEXT NOT NULL);
+             CREATE TABLE game_results (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_config_id TEXT NOT NULL REFERENCES game_configs(id),
+                player1_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                player2_id TEXT NOT NULL REFERENCES players(id) ON DELETE CASCADE,
+                player1_score REAL NOT NULL, player2_score REAL NOT NULL,
+                turns INTEGER NOT NULL,
+                played_at TEXT NOT NULL DEFAULT (datetime('now'))
+             );
+             CREATE TABLE tournaments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                format TEXT NOT NULL,
+                target_games_per_matchup INTEGER,
+                params_json TEXT NOT NULL,
+                game_config_id TEXT NOT NULL REFERENCES game_configs(id),
+                tournament_seed INTEGER NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+             );
+             CREATE TABLE tournament_players (
+                tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+                player_id TEXT NOT NULL REFERENCES players(id) ON DELETE RESTRICT,
+                slot INTEGER NOT NULL,
+                PRIMARY KEY (tournament_id, player_id),
+                UNIQUE (tournament_id, slot)
+             );
+             CREATE TABLE match_attempts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tournament_id INTEGER NOT NULL REFERENCES tournaments(id) ON DELETE CASCADE,
+                game_config_id TEXT NOT NULL REFERENCES game_configs(id),
+                player1_id TEXT NOT NULL REFERENCES players(id) ON DELETE RESTRICT,
+                player2_id TEXT NOT NULL REFERENCES players(id) ON DELETE RESTRICT,
+                seed INTEGER NOT NULL,
+                repetition_index INTEGER NOT NULL DEFAULT 0,
+                attempt_index INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                player1_score REAL, player2_score REAL, turns INTEGER,
+                failure_reason TEXT, started_at TEXT,
+                finished_at TEXT NOT NULL,
+                UNIQUE (tournament_id, game_config_id, player1_id, player2_id, repetition_index, attempt_index)
+             );
+             PRAGMA user_version = 3;
+             INSERT INTO game_configs (id, config_json) VALUES ('cfg1', '{\"width\":7}');
+             INSERT INTO players (id, display_name) VALUES ('a', 'A'), ('b', 'B');
+             INSERT INTO tournaments (format, target_games_per_matchup, params_json, game_config_id, tournament_seed)
+                VALUES ('round_robin', 1, '{}', 'cfg1', 42);
+             INSERT INTO match_attempts
+                (tournament_id, game_config_id, player1_id, player2_id, seed,
+                 repetition_index, attempt_index, status, player1_score, player2_score, turns, started_at, finished_at)
+                VALUES (1, 'cfg1', 'a', 'b', 7, 0, 0, 'success', 5.0, 3.0, 50, '2026-01-01 00:00:00', '2026-01-01 00:00:00');",
+        )
+        .unwrap();
+
+        let store = EvalStore::from_connection(conn).unwrap();
+        assert_eq!(user_version(&store), 5);
+
+        // Tournament row survived with name defaulting to NULL (migration 4).
+        let t = store
+            .get_tournament(TournamentId(1))
+            .unwrap()
+            .expect("tournament row survived migration");
+        assert_eq!(t.name, None);
+
+        // Attempt row survived; legacy orientation reads back as Canonical
+        // (migration 5 default 0).
+        let attempts = store.get_attempts(TournamentId(1), None).unwrap();
+        assert_eq!(attempts.len(), 1);
+        assert_eq!(attempts[0].key.orientation, SeatOrientation::Canonical);
+        match attempts[0].outcome {
+            AttemptOutcome::Success {
+                player1_score,
+                player2_score,
+                ..
+            } => {
+                assert_eq!(player1_score, 5.0);
+                assert_eq!(player2_score, 3.0);
+            },
+            AttemptOutcome::Failure { .. } => panic!("expected success row"),
+        }
+    }
+
+    /// Store-boundary invariant (Design A): `orientation` is informational,
+    /// not identity. Both seatings of a maze insert distinctly only because
+    /// their `repetition_index` differs (the paired `2k`/`2k+1` slots); a row
+    /// differing *only* by orientation collides on the matchup UNIQUE.
+    #[test]
+    fn orientation_is_informational_not_identity() {
+        let store = EvalStore::open_in_memory().unwrap();
+        let (tid, cid) = setup_tournament(&store);
+
+        let attempt = |rep: u32, orientation: SeatOrientation, s1: f64, s2: f64| NewAttempt {
+            key: AttemptKey {
+                tournament_id: tid,
+                game_config_id: cid.clone(),
+                player1_id: "alice".into(),
+                player2_id: "bob".into(),
+                seed: 1,
+                repetition_index: rep,
+                attempt_index: 0,
+                orientation,
+            },
+            finished_at: "2026-01-01 00:00:00".into(),
+            outcome: NewAttemptOutcome::Success {
+                player1_score: s1,
+                player2_score: s2,
+                turns: 10,
+                started_at: "2026-01-01 00:00:00".into(),
+            },
+        };
+
+        // Paired slots 0 (Canonical) and 1 (Flipped): distinct repetition_index
+        // → both insert.
+        store
+            .record_attempt(&attempt(0, SeatOrientation::Canonical, 5.0, 3.0))
+            .expect("canonical seating inserts");
+        store
+            .record_attempt(&attempt(1, SeatOrientation::Flipped, 3.0, 5.0))
+            .expect("flipped seating inserts (distinct repetition_index)");
+
+        // A row differing ONLY by orientation (same rep/attempt) collides —
+        // orientation is not part of the UNIQUE.
+        match store.record_attempt(&attempt(0, SeatOrientation::Flipped, 1.0, 1.0)) {
+            Err(RecordAttemptError::AttemptAlreadyExists { .. }) => {},
+            other => panic!("expected AttemptAlreadyExists, got {other:?}"),
+        }
+
+        // Both stored seatings read back with their recorded orientation.
+        let attempts = store.get_attempts(tid, None).unwrap();
+        assert_eq!(attempts.len(), 2);
+        let orientations: Vec<_> = attempts.iter().map(|a| a.key.orientation).collect();
+        assert!(orientations.contains(&SeatOrientation::Canonical));
+        assert!(orientations.contains(&SeatOrientation::Flipped));
+    }
+
     #[test]
     fn create_tournament_rejects_missing_game_config() {
         let store = EvalStore::open_in_memory().unwrap();
         match store.create_tournament(&NewTournament {
+            name: None,
             format: "rr".into(),
             target_games_per_matchup: None,
             params_json: "{}".into(),
@@ -1404,6 +1571,7 @@ mod tests {
         // signed INTEGER column without truncation.
         let tid = store
             .create_tournament(&NewTournament {
+                name: None,
                 format: "rr".into(),
                 target_games_per_matchup: Some(2),
                 params_json: "{}".into(),
@@ -1415,6 +1583,34 @@ mod tests {
         assert_eq!(t.game_config_id, cid);
         // Seed round-trips bit-identically — no masking.
         assert_eq!(t.tournament_seed, i64::MAX as u64);
+        // No name supplied → column is NULL (the CLI path).
+        assert_eq!(t.name, None);
+    }
+
+    #[test]
+    fn create_tournament_round_trips_name() {
+        let store = EvalStore::open_in_memory().unwrap();
+        let cid = store.ensure_game_config(&sample_config()).unwrap();
+        let tid = store
+            .create_tournament(&NewTournament {
+                name: Some("ckpt-1200".into()),
+                format: "gauntlet".into(),
+                target_games_per_matchup: Some(15),
+                params_json: "{}".into(),
+                game_config_id: cid,
+                tournament_seed: 7,
+            })
+            .unwrap();
+        // The named row round-trips through get_tournament and list_tournaments.
+        assert_eq!(
+            store.get_tournament(tid).unwrap().unwrap().name.as_deref(),
+            Some("ckpt-1200")
+        );
+        let listed = store.list_tournaments().unwrap();
+        assert_eq!(
+            listed.iter().find(|t| t.id == tid).unwrap().name.as_deref(),
+            Some("ckpt-1200")
+        );
     }
 
     #[test]
@@ -1423,6 +1619,7 @@ mod tests {
         let cid = store.ensure_game_config(&sample_config()).unwrap();
         let seed = 1u64 << 63;
         match store.create_tournament(&NewTournament {
+            name: None,
             format: "rr".into(),
             target_games_per_matchup: None,
             params_json: "{}".into(),
@@ -1712,6 +1909,7 @@ mod tests {
         let cid = store.ensure_game_config(&sample_config()).unwrap();
         let tid = store
             .create_tournament(&NewTournament {
+                name: None,
                 format: "round-robin".into(),
                 target_games_per_matchup: None,
                 params_json: "{}".into(),
@@ -1786,6 +1984,7 @@ mod tests {
         // is touched.
         let other = store
             .create_tournament(&NewTournament {
+                name: None,
                 format: "gauntlet".into(),
                 target_games_per_matchup: None,
                 params_json: "{}".into(),

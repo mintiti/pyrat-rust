@@ -55,6 +55,10 @@ use crate::store_sink::StoreSink;
 /// fields explicitly.
 #[derive(Clone)]
 pub struct TournamentSpec {
+    /// Optional human-readable name persisted on the tournament row (e.g.
+    /// "ckpt-1200"). `None` leaves it NULL — the CLI takes this path; the GUI
+    /// supplies a name so stored tournaments are distinguishable when read back.
+    pub name: Option<String>,
     pub format: String,
     pub target_games_per_matchup: Option<u32>,
     pub params_json: String,
@@ -679,6 +683,7 @@ async fn bootstrap_new_tournament(
     players: &[ResolvedPlayer],
 ) -> Result<CreatedTournament, SessionError> {
     let game_config_record = crate::mapping::game_config_to_record(&spec.game_config)?;
+    let name = spec.name.clone();
     let format = spec.format.clone();
     let target_games_per_matchup = spec.target_games_per_matchup;
     let params_json = spec.params_json.clone();
@@ -707,6 +712,7 @@ async fn bootstrap_new_tournament(
                 tx.register_player(p)?;
             }
             let new_tournament = NewTournament {
+                name,
                 format,
                 target_games_per_matchup,
                 params_json,
@@ -1079,6 +1085,7 @@ mod tests {
                 seed: 7,
                 repetition_index: 0,
                 attempt_index,
+                orientation: pyrat_eval_store::SeatOrientation::Canonical,
                 planned_at: SystemTime::UNIX_EPOCH,
             },
             started_at: None,
@@ -1179,6 +1186,7 @@ mod tests {
                     seed: 7,
                     repetition_index: 0,
                     attempt_index: 1,
+                    orientation: pyrat_eval_store::SeatOrientation::Canonical,
                     planned_at: SystemTime::UNIX_EPOCH,
                 },
                 started_at: SystemTime::UNIX_EPOCH,
@@ -1295,6 +1303,7 @@ mod tests {
         ];
 
         let spec = TournamentSpec {
+            name: None,
             format: "round_robin".into(),
             target_games_per_matchup: Some(10),
             params_json: "{}".into(),
@@ -1318,6 +1327,7 @@ mod tests {
             target_per_pair: 10,
             // High enough that the counter trips first, not max_failures.
             max_failures_per_pair: 999,
+            seat_policy: crate::plan::SeatPolicy::Legacy,
             tournament_seed: 0xC0FFEE,
         });
 
@@ -1434,6 +1444,7 @@ mod tests {
             tournament_id: TournamentId(1),
             target_per_pair: 100,
             max_failures_per_pair: 999,
+            seat_policy: crate::plan::SeatPolicy::Legacy,
             tournament_seed: 0xC0FFEE,
         });
 

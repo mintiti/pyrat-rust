@@ -6,7 +6,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use pyrat::game::builder::{CheeseStrategy, GameConfig, MazeStrategy};
 use pyrat_eval_store::{
-    AttemptKey, GameConfigRecord, NewAttempt, NewAttemptOutcome, RecordAttemptError, TournamentId,
+    AttemptKey, GameConfigRecord, NewAttempt, NewAttemptOutcome, RecordAttemptError,
+    SeatOrientation, TournamentId,
 };
 use pyrat_orchestrator::{FailureReason, MatchFailure, MatchOutcome};
 
@@ -67,12 +68,20 @@ pub fn game_config_to_record(cfg: &GameConfig) -> Result<GameConfigRecord, Mappi
 /// `record_attempt`.
 pub fn outcome_to_new_attempt(outcome: &MatchOutcome<EvalMatchDescriptor>) -> NewAttempt {
     let desc = &outcome.descriptor;
+    // The engine returns scores in seat order (slot 0 = Rat). Canonicalize to
+    // (lex-min, lex-max) before storing so the row is seat-agnostic — the one
+    // `SeatOrientation::canonicalize` is the single source of truth shared by
+    // every write/emit site. For a `Canonical` game this is a no-op.
+    let (player1_score, player2_score) = desc.orientation.canonicalize(
+        f64::from(outcome.result.player1_score),
+        f64::from(outcome.result.player2_score),
+    );
     NewAttempt {
         key: attempt_key(desc),
         finished_at: format_sqlite_datetime(outcome.finished_at),
         outcome: NewAttemptOutcome::Success {
-            player1_score: f64::from(outcome.result.player1_score),
-            player2_score: f64::from(outcome.result.player2_score),
+            player1_score,
+            player2_score,
             turns: u32::from(outcome.result.turns_played),
             started_at: format_sqlite_datetime(outcome.started_at),
         },
@@ -102,6 +111,7 @@ fn attempt_key(desc: &EvalMatchDescriptor) -> AttemptKey {
         seed: desc.seed,
         repetition_index: desc.repetition_index,
         attempt_index: desc.attempt_index,
+        orientation: desc.orientation,
     }
 }
 
@@ -192,6 +202,9 @@ pub fn synthetic_attempt(
             seed,
             repetition_index,
             attempt_index,
+            // Synthetic rows are canonical (lex-min was Rat); tests needing a
+            // Flipped row build the AttemptKey directly.
+            orientation: SeatOrientation::Canonical,
         },
         finished_at: finished_at.into(),
         outcome,
@@ -219,6 +232,7 @@ mod tests {
             seed: 7,
             repetition_index: 0,
             attempt_index: 0,
+            orientation: SeatOrientation::Canonical,
             planned_at: SystemTime::UNIX_EPOCH,
         }
     }

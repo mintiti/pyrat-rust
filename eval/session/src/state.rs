@@ -191,9 +191,14 @@ impl TournamentState {
             DriverEvent::MatchFinished { outcome } => {
                 self.in_flight.remove(&outcome.descriptor.match_id);
                 let desc = &outcome.descriptor;
-                let (p1_score, p2_score) = canonicalize_scores(
-                    &desc.player1_id,
-                    &desc.player2_id,
+                // Scores arrive in seat order (slot 0 = Rat); map to canonical
+                // (lex-min, lex-max) via the descriptor's orientation — the
+                // same `SeatOrientation::canonicalize` the store-write path
+                // uses, so history and the durable row agree byte-for-byte.
+                // (Was an id-comparison no-op; under paired games the id
+                // comparison can't see the flipped seat, so it must read the
+                // orientation marker instead.)
+                let (p1_score, p2_score) = desc.orientation.canonicalize(
                     f64::from(outcome.result.player1_score),
                     f64::from(outcome.result.player2_score),
                 );
@@ -309,6 +314,7 @@ mod tests {
             seed: 0,
             repetition_index: 0,
             attempt_index,
+            orientation: pyrat_eval_store::SeatOrientation::Canonical,
             planned_at: SystemTime::UNIX_EPOCH,
         }
     }
@@ -473,6 +479,7 @@ mod tests {
             seed: 0,
             repetition_index: 0,
             attempt_index: 0,
+            orientation: pyrat_eval_store::SeatOrientation::Canonical,
         };
         let rec = AttemptRecord {
             id: 1,
@@ -508,19 +515,23 @@ mod tests {
         assert_eq!(h[0].draws, 0);
     }
 
+    /// Two seatings of the same pair aggregate into one canonical
+    /// head-to-head, with the flipped game's scores read through its
+    /// orientation. Descriptor ids stay canonical `(a, b)`; the seat lives in
+    /// `orientation`. This pins the paired-games ingest at the apply layer.
     #[test]
-    fn head_to_head_normalizes_pair_order() {
-        // Storing under (b, a) should still aggregate into the canonical
-        // (a, b) pair (sorted) so the same pair from different MatchupKey
-        // orientations doesn't fragment.
+    fn head_to_head_aggregates_both_seatings_via_orientation() {
         let mut s = TournamentState::empty(TournamentId(1));
+        // Game 0: a is Rat (Canonical), a beats b 5–3.
         s.apply(&finished(desc(0, "a", "b"), 5.0, 3.0));
-        s.apply(&finished(desc(1, "b", "a"), 5.0, 3.0));
+        // Game 1: b is Rat (Flipped). Engine returns seat-order scores
+        // (seat 0 = b = 5, seat 1 = a = 3); canonicalize swaps them to
+        // (a = 3, b = 5), so b wins.
+        let mut flipped = desc(1, "a", "b");
+        flipped.orientation = pyrat_eval_store::SeatOrientation::Flipped;
+        s.apply(&finished(flipped, 5.0, 3.0));
         let h = s.head_to_head();
         assert_eq!(h.len(), 1);
-        // Both games go to the canonical (a, b) pair.
-        // (a, b, 5, 3) → wins_a += 1.
-        // (b, a, 5, 3) → swapped to (a, b, 3, 5) → wins_b += 1.
         assert_eq!(h[0].wins_a, 1);
         assert_eq!(h[0].wins_b, 1);
     }

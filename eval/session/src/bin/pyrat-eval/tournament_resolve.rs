@@ -11,7 +11,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use pyrat_eval::ResolvedPlayer;
+use pyrat_eval::{ResolvedPlayer, SeatPolicy};
 use pyrat_eval_store::TournamentId;
 use pyrat_orchestrator::PlayerSpec;
 
@@ -21,7 +21,11 @@ use crate::{BotArg, RunArgs};
 
 // ── Defaults (live in the resolver, not in clap) ─────────────────────
 
-const DEFAULT_GAMES: u32 = 5;
+/// Default matchup size when neither `--games`/`--mazes` nor a config size is
+/// given: 8 mazes under the paired (seat-debiased) policy → 16 game slots.
+/// Like-for-like with the prior single-seat default of 5–15 games, but every
+/// maze is now played both seatings, so ratings can't inherit a seat bias.
+const DEFAULT_MAZES: u32 = 8;
 const DEFAULT_GAME_PRESET: &str = "tiny";
 const DEFAULT_MAX_FAILURES: u32 = 1;
 const DEFAULT_MAX_PARALLEL: u32 = 2;
@@ -83,6 +87,14 @@ pub enum FormatChoice {
     },
 }
 
+/// A resolved matchup size: total game slots per matchup and the seat policy
+/// that produced it. Under `Paired`, `slots = 2 × mazes`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SizeChoice {
+    pub seat_policy: SeatPolicy,
+    pub slots: u32,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedTiming {
     pub move_timeout_ms: u32,
@@ -100,7 +112,17 @@ pub struct ResolvedRun {
     pub game: ResolvedGame,
     pub timing: ResolvedTiming,
     pub format: FormatChoice,
+    /// Total game slots per matchup (= `2 × mazes` under `Paired`). On a new
+    /// run this is the value to create with; on resume the stored value wins
+    /// (see [`LaunchMode::Resume`]).
     pub target_games_per_matchup: u32,
+    /// Seat policy paired with `target_games_per_matchup`. New default is
+    /// `Paired`; `--games` selects `Legacy`.
+    pub seat_policy: SeatPolicy,
+    /// The size the user actually requested via flag/config, if any. `None`
+    /// means "defaulted". On resume this is only an *assertion* — the stored
+    /// schedule wins — so a no-flag resume just works under the new default.
+    pub requested_size: Option<SizeChoice>,
     pub max_failures_per_pair: u32,
     pub max_parallel: u32,
     pub mode: LaunchMode,
@@ -197,14 +219,16 @@ pub fn resolve_loaded(
     validate_players(&players)?;
     let format = resolve_format_choice(&args, &cfg, &players)?;
 
-    // The labels name both surfaces: the user may have typed the flag
-    // or written the TOML key.
-    let target_games_per_matchup = positive(
-        args.games
-            .or(cfg.target_games_per_matchup)
-            .unwrap_or(DEFAULT_GAMES),
-        "--games / target_games_per_matchup",
-    )?;
+    // Matchup size: `--mazes` (paired) XOR `--games` (legacy), else the
+    // paired default. `requested_size` keeps the user's choice (or None) so
+    // resume can treat it as an assertion against the stored schedule.
+    let requested_size = resolve_size_choice(&args, &cfg)?;
+    let size = requested_size.unwrap_or(SizeChoice {
+        seat_policy: SeatPolicy::Paired,
+        slots: 2 * DEFAULT_MAZES,
+    });
+    let target_games_per_matchup = size.slots;
+    let seat_policy = size.seat_policy;
     let max_failures_per_pair = positive(
         args.max_failures
             .or(cfg.max_failures_per_pair)
@@ -277,6 +301,8 @@ pub fn resolve_loaded(
         timing,
         format,
         target_games_per_matchup,
+        seat_policy,
+        requested_size,
         max_failures_per_pair,
         max_parallel,
         mode,
@@ -290,6 +316,41 @@ pub fn resolve_loaded(
 }
 
 // ── Field-level resolvers ────────────────────────────────────────────
+
+/// Resolve the matchup size. `--mazes` (or `mazes_per_matchup`) selects the
+/// paired, seat-debiased policy with `2 × mazes` slots; `--games` (or
+/// `target_games_per_matchup`) selects the legacy single-seat policy with
+/// that many slots. The two are mutually exclusive across flag and config:
+/// `.or()` collapses flag-over-config per field, then `(Some, Some)` rejects
+/// any cross combination. `None` means the caller applies the default.
+fn resolve_size_choice(
+    args: &RunArgs,
+    cfg: &TournamentConfig,
+) -> Result<Option<SizeChoice>, ResolveError> {
+    let mazes = args.mazes.or(cfg.mazes_per_matchup);
+    let games = args.games.or(cfg.target_games_per_matchup);
+    match (mazes, games) {
+        (Some(_), Some(_)) => Err(ResolveError::v(
+            "set either --mazes / mazes_per_matchup (paired, seat-debiased) or \
+             --games / target_games_per_matchup (legacy single-seat), not both",
+        )),
+        (Some(m), None) => {
+            let m = positive(m, "--mazes / mazes_per_matchup")?;
+            Ok(Some(SizeChoice {
+                seat_policy: SeatPolicy::Paired,
+                slots: 2 * m,
+            }))
+        },
+        (None, Some(g)) => {
+            let g = positive(g, "--games / target_games_per_matchup")?;
+            Ok(Some(SizeChoice {
+                seat_policy: SeatPolicy::Legacy,
+                slots: g,
+            }))
+        },
+        (None, None) => Ok(None),
+    }
+}
 
 fn resolve_format_choice(
     args: &RunArgs,
@@ -948,7 +1009,10 @@ mod tests {
         let args = args_with_two_bots();
         let mut gen = fixed_seed_gen(42);
         let resolved = resolve_loaded(args, None, &mut gen).expect("resolve");
-        assert_eq!(resolved.target_games_per_matchup, DEFAULT_GAMES);
+        // New default: paired (seat-debiased), 8 mazes → 16 slots.
+        assert_eq!(resolved.target_games_per_matchup, 2 * DEFAULT_MAZES);
+        assert_eq!(resolved.seat_policy, SeatPolicy::Paired);
+        assert_eq!(resolved.requested_size, None);
         assert_eq!(resolved.max_failures_per_pair, DEFAULT_MAX_FAILURES);
         assert_eq!(resolved.max_parallel, DEFAULT_MAX_PARALLEL);
         assert_eq!(resolved.timing.move_timeout_ms, DEFAULT_MOVE_TIMEOUT_MS);

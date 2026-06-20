@@ -22,7 +22,12 @@ pub struct TournamentConfig {
     pub replay_dir: Option<PathBuf>,
     pub seed: Option<u64>,
     pub format: Option<String>,
+    /// Legacy single-seat games per matchup. Mutually exclusive with
+    /// `mazes_per_matchup`; the resolver rejects setting both.
     pub target_games_per_matchup: Option<u32>,
+    /// Paired (seat-debiased) mazes per matchup; each maze is played both
+    /// seatings, so the matchup runs `2 × mazes_per_matchup` games.
+    pub mazes_per_matchup: Option<u32>,
     pub max_failures_per_pair: Option<u32>,
     pub max_parallel: Option<u32>,
 

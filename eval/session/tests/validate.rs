@@ -117,6 +117,7 @@ async fn rejects_planner_with_different_tournament_seed() {
         tournament_id: created.tournament_id,
         target_per_pair: 1,
         max_failures_per_pair: 3,
+        seat_policy: pyrat_eval::SeatPolicy::Legacy,
         tournament_seed: 0xDEAD, // diverges from spec's 0xC0FFEE
     });
 
@@ -244,6 +245,7 @@ async fn rejects_gauntlet_planner_for_round_robin_tournament() {
         tournament_id: created.tournament_id,
         target_each: 1,
         max_failures_per_pair: 3,
+        seat_policy: pyrat_eval::SeatPolicy::Legacy,
         tournament_seed: 0xC0FFEE,
     });
 
@@ -301,6 +303,7 @@ async fn rejects_planner_with_drifted_runtime_game_config() {
         tournament_id: created.tournament_id,
         target_per_pair: 1,
         max_failures_per_pair: 3,
+        seat_policy: pyrat_eval::SeatPolicy::Legacy,
         tournament_seed: 0xC0FFEE,
     });
 
@@ -354,6 +357,7 @@ async fn drifted_game_config_message_shows_geometry_expected_vs_got() {
         tournament_id: created.tournament_id,
         target_per_pair: 1,
         max_failures_per_pair: 3,
+        seat_policy: pyrat_eval::SeatPolicy::Legacy,
         tournament_seed: 0xC0FFEE,
     });
 
@@ -406,6 +410,7 @@ async fn rejects_planner_with_different_params() {
         tournament_id: created.tournament_id,
         target_per_pair: 1,
         max_failures_per_pair: 99, // diverges from spec's 3
+        seat_policy: pyrat_eval::SeatPolicy::Legacy,
         tournament_seed: 0xC0FFEE,
     });
 

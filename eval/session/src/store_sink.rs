@@ -189,6 +189,7 @@ mod tests {
             .unwrap();
         let tid = store
             .create_tournament(&NewTournament {
+                name: None,
                 format: "round_robin".into(),
                 target_games_per_matchup: Some(1),
                 params_json: "{}".into(),
@@ -216,6 +217,7 @@ mod tests {
             seed: 42,
             repetition_index: 0,
             attempt_index,
+            orientation: pyrat_eval_store::SeatOrientation::Canonical,
             planned_at: SystemTime::UNIX_EPOCH,
         }
     }
@@ -320,6 +322,7 @@ mod tests {
                 seed: 0x1234,
                 repetition_index: 2,
                 attempt_index: 3,
+                orientation: pyrat_eval_store::SeatOrientation::Canonical,
                 planned_at: SystemTime::UNIX_EPOCH,
             },
             started_at: UNIX_EPOCH + Duration::from_secs(100),

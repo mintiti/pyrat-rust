@@ -19,6 +19,7 @@ use crate::tournament_config::{
     EloSection, GameSection, GauntletSection, PlayerEntry, TimingSection, TournamentConfig,
 };
 use crate::tournament_resolve::{FormatChoice, LaunchMode, NewSeed, ResolvedRun};
+use pyrat_eval::SeatPolicy;
 
 pub(crate) fn write_save_as(
     resolved: &ResolvedRun,
@@ -91,6 +92,15 @@ fn to_saveable_config(resolved: &ResolvedRun, save_dir: &Path) -> Result<Tournam
         | LaunchMode::Resume { .. } => None,
     };
 
+    // Project the size onto the field that re-resolves to the same policy:
+    // `Paired` → `mazes_per_matchup` (slots / 2), `Legacy` →
+    // `target_games_per_matchup`. Writing the wrong field would silently
+    // flip the seat policy on reload.
+    let (target_games_per_matchup, mazes_per_matchup) = match resolved.seat_policy {
+        SeatPolicy::Paired => (None, Some(resolved.target_games_per_matchup / 2)),
+        SeatPolicy::Legacy => (Some(resolved.target_games_per_matchup), None),
+    };
+
     Ok(TournamentConfig {
         store_path: Some(make_relative_or_absolute(&resolved.store_path, save_dir)),
         replay_dir: resolved
@@ -99,7 +109,8 @@ fn to_saveable_config(resolved: &ResolvedRun, save_dir: &Path) -> Result<Tournam
             .map(|p| make_relative_or_absolute(p, save_dir)),
         seed,
         format: Some(format.into()),
-        target_games_per_matchup: Some(resolved.target_games_per_matchup),
+        target_games_per_matchup,
+        mazes_per_matchup,
         max_failures_per_pair: Some(resolved.max_failures_per_pair),
         max_parallel: Some(resolved.max_parallel),
         game,
@@ -243,6 +254,8 @@ mod tests {
             },
             format: FormatChoice::RoundRobin,
             target_games_per_matchup: 5,
+            seat_policy: SeatPolicy::Legacy,
+            requested_size: None,
             max_failures_per_pair: 1,
             max_parallel: 2,
             mode: LaunchMode::New {
@@ -465,6 +478,11 @@ mod tests {
                 opponents: vec!["rando".into()],
             },
             target_games_per_matchup: 7,
+            seat_policy: SeatPolicy::Legacy,
+            requested_size: Some(crate::tournament_resolve::SizeChoice {
+                seat_policy: SeatPolicy::Legacy,
+                slots: 7,
+            }),
             max_failures_per_pair: 4,
             max_parallel: 3,
             mode: LaunchMode::New {
@@ -495,6 +513,7 @@ mod tests {
         assert_eq!(back.timing, resolved.timing);
         assert_eq!(back.format, resolved.format);
         assert_eq!(back.target_games_per_matchup, 7);
+        assert_eq!(back.seat_policy, SeatPolicy::Legacy);
         assert_eq!(back.max_failures_per_pair, 4);
         assert_eq!(back.max_parallel, 3);
         assert_eq!(

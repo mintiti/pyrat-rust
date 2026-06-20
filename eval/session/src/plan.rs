@@ -12,7 +12,7 @@ use std::collections::{HashMap, HashSet};
 use std::time::SystemTime;
 
 use pyrat::game::builder::GameConfig;
-use pyrat_eval_store::TournamentId;
+use pyrat_eval_store::{SeatOrientation, TournamentId};
 use pyrat_orchestrator::{MatchId, Matchup, PlayerSpec, Timing};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -66,6 +66,29 @@ pub struct TournamentParams {
     /// would silently change tournament semantics.
     #[serde(default)]
     pub max_failures_per_pair: u32,
+    /// How seats are assigned across a matchup's games. Absent in a stored
+    /// row (pre-fix tournaments) decodes to [`SeatPolicy::Legacy`] via
+    /// `Default`, so existing tournaments keep single-seat semantics and
+    /// never silently double their game count on resume.
+    #[serde(default)]
+    pub seat_policy: SeatPolicy,
+}
+
+/// How seats (the engine's Rat = slot 0) are assigned across the games of
+/// one matchup. Stored in `params_json` so resume reconstructs the exact
+/// schedule the tournament was created with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SeatPolicy {
+    /// One game per repetition; the lex-min player is always Rat. The
+    /// historical behavior, and the decode target for pre-fix rows.
+    #[default]
+    Legacy,
+    /// Chess-style paired games: each maze is played twice with flipped
+    /// seats. Composite slot `2k` seats lex-min as Rat, slot `2k+1` flips
+    /// it; both share maze `k`'s seed. De-biases seat per maze and cuts
+    /// maze-luck variance (the SPRT reversed-colors move).
+    Paired,
 }
 
 impl TournamentParams {
@@ -241,8 +264,12 @@ pub struct RoundRobinPlannerConfig {
     pub game_config_id: String,
     pub timing: Timing,
     pub tournament_id: TournamentId,
+    /// Total game *slots* per pair. Under [`SeatPolicy::Paired`] this is
+    /// `2 × mazes` (each maze played both seatings); under `Legacy` it is the
+    /// game count directly.
     pub target_per_pair: u32,
     pub max_failures_per_pair: u32,
+    pub seat_policy: SeatPolicy,
     pub tournament_seed: u64,
 }
 
@@ -353,6 +380,7 @@ impl Planner for RoundRobinPlanner {
     fn expected_params(&self) -> TournamentParams {
         TournamentParams {
             max_failures_per_pair: self.config.max_failures_per_pair,
+            seat_policy: self.config.seat_policy,
         }
     }
 }
@@ -371,8 +399,11 @@ pub struct GauntletPlannerConfig {
     pub game_config_id: String,
     pub timing: Timing,
     pub tournament_id: TournamentId,
+    /// Total game *slots* per opponent. Under [`SeatPolicy::Paired`] this is
+    /// `2 × mazes`; under `Legacy` it is the game count directly.
     pub target_each: u32,
     pub max_failures_per_pair: u32,
+    pub seat_policy: SeatPolicy,
     pub tournament_seed: u64,
 }
 
@@ -389,6 +420,34 @@ pub fn gauntlet_slot_order<'a>(
     opponents: &'a [ResolvedPlayer],
 ) -> impl Iterator<Item = &'a ResolvedPlayer> {
     std::iter::once(challenger).chain(opponents.iter())
+}
+
+/// A gauntlet challenger/opponent id was not found in the resolved player list.
+#[derive(Debug, thiserror::Error)]
+#[error("player `{0}` missing from player list")]
+pub struct PlayerNotInList(pub String);
+
+/// Split a flat resolved-player list into a challenger + its opponents by id,
+/// for building a [`GauntletPlannerConfig`]. Shared by the CLI and the GUI so
+/// both produce the same slot orientation (pairs with [`gauntlet_slot_order`]).
+pub fn split_gauntlet_players(
+    players: &[ResolvedPlayer],
+    challenger_id: &str,
+    opponent_ids: &[String],
+) -> Result<(ResolvedPlayer, Vec<ResolvedPlayer>), PlayerNotInList> {
+    let find = |id: &str| -> Result<ResolvedPlayer, PlayerNotInList> {
+        players
+            .iter()
+            .find(|p| p.id == id)
+            .cloned()
+            .ok_or_else(|| PlayerNotInList(id.to_string()))
+    };
+    let challenger = find(challenger_id)?;
+    let opponents = opponent_ids
+        .iter()
+        .map(|id| find(id))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok((challenger, opponents))
 }
 
 pub struct GauntletPlanner {
@@ -497,6 +556,7 @@ impl Planner for GauntletPlanner {
     fn expected_params(&self) -> TournamentParams {
         TournamentParams {
             max_failures_per_pair: self.config.max_failures_per_pair,
+            seat_policy: self.config.seat_policy,
         }
     }
 }
@@ -542,6 +602,7 @@ struct SlotContext<'a> {
     tournament_id: TournamentId,
     tournament_seed: u64,
     max_failures: u32,
+    seat_policy: SeatPolicy,
 }
 
 impl<'a> SlotContext<'a> {
@@ -553,6 +614,7 @@ impl<'a> SlotContext<'a> {
             tournament_id: config.tournament_id,
             tournament_seed: config.tournament_seed,
             max_failures: config.max_failures_per_pair,
+            seat_policy: config.seat_policy,
         }
     }
 
@@ -564,7 +626,29 @@ impl<'a> SlotContext<'a> {
             tournament_id: config.tournament_id,
             tournament_seed: config.tournament_seed,
             max_failures: config.max_failures_per_pair,
+            seat_policy: config.seat_policy,
         }
+    }
+}
+
+/// Resolve a composite slot index into the maze it plays and the seat
+/// orientation, per the policy. Under `Legacy` the slot *is* the maze and
+/// the lex-min player is always Rat. Under `Paired`, slots `2k`/`2k+1`
+/// share maze `k`; the even slot seats lex-min as Rat, the odd one flips.
+///
+/// The maze index (not the composite slot) feeds `matchup_seed`, so a pair's
+/// two seatings replay the *same* maze — the de-biasing move.
+fn slot_maze_and_orientation(seat_policy: SeatPolicy, slot: u32) -> (u32, SeatOrientation) {
+    match seat_policy {
+        SeatPolicy::Legacy => (slot, SeatOrientation::Canonical),
+        SeatPolicy::Paired => {
+            let orientation = if slot.is_multiple_of(2) {
+                SeatOrientation::Canonical
+            } else {
+                SeatOrientation::Flipped
+            };
+            (slot / 2, orientation)
+        },
     }
 }
 
@@ -577,12 +661,16 @@ fn build_slot(
     pending: &mut HashMap<MatchupKey, HashSet<u32>>,
     allocate_match_id: &mut dyn FnMut() -> MatchId,
 ) -> Option<Matchup<EvalMatchDescriptor>> {
-    // Lex-sort players for slot 0/1 so the planner submits descriptors in
-    // canonical orientation. `MatchupKey::from_pair` already canonicalizes
-    // its own player_ids, but the descriptor's slot order is what the
-    // engine sees.
+    // Lex-sort the pair so `player1`/`player2` are the canonical (lex-min,
+    // lex-max) identities. `MatchupKey::from_pair` canonicalizes too; this
+    // local sort is what decides which spec lands in which engine seat.
     let (p1, p2) = if a.id <= b.id { (a, b) } else { (b, a) };
+    // `repetition_index` here is the composite slot index. Under Paired it
+    // splits into a maze (shared by the pair's two seatings) and an
+    // orientation; the composite stays the matchup key's repetition so the
+    // store's UNIQUE distinguishes slot 2k from 2k+1 with no schema change.
     let key = MatchupKey::from_pair(&p1.id, &p2.id, ctx.game_config_id, repetition_index);
+    let (maze, orientation) = slot_maze_and_orientation(ctx.seat_policy, repetition_index);
 
     if slot_done(&key, state, ctx.max_failures) {
         return None;
@@ -597,12 +685,14 @@ fn build_slot(
     let attempt_index = history_len as u32;
     pending_set.insert(attempt_index);
 
+    // Seed from the *maze*, not the composite slot, so a Paired pair's two
+    // seatings replay the same maze — the de-biasing move.
     let seed = matchup_seed(
         ctx.tournament_seed,
         key.player1_id(),
         key.player2_id(),
         ctx.game_config_id,
-        repetition_index,
+        maze,
     );
     let descriptor = EvalMatchDescriptor {
         match_id: allocate_match_id(),
@@ -613,13 +703,22 @@ fn build_slot(
         seed,
         repetition_index,
         attempt_index,
+        orientation,
         planned_at: SystemTime::now(),
+    };
+
+    // Seat assignment: Canonical seats lex-min (p1) as Rat (slot 0); Flipped
+    // seats lex-max (p2) as Rat. The descriptor's player ids stay canonical
+    // regardless — only the engine seat differs, recorded in `orientation`.
+    let players = match orientation {
+        SeatOrientation::Canonical => [p1.spec.clone(), p2.spec.clone()],
+        SeatOrientation::Flipped => [p2.spec.clone(), p1.spec.clone()],
     };
 
     Some(Matchup {
         descriptor,
         game_config: ctx.game_config.clone(),
-        players: [p1.spec.clone(), p2.spec.clone()],
+        players,
         timing: ctx.timing,
     })
 }
@@ -678,6 +777,7 @@ mod tests {
             tournament_id: TournamentId(1),
             target_per_pair: target,
             max_failures_per_pair: max_failures,
+            seat_policy: SeatPolicy::Legacy,
             tournament_seed: 0xC0FFEE,
         })
     }
@@ -867,6 +967,7 @@ mod tests {
             tournament_id: TournamentId(1),
             target_per_pair: 1,
             max_failures_per_pair: 2,
+            seat_policy: SeatPolicy::Legacy,
             tournament_seed: 1,
         });
         let alloc = MatchIdAllocator::new();
@@ -881,6 +982,63 @@ mod tests {
         let batch3 = p.next_batch(&state, 100, &mut || alloc.allocate());
         assert!(batch3.is_empty());
         assert!(p.is_done(&state));
+    }
+
+    /// Paired policy: one pair emits `2 × mazes` slots. Slots `2k`/`2k+1`
+    /// share a maze (same seed) and carry opposite orientations; the
+    /// descriptor's player ids stay canonical (lex-min first) for every slot.
+    /// This is the load-bearing seat-debiasing contract.
+    #[test]
+    fn paired_policy_emits_flipped_seatings_sharing_a_maze() {
+        // 2 players, 2 mazes → target_per_pair = 4 composite slots.
+        let mut p = RoundRobinPlanner::new(RoundRobinPlannerConfig {
+            players: vec![embedded("a"), embedded("b")],
+            game_config: GameConfig::classic(7, 5, 3),
+            game_config_id: "gc".into(),
+            timing: timing(),
+            tournament_id: TournamentId(1),
+            target_per_pair: 4,
+            max_failures_per_pair: 1,
+            seat_policy: SeatPolicy::Paired,
+            tournament_seed: 0xABCD,
+        });
+        let alloc = MatchIdAllocator::new();
+        let state = TournamentState::empty(TournamentId(1));
+        let batch = p.next_batch(&state, 100, &mut || alloc.allocate());
+        assert_eq!(batch.len(), 4, "one pair × 2 mazes × 2 seatings = 4 slots");
+
+        // Index by composite slot (repetition_index).
+        let by_slot: std::collections::HashMap<u32, &Matchup<EvalMatchDescriptor>> = batch
+            .iter()
+            .map(|m| (m.descriptor.repetition_index, m))
+            .collect();
+        for slot in 0..4u32 {
+            let d = &by_slot[&slot].descriptor;
+            // Ids canonical regardless of seat.
+            assert_eq!(d.player1_id, "a");
+            assert_eq!(d.player2_id, "b");
+            let expected = if slot.is_multiple_of(2) {
+                SeatOrientation::Canonical
+            } else {
+                SeatOrientation::Flipped
+            };
+            assert_eq!(d.orientation, expected, "slot {slot} orientation");
+        }
+        // A pair (2k, 2k+1) shares a maze → same seed; different mazes differ.
+        assert_eq!(by_slot[&0].descriptor.seed, by_slot[&1].descriptor.seed);
+        assert_eq!(by_slot[&2].descriptor.seed, by_slot[&3].descriptor.seed);
+        assert_ne!(by_slot[&0].descriptor.seed, by_slot[&2].descriptor.seed);
+
+        // Flipped slot seats lex-max ("b") as Rat (slot 0 spec).
+        let canonical = by_slot[&0];
+        let flipped = by_slot[&1];
+        let agent = |m: &Matchup<EvalMatchDescriptor>, slot: usize| match &m.players[slot] {
+            PlayerSpec::Embedded { agent_id, .. } => agent_id.clone(),
+            PlayerSpec::Subprocess { agent_id, .. } => agent_id.clone(),
+            _ => unreachable!(),
+        };
+        assert_eq!(agent(canonical, 0), "a", "canonical seats a as Rat");
+        assert_eq!(agent(flipped, 0), "b", "flipped seats b as Rat");
     }
 
     /// Same matchup key always yields the same seed, regardless of caller
@@ -900,6 +1058,7 @@ mod tests {
     fn tournament_params_round_trips_json() {
         let p = TournamentParams {
             max_failures_per_pair: 7,
+            seat_policy: SeatPolicy::Paired,
         };
         let s = p.to_json();
         let back = TournamentParams::from_json(&s).expect("decode");
@@ -909,12 +1068,14 @@ mod tests {
     #[test]
     fn tournament_params_deserializes_empty_object_with_serde_default() {
         // Back-compat: any externally-stored row with `"{}"` decodes
-        // to defaults (max_failures_per_pair = 0).
+        // to defaults (max_failures_per_pair = 0, seat_policy = Legacy) —
+        // pre-fix tournaments keep single-seat semantics on resume.
         let p = TournamentParams::from_json("{}").expect("decode");
         assert_eq!(
             p,
             TournamentParams {
-                max_failures_per_pair: 0
+                max_failures_per_pair: 0,
+                seat_policy: SeatPolicy::Legacy,
             }
         );
     }
@@ -925,7 +1086,8 @@ mod tests {
         assert_eq!(
             p.expected_params(),
             TournamentParams {
-                max_failures_per_pair: 3
+                max_failures_per_pair: 3,
+                seat_policy: SeatPolicy::Legacy,
             }
         );
     }
@@ -973,6 +1135,7 @@ mod tests {
             tournament_id: TournamentId(1),
             target_each: 1,
             max_failures_per_pair: 1,
+            seat_policy: SeatPolicy::Legacy,
             tournament_seed: 1,
         });
         let from_order: Vec<&str> = gauntlet_slot_order(&challenger, &opponents)
@@ -993,12 +1156,14 @@ mod tests {
             tournament_id: TournamentId(1),
             target_each: 2,
             max_failures_per_pair: 4,
+            seat_policy: SeatPolicy::Legacy,
             tournament_seed: 0xC0FFEE,
         });
         assert_eq!(
             planner.expected_params(),
             TournamentParams {
-                max_failures_per_pair: 4
+                max_failures_per_pair: 4,
+                seat_policy: SeatPolicy::Legacy,
             }
         );
     }
