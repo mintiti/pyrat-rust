@@ -165,6 +165,7 @@ mod tests {
                 symmetric: true,
                 cheese_count: 3,
                 cheese_symmetric: true,
+                player_start: pyrat_eval_store::PlayerStartRecord::Corners,
             })
             .unwrap();
         store

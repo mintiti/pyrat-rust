@@ -9,7 +9,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use pyrat::game::builder::GameConfig;
-use pyrat::{Coordinates, Direction, GameBuilder};
+use pyrat::{Direction, GameBuilder};
 use pyrat_bot_api::Options;
 use pyrat_eval::{
     GameConfigId, ResolvedPlayer, RoundRobinPlanner, RoundRobinPlannerConfig, TournamentParams,
@@ -44,7 +44,7 @@ pub fn small_game_config() -> GameConfig {
     GameBuilder::new(3, 3)
         .with_max_turns(5)
         .with_open_maze()
-        .with_custom_positions(Coordinates::new(0, 0), Coordinates::new(2, 2))
+        .with_corner_positions()
         .with_random_cheese(1, false)
         .build()
 }
@@ -93,6 +93,7 @@ pub fn open_store_with_config(store: &Arc<Mutex<EvalStore>>) -> GameConfigId {
             symmetric: false,
             cheese_count: 1,
             cheese_symmetric: false,
+            player_start: pyrat_eval_store::PlayerStartRecord::Corners,
         })
         .expect("ensure_game_config")
 }

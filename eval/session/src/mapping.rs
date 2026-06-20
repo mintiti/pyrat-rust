@@ -4,10 +4,10 @@
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use pyrat::game::builder::{CheeseStrategy, GameConfig, MazeStrategy};
+use pyrat::game::builder::{CheeseStrategy, GameConfig, MazeStrategy, PlayerStrategy};
 use pyrat_eval_store::{
-    AttemptKey, GameConfigRecord, NewAttempt, NewAttemptOutcome, RecordAttemptError,
-    SeatOrientation, TournamentId,
+    AttemptKey, GameConfigRecord, NewAttempt, NewAttemptOutcome, PlayerStartRecord,
+    RecordAttemptError, SeatOrientation, TournamentId,
 };
 use pyrat_orchestrator::{FailureReason, MatchFailure, MatchOutcome};
 
@@ -24,6 +24,9 @@ pub enum MappingError {
 
     #[error("game config uses fixed-positions cheese strategy; eval-store schema only represents random cheese")]
     FixedCheeseUnsupported,
+
+    #[error("game config uses fixed player positions; eval-store schema only represents corner / random starts")]
+    FixedStartUnsupported,
 
     #[error("record_attempt failed: {0}")]
     RecordAttempt(#[from] RecordAttemptError),
@@ -50,6 +53,11 @@ pub fn game_config_to_record(cfg: &GameConfig) -> Result<GameConfigRecord, Mappi
         CheeseStrategy::Random { count, symmetric } => (u32::from(*count), *symmetric),
         CheeseStrategy::Fixed(_) => return Err(MappingError::FixedCheeseUnsupported),
     };
+    let player_start = match cfg.players() {
+        PlayerStrategy::Corners => PlayerStartRecord::Corners,
+        PlayerStrategy::Random => PlayerStartRecord::Random,
+        PlayerStrategy::Fixed(..) => return Err(MappingError::FixedStartUnsupported),
+    };
     Ok(GameConfigRecord {
         width: u32::from(cfg.width()),
         height: u32::from(cfg.height()),
@@ -61,6 +69,7 @@ pub fn game_config_to_record(cfg: &GameConfig) -> Result<GameConfigRecord, Mappi
         symmetric,
         cheese_count,
         cheese_symmetric,
+        player_start,
     })
 }
 
@@ -256,6 +265,19 @@ mod tests {
         assert!(rec.cheese_symmetric);
         assert!(rec.connected);
         assert!(rec.symmetric);
+        assert_eq!(rec.player_start, PlayerStartRecord::Corners);
+    }
+
+    #[test]
+    fn random_start_game_config_records_player_start() {
+        use pyrat::game::builder::GameBuilder;
+        let cfg = GameBuilder::new(7, 5)
+            .with_classic_maze()
+            .with_random_positions()
+            .with_random_cheese(4, true)
+            .build();
+        let rec = game_config_to_record(&cfg).unwrap();
+        assert_eq!(rec.player_start, PlayerStartRecord::Random);
     }
 
     /// Pin the SQLite-format string for a few known instants. The values

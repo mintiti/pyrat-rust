@@ -25,7 +25,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use parking_lot::Mutex;
 use pyrat::game::builder::GameBuilder;
-use pyrat::{Coordinates, Direction};
+use pyrat::Direction;
 use pyrat_bot_api::Options;
 use pyrat_eval::{
     EvalMatchDescriptor, EvalSession, ResolvedPlayer, RoundRobinPlanner, RoundRobinPlannerConfig,
@@ -105,7 +105,7 @@ async fn end_to_end_round_robin_with_replay_sink() {
     let store = Arc::new(Mutex::new(EvalStore::open_in_memory().unwrap()));
     let game_config = GameBuilder::new(3, 3)
         .with_open_maze()
-        .with_custom_positions(Coordinates::new(0, 0), Coordinates::new(2, 2))
+        .with_corner_positions()
         .with_random_cheese(1, false)
         .with_max_turns(5)
         .build();

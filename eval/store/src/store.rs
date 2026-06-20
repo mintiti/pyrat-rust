@@ -842,6 +842,7 @@ mod tests {
             symmetric: true,
             cheese_count: 41,
             cheese_symmetric: true,
+            player_start: crate::types::PlayerStartRecord::Corners,
         }
     }
 

@@ -275,7 +275,7 @@ async fn rejects_gauntlet_planner_for_round_robin_tournament() {
 /// played.
 #[tokio::test]
 async fn rejects_planner_with_drifted_runtime_game_config() {
-    use pyrat::{Coordinates, GameBuilder};
+    use pyrat::GameBuilder;
 
     let store = Arc::new(Mutex::new(EvalStore::open_in_memory().unwrap()));
     let players = vec![embedded_player("a"), embedded_player("b")];
@@ -289,7 +289,7 @@ async fn rejects_planner_with_drifted_runtime_game_config() {
     let drifted_runtime = GameBuilder::new(3, 3)
         .with_max_turns(99)
         .with_open_maze()
-        .with_custom_positions(Coordinates::new(0, 0), Coordinates::new(2, 2))
+        .with_corner_positions()
         .with_random_cheese(1, false)
         .build();
 
@@ -333,7 +333,7 @@ async fn rejects_planner_with_drifted_runtime_game_config() {
 /// the user sees *what* drifted, not just that hashes differ.
 #[tokio::test]
 async fn drifted_game_config_message_shows_geometry_expected_vs_got() {
-    use pyrat::{Coordinates, GameBuilder};
+    use pyrat::GameBuilder;
 
     let store = Arc::new(Mutex::new(EvalStore::open_in_memory().unwrap()));
     let players = vec![embedded_player("a"), embedded_player("b")];
@@ -345,7 +345,7 @@ async fn drifted_game_config_message_shows_geometry_expected_vs_got() {
     let drifted_runtime = GameBuilder::new(3, 3)
         .with_max_turns(99)
         .with_open_maze()
-        .with_custom_positions(Coordinates::new(0, 0), Coordinates::new(2, 2))
+        .with_corner_positions()
         .with_random_cheese(1, false)
         .build();
 

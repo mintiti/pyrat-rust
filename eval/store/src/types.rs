@@ -13,6 +13,12 @@ pub struct GameConfigRecord {
     pub symmetric: bool,
     pub cheese_count: u32,
     pub cheese_symmetric: bool,
+    /// Player start-position strategy. Skipped on serialization for `Corners`
+    /// (the default), so corner configs — every pre-existing row and the
+    /// committed ladder — keep their exact JSON and `content_hash`. Only
+    /// `Random` configs carry the field and get a distinct hash.
+    #[serde(default, skip_serializing_if = "PlayerStartRecord::is_corners")]
+    pub player_start: PlayerStartRecord,
 }
 
 impl GameConfigRecord {
@@ -30,6 +36,33 @@ impl GameConfigRecord {
         let json = serde_json::to_string(self).expect("GameConfigRecord is always serializable");
         let hash = Sha256::digest(json.as_bytes());
         (format!("{hash:x}"), json)
+    }
+}
+
+/// Player start-position strategy recorded with a game config. Store-native
+/// (no engine dependency — same boundary discipline as [`SeatOrientation`]);
+/// the engine's `PlayerStrategy` is mapped to this at the session boundary.
+///
+/// `Corners` is the default and is omitted on serialization (see
+/// [`GameConfigRecord::player_start`]) so corner-start configs hash exactly as
+/// they did before this field existed. Only `Random` configs carry it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum PlayerStartRecord {
+    /// P1 at (0,0), P2 at the opposite corner — the historical sole behaviour
+    /// and the only start strategy the committed ladder uses.
+    #[default]
+    Corners,
+    /// Both players placed at random (seeded), not necessarily mutual mirrors.
+    Random,
+}
+
+impl PlayerStartRecord {
+    /// `skip_serializing_if` predicate: omit the field for corner starts so
+    /// their JSON (and `content_hash`) is byte-identical to the pre-field
+    /// encoding. Kept in sync with `#[default]` above.
+    #[allow(clippy::trivially_copy_pass_by_ref)] // serde requires `&self`
+    pub(crate) fn is_corners(&self) -> bool {
+        matches!(self, PlayerStartRecord::Corners)
     }
 }
 
@@ -417,5 +450,86 @@ impl From<rusqlite::Error> for AddTournamentPlayerError {
 impl From<rusqlite::Error> for RecordAttemptError {
     fn from(e: rusqlite::Error) -> Self {
         RecordAttemptError::Db(EvalError::Db(e))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn corners_record() -> GameConfigRecord {
+        GameConfigRecord {
+            width: 21,
+            height: 15,
+            max_turns: 300,
+            wall_density: 0.7,
+            mud_density: 0.1,
+            mud_range: 3,
+            connected: true,
+            symmetric: true,
+            cheese_count: 41,
+            cheese_symmetric: true,
+            player_start: PlayerStartRecord::Corners,
+        }
+    }
+
+    /// Adding `player_start` must not change the JSON (or `content_hash`) of a
+    /// corner-start config: every pre-existing row and the committed ladder key
+    /// on that hash. The frozen `Legacy` shape is the exact pre-field encoding.
+    #[test]
+    fn corners_config_hash_byte_identical_to_pre_field_encoding() {
+        #[derive(Serialize)]
+        struct Legacy {
+            width: u32,
+            height: u32,
+            max_turns: u32,
+            wall_density: f64,
+            mud_density: f64,
+            mud_range: u32,
+            connected: bool,
+            symmetric: bool,
+            cheese_count: u32,
+            cheese_symmetric: bool,
+        }
+        let legacy = Legacy {
+            width: 21,
+            height: 15,
+            max_turns: 300,
+            wall_density: 0.7,
+            mud_density: 0.1,
+            mud_range: 3,
+            connected: true,
+            symmetric: true,
+            cheese_count: 41,
+            cheese_symmetric: true,
+        };
+        let legacy_json = serde_json::to_string(&legacy).unwrap();
+        let (hash, json) = corners_record().content_hash_with_json();
+
+        assert!(
+            !json.contains("player_start"),
+            "corner config must omit the field: {json}"
+        );
+        assert_eq!(json, legacy_json, "JSON must match the pre-field encoding");
+        let legacy_hash = format!("{:x}", Sha256::digest(legacy_json.as_bytes()));
+        assert_eq!(hash, legacy_hash, "content_hash must be unchanged");
+    }
+
+    /// A random-start config carries the field, so it hashes distinctly from an
+    /// otherwise-identical corner config.
+    #[test]
+    fn random_start_config_serializes_field_and_changes_hash() {
+        let corners = corners_record();
+        let random = GameConfigRecord {
+            player_start: PlayerStartRecord::Random,
+            ..corners.clone()
+        };
+        let (random_hash, random_json) = random.content_hash_with_json();
+
+        assert!(
+            random_json.contains(r#""player_start":"Random""#),
+            "random config must carry the field: {random_json}"
+        );
+        assert_ne!(corners.content_hash(), random_hash);
     }
 }

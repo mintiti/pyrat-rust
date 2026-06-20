@@ -15,6 +15,6 @@ pub use types::{
     AddTournamentPlayerError, AttemptKey, AttemptOutcome, AttemptRecord, AttemptStatus,
     CreateTournamentError, DeletePlayerError, EvalError, GameConfigRecord, GameResultRecord,
     NewAttempt, NewAttemptOutcome, NewGameResult, NewPlayer, NewTournament, PlayerRecord,
-    RecordAttemptError, RegisterPlayerError, ResultFilter, SeatOrientation, TournamentId,
-    TournamentParticipant, TournamentRecord,
+    PlayerStartRecord, RecordAttemptError, RegisterPlayerError, ResultFilter, SeatOrientation,
+    TournamentId, TournamentParticipant, TournamentRecord,
 };

@@ -285,7 +285,7 @@ pub enum TournamentMismatch {
 /// every `GameConfigRecord` field so the differing one is always visible.
 fn geometry(r: &GameConfigRecord) -> String {
     format!(
-        "{}x{}, max_turns={}, cheese={} (symmetric={}), walls={}, mud={} (range {}), connected={}, symmetric={}",
+        "{}x{}, max_turns={}, cheese={} (symmetric={}), walls={}, mud={} (range {}), connected={}, symmetric={}, start={:?}",
         r.width,
         r.height,
         r.max_turns,
@@ -295,7 +295,8 @@ fn geometry(r: &GameConfigRecord) -> String {
         r.mud_density,
         r.mud_range,
         r.connected,
-        r.symmetric
+        r.symmetric,
+        r.player_start
     )
 }
 
@@ -1256,7 +1257,7 @@ mod tests {
     async fn launch_with_sinks_persists_sink_flush_failure_triggers_abort() {
         use crate::plan::{RoundRobinPlanner, RoundRobinPlannerConfig};
         use pyrat::game::builder::GameBuilder;
-        use pyrat::{Coordinates, Direction};
+        use pyrat::Direction;
         use pyrat_bot_api::Options;
         use pyrat_host::player::{EmbeddedBot, EmbeddedCtx};
         use pyrat_host::wire::TimingMode;
@@ -1276,7 +1277,7 @@ mod tests {
         let game_config = GameBuilder::new(3, 3)
             .with_max_turns(5)
             .with_open_maze()
-            .with_custom_positions(Coordinates::new(0, 0), Coordinates::new(2, 2))
+            .with_corner_positions()
             .with_random_cheese(1, false)
             .build();
 
@@ -1385,7 +1386,7 @@ mod tests {
     async fn dropping_session_cancels_run_loop_and_releases_orchestrator() {
         use crate::plan::{RoundRobinPlanner, RoundRobinPlannerConfig};
         use pyrat::game::builder::GameBuilder;
-        use pyrat::{Coordinates, Direction};
+        use pyrat::Direction;
         use pyrat_bot_api::Options;
         use pyrat_host::player::{EmbeddedBot, EmbeddedCtx};
         use pyrat_host::wire::TimingMode;
@@ -1403,7 +1404,7 @@ mod tests {
         let game_config = GameBuilder::new(3, 3)
             .with_max_turns(5)
             .with_open_maze()
-            .with_custom_positions(Coordinates::new(0, 0), Coordinates::new(2, 2))
+            .with_corner_positions()
             .with_random_cheese(1, false)
             .build();
 
