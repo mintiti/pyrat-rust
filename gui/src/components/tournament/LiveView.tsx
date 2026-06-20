@@ -26,6 +26,7 @@ const MAX_PARALLEL = 4;
 export default function LiveView({ live }: { live: TournamentLive }) {
 	const nav = useTournamentStore((s) => s.nav);
 	const back = useTournamentStore((s) => s.back);
+	const showLaunch = useTournamentStore((s) => s.showLaunch);
 
 	// Ticking elapsed clock.
 	const [now, setNow] = useState(() => Date.now());
@@ -89,17 +90,21 @@ export default function LiveView({ live }: { live: TournamentLive }) {
 				<Text size="xs" c="dimmed">
 					· {elapsed}
 				</Text>
-				{live.status === "running" && (
-					<Button
-						size="compact-xs"
-						variant="subtle"
-						color="red"
-						ml="auto"
-						onClick={() => commands.stopTournament()}
-					>
-						Stop
+				<Group gap="xs" ml="auto">
+					<Button size="compact-xs" variant="subtle" onClick={showLaunch}>
+						New tournament
 					</Button>
-				)}
+					{live.status === "running" && (
+						<Button
+							size="compact-xs"
+							variant="subtle"
+							color="red"
+							onClick={() => commands.stopTournament()}
+						>
+							Stop
+						</Button>
+					)}
+				</Group>
 			</Group>
 
 			<Progress

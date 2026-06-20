@@ -168,6 +168,19 @@ async getGameReplay(tournamentId: number, matchId: number) : Promise<Result<Game
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Launch-form defaults the frontend pre-fills from: the ladder recipe as a
+ * factory config plus the methodology knobs. Derived from the Rust constants
+ * (and the actual preset), so there's no TS mirror to drift.
+ */
+async getTournamentLaunchDefaults() : Promise<Result<LaunchDefaults, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_tournament_launch_defaults") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -248,19 +261,44 @@ export type DiscoveredBot = { agent_id: string; name: string; run_command: strin
  */
 working_dir: string; description: string; developer: string; language: string; tags: string[] }
 /**
+ * The game-instance distribution configured on the launch screen: board,
+ * maze, start strategy, cheese. This is the *distribution*; the tournament
+ * seed that selects which instances get drawn lives on `LaunchParams`.
+ */
+export type GameFactoryConfig = { width: number; height: number; max_turns: number; wall_density: number; mud_density: number; mud_range: number; connected: boolean; symmetric: boolean; player_start: PlayerStart; cheese_count: number; cheese_symmetric: boolean }
+/**
  * Final-position board + verdict for one finished game, or a reason it's
  * unavailable (failed match, or replay file missing).
  */
 export type GameReplayState = { kind: "available"; final_state: MazeState; winner: string | null; player1_id: string; player2_id: string; player1_score: number; player2_score: number; turns: number } | { kind: "missing"; reason: string }
 /**
- * Launch parameters. Timing / preset / games / concurrency come from the
- * pinned constants, not the wire (`tournament_config`).
+ * Launch-form defaults: the ladder recipe as a factory config plus the
+ * methodology knobs. The frontend pre-fills from this, so the Rust constants
+ * stay the single source of truth (no stale TS mirror to drift).
+ */
+export type LaunchDefaults = { factory: GameFactoryConfig; mazes_per_matchup: number; move_timeout_ms: number; preprocessing_timeout_ms: number; max_parallel: number }
+/**
+ * Launch parameters. The factory + methodology knobs are configured on the
+ * launch screen; the frontend pre-fills them from `get_tournament_launch_defaults`.
  */
 export type LaunchParams = { bots: BotPick[]; 
 /**
  * The starred bot to measure → gauntlet. `None` → round-robin.
  */
-target: string | null; name: string | null }
+target: string | null; name: string | null; 
+/**
+ * The game-instance distribution (board / maze / starts / cheese).
+ */
+factory: GameFactoryConfig; 
+/**
+ * Mazes per matchup; the paired schedule runs 2× this many games.
+ */
+mazes_per_matchup: number; move_timeout_ms: number; preprocessing_timeout_ms: number; max_parallel: number; 
+/**
+ * Tournament seed (selects which instances are drawn). `None` → random,
+ * capped to the JS-safe range so it round-trips for reproducibility.
+ */
+tournament_seed: number | null }
 /**
  * Per-player option overrides + match flags, bundled so start_match stays under specta's 10-arg limit.
  */
@@ -310,6 +348,11 @@ export type PlayerLite = { player_id: string }
  * Player identity — specta-friendly mirror of pyrat_wire::Player.
  */
 export type PlayerSide = "Player1" | "Player2"
+/**
+ * Player start strategy for the game-instance factory. Mirrors the engine's
+ * `PlayerStrategy` (corners | random); fixed positions are parked.
+ */
+export type PlayerStart = "corners" | "random"
 export type PlayerState = { position: Coord; score: number; mud_turns: number }
 /**
  * Emitted when all bots enter the preprocessing phase.

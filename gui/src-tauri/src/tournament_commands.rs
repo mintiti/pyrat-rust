@@ -10,6 +10,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
+use pyrat::game::builder::{
+    CheeseStrategy, GameBuilder, GameConfig, MazeParams, MazeStrategy, PlayerStrategy,
+};
 use pyrat_eval::{
     EvalSession, MatchupKey, ResolvedPlayer, TournamentParams, TournamentSpec, TournamentState,
 };
@@ -41,14 +44,179 @@ pub struct BotPick {
     pub working_dir: String,
 }
 
-/// Launch parameters. Timing / preset / games / concurrency come from the
-/// pinned constants, not the wire (`tournament_config`).
+/// Tournament seeds round-trip through the frontend as a JS `number`, exact
+/// only up to 2^53 - 1. Generate / accept seeds in that range so a reproduced
+/// tournament uses the same seed the user saw. (The CLI keeps the full `u64`;
+/// it never crosses a JS boundary.)
+const MAX_JS_SAFE_SEED: u64 = (1 << 53) - 1;
+
+/// Player start strategy for the game-instance factory. Mirrors the engine's
+/// `PlayerStrategy` (corners | random); fixed positions are parked.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum PlayerStart {
+    Corners,
+    Random,
+}
+
+/// The game-instance distribution configured on the launch screen: board,
+/// maze, start strategy, cheese. This is the *distribution*; the tournament
+/// seed that selects which instances get drawn lives on `LaunchParams`.
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct GameFactoryConfig {
+    pub width: u32,
+    pub height: u32,
+    pub max_turns: u32,
+    pub wall_density: f64,
+    pub mud_density: f64,
+    pub mud_range: u32,
+    pub connected: bool,
+    pub symmetric: bool,
+    pub player_start: PlayerStart,
+    pub cheese_count: u32,
+    pub cheese_symmetric: bool,
+}
+
+impl GameFactoryConfig {
+    /// Build the engine `GameConfig`, validating engine bounds (the builder
+    /// asserts on out-of-range dims / zero max_turns) and the seed-independent
+    /// random-start invariants. A single `create(seed)` smoke test (in
+    /// `build_and_spawn`) catches per-seed cheese-capacity failures; random
+    /// starts draw many seeds, so symmetric-cheese soundness is enforced here
+    /// instead — no seed can fail mid-tournament.
+    fn to_game_config(&self) -> Result<GameConfig, String> {
+        if !(2..=255).contains(&self.width) {
+            return Err(format!("width must be 2..=255, got {}", self.width));
+        }
+        if !(2..=255).contains(&self.height) {
+            return Err(format!("height must be 2..=255, got {}", self.height));
+        }
+        if !(1..=u32::from(u16::MAX)).contains(&self.max_turns) {
+            return Err(format!(
+                "max_turns must be 1..=65535, got {}",
+                self.max_turns
+            ));
+        }
+        if self.mud_range > u32::from(u8::MAX) {
+            return Err(format!("mud_range must be <= 255, got {}", self.mud_range));
+        }
+        if self.mud_density > 0.0 && self.mud_range < 2 {
+            return Err("mud_range must be >= 2 when mud is enabled".into());
+        }
+        if self.cheese_count < 1 {
+            return Err("cheese_count must be >= 1".into());
+        }
+        if self.cheese_count > u32::from(u16::MAX) {
+            return Err(format!(
+                "cheese_count must be <= 65535, got {}",
+                self.cheese_count
+            ));
+        }
+
+        let area = self.width.saturating_mul(self.height);
+        if matches!(self.player_start, PlayerStart::Random) && self.cheese_symmetric {
+            if self.cheese_count % 2 == 1 {
+                return Err(
+                    "random starts with symmetric cheese need an even cheese count: \
+                     the unpaired (center) piece can't be placed when a random start \
+                     occupies the center"
+                        .into(),
+                );
+            }
+            // A random pair removes up to two mirror-pairs of cells (each player
+            // + its mirror); an odd×odd board also reserves the self-mirror
+            // center, which can't hold a paired piece.
+            let odd_board = self.width % 2 == 1 && self.height % 2 == 1;
+            let cap = area.saturating_sub(if odd_board { 5 } else { 4 });
+            if self.cheese_count > cap {
+                return Err(format!(
+                    "random + symmetric cheese over capacity: max {cap} on this board, got {}",
+                    self.cheese_count
+                ));
+            }
+        }
+
+        let maze = MazeParams {
+            wall_density: self.wall_density as f32,
+            connected: self.connected,
+            symmetric: self.symmetric,
+            mud_density: self.mud_density as f32,
+            mud_range: self.mud_range as u8,
+        };
+        let builder = GameBuilder::new(self.width as u8, self.height as u8)
+            .with_max_turns(self.max_turns as u16)
+            .with_random_maze(maze);
+        let builder = match self.player_start {
+            PlayerStart::Corners => builder.with_corner_positions(),
+            PlayerStart::Random => builder.with_random_positions(),
+        };
+        Ok(builder
+            .with_random_cheese(self.cheese_count as u16, self.cheese_symmetric)
+            .build())
+    }
+}
+
+/// Build a factory config from an engine `GameConfig` (e.g. a preset) — the
+/// inverse of [`GameFactoryConfig::to_game_config`]. Used for launch defaults
+/// so they mirror the actual preset rather than a hand-copied constant (the
+/// stale-mirror class of bug).
+fn factory_from_game_config(cfg: &GameConfig) -> Result<GameFactoryConfig, String> {
+    let MazeStrategy::Random(p) = cfg.maze() else {
+        return Err("default config uses a fixed maze (not representable as a factory)".into());
+    };
+    let CheeseStrategy::Random { count, symmetric } = cfg.cheese() else {
+        return Err("default config uses fixed cheese".into());
+    };
+    let player_start = match cfg.players() {
+        PlayerStrategy::Corners => PlayerStart::Corners,
+        PlayerStrategy::Random => PlayerStart::Random,
+        PlayerStrategy::Fixed(..) => return Err("default config uses fixed positions".into()),
+    };
+    Ok(GameFactoryConfig {
+        width: u32::from(cfg.width()),
+        height: u32::from(cfg.height()),
+        max_turns: u32::from(cfg.max_turns()),
+        wall_density: f64::from(p.wall_density),
+        mud_density: f64::from(p.mud_density),
+        mud_range: u32::from(p.mud_range),
+        connected: p.connected,
+        symmetric: p.symmetric,
+        player_start,
+        cheese_count: u32::from(*count),
+        cheese_symmetric: *symmetric,
+    })
+}
+
+/// Launch parameters. The factory + methodology knobs are configured on the
+/// launch screen; the frontend pre-fills them from `get_tournament_launch_defaults`.
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct LaunchParams {
     pub bots: Vec<BotPick>,
     /// The starred bot to measure → gauntlet. `None` → round-robin.
     pub target: Option<String>,
     pub name: Option<String>,
+    /// The game-instance distribution (board / maze / starts / cheese).
+    pub factory: GameFactoryConfig,
+    /// Mazes per matchup; the paired schedule runs 2× this many games.
+    pub mazes_per_matchup: u32,
+    pub move_timeout_ms: u32,
+    pub preprocessing_timeout_ms: u32,
+    pub max_parallel: u32,
+    /// Tournament seed (selects which instances are drawn). `None` → random,
+    /// capped to the JS-safe range so it round-trips for reproducibility.
+    pub tournament_seed: Option<u64>,
+}
+
+/// Launch-form defaults: the ladder recipe as a factory config plus the
+/// methodology knobs. The frontend pre-fills from this, so the Rust constants
+/// stay the single source of truth (no stale TS mirror to drift).
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct LaunchDefaults {
+    pub factory: GameFactoryConfig,
+    pub mazes_per_matchup: u32,
+    pub move_timeout_ms: u32,
+    pub preprocessing_timeout_ms: u32,
+    pub max_parallel: u32,
 }
 
 /// Row in the "in this store" panel.
@@ -166,6 +334,22 @@ pub async fn start_tournament(
     }
 }
 
+/// Launch-form defaults the frontend pre-fills from: the ladder recipe as a
+/// factory config plus the methodology knobs. Derived from the Rust constants
+/// (and the actual preset), so there's no TS mirror to drift.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_tournament_launch_defaults() -> Result<LaunchDefaults, String> {
+    let factory = factory_from_game_config(&tournament_config::game_config()?)?;
+    Ok(LaunchDefaults {
+        factory,
+        mazes_per_matchup: tournament_config::MAZES_PER_MATCHUP,
+        move_timeout_ms: tournament_config::MOVE_TIMEOUT_MS,
+        preprocessing_timeout_ms: tournament_config::PREPROCESSING_TIMEOUT_MS,
+        max_parallel: tournament_config::MAX_PARALLEL,
+    })
+}
+
 /// Create the tournament row and spawn its runner. Returns the new id plus
 /// the cancel/handle the caller installs into `TournamentPhase::Running`.
 /// Phase management lives entirely in `start_tournament`; this is the fallible
@@ -207,22 +391,62 @@ async fn build_and_spawn(
         .collect();
     let anchor_id = tournament_config::derive_anchor(&player_ids, params.target.as_deref())
         .ok_or("could not pick an Elo anchor (need a non-target player)")?;
-    let total = total_games(&format, canonical_players.len());
-    let plan_summary = plan_summary(&params.target, canonical_players.len());
+
+    // Resolve & validate the measurement conditions once, here — the runner
+    // consumes these rather than reaching back into pinned constants.
+    let game_config = params.factory.to_game_config()?;
+    let target_games_per_matchup = params.mazes_per_matchup.saturating_mul(2);
+    if target_games_per_matchup == 0 {
+        return Err("mazes_per_matchup must be >= 1".into());
+    }
+    let tournament_seed = match params.tournament_seed {
+        Some(s) if s > MAX_JS_SAFE_SEED => {
+            return Err(format!(
+                "tournament_seed must be <= {MAX_JS_SAFE_SEED} (JS-safe range)"
+            ));
+        },
+        Some(s) => s,
+        None => fastrand::u64(0..=MAX_JS_SAFE_SEED),
+    };
+    // Smoke-test at the tournament seed: an invalid config fails here (clear
+    // message, no dangling row) rather than inside the runner. For random
+    // starts this validates only one draw; the seed-independent invariants in
+    // `to_game_config` cover the rest.
+    game_config
+        .create(Some(tournament_seed))
+        .map_err(|e| format!("invalid game config: {e}"))?;
+
+    let seat_policy = tournament_config::SEAT_POLICY;
+    let timing = tournament_config::per_match_timing(
+        params.move_timeout_ms,
+        params.preprocessing_timeout_ms,
+    );
+    let orchestrator_config = tournament_config::orchestrator_config(
+        params.move_timeout_ms,
+        params.preprocessing_timeout_ms,
+        params.max_parallel,
+    );
+
+    let total = total_games(&format, canonical_players.len(), target_games_per_matchup);
+    let plan_summary = plan_summary(
+        &params.target,
+        canonical_players.len(),
+        &params.factory,
+        target_games_per_matchup,
+        params.move_timeout_ms,
+    );
 
     let spec = TournamentSpec {
         name: params.name.clone(),
         format: format_str.clone(),
-        target_games_per_matchup: Some(tournament_config::TARGET_GAMES_PER_MATCHUP),
+        target_games_per_matchup: Some(target_games_per_matchup),
         params_json: TournamentParams {
             max_failures_per_pair: tournament_config::MAX_FAILURES_PER_PAIR,
-            seat_policy: tournament_config::SEAT_POLICY,
+            seat_policy,
         }
         .to_json(),
-        game_config: tournament_config::game_config()?,
-        // SQLite INTEGER is signed; mask to 63 bits so it round-trips. The GUI
-        // has fastrand, not rand (the CLI's masked_random_seed).
-        tournament_seed: fastrand::u64(..) & (i64::MAX as u64),
+        game_config: game_config.clone(),
+        tournament_seed,
     };
 
     let created =
@@ -236,7 +460,7 @@ async fn build_and_spawn(
     let run = TournamentRun {
         tournament_id,
         game_config_id: created.game_config_id,
-        tournament_seed: spec.tournament_seed,
+        tournament_seed,
         name: params.name,
         format_str,
         players: canonical_players,
@@ -247,6 +471,11 @@ async fn build_and_spawn(
         total_games: total,
         player_ids,
         replay_dir,
+        game_config,
+        target_games_per_matchup,
+        seat_policy,
+        timing,
+        orchestrator_config,
     };
 
     let app_for_task = app.clone();
@@ -594,13 +823,20 @@ fn resolve_players(bots: &[BotPick]) -> Vec<ResolvedPlayer> {
         .collect()
 }
 
-/// "my-bot vs 5 (gauntlet) · tiny preset · 200 ms/move" — the shared-core
-/// provenance string. Target namespace is stripped for readability.
-fn plan_summary(target: &Option<String>, player_count: usize) -> String {
+/// "my-bot vs 5 (gauntlet) · 11×9 · 16 games/matchup · 200 ms/move" — the
+/// provenance string, derived from the *configured* conditions (not pinned
+/// constants), so it can never drift from what actually runs. Target namespace
+/// is stripped for readability.
+fn plan_summary(
+    target: &Option<String>,
+    player_count: usize,
+    factory: &GameFactoryConfig,
+    target_games: u32,
+    move_timeout_ms: u32,
+) -> String {
     let conditions = format!(
-        "{} preset · {} ms/move",
-        tournament_config::PRESET,
-        tournament_config::MOVE_TIMEOUT_MS
+        "{}×{} · {target_games} games/matchup · {move_timeout_ms} ms/move",
+        factory.width, factory.height
     );
     match target {
         Some(t) => {
@@ -688,5 +924,92 @@ fn expected_pairs(format: &str, players: &[String]) -> Vec<(String, String)> {
             }
             pairs
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 7×7, no walls/mud, random symmetric — the interesting validation case.
+    fn random_symmetric_factory() -> GameFactoryConfig {
+        GameFactoryConfig {
+            width: 7,
+            height: 7,
+            max_turns: 100,
+            wall_density: 0.0,
+            mud_density: 0.0,
+            mud_range: 2,
+            connected: true,
+            symmetric: true,
+            player_start: PlayerStart::Random,
+            cheese_count: 4,
+            cheese_symmetric: true,
+        }
+    }
+
+    #[test]
+    fn random_symmetric_odd_cheese_rejected() {
+        let f = GameFactoryConfig {
+            cheese_count: 5,
+            ..random_symmetric_factory()
+        };
+        let Err(err) = f.to_game_config() else {
+            panic!("odd symmetric cheese with random starts should be rejected");
+        };
+        assert!(err.contains("even cheese count"), "{err}");
+    }
+
+    #[test]
+    fn random_symmetric_even_cheese_over_capacity_rejected() {
+        // 7×7 odd board → cap = 49 - 5 = 44; 46 is over.
+        let f = GameFactoryConfig {
+            cheese_count: 46,
+            ..random_symmetric_factory()
+        };
+        let Err(err) = f.to_game_config() else {
+            panic!("over-capacity random symmetric cheese should be rejected");
+        };
+        assert!(err.contains("over capacity"), "{err}");
+    }
+
+    #[test]
+    fn random_symmetric_even_within_capacity_builds_every_seed() {
+        // The capacity cap exists so no *seed* can fail mid-tournament: sweep.
+        let f = GameFactoryConfig {
+            cheese_count: 10,
+            ..random_symmetric_factory()
+        };
+        let cfg = f.to_game_config().expect("should build");
+        for seed in 0..30u64 {
+            cfg.create(Some(seed))
+                .unwrap_or_else(|e| panic!("seed {seed}: {e}"));
+        }
+    }
+
+    #[test]
+    fn out_of_range_dims_rejected() {
+        for (w, h) in [(1, 7), (300, 7), (7, 1)] {
+            let f = GameFactoryConfig {
+                width: w,
+                height: h,
+                ..random_symmetric_factory()
+            };
+            assert!(f.to_game_config().is_err(), "{w}x{h} should be rejected");
+        }
+    }
+
+    #[test]
+    fn launch_defaults_roundtrip_through_factory() {
+        // The default (tiny preset) must be representable as a factory and
+        // rebuildable — the no-stale-mirror guarantee for `LaunchDefaults`.
+        let cfg = tournament_config::game_config().unwrap();
+        let factory = factory_from_game_config(&cfg).unwrap();
+        factory
+            .to_game_config()
+            .unwrap()
+            .create(Some(7))
+            .expect("default factory builds");
+        assert!(matches!(factory.player_start, PlayerStart::Corners));
     }
 }

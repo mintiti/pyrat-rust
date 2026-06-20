@@ -1,12 +1,12 @@
-//! Pinned V1 tournament conditions for the GUI.
+//! Default tournament conditions for the GUI launch form.
 //!
-//! These mirror the committed ladder (`botpack/ladder.toml`) so GUI ratings
-//! stay comparable to the CI ladder and alpharat — the one deliberate
+//! These mirror the committed ladder (`botpack/ladder.toml`) so the *default*
+//! launch stays comparable to the CI ladder and alpharat — the one deliberate
 //! divergence is `MAX_PARALLEL` (the ladder uses 2 for its CI runtime budget;
-//! an interactive machine gets 4). They are fixed constants, not user inputs:
-//! the launch screen quotes them ("tiny preset · 200 ms/move · 4 concurrent")
-//! but never lets the user edit them in V1. Keeping them here means a drift in
-//! CLI / GUI-match defaults can never silently change a GUI tournament.
+//! an interactive machine gets 4). The launch screen pre-fills from these (via
+//! `get_tournament_launch_defaults`) and the user can override; keeping them as
+//! Rust constants means there's no stale TS mirror to drift. `SEAT_POLICY` and
+//! the anchor are not user knobs (soundness / methodology), so they stay fixed.
 
 use std::time::Duration;
 
@@ -29,13 +29,12 @@ pub const NETWORK_GRACE_MS: u32 = 50;
 /// Large because botpack bots cold-build `cargo run --release` on first launch.
 pub const STARTUP_TIMEOUT_MS: u32 = 120_000;
 
-/// Paired, seat-debiased schedule: each maze is played both seatings, so the
-/// matchup runs `2 × MAZES_PER_MATCHUP` games. 8 mazes (16 games) is
-/// like-for-like with the prior single-seat 15, but de-biases seat per maze
-/// so GUI ratings are demo-defensible. Pinned (no launch control) like the
-/// other V1 conditions.
+/// Default mazes per matchup (the launch-form pre-fill, configurable now). The
+/// paired, seat-debiased schedule plays each maze both seatings, so a matchup
+/// runs 2× this many games. 8 mazes (16 games) is like-for-like with the prior
+/// single-seat 15 but de-biases seat per maze so GUI ratings are defensible.
 pub const MAZES_PER_MATCHUP: u32 = 8;
-pub const TARGET_GAMES_PER_MATCHUP: u32 = 2 * MAZES_PER_MATCHUP;
+/// Always paired (seat de-biasing is a soundness property, not a knob).
 pub const SEAT_POLICY: SeatPolicy = SeatPolicy::Paired;
 pub const MAX_FAILURES_PER_PAIR: u32 = 1;
 
@@ -59,25 +58,33 @@ pub fn game_config() -> Result<GameConfig, String> {
 }
 
 /// Per-match timing handed to the planner config (distinct from the
-/// orchestrator's setup/playing timing below).
-pub fn per_match_timing() -> Timing {
+/// orchestrator's setup/playing timing below). The move + preprocessing
+/// budgets are configured per launch (the constants above are only the
+/// launch-form defaults); the mode is fixed.
+pub fn per_match_timing(move_timeout_ms: u32, preprocessing_timeout_ms: u32) -> Timing {
     Timing {
         mode: TimingMode::Wait,
-        move_timeout_ms: MOVE_TIMEOUT_MS,
-        preprocessing_timeout_ms: PREPROCESSING_TIMEOUT_MS,
+        move_timeout_ms,
+        preprocessing_timeout_ms,
     }
 }
 
-/// Orchestrator config with the pinned setup/playing timeouts and concurrency.
-pub fn orchestrator_config() -> OrchestratorConfig {
+/// Orchestrator config. Move/preprocessing budgets and concurrency come from
+/// the launch params; the configure / network-grace / startup timeouts stay
+/// pinned (process-launch infrastructure, not measurement conditions).
+pub fn orchestrator_config(
+    move_timeout_ms: u32,
+    preprocessing_timeout_ms: u32,
+    max_parallel: u32,
+) -> OrchestratorConfig {
     OrchestratorConfig {
-        max_parallel: MAX_PARALLEL.max(1) as usize,
+        max_parallel: max_parallel.max(1) as usize,
         setup_timing: SetupTiming {
             configure_timeout: Duration::from_millis(u64::from(CONFIGURE_TIMEOUT_MS)),
-            preprocessing_timeout: Duration::from_millis(u64::from(PREPROCESSING_TIMEOUT_MS)),
+            preprocessing_timeout: Duration::from_millis(u64::from(preprocessing_timeout_ms)),
         },
         playing_config: PlayingConfig {
-            move_timeout: Duration::from_millis(u64::from(MOVE_TIMEOUT_MS)),
+            move_timeout: Duration::from_millis(u64::from(move_timeout_ms)),
             network_grace: Duration::from_millis(u64::from(NETWORK_GRACE_MS)),
             ..Default::default()
         },

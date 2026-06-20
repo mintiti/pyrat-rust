@@ -29,8 +29,8 @@ use events::{
 use match_config::{load_match_config, save_match_config};
 use tauri_specta::{collect_commands, collect_events, Builder};
 use tournament_commands::{
-    get_game_replay, get_tournament_standings, list_tournaments, start_tournament, stop_tournament,
-    tournament_status,
+    get_game_replay, get_tournament_launch_defaults, get_tournament_standings, list_tournaments,
+    start_tournament, stop_tournament, tournament_status,
 };
 use tournament_events::{
     NowPlayingEvent, StandingsUpdatedEvent, TournamentAbortedEvent, TournamentFinishedEvent,
@@ -64,7 +64,8 @@ fn main() {
             tournament_status,
             list_tournaments,
             get_tournament_standings,
-            get_game_replay
+            get_game_replay,
+            get_tournament_launch_defaults
         ])
         .events(collect_events![
             MatchStartedEvent,

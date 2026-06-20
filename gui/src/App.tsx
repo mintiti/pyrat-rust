@@ -9,6 +9,7 @@ import TournamentsPage from "./components/TournamentsPage";
 import LiveChip from "./components/tournament/LiveChip";
 import { useTournamentEvents } from "./components/tournament/useTournamentEvents";
 import { useMatchStore } from "./stores/matchStore";
+import { useTournamentStore } from "./stores/tournamentStore";
 
 export type GameView = "home" | "setup" | "match";
 
@@ -16,6 +17,7 @@ export default function App() {
 	// Mounted at the root so the tournament store updates across every tab
 	// (the live chip stays current while the user is in Play/Analysis).
 	useTournamentEvents();
+	const showLive = useTournamentStore((s) => s.showLive);
 
 	const [page, setPage] = useState<Page>("game");
 	const [gameView, setGameView] = useState<GameView>("home");
@@ -63,7 +65,12 @@ export default function App() {
 				{content}
 				{/* Glanceable from any tab; click jumps to the live view. */}
 				<Box pos="fixed" top={10} right={14} style={{ zIndex: 200 }}>
-					<LiveChip onClick={() => handlePageNav("tournaments")} />
+					<LiveChip
+						onClick={() => {
+							showLive();
+							handlePageNav("tournaments");
+						}}
+					/>
 				</Box>
 			</AppShell.Main>
 		</AppShell>

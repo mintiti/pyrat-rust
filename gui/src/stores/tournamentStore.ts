@@ -70,6 +70,7 @@ interface TournamentStore {
 	nav: TournamentNav;
 	// navigation
 	showLaunch: () => void;
+	showLive: () => void;
 	navigate: (nav: TournamentNav) => void;
 	back: () => void;
 	// event handlers
@@ -88,6 +89,11 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 	nav: { kind: "overview" },
 
 	showLaunch: () => set({ screen: "launch", nav: { kind: "overview" } }),
+
+	// Return to the live view (e.g. from the launch screen or the LiveChip).
+	// Only meaningful when a tournament is live; the chip / banner that call
+	// it are shown only then.
+	showLive: () => set({ screen: "live" }),
 
 	navigate: (nav) => set({ nav }),
 

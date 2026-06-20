@@ -79,3 +79,22 @@ describe("tournamentStore live-row guards", () => {
 		expect(useTournamentStore.getState().live?.liveByMatch[9]).toBeUndefined();
 	});
 });
+
+describe("tournamentStore launch ↔ live navigation", () => {
+	it("onStarted shows the live screen; showLaunch / showLive toggle it", () => {
+		const s = useTournamentStore.getState();
+		s.onStarted(started(), 0);
+		expect(useTournamentStore.getState().screen).toBe("live");
+
+		// Leave the live view to start another tournament...
+		s.showLaunch();
+		expect(useTournamentStore.getState().screen).toBe("launch");
+		expect(useTournamentStore.getState().nav).toEqual({ kind: "overview" });
+
+		// ...and return to the still-running one (chip / banner).
+		s.showLive();
+		expect(useTournamentStore.getState().screen).toBe("live");
+		// The live data is untouched by the nav round-trip.
+		expect(useTournamentStore.getState().live?.tournamentId).toBe(1);
+	});
+});

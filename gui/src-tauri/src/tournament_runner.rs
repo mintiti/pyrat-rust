@@ -16,14 +16,17 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::Mutex;
+use pyrat::game::builder::GameConfig;
 use pyrat_eval::{
     gauntlet_slot_order, split_gauntlet_players, EvalMatchDescriptor, EvalSession, GauntletPlanner,
     GauntletPlannerConfig, MatchupKey, MatchupOutcome, Planner, ResolvedPlayer, RoundRobinPlanner,
-    RoundRobinPlannerConfig, SessionConfig, SessionEvent, SessionMode, TournamentState,
+    RoundRobinPlannerConfig, SeatPolicy, SessionConfig, SessionEvent, SessionMode, TournamentState,
 };
 use pyrat_eval_store::{compute_elo_with_uncertainty, EloOptions, EvalStore, TournamentId};
 use pyrat_host::match_host::MatchEvent;
-use pyrat_orchestrator::{DirectoryWriter, MatchSink, OrchestratorEvent, ReplaySink, SinkRole};
+use pyrat_orchestrator::{
+    DirectoryWriter, MatchSink, OrchestratorConfig, OrchestratorEvent, ReplaySink, SinkRole, Timing,
+};
 use tauri::AppHandle;
 use tauri_specta::Event;
 use tokio_util::sync::CancellationToken;
@@ -68,6 +71,16 @@ pub struct TournamentRun {
     pub total_games: u32,
     /// Ordered player ids (slot order) for standings rows.
     pub player_ids: Vec<String>,
+    // Resolved measurement conditions, built once by the command from the
+    // launch params (no longer pinned constants). The runner consumes these
+    // rather than reaching back into `tournament_config`.
+    /// The game-instance distribution (board / maze / starts / cheese).
+    pub game_config: GameConfig,
+    /// Games per matchup (= 2 × mazes for the paired schedule).
+    pub target_games_per_matchup: u32,
+    pub seat_policy: SeatPolicy,
+    pub timing: Timing,
+    pub orchestrator_config: OrchestratorConfig,
     /// Where per-match `ReplayFile` JSONs are written (one per match), for
     /// thumbnails and the game page. An open failure disables thumbnails for
     /// this run but never blocks the tournament.
@@ -100,21 +113,25 @@ pub async fn run_tournament(
         total_games,
         player_ids,
         replay_dir,
+        game_config,
+        target_games_per_matchup,
+        seat_policy,
+        timing,
+        orchestrator_config,
     } = run;
 
-    // Build the planner for the chosen format.
+    // Build the planner for the chosen format from the resolved conditions.
     let elo_options = tournament_config::elo_options(&anchor_id);
-    let timing = tournament_config::per_match_timing();
     let planner: Box<dyn Planner> = match &format {
         RunnerFormat::RoundRobin => Box::new(RoundRobinPlanner::new(RoundRobinPlannerConfig {
             players: players.clone(),
-            game_config: tournament_config::game_config()?,
+            game_config: game_config.clone(),
             game_config_id: game_config_id.clone(),
             timing,
             tournament_id,
-            target_per_pair: tournament_config::TARGET_GAMES_PER_MATCHUP,
+            target_per_pair: target_games_per_matchup,
             max_failures_per_pair: tournament_config::MAX_FAILURES_PER_PAIR,
-            seat_policy: tournament_config::SEAT_POLICY,
+            seat_policy,
             tournament_seed,
         })),
         RunnerFormat::Gauntlet {
@@ -127,13 +144,13 @@ pub async fn run_tournament(
             Box::new(GauntletPlanner::new(GauntletPlannerConfig {
                 challenger: challenger_p,
                 opponents: opponent_ps,
-                game_config: tournament_config::game_config()?,
+                game_config: game_config.clone(),
                 game_config_id: game_config_id.clone(),
                 timing,
                 tournament_id,
-                target_each: tournament_config::TARGET_GAMES_PER_MATCHUP,
+                target_each: target_games_per_matchup,
                 max_failures_per_pair: tournament_config::MAX_FAILURES_PER_PAIR,
-                seat_policy: tournament_config::SEAT_POLICY,
+                seat_policy,
                 tournament_seed,
             }))
         },
@@ -160,7 +177,7 @@ pub async fn run_tournament(
         store,
         SessionMode { tournament_id },
         planner,
-        tournament_config::orchestrator_config(),
+        orchestrator_config,
         elo_options.clone(),
         SessionConfig::default(),
         extra_sinks,
@@ -445,12 +462,14 @@ fn games_for(state: &TournamentState, player_id: &str) -> u32 {
 }
 
 /// Number of games a complete tournament will produce, for the progress bar.
-pub fn total_games(format: &RunnerFormat, player_count: usize) -> u32 {
+/// `target_per_matchup` is the resolved games-per-matchup (2 × mazes for the
+/// paired schedule), no longer a pinned constant.
+pub fn total_games(format: &RunnerFormat, player_count: usize, target_per_matchup: u32) -> u32 {
     let matchups = match format {
         RunnerFormat::RoundRobin => player_count * player_count.saturating_sub(1) / 2,
         RunnerFormat::Gauntlet { opponents, .. } => opponents.len(),
     };
-    matchups as u32 * tournament_config::TARGET_GAMES_PER_MATCHUP
+    matchups as u32 * target_per_matchup
 }
 
 /// Order players canonically for a gauntlet (challenger first), matching the
