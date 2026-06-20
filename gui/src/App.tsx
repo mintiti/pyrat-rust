@@ -1,15 +1,22 @@
-import { AppShell } from "@mantine/core";
+import { AppShell, Box } from "@mantine/core";
 import { useState } from "react";
 import BotsPage from "./components/BotsPage";
 import HomePage from "./components/HomePage";
 import MatchView from "./components/MatchView";
 import SetupView from "./components/SetupView";
 import Sidebar, { type Page } from "./components/Sidebar";
+import TournamentsPage from "./components/TournamentsPage";
+import LiveChip from "./components/tournament/LiveChip";
+import { useTournamentEvents } from "./components/tournament/useTournamentEvents";
 import { useMatchStore } from "./stores/matchStore";
 
 export type GameView = "home" | "setup" | "match";
 
 export default function App() {
+	// Mounted at the root so the tournament store updates across every tab
+	// (the live chip stays current while the user is in Play/Analysis).
+	useTournamentEvents();
+
 	const [page, setPage] = useState<Page>("game");
 	const [gameView, setGameView] = useState<GameView>("home");
 
@@ -24,8 +31,15 @@ export default function App() {
 	let content: React.ReactNode;
 	if (page === "bots") {
 		content = <BotsPage />;
+	} else if (page === "tournaments") {
+		content = <TournamentsPage />;
 	} else if (gameView === "home") {
-		content = <HomePage onNavigate={setGameView} />;
+		content = (
+			<HomePage
+				onNavigate={setGameView}
+				onOpenTournaments={() => handlePageNav("tournaments")}
+			/>
+		);
 	} else if (gameView === "setup") {
 		content = (
 			<SetupView
@@ -45,7 +59,13 @@ export default function App() {
 			<AppShell.Navbar>
 				<Sidebar active={page} onNavigate={handlePageNav} />
 			</AppShell.Navbar>
-			<AppShell.Main>{content}</AppShell.Main>
+			<AppShell.Main>
+				{content}
+				{/* Glanceable from any tab; click jumps to the live view. */}
+				<Box pos="fixed" top={10} right={14} style={{ zIndex: 200 }}>
+					<LiveChip onClick={() => handlePageNav("tournaments")} />
+				</Box>
+			</AppShell.Main>
 		</AppShell>
 	);
 }

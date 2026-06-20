@@ -740,7 +740,7 @@ export function useDisplayState(): DisplayState | null {
 }
 
 /** Wrap a plain MazeState as a DisplayState (no mud, so destinations = positions). */
-function toDisplayState(maze: MazeState): DisplayState {
+export function toDisplayState(maze: MazeState): DisplayState {
 	return {
 		...maze,
 		player1Destination: maze.player1.position,

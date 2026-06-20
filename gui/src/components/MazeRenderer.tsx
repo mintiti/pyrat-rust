@@ -26,6 +26,10 @@ type Props = {
 	layout?: LayoutMetrics | null;
 	showCellIndices?: boolean;
 	hideScoreStrip?: boolean;
+	/** Render a plain board with no match-store coupling: no PV arrows, no drag
+	 * overlay, and no reserved score-strip margin. Used for tournament boards,
+	 * which have their own (non-match) state. */
+	staticBoard?: boolean;
 };
 
 export default function MazeRenderer({
@@ -33,6 +37,7 @@ export default function MazeRenderer({
 	layout: externalLayout,
 	showCellIndices,
 	hideScoreStrip,
+	staticBoard,
 }: Props) {
 	const [assets, setAssets] = useState<AssetMap | null>(null);
 	const { ref, width, height } = useElementSize();
@@ -43,7 +48,7 @@ export default function MazeRenderer({
 	const matchPhase = useMatchStore((s) => s.matchPhase);
 	const isAtTip = useIsAtTip();
 	const showDragOverlay =
-		mode === "step" && isAtTip && matchPhase === "playing";
+		!staticBoard && mode === "step" && isAtTip && matchPhase === "playing";
 
 	useEffect(() => {
 		loadAssets().then(setAssets);
@@ -53,8 +58,22 @@ export default function MazeRenderer({
 	const internalLayout = useMemo(() => {
 		if (externalLayout !== undefined) return null;
 		if (width === 0 || height === 0) return null;
-		return computeLayout(width, height, gameState.width, gameState.height);
-	}, [externalLayout, width, height, gameState.width, gameState.height]);
+		// Hidden score strip → don't reserve the top margin for it.
+		return computeLayout(
+			width,
+			height,
+			gameState.width,
+			gameState.height,
+			hideScoreStrip ? 6 : undefined,
+		);
+	}, [
+		externalLayout,
+		width,
+		height,
+		gameState.width,
+		gameState.height,
+		hideScoreStrip,
+	]);
 
 	const layout = externalLayout !== undefined ? externalLayout : internalLayout;
 
@@ -103,6 +122,7 @@ export default function MazeRenderer({
 	}, [showP1Arrows, showP2Arrows]);
 
 	const pvOverlayData = useMemo(() => {
+		if (staticBoard) return null;
 		if (!botInfo || !layout) return null;
 		if (visibleSenders?.size === 0) return null;
 		return buildPvOverlay(
@@ -115,12 +135,18 @@ export default function MazeRenderer({
 			layout,
 			{ visibleSenders },
 		);
-	}, [botInfo, layout, gameState, wallSet, visibleSenders]);
+	}, [botInfo, layout, gameState, wallSet, visibleSenders, staticBoard]);
 
 	return (
 		<div
 			ref={externalLayout !== undefined ? undefined : ref}
-			style={{ width: "100%", height: "100%", minHeight: 200 }}
+			style={{
+				width: "100%",
+				height: "100%",
+				// Tournament boards size to their (small) container; the in-game
+				// board keeps a sensible floor.
+				minHeight: staticBoard ? undefined : 200,
+			}}
 		>
 			{!assets || !instructions || !layout ? (
 				<Center h="100%">

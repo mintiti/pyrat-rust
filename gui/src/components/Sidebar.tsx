@@ -1,8 +1,8 @@
 import { AppShell, Stack, Tooltip, UnstyledButton } from "@mantine/core";
-import { IconCpu, IconGridDots } from "@tabler/icons-react";
+import { IconCpu, IconGridDots, IconTrophy } from "@tabler/icons-react";
 import type { Icon } from "@tabler/icons-react";
 
-export type Page = "game" | "bots";
+export type Page = "game" | "bots" | "tournaments";
 
 type NavbarLinkProps = {
 	icon: Icon;
@@ -38,6 +38,7 @@ function NavbarLink({ icon: Icon, label, active, onClick }: NavbarLinkProps) {
 const links: { icon: Icon; label: string; page: Page }[] = [
 	{ icon: IconGridDots, label: "Game", page: "game" },
 	{ icon: IconCpu, label: "Bots", page: "bots" },
+	{ icon: IconTrophy, label: "Tournaments", page: "tournaments" },
 ];
 
 type Props = {

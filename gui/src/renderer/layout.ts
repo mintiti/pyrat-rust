@@ -19,6 +19,10 @@ export function computeLayout(
 	containerH: number,
 	mazeW: number,
 	mazeH: number,
+	// Reserved space above the board for the score strip. Pass a small value
+	// for boards that hide the strip (e.g. tournament thumbnails), so the board
+	// fills the container instead of wasting ~28px up top.
+	topMargin: number = MIN_TOP_MARGIN,
 ): LayoutMetrics {
 	let cellSize = Math.floor(
 		Math.min(containerW / mazeW, containerH / mazeH) * 0.9,
@@ -29,15 +33,15 @@ export function computeLayout(
 	let mazeY = Math.floor((containerH - mazePixelH) / 2);
 
 	// Ensure minimum top margin for the score strip
-	if (mazeY < MIN_TOP_MARGIN) {
-		const availableH = containerH - MIN_TOP_MARGIN;
+	if (mazeY < topMargin) {
+		const availableH = containerH - topMargin;
 		cellSize = Math.floor(
 			Math.min(containerW / mazeW, availableH / mazeH) * 0.9,
 		);
 		mazePixelW = cellSize * mazeW;
 		mazePixelH = cellSize * mazeH;
 		mazeX = Math.floor((containerW - mazePixelW) / 2);
-		mazeY = Math.max(MIN_TOP_MARGIN, Math.floor((containerH - mazePixelH) / 2));
+		mazeY = Math.max(topMargin, Math.floor((containerH - mazePixelH) / 2));
 	}
 
 	const wallThickness = Math.max(1, Math.floor(cellSize / 7));

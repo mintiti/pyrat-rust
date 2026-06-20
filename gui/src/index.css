@@ -1,0 +1,6 @@
+/* Global animations shared across the app. */
+@keyframes pulse {
+	50% {
+		opacity: 0.25;
+	}
+}

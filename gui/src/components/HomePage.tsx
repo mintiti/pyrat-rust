@@ -8,15 +8,20 @@ import {
 	ThemeIcon,
 	Title,
 } from "@mantine/core";
-import { IconMicroscope, IconPlayerPlay } from "@tabler/icons-react";
+import {
+	IconMicroscope,
+	IconPlayerPlay,
+	IconTrophy,
+} from "@tabler/icons-react";
 import type { GameView } from "../App";
 import { useMatchStore } from "../stores/matchStore";
 
 type Props = {
 	onNavigate: (view: GameView) => void;
+	onOpenTournaments: () => void;
 };
 
-export default function HomePage({ onNavigate }: Props) {
+export default function HomePage({ onNavigate, onOpenTournaments }: Props) {
 	return (
 		<Center h="100%">
 			<Group gap="lg">
@@ -62,6 +67,27 @@ export default function HomePage({ onNavigate }: Props) {
 								useMatchStore.getState().setMode("step");
 								onNavigate("setup");
 							}}
+						>
+							Start
+						</Button>
+					</Stack>
+				</Card>
+				<Card shadow="sm" withBorder padding="xl" w={260}>
+					<Stack align="center" justify="space-between" h="100%" gap="md">
+						<ThemeIcon size={56} radius="md" variant="light" color="yellow">
+							<IconTrophy size={32} />
+						</ThemeIcon>
+						<Stack align="center" gap={4}>
+							<Title order={4}>Tournament</Title>
+							<Text size="sm" c="dimmed" ta="center">
+								Rank a bot against a pool and watch the standings live
+							</Text>
+						</Stack>
+						<Button
+							variant="light"
+							color="yellow"
+							fullWidth
+							onClick={onOpenTournaments}
 						>
 							Start
 						</Button>

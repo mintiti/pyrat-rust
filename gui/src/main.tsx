@@ -1,4 +1,5 @@
 import "@mantine/core/styles.css";
+import "./index.css";
 import { MantineProvider, createTheme } from "@mantine/core";
 import { Provider as JotaiProvider } from "jotai";
 import { createRoot } from "react-dom/client";
