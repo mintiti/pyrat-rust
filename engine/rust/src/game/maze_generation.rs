@@ -710,11 +710,20 @@ impl CheeseGenerator {
                         .to_string(),
                 );
             }
+            // The board center is the only cell that is its own mirror, so the
+            // unpaired piece of an odd symmetric count must go there. A random
+            // start can occupy it (corner starts never can — they sit on the
+            // edges), which leaves that piece unplaceable at *any* seed. Fail
+            // explicitly here rather than later with a misleading "too many
+            // pieces" when the pair loop can't drive `remaining` to 0.
             let center = Coordinates::new(self.width / 2, self.height / 2);
-            if center != player1_pos && center != player2_pos {
-                pieces.push(center);
-                remaining -= 1;
+            if center == player1_pos || center == player2_pos {
+                return Err(
+                    "cannot place odd symmetric cheese: center occupied by a player".to_string(),
+                );
             }
+            pieces.push(center);
+            remaining -= 1;
         }
 
         // Generate candidate positions
@@ -726,14 +735,23 @@ impl CheeseGenerator {
                 let symmetric = self.get_symmetric(pos);
                 let precedes_symmetric =
                     pos.x < symmetric.x || (pos.x == symmetric.x && pos.y < symmetric.y);
-                let represents_pair = !self.config.symmetry
-                    || precedes_symmetric
-                    // Preserve which half represents the pair when its earlier
-                    // coordinate is occupied by a player.
-                    || symmetric == player1_pos
-                    || symmetric == player2_pos;
+                let represents_pair = !self.config.symmetry || precedes_symmetric;
 
-                if represents_pair && pos != player1_pos && pos != player2_pos && pos != symmetric {
+                if represents_pair
+                    && pos != player1_pos
+                    && pos != player2_pos
+                    && pos != symmetric
+                    // When symmetric, the chosen candidate's mirror is pushed
+                    // unconditionally below — so exclude any candidate whose
+                    // mirror lands on a player, or a random start (players not
+                    // mutual mirrors) could get cheese placed on it. Redundant
+                    // for corner starts: there a mirror-hits-player candidate is
+                    // the other player's own cell, already excluded above — so
+                    // the candidate set and RNG draws are unchanged and corner /
+                    // ladder layouts stay byte-identical.
+                    && (!self.config.symmetry
+                        || (symmetric != player1_pos && symmetric != player2_pos))
+                {
                     candidates.push(pos);
                 }
             }
@@ -792,10 +810,13 @@ mod tests {
                 );
             }
             let center = Coordinates::new(width / 2, height / 2);
-            if center != players.0 && center != players.1 {
-                pieces.push(center);
-                remaining -= 1;
+            if center == players.0 || center == players.1 {
+                return Err(
+                    "cannot place odd symmetric cheese: center occupied by a player".to_string(),
+                );
             }
+            pieces.push(center);
+            remaining -= 1;
         }
 
         let mut candidates = Vec::new();
@@ -807,6 +828,8 @@ mod tests {
                     && pos != players.0
                     && pos != players.1
                     && pos != symmetric(pos)
+                    && (!config.symmetry
+                        || (symmetric(pos) != players.0 && symmetric(pos) != players.1))
                 {
                     candidates.push(pos);
                     if config.symmetry {
@@ -1964,6 +1987,77 @@ mod tests {
         let result = generator.generate(player1_pos, player2_pos);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Too many pieces of cheese"));
+    }
+
+    #[test]
+    fn test_symmetric_cheese_random_starts_never_on_player() {
+        // Players that are NOT mutual mirrors: mirror((0,0)) = (6,6) != (2,3),
+        // so the symmetric mirror of a cheese candidate can coincide with a
+        // player cell (the bug). Sweep seeds — the "no cheese on a player"
+        // invariant must hold for every one, and symmetry must be preserved.
+        let width = 7;
+        let height = 7;
+        let p1 = Coordinates::new(0, 0);
+        let p2 = Coordinates::new(2, 3);
+        for seed in 0..50u64 {
+            let config = CheeseConfig {
+                count: 20,
+                symmetry: true,
+            };
+            let mut generator = CheeseGenerator::new(config, width, height, Some(seed));
+            let cheese = generator.generate(p1, p2).unwrap();
+            assert!(!cheese.contains(&p1), "seed {seed}: cheese on player 1");
+            assert!(!cheese.contains(&p2), "seed {seed}: cheese on player 2");
+            for piece in &cheese {
+                let mirror = generator.get_symmetric(*piece);
+                if *piece != mirror {
+                    assert!(
+                        cheese.contains(&mirror),
+                        "seed {seed}: piece {piece:?} has no symmetric twin"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn test_symmetric_cheese_center_occupied_by_player_errs() {
+        // An odd symmetric count needs the board center for its unpaired piece;
+        // a start sitting on the center makes it unplaceable at any seed, so the
+        // generator fails explicitly rather than with a misleading "too many".
+        let config = CheeseConfig {
+            count: 5,
+            symmetry: true,
+        };
+        let p1 = Coordinates::new(0, 0);
+        let p2 = Coordinates::new(3, 3); // the 7x7 center
+        let mut generator = CheeseGenerator::new(config, 7, 7, Some(42));
+        let err = generator.generate(p1, p2).unwrap_err();
+        assert!(err.contains("center occupied by a player"), "got: {err}");
+    }
+
+    #[test]
+    fn test_symmetric_cheese_corner_layout_unchanged() {
+        // The mirror-exclusion filter is a no-op for corner starts (players are
+        // mutual mirrors), so the layout is byte-identical to the pre-fix code —
+        // this golden guards ladder determinism.
+        let config = CheeseConfig {
+            count: 5,
+            symmetry: true,
+        };
+        let mut generator = CheeseGenerator::new(config, 7, 7, Some(42));
+        let mut cheese = generator
+            .generate(Coordinates::new(0, 0), Coordinates::new(6, 6))
+            .unwrap();
+        cheese.sort_by_key(|c| (c.x, c.y));
+        let expected = vec![
+            Coordinates::new(0, 4),
+            Coordinates::new(1, 5),
+            Coordinates::new(3, 3), // center (self-mirror)
+            Coordinates::new(5, 1),
+            Coordinates::new(6, 2),
+        ];
+        assert_eq!(cheese, expected);
     }
 
     #[test]
