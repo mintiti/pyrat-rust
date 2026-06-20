@@ -10,6 +10,11 @@ mod match_config;
 mod match_runner;
 mod random_bot;
 mod state;
+mod tournament_commands;
+mod tournament_config;
+mod tournament_events;
+mod tournament_paths;
+mod tournament_runner;
 
 use bot_discovery::{discover_bots, load_scan_paths, save_scan_paths};
 use bot_probe::probe_bot;
@@ -23,6 +28,14 @@ use events::{
 };
 use match_config::{load_match_config, save_match_config};
 use tauri_specta::{collect_commands, collect_events, Builder};
+use tournament_commands::{
+    get_game_replay, get_tournament_standings, list_tournaments, start_tournament, stop_tournament,
+    tournament_status,
+};
+use tournament_events::{
+    NowPlayingEvent, StandingsUpdatedEvent, TournamentAbortedEvent, TournamentFinishedEvent,
+    TournamentMatchFinishedEvent, TournamentMatchStartedEvent, TournamentStartedEvent,
+};
 
 fn main() {
     tracing_subscriber::fmt()
@@ -45,7 +58,13 @@ fn main() {
             discover_bots,
             load_match_config,
             save_match_config,
-            probe_bot
+            probe_bot,
+            start_tournament,
+            stop_tournament,
+            tournament_status,
+            list_tournaments,
+            get_tournament_standings,
+            get_game_replay
         ])
         .events(collect_events![
             MatchStartedEvent,
@@ -54,7 +73,14 @@ fn main() {
             TurnPlayedEvent,
             MatchOverEvent,
             MatchErrorEvent,
-            BotInfoEvent
+            BotInfoEvent,
+            TournamentStartedEvent,
+            StandingsUpdatedEvent,
+            TournamentMatchFinishedEvent,
+            TournamentMatchStartedEvent,
+            NowPlayingEvent,
+            TournamentFinishedEvent,
+            TournamentAbortedEvent
         ]);
 
     #[cfg(debug_assertions)]

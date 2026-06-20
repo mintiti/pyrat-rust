@@ -3062,7 +3062,11 @@ name = "pyrat-gui"
 version = "0.1.0"
 dependencies = [
  "fastrand",
+ "parking_lot",
+ "pyrat-eval",
+ "pyrat-eval-store",
  "pyrat-host",
+ "pyrat-orchestrator",
  "pyrat-protocol",
  "pyrat-rust",
  "serde",

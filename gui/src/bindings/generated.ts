@@ -95,6 +95,79 @@ async probeBot(runCommand: string, workingDir: string, agentId: string) : Promis
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+/**
+ * Create a tournament and start running it in the background. Returns the
+ * new tournament id. Rejects if one is already running.
+ */
+async startTournament(params: LaunchParams) : Promise<Result<number, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("start_tournament", { params }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Request the running tournament to stop and wait for it to drain. The runner
+ * shuts the session down gracefully and emits `TournamentAbortedEvent`. No-op
+ * if nothing is running.
+ */
+async stopTournament() : Promise<Result<null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("stop_tournament") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * The currently-running tournament id, if any. The frontend reads this on
+ * load / tab switch to restore the live chip after a navigation.
+ */
+async tournamentStatus() : Promise<Result<number | null, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("tournament_status") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * List tournaments in the store, newest first, with finished-inference.
+ */
+async listTournaments() : Promise<Result<TournamentSummary[], string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("list_tournaments") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Standings for one tournament, reopened from the store (read-only). Used for
+ * finished tournaments and interrupted ones (standings-so-far).
+ */
+async getTournamentStandings(tournamentId: number) : Promise<Result<StandingsSnapshot, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_tournament_standings", { tournamentId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Final-position board + verdict for one game, read from its `ReplayFile`.
+ * Returns `Missing` (not an error) when the file is absent — a failed match
+ * or a draw with no replay leaves no board, and the card shows that state.
+ */
+async getGameReplay(tournamentId: number, matchId: number) : Promise<Result<GameReplayState, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("get_game_replay", { tournamentId, matchId }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
 }
 }
 
@@ -106,16 +179,30 @@ botInfoEvent: BotInfoEvent,
 matchErrorEvent: MatchErrorEvent,
 matchOverEvent: MatchOverEvent,
 matchStartedEvent: MatchStartedEvent,
+nowPlayingEvent: NowPlayingEvent,
 preprocessingStartedEvent: PreprocessingStartedEvent,
 setupCompleteEvent: SetupCompleteEvent,
+standingsUpdatedEvent: StandingsUpdatedEvent,
+tournamentAbortedEvent: TournamentAbortedEvent,
+tournamentFinishedEvent: TournamentFinishedEvent,
+tournamentMatchFinishedEvent: TournamentMatchFinishedEvent,
+tournamentMatchStartedEvent: TournamentMatchStartedEvent,
+tournamentStartedEvent: TournamentStartedEvent,
 turnPlayedEvent: TurnPlayedEvent
 }>({
 botInfoEvent: "bot-info-event",
 matchErrorEvent: "match-error-event",
 matchOverEvent: "match-over-event",
 matchStartedEvent: "match-started-event",
+nowPlayingEvent: "now-playing-event",
 preprocessingStartedEvent: "preprocessing-started-event",
 setupCompleteEvent: "setup-complete-event",
+standingsUpdatedEvent: "standings-updated-event",
+tournamentAbortedEvent: "tournament-aborted-event",
+tournamentFinishedEvent: "tournament-finished-event",
+tournamentMatchFinishedEvent: "tournament-match-finished-event",
+tournamentMatchStartedEvent: "tournament-match-started-event",
+tournamentStartedEvent: "tournament-started-event",
 turnPlayedEvent: "turn-played-event"
 })
 
@@ -144,6 +231,11 @@ export type BotOptionType = "Check" | "Spin" | "Combo" | "String" | "Button"
  * A single option name-value pair for configuring a bot before match start.
  */
 export type BotOptionValue = { name: string; value: string }
+/**
+ * One bot selected on the launch screen. `agent_id` is the stable bot.toml id
+ * and doubles as the tournament-scoped player id.
+ */
+export type BotPick = { agent_id: string; run_command: string; working_dir: string }
 export type BotProbeResult = { name: string; author: string; agent_id: string; options: BotOptionDef[] }
 export type Coord = { x: number; y: number }
 /**
@@ -155,6 +247,20 @@ export type DiscoveredBot = { agent_id: string; name: string; run_command: strin
  * Absolute path to the directory containing bot.toml.
  */
 working_dir: string; description: string; developer: string; language: string; tags: string[] }
+/**
+ * Final-position board + verdict for one finished game, or a reason it's
+ * unavailable (failed match, or replay file missing).
+ */
+export type GameReplayState = { kind: "available"; final_state: MazeState; winner: string | null; player1_id: string; player2_id: string; player1_score: number; player2_score: number; turns: number } | { kind: "missing"; reason: string }
+/**
+ * Launch parameters. Timing / preset / games / concurrency come from the
+ * pinned constants, not the wire (`tournament_config`).
+ */
+export type LaunchParams = { bots: BotPick[]; 
+/**
+ * The starred bot to measure → gauntlet. `None` → round-robin.
+ */
+target: string | null; name: string | null }
 /**
  * Per-player option overrides + match flags, bundled so start_match stays under specta's 10-arg limit.
  */
@@ -192,6 +298,15 @@ export type MatchWinner = "Player1" | "Player2" | "Draw"
 export type MazeState = { width: number; height: number; turn: number; max_turns: number; walls: WallEntry[]; mud: MudEntry[]; cheese: Coord[]; player1: PlayerState; player2: PlayerState; total_cheese: number; state_hash: string }
 export type MudEntry = { from: Coord; to: Coord; cost: number }
 /**
+ * Throttled per-turn liveness from `live_events()` (slice B). Drives the
+ * now-playing line and the depth-2 live-game row. Lossy by design.
+ */
+export type NowPlayingEvent = { tournament_id: number; match_id: number; turn: number; player1_score: number; player2_score: number }
+/**
+ * A participant, for the launch→live handoff (name + display fields).
+ */
+export type PlayerLite = { player_id: string }
+/**
  * Player identity — specta-friendly mirror of pyrat_wire::Player.
  */
 export type PlayerSide = "Player1" | "Player2"
@@ -204,7 +319,78 @@ export type PreprocessingStartedEvent = { match_id: number }
  * Emitted when setup is fully complete (bots connected, configured, preprocessed).
  */
 export type SetupCompleteEvent = { match_id: number }
+/**
+ * One row of the live standings: Elo with a 95% CI band and game count.
+ * CI bounds come from `compute_elo_with_uncertainty` (point Elo alone has
+ * no covariance), so the frontend never reconstructs them.
+ */
+export type StandingRow = { player_id: string; elo: number; elo_ci_low: number; elo_ci_high: number; games: number; 
+/**
+ * True before the player has enough games for a stable estimate; the
+ * frontend shows "warming up" instead of a bar.
+ */
+pending: boolean }
+/**
+ * Standings for a finished/partial tournament, reopened from the store.
+ */
+export type StandingsSnapshot = { tournament_id: number; name: string | null; format: string; anchor_id: string; finished: boolean; done: number; total: number; standings: StandingRow[] }
+/**
+ * Emitted on every `MatchFinished`, carrying the freshly recomputed standings
+ * plus progress. The hero, standings bars/whiskers, progress, ETA, and chip
+ * all read this.
+ */
+export type StandingsUpdatedEvent = { tournament_id: number; done: number; total: number; success: number; failure: number; standings: StandingRow[] }
 export type StopAnalysisTurnResult = { player1_action: Direction; player2_action: Direction }
+/**
+ * Terminal: tournament aborted (e.g. persistent sink-flush failure, or
+ * user-requested stop). Carries a reason for the UI.
+ */
+export type TournamentAbortedEvent = { tournament_id: number; reason: string }
+/**
+ * Terminal: tournament finished naturally. The hero swaps to the verdict and
+ * the chip goes green.
+ */
+export type TournamentFinishedEvent = { tournament_id: number }
+/**
+ * Emitted on every `MatchFinished`. Scores are canonical (player1_id is the
+ * lex-min of the pair); the frontend re-orients per target / per displayed
+ * bot. Drives form dots, the game-card grid, and the W-L-D record. `turns`
+ * and the board are loaded lazily via `get_game_replay` when a card renders.
+ */
+export type TournamentMatchFinishedEvent = { tournament_id: number; player1_id: string; player2_id: string; repetition_index: number; player1_score: number; player2_score: number; match_id: number }
+/**
+ * Emitted on every `MatchStarted` (slice B). Lets the matchup view show a
+ * live-game row before the first turn arrives.
+ */
+export type TournamentMatchStartedEvent = { tournament_id: number; match_id: number; player1_id: string; player2_id: string; repetition_index: number }
+/**
+ * Emitted once, right after the tournament row is created. Scaffolds the
+ * header, hero, and axis before any game finishes.
+ */
+export type TournamentStartedEvent = { tournament_id: number; name: string | null; 
+/**
+ * "gauntlet" or "round_robin".
+ */
+format: string; 
+/**
+ * In a gauntlet, the measured bot (highlighted, not clickable). `None`
+ * for round-robin.
+ */
+target: string | null; total_games: number; anchor_id: string; 
+/**
+ * Shared-core provenance string, identical in the launch line and the
+ * live header: e.g. "my-bot vs 6 (gauntlet) · tiny preset · 200 ms/move".
+ */
+plan_summary: string; players: PlayerLite[] }
+/**
+ * Row in the "in this store" panel.
+ */
+export type TournamentSummary = { id: number; name: string | null; format: string; created_at: string; 
+/**
+ * All expected (pair, repetition) slots are done (success or
+ * failure-exhausted) — `slot_done` semantics, not raw count-vs-target.
+ */
+finished: boolean; done: number; total: number }
 /**
  * Per-turn delta. Walls/mud never change, so we only send positions + cheese.
  */
