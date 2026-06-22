@@ -32,6 +32,11 @@ import { T, shortId } from "./theme";
 // drives real timing; this just sets expectations.
 const EST_SECONDS_PER_GAME = 6.5;
 
+// Below this move budget, search-style bots routinely overrun. We keep the
+// default ladder-comparable (200 ms) but flag a tight choice so a wall of
+// timeouts reads as "I set this low", not "the tool is broken".
+const TIGHT_MOVE_BUDGET_MS = 300;
+
 interface Methodology {
 	mazes_per_matchup: number;
 	move_timeout_ms: number;
@@ -292,6 +297,12 @@ export default function LaunchView() {
 									}
 								/>
 							</SettingRowInline>
+							{method.move_timeout_ms < TIGHT_MOVE_BUDGET_MS && (
+								<Text size="xs" c="dimmed" mt={-6}>
+									Tight budget — search-style bots may exceed it; any failures
+									show as bot health, not lost results.
+								</Text>
+							)}
 
 							<GameFactoryForm
 								value={factory}
