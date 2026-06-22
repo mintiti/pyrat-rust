@@ -12,6 +12,7 @@ import { useTournamentStore } from "../../stores/tournamentStore";
 export function useTournamentEvents() {
 	useEffect(() => {
 		const {
+			onPreparing,
 			onStarted,
 			onStandings,
 			onMatchFinished,
@@ -23,6 +24,7 @@ export function useTournamentEvents() {
 		} = useTournamentStore.getState();
 
 		const unlisteners = [
+			events.tournamentPreparingEvent.listen((e) => onPreparing(e.payload)),
 			events.tournamentStartedEvent.listen((e) =>
 				onStarted(e.payload, Date.now()),
 			),

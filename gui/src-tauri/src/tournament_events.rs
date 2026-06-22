@@ -32,6 +32,16 @@ pub struct PlayerLite {
     pub player_id: String,
 }
 
+/// Emitted during the pre-tournament bot warmup, before the row exists (so it
+/// carries no `tournament_id`). Drives a transient launch-side "Preparing
+/// bots… (done/total)" state that clears when `TournamentStartedEvent` lands.
+/// `done` increments before each bot's warmup and once more on completion.
+#[derive(Serialize, Deserialize, Debug, Clone, Type, Event)]
+pub struct TournamentPreparingEvent {
+    pub done: u32,
+    pub total: u32,
+}
+
 /// Emitted once, right after the tournament row is created. Scaffolds the
 /// header, hero, and axis before any game finishes.
 #[derive(Serialize, Deserialize, Debug, Clone, Type, Event)]

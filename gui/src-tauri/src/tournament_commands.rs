@@ -6,6 +6,7 @@
 //! connection each call — WAL allows concurrent readers, and they're
 //! infrequent.
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -17,16 +18,18 @@ use pyrat_eval::{
     EvalSession, MatchupKey, ResolvedPlayer, TournamentParams, TournamentSpec, TournamentState,
 };
 use pyrat_eval_store::{EvalStore, TournamentId};
+use pyrat_host::probe::probe_bot;
 use pyrat_orchestrator::{PlayerSpec, ReplayEvent, ReplayFile};
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use tauri_specta::Event;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use crate::commands::{MazeState, MudEntry, PlayerState, WallEntry};
 use crate::state::{AppState, TournamentPhase};
 use crate::tournament_config;
-use crate::tournament_events::StandingRow;
+use crate::tournament_events::{StandingRow, TournamentPreparingEvent};
 use crate::tournament_runner::{
     build_standings, ordered_player_ids, run_tournament, total_games, RunnerFormat, TournamentRun,
 };
@@ -294,19 +297,31 @@ pub async fn start_tournament(
     // the second orphans the first's runner. Every path below must release
     // the reservation (rollback to Idle) on error or honor a stop that lands
     // mid-launch.
-    {
+    // The cancel token is born here, with the reservation, and stored in
+    // `Starting` so a `stop_tournament` during the (possibly slow) warmup can
+    // fire it immediately. The same token is reused as the runner's token on
+    // promotion, so cancellation spans the whole start lifetime.
+    let cancel = {
         let mut phase = state.tournament_phase.lock().await;
-        match *phase {
-            TournamentPhase::Idle => *phase = TournamentPhase::Starting,
-            TournamentPhase::Starting => return Err("a tournament is already starting".into()),
+        match &*phase {
+            TournamentPhase::Idle => {
+                let cancel = CancellationToken::new();
+                *phase = TournamentPhase::Starting {
+                    cancel: cancel.clone(),
+                };
+                cancel
+            },
+            TournamentPhase::Starting { .. } => {
+                return Err("a tournament is already starting".into())
+            },
             TournamentPhase::Running { .. } => return Err("a tournament is already running".into()),
         }
-    }
+    };
 
-    match build_and_spawn(&app, params).await {
-        Ok((tournament_id, cancel, handle)) => {
+    match build_and_spawn(&app, params, cancel.clone()).await {
+        Ok((tournament_id, handle)) => {
             let mut phase = state.tournament_phase.lock().await;
-            if matches!(*phase, TournamentPhase::Starting) {
+            if matches!(*phase, TournamentPhase::Starting { .. }) {
                 *phase = TournamentPhase::Running {
                     tournament_id,
                     cancel,
@@ -315,9 +330,9 @@ pub async fn start_tournament(
                 Ok(tournament_id)
             } else {
                 // A `stop_tournament` landed during the launch window (it reset
-                // the slot to Idle). Honor it: cancel the runner we just spawned
-                // and drain it, rather than promoting a tournament the user
-                // already asked to stop.
+                // the slot to Idle and already fired the token). Honor it:
+                // cancel (idempotent) and drain the runner we just spawned,
+                // rather than promoting a tournament the user asked to stop.
                 cancel.cancel();
                 let _ = handle.await;
                 Err("tournament start was cancelled".into())
@@ -325,8 +340,9 @@ pub async fn start_tournament(
         },
         Err(e) => {
             // Roll back the reservation so a failed launch can't wedge the slot.
+            // (If a stop already reset it to Idle, leave it.)
             let mut phase = state.tournament_phase.lock().await;
-            if matches!(*phase, TournamentPhase::Starting) {
+            if matches!(*phase, TournamentPhase::Starting { .. }) {
                 *phase = TournamentPhase::Idle;
             }
             Err(e)
@@ -350,14 +366,17 @@ pub async fn get_tournament_launch_defaults() -> Result<LaunchDefaults, String> 
     })
 }
 
-/// Create the tournament row and spawn its runner. Returns the new id plus
-/// the cancel/handle the caller installs into `TournamentPhase::Running`.
-/// Phase management lives entirely in `start_tournament`; this is the fallible
-/// build body it wraps so every error path releases the `Starting` slot.
+/// Create the tournament row and spawn its runner. Returns the new id plus the
+/// runner handle; the caller installs them (with the `cancel` it owns) into
+/// `TournamentPhase::Running`. Phase management lives entirely in
+/// `start_tournament`; this is the fallible build body it wraps so every error
+/// path releases the `Starting` slot. `cancel` is the start-lifetime token: it
+/// gates warmup and is reused as the runner's token.
 async fn build_and_spawn(
     app: &tauri::AppHandle,
     params: LaunchParams,
-) -> Result<(i64, CancellationToken, tokio::task::JoinHandle<()>), String> {
+    cancel: CancellationToken,
+) -> Result<(i64, tokio::task::JoinHandle<()>), String> {
     let store = open_store(app)?;
     let players = resolve_players(&params.bots);
 
@@ -449,6 +468,13 @@ async fn build_and_spawn(
         tournament_seed,
     };
 
+    // Warm up the bots *before* creating the tournament row: pay the one-time
+    // cold-build / dep-resolve cost up front (so the first matches don't time
+    // out cold), drain build chatter before matches, and catch a dead bot here
+    // (clear error, no dangling row) rather than mid-run. Aborts cleanly on a
+    // stop landing during warmup.
+    warmup_bots(app, &params.bots, &cancel).await?;
+
     let created =
         EvalSession::create_tournament(store.clone(), spec.clone(), canonical_players.clone())
             .await
@@ -456,7 +482,6 @@ async fn build_and_spawn(
     let tournament_id = created.tournament_id;
 
     let replay_dir = crate::tournament_paths::tournament_replay_dir(app, tournament_id.0)?;
-    let cancel = CancellationToken::new();
     let run = TournamentRun {
         tournament_id,
         game_config_id: created.game_config_id,
@@ -479,14 +504,64 @@ async fn build_and_spawn(
     };
 
     let app_for_task = app.clone();
-    let cancel_for_task = cancel.clone();
     let handle = tokio::spawn(async move {
-        if let Err(e) = run_tournament(app_for_task, store, run, cancel_for_task).await {
+        if let Err(e) = run_tournament(app_for_task, store, run, cancel).await {
             warn!(error = %e, "tournament runner exited with error");
         }
     });
 
-    Ok((tournament_id.0, cancel, handle))
+    Ok((tournament_id.0, handle))
+}
+
+/// Smoke-build each distinct bot once before the tournament starts.
+///
+/// Pays the one-time cold `cargo build` / `uv` dep-resolve cost up front so the
+/// first matches don't time out cold, drains build chatter before matches
+/// begin, and catches a bot that can't start *here* (clear named error, no
+/// tournament row) instead of as a mid-run failure cascade.
+///
+/// Sequential by design: distinct bots may share a Cargo target dir (AlphaRat's
+/// crates do), so warming them concurrently would contend on the build lock,
+/// and parallel release builds thrash a dev machine. The cost is paid once.
+/// `cancel` makes a stop during a long warmup responsive — the in-flight probe
+/// future is dropped, which kills its bot subprocess via `BotProcesses` drop.
+/// Distinct bots by `agent_id`, first-seen order — round-robin reuses a bot
+/// across many matchups but it has one target dir to warm.
+fn distinct_by_agent(bots: &[BotPick]) -> Vec<&BotPick> {
+    let mut seen = HashSet::new();
+    bots.iter()
+        .filter(|b| seen.insert(b.agent_id.as_str()))
+        .collect()
+}
+
+async fn warmup_bots(
+    app: &tauri::AppHandle,
+    bots: &[BotPick],
+    cancel: &CancellationToken,
+) -> Result<(), String> {
+    let distinct = distinct_by_agent(bots);
+    let total = distinct.len() as u32;
+    for (i, bot) in distinct.iter().enumerate() {
+        let _ = TournamentPreparingEvent {
+            done: i as u32,
+            total,
+        }
+        .emit(app);
+        let probe = probe_bot(
+            bot.run_command.clone(),
+            bot.working_dir.clone(),
+            bot.agent_id.clone(),
+        );
+        tokio::select! {
+            biased;
+            () = cancel.cancelled() => return Err("tournament start was cancelled".into()),
+            result = probe => {
+                result.map_err(|e| format!("bot `{}` failed to start: {e}", bot.agent_id))?;
+            }
+        }
+    }
+    let _ = TournamentPreparingEvent { done: total, total }.emit(app);
+    Ok(())
 }
 
 /// Request the running tournament to stop and wait for it to drain. The runner
@@ -495,13 +570,21 @@ async fn build_and_spawn(
 #[tauri::command]
 #[specta::specta]
 pub async fn stop_tournament(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let running = {
+    let prev = {
         let mut phase = state.tournament_phase.lock().await;
         std::mem::replace(&mut *phase, TournamentPhase::Idle)
     };
-    if let TournamentPhase::Running { cancel, handle, .. } = running {
-        cancel.cancel();
-        let _ = handle.await;
+    match prev {
+        TournamentPhase::Running { cancel, handle, .. } => {
+            cancel.cancel();
+            let _ = handle.await;
+        },
+        // A start is mid-flight (likely warming up bots). Fire its token so the
+        // in-flight `build_and_spawn` aborts promptly; resetting the slot to
+        // Idle (above) makes `start_tournament` return the cancelled error
+        // instead of promoting to Running.
+        TournamentPhase::Starting { cancel } => cancel.cancel(),
+        TournamentPhase::Idle => {},
     }
     Ok(())
 }
@@ -516,7 +599,7 @@ pub async fn tournament_status(state: tauri::State<'_, AppState>) -> Result<Opti
         TournamentPhase::Running { tournament_id, .. } => Some(*tournament_id),
         // Starting: the row isn't created yet, so there's no id to report —
         // the chip appears once the runner is promoted to Running.
-        TournamentPhase::Starting | TournamentPhase::Idle => None,
+        TournamentPhase::Starting { .. } | TournamentPhase::Idle => None,
     })
 }
 
@@ -930,6 +1013,26 @@ fn expected_pairs(format: &str, players: &[String]) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pick(agent_id: &str, working_dir: &str) -> BotPick {
+        BotPick {
+            agent_id: agent_id.to_string(),
+            run_command: "cargo run".to_string(),
+            working_dir: working_dir.to_string(),
+        }
+    }
+
+    #[test]
+    fn warmup_dedupes_by_agent_id_first_seen() {
+        // Round-robin lists the same bot in many picks; warmup must build it
+        // once. Dedup is by agent_id, keeping first-seen order.
+        let bots = vec![pick("a", "/a"), pick("b", "/b"), pick("a", "/a-dup")];
+        let distinct = distinct_by_agent(&bots);
+        assert_eq!(distinct.len(), 2);
+        assert_eq!(distinct[0].agent_id, "a");
+        assert_eq!(distinct[0].working_dir, "/a"); // first-seen wins
+        assert_eq!(distinct[1].agent_id, "b");
+    }
 
     /// 7×7, no walls/mud, random symmetric — the interesting validation case.
     fn random_symmetric_factory() -> GameFactoryConfig {

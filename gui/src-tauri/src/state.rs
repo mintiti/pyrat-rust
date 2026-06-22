@@ -56,7 +56,16 @@ pub enum TournamentPhase {
     /// Without this, two concurrent `start_tournament` calls (a second window,
     /// a slow-launch retry) both pass an `Idle` check while the lock is
     /// released across the await, and the second orphans the first's runner.
-    Starting,
+    ///
+    /// Carries the `cancel` token from the moment the slot is reserved (not
+    /// only once `Running`), so a `stop_tournament` landing during the
+    /// pre-tournament bot warmup — which can cold-build for tens of seconds —
+    /// is honored immediately instead of waiting for the launch to return.
+    /// The same token is reused as the runner's token on promotion to
+    /// `Running`, so the cancel signal spans the whole start lifetime.
+    Starting {
+        cancel: CancellationToken,
+    },
     Running {
         tournament_id: i64,
         cancel: CancellationToken,

@@ -43,6 +43,7 @@ export default function LaunchView() {
 	const bots = useAtomValue(discoveredBotsAtom);
 	const live = useTournamentStore((s) => s.live);
 	const showLive = useTournamentStore((s) => s.showLive);
+	const preparing = useTournamentStore((s) => s.preparing);
 
 	const [selected, setSelected] = useState<Set<string>>(new Set());
 	const [target, setTarget] = useState<string | null>(null);
@@ -359,6 +360,14 @@ export default function LaunchView() {
 							{error}
 						</Text>
 					)}
+					{launching && preparing && (
+						<Text size="sm" c="dimmed" mb="sm">
+							Preparing bots… ({preparing.done}/{preparing.total})
+							{preparing.done < preparing.total
+								? " — first launch builds each bot once"
+								: ""}
+						</Text>
+					)}
 					<Button
 						color="yellow"
 						disabled={
@@ -371,7 +380,7 @@ export default function LaunchView() {
 						loading={launching}
 						onClick={launch}
 					>
-						Launch
+						{launching && preparing ? "Preparing bots…" : "Launch"}
 					</Button>
 				</Paper>
 

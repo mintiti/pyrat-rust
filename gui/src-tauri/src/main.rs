@@ -35,7 +35,7 @@ use tournament_commands::{
 use tournament_events::{
     NowPlayingEvent, StandingsUpdatedEvent, TournamentAbortedEvent, TournamentFinishedEvent,
     TournamentMatchFailedEvent, TournamentMatchFinishedEvent, TournamentMatchStartedEvent,
-    TournamentStartedEvent,
+    TournamentPreparingEvent, TournamentStartedEvent,
 };
 
 fn main() {
@@ -83,6 +83,7 @@ fn main() {
             MatchOverEvent,
             MatchErrorEvent,
             BotInfoEvent,
+            TournamentPreparingEvent,
             TournamentStartedEvent,
             StandingsUpdatedEvent,
             TournamentMatchFinishedEvent,

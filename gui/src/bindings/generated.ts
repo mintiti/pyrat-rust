@@ -201,6 +201,7 @@ tournamentFinishedEvent: TournamentFinishedEvent,
 tournamentMatchFailedEvent: TournamentMatchFailedEvent,
 tournamentMatchFinishedEvent: TournamentMatchFinishedEvent,
 tournamentMatchStartedEvent: TournamentMatchStartedEvent,
+tournamentPreparingEvent: TournamentPreparingEvent,
 tournamentStartedEvent: TournamentStartedEvent,
 turnPlayedEvent: TurnPlayedEvent
 }>({
@@ -217,6 +218,7 @@ tournamentFinishedEvent: "tournament-finished-event",
 tournamentMatchFailedEvent: "tournament-match-failed-event",
 tournamentMatchFinishedEvent: "tournament-match-finished-event",
 tournamentMatchStartedEvent: "tournament-match-started-event",
+tournamentPreparingEvent: "tournament-preparing-event",
 tournamentStartedEvent: "tournament-started-event",
 turnPlayedEvent: "turn-played-event"
 })
@@ -429,10 +431,17 @@ export type TournamentMatchFinishedEvent = { tournament_id: number; player1_id: 
  */
 export type TournamentMatchStartedEvent = { tournament_id: number; match_id: number; player1_id: string; player2_id: string; repetition_index: number }
 /**
+ * Emitted during the pre-tournament bot warmup, before the row exists (so it
+ * carries no `tournament_id`). Drives a transient launch-side "Preparing
+ * bots… (done/total)" state that clears when `TournamentStartedEvent` lands.
+ * `done` increments before each bot's warmup and once more on completion.
+ */
+export type TournamentPreparingEvent = { done: number; total: number }
+/**
  * Emitted once, right after the tournament row is created. Scaffolds the
  * header, hero, and axis before any game finishes.
  */
-export type TournamentStartedEvent = { tournament_id: number; name: string | null; 
+export type TournamentStartedEvent = { tournament_id: number; name: string | null;
 /**
  * "gauntlet" or "round_robin".
  */

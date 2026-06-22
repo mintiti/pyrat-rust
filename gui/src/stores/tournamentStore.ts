@@ -8,6 +8,7 @@ import type {
 	TournamentMatchFailedEvent,
 	TournamentMatchFinishedEvent,
 	TournamentMatchStartedEvent,
+	TournamentPreparingEvent,
 	TournamentStartedEvent,
 } from "../bindings/generated";
 import { pairKey } from "../components/tournament/theme";
@@ -93,6 +94,10 @@ export interface TournamentLive {
 interface TournamentStore {
 	screen: "launch" | "live";
 	live: TournamentLive | null;
+	/** Transient pre-tournament warmup progress (no tournament id yet). Set by
+	 * `onPreparing`, cleared when the tournament starts. Drives the launch
+	 * screen's "Preparing bots…" line. */
+	preparing: { done: number; total: number } | null;
 	nav: TournamentNav;
 	// navigation
 	showLaunch: () => void;
@@ -100,6 +105,7 @@ interface TournamentStore {
 	navigate: (nav: TournamentNav) => void;
 	back: () => void;
 	// event handlers
+	onPreparing: (e: TournamentPreparingEvent) => void;
 	onStarted: (e: TournamentStartedEvent, startedAt: number) => void;
 	onStandings: (e: StandingsUpdatedEvent) => void;
 	onMatchFinished: (e: TournamentMatchFinishedEvent) => void;
@@ -113,6 +119,7 @@ interface TournamentStore {
 export const useTournamentStore = create<TournamentStore>((set, get) => ({
 	screen: "launch",
 	live: null,
+	preparing: null,
 	nav: { kind: "overview" },
 
 	showLaunch: () => set({ screen: "launch", nav: { kind: "overview" } }),
@@ -149,10 +156,13 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 			}
 		}),
 
+	onPreparing: (e) => set({ preparing: { done: e.done, total: e.total } }),
+
 	onStarted: (e, startedAt) =>
 		set({
 			screen: "live",
 			nav: { kind: "overview" },
+			preparing: null,
 			live: {
 				tournamentId: e.tournament_id,
 				name: e.name,
