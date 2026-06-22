@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type {
+	TournamentMatchFailedEvent,
 	TournamentMatchFinishedEvent,
 	TournamentMatchStartedEvent,
 	TournamentStartedEvent,
@@ -41,6 +42,10 @@ function matchFinished(matchId: number): TournamentMatchFinishedEvent {
 	};
 }
 
+function matchFailed(matchId: number): TournamentMatchFailedEvent {
+	return { tournament_id: 1, match_id: matchId };
+}
+
 describe("tournamentStore live-row guards", () => {
 	beforeEach(() => {
 		useTournamentStore.getState().onStarted(started(), 0);
@@ -59,6 +64,28 @@ describe("tournamentStore live-row guards", () => {
 		// row at turn 0 that never clears.
 		s.onMatchStarted(matchStarted(7));
 		expect(useTournamentStore.getState().live?.liveByMatch[7]).toBeUndefined();
+	});
+
+	it("clears a failed match's row and tombstones it against a late MatchStarted", () => {
+		const s = useTournamentStore.getState();
+		s.onMatchStarted(matchStarted(7));
+		expect(useTournamentStore.getState().live?.liveByMatch[7]).toBeDefined();
+
+		// A failed match emits no scored event; onMatchFailed must drop the row.
+		s.onMatchFailed(matchFailed(7));
+		expect(useTournamentStore.getState().live?.liveByMatch[7]).toBeUndefined();
+
+		// A delayed MatchStarted for the now-terminated match must not revive it.
+		s.onMatchStarted(matchStarted(7));
+		expect(useTournamentStore.getState().live?.liveByMatch[7]).toBeUndefined();
+	});
+
+	it("tombstones a failure that arrives before its MatchStarted (order-independent)", () => {
+		const s = useTournamentStore.getState();
+		// Terminal event first (streams are unordered): no row should ever form.
+		s.onMatchFailed(matchFailed(8));
+		s.onMatchStarted(matchStarted(8));
+		expect(useTournamentStore.getState().live?.liveByMatch[8]).toBeUndefined();
 	});
 
 	it("ignores MatchStarted / NowPlaying once the tournament is not running", () => {

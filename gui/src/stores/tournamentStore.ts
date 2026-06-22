@@ -3,6 +3,7 @@ import type {
 	NowPlayingEvent,
 	StandingRow,
 	StandingsUpdatedEvent,
+	TournamentMatchFailedEvent,
 	TournamentMatchFinishedEvent,
 	TournamentMatchStartedEvent,
 	TournamentStartedEvent,
@@ -60,6 +61,11 @@ export interface TournamentLive {
 	gamesByPair: Record<string, FinishedGame[]>;
 	/** In-flight matches keyed by match id. */
 	liveByMatch: Record<number, LiveMatch>;
+	/** Tombstones: match ids that have reached a terminal state (success OR
+	 * failure). `onMatchStarted` ignores any id in here, so a delayed/late
+	 * `MatchStarted` (lossy stream) can't resurrect a row after the match
+	 * already ended — regardless of which stream's event arrives first. */
+	terminalMatchIds: Record<number, true>;
 	/** Wall-clock start (epoch ms) for the elapsed counter. */
 	startedAt: number;
 }
@@ -77,6 +83,7 @@ interface TournamentStore {
 	onStarted: (e: TournamentStartedEvent, startedAt: number) => void;
 	onStandings: (e: StandingsUpdatedEvent) => void;
 	onMatchFinished: (e: TournamentMatchFinishedEvent) => void;
+	onMatchFailed: (e: TournamentMatchFailedEvent) => void;
 	onMatchStarted: (e: TournamentMatchStartedEvent) => void;
 	onNowPlaying: (e: NowPlayingEvent) => void;
 	onFinished: () => void;
@@ -143,6 +150,7 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 				standings: [],
 				gamesByPair: {},
 				liveByMatch: {},
+				terminalMatchIds: {},
 				startedAt,
 			},
 		}),
@@ -190,6 +198,27 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 					...s.live,
 					gamesByPair: { ...s.live.gamesByPair, [key]: [...existing, game] },
 					liveByMatch,
+					terminalMatchIds: { ...s.live.terminalMatchIds, [e.match_id]: true },
+				},
+			};
+		});
+	},
+
+	// A failed match emits no scored event, so without this its now-playing row
+	// would freeze at its last turn until the whole tournament ends. Drop the
+	// row and tombstone the id so a late `MatchStarted` can't resurrect it. No
+	// `status === "running"` gate: a terminal event must always tombstone.
+	onMatchFailed: (e) => {
+		const live = get().live;
+		if (!live || live.tournamentId !== e.tournament_id) return;
+		set((s) => {
+			if (!s.live) return {};
+			const { [e.match_id]: _drop, ...liveByMatch } = s.live.liveByMatch;
+			return {
+				live: {
+					...s.live,
+					liveByMatch,
+					terminalMatchIds: { ...s.live.terminalMatchIds, [e.match_id]: true },
 				},
 			};
 		});
@@ -198,16 +227,16 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 	onMatchStarted: (e) => {
 		const live = get().live;
 		if (!live || live.tournamentId !== e.tournament_id) return;
-		// `MatchStarted` and `MatchFinished` ride independent, lossy streams, so
-		// a delayed `MatchStarted` can arrive after the match already finished.
-		// Without these guards it would re-insert the match at turn 0 and nothing
-		// would ever remove it again — a zombie "Now playing" row that inflates
-		// the live count. Ignore once the tournament is no longer running, and
-		// ignore any match id we've already recorded as finished.
+		// `MatchStarted` (lossy) and the terminal events (lossless) ride
+		// independent streams with no ordering guarantee. Without these guards a
+		// delayed `MatchStarted` would re-insert the match at turn 0 and nothing
+		// would remove it again — a zombie "Now playing" row that inflates the
+		// count. Ignore once the tournament is no longer running, and ignore any
+		// id already terminated (success or failure) — the tombstone makes this
+		// order-independent: a `MatchFailed` arriving before a late
+		// `MatchStarted` still blocks the row.
 		if (live.status !== "running") return;
-		const key = pairKey(e.player1_id, e.player2_id);
-		if ((live.gamesByPair[key] ?? []).some((g) => g.matchId === e.match_id))
-			return;
+		if (live.terminalMatchIds[e.match_id]) return;
 		set((s) =>
 			s.live
 				? {

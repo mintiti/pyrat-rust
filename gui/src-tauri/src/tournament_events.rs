@@ -90,6 +90,17 @@ pub struct TournamentMatchStartedEvent {
     pub repetition_index: u32,
 }
 
+/// Terminal, per-match: a match failed (timeout, disconnect, spawn failure).
+/// Verdict-bearing data rides the lossless standings path; this carries only
+/// what the frontend needs to drop the now-playing row, so the payload is
+/// deliberately minimal. Distinct from `TournamentMatchFinishedEvent`, which
+/// means a *successful scored game* (form dots, game cards, replay).
+#[derive(Serialize, Deserialize, Debug, Clone, Type, Event)]
+pub struct TournamentMatchFailedEvent {
+    pub tournament_id: i64,
+    pub match_id: u64,
+}
+
 /// Throttled per-turn liveness from `live_events()` (slice B). Drives the
 /// now-playing line and the depth-2 live-game row. Lossy by design.
 #[derive(Serialize, Deserialize, Debug, Clone, Type, Event)]

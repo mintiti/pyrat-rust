@@ -15,6 +15,7 @@ export function useTournamentEvents() {
 			onStarted,
 			onStandings,
 			onMatchFinished,
+			onMatchFailed,
 			onMatchStarted,
 			onNowPlaying,
 			onFinished,
@@ -29,6 +30,7 @@ export function useTournamentEvents() {
 			events.tournamentMatchFinishedEvent.listen((e) =>
 				onMatchFinished(e.payload),
 			),
+			events.tournamentMatchFailedEvent.listen((e) => onMatchFailed(e.payload)),
 			events.tournamentMatchStartedEvent.listen((e) =>
 				onMatchStarted(e.payload),
 			),

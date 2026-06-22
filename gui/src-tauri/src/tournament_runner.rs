@@ -35,8 +35,8 @@ use tracing::warn;
 use crate::tournament_config;
 use crate::tournament_events::{
     NowPlayingEvent, StandingRow, StandingsUpdatedEvent, TournamentAbortedEvent,
-    TournamentFinishedEvent, TournamentMatchFinishedEvent, TournamentMatchStartedEvent,
-    TournamentStartedEvent,
+    TournamentFinishedEvent, TournamentMatchFailedEvent, TournamentMatchFinishedEvent,
+    TournamentMatchStartedEvent, TournamentStartedEvent,
 };
 
 /// Below this many games a non-anchor player's Elo is too noisy to show.
@@ -245,6 +245,15 @@ pub async fn run_tournament(
                     Ok(SessionEvent::MatchFailed { descriptor, .. }) => {
                         now_playing.remove(&descriptor.match_id.0);
                         orientation_by_match.remove(&descriptor.match_id.0);
+                        // Tell the frontend to drop the now-playing row. Unlike
+                        // a finish, a failed match emits no scored event, so
+                        // without this its live row would freeze at its last
+                        // turn until the whole tournament ends.
+                        let _ = TournamentMatchFailedEvent {
+                            tournament_id: tournament_id.0,
+                            match_id: descriptor.match_id.0,
+                        }
+                        .emit(&app);
                         let state = state_rx.borrow().clone();
                         emit_standings(&app, tournament_id.0, &state, &elo_options, &player_ids,
                                        &anchor_id, total_games);

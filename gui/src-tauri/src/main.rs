@@ -34,7 +34,8 @@ use tournament_commands::{
 };
 use tournament_events::{
     NowPlayingEvent, StandingsUpdatedEvent, TournamentAbortedEvent, TournamentFinishedEvent,
-    TournamentMatchFinishedEvent, TournamentMatchStartedEvent, TournamentStartedEvent,
+    TournamentMatchFailedEvent, TournamentMatchFinishedEvent, TournamentMatchStartedEvent,
+    TournamentStartedEvent,
 };
 
 fn main() {
@@ -79,6 +80,7 @@ fn main() {
             StandingsUpdatedEvent,
             TournamentMatchFinishedEvent,
             TournamentMatchStartedEvent,
+            TournamentMatchFailedEvent,
             NowPlayingEvent,
             TournamentFinishedEvent,
             TournamentAbortedEvent

@@ -198,6 +198,7 @@ setupCompleteEvent: SetupCompleteEvent,
 standingsUpdatedEvent: StandingsUpdatedEvent,
 tournamentAbortedEvent: TournamentAbortedEvent,
 tournamentFinishedEvent: TournamentFinishedEvent,
+tournamentMatchFailedEvent: TournamentMatchFailedEvent,
 tournamentMatchFinishedEvent: TournamentMatchFinishedEvent,
 tournamentMatchStartedEvent: TournamentMatchStartedEvent,
 tournamentStartedEvent: TournamentStartedEvent,
@@ -213,6 +214,7 @@ setupCompleteEvent: "setup-complete-event",
 standingsUpdatedEvent: "standings-updated-event",
 tournamentAbortedEvent: "tournament-aborted-event",
 tournamentFinishedEvent: "tournament-finished-event",
+tournamentMatchFailedEvent: "tournament-match-failed-event",
 tournamentMatchFinishedEvent: "tournament-match-finished-event",
 tournamentMatchStartedEvent: "tournament-match-started-event",
 tournamentStartedEvent: "tournament-started-event",
@@ -394,6 +396,14 @@ export type TournamentAbortedEvent = { tournament_id: number; reason: string }
  * the chip goes green.
  */
 export type TournamentFinishedEvent = { tournament_id: number }
+/**
+ * Terminal, per-match: a match failed (timeout, disconnect, spawn failure).
+ * Verdict-bearing data rides the lossless standings path; this carries only
+ * what the frontend needs to drop the now-playing row, so the payload is
+ * deliberately minimal. Distinct from `TournamentMatchFinishedEvent`, which
+ * means a *successful scored game* (form dots, game cards, replay).
+ */
+export type TournamentMatchFailedEvent = { tournament_id: number; match_id: number }
 /**
  * Emitted on every `MatchFinished`. Scores are canonical (player1_id is the
  * lex-min of the pair); the frontend re-orients per target / per displayed
