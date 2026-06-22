@@ -273,6 +273,23 @@ pub enum GameReplayState {
 // Commands
 // ---------------------------------------------------------------------------
 
+/// Whether a new tournament may claim the slot.
+///
+/// `Idle` is free. A `Running` slot whose runner task has already **finished**
+/// is reclaimable: the runner doesn't reset the phase on natural finish (it
+/// never touches `AppState`), so the slot would otherwise stay `Running`
+/// forever and refuse every future launch — the "can't launch after a
+/// tournament finishes" bug. A still-running `Running` or an in-flight
+/// `Starting` is refused, with distinct messages.
+fn reservation_check(phase: &TournamentPhase) -> Result<(), String> {
+    match phase {
+        TournamentPhase::Idle => Ok(()),
+        TournamentPhase::Running { handle, .. } if handle.is_finished() => Ok(()),
+        TournamentPhase::Starting { .. } => Err("a tournament is already starting".into()),
+        TournamentPhase::Running { .. } => Err("a tournament is already running".into()),
+    }
+}
+
 /// Create a tournament and start running it in the background. Returns the
 /// new tournament id. Rejects if one is already running.
 #[tauri::command]
@@ -303,19 +320,12 @@ pub async fn start_tournament(
     // promotion, so cancellation spans the whole start lifetime.
     let cancel = {
         let mut phase = state.tournament_phase.lock().await;
-        match &*phase {
-            TournamentPhase::Idle => {
-                let cancel = CancellationToken::new();
-                *phase = TournamentPhase::Starting {
-                    cancel: cancel.clone(),
-                };
-                cancel
-            },
-            TournamentPhase::Starting { .. } => {
-                return Err("a tournament is already starting".into())
-            },
-            TournamentPhase::Running { .. } => return Err("a tournament is already running".into()),
-        }
+        reservation_check(&phase)?;
+        let cancel = CancellationToken::new();
+        *phase = TournamentPhase::Starting {
+            cancel: cancel.clone(),
+        };
+        cancel
     };
 
     match build_and_spawn(&app, params, cancel.clone()).await {
@@ -602,10 +612,17 @@ pub async fn stop_tournament(state: tauri::State<'_, AppState>) -> Result<(), St
 pub async fn tournament_status(state: tauri::State<'_, AppState>) -> Result<Option<i64>, String> {
     let phase = state.tournament_phase.lock().await;
     Ok(match &*phase {
-        TournamentPhase::Running { tournament_id, .. } => Some(*tournament_id),
+        // Only a *live* runner counts: a finished tournament's slot may not be
+        // freed yet (the runner doesn't reset the phase), so report it as
+        // not-live — else a reloaded window would re-attach to a done one.
+        TournamentPhase::Running {
+            tournament_id,
+            handle,
+            ..
+        } if !handle.is_finished() => Some(*tournament_id),
         // Starting: the row isn't created yet, so there's no id to report —
         // the chip appears once the runner is promoted to Running.
-        TournamentPhase::Starting { .. } | TournamentPhase::Idle => None,
+        _ => None,
     })
 }
 
@@ -1038,6 +1055,40 @@ mod tests {
         assert_eq!(distinct[0].agent_id, "a");
         assert_eq!(distinct[0].working_dir, "/a"); // first-seen wins
         assert_eq!(distinct[1].agent_id, "b");
+    }
+
+    /// The launch-blocker: a tournament that *finished* leaves its slot
+    /// `Running` (the runner never resets the phase), and the next launch must
+    /// still be allowed. Idle is free, in-flight Starting/Running are refused.
+    #[tokio::test]
+    async fn finished_running_slot_is_reclaimable() {
+        assert!(reservation_check(&TournamentPhase::Idle).is_ok());
+        assert!(reservation_check(&TournamentPhase::Starting {
+            cancel: CancellationToken::new(),
+        })
+        .is_err());
+
+        // A still-running tournament: refused.
+        let live = tokio::spawn(std::future::pending::<()>());
+        let running_live = TournamentPhase::Running {
+            tournament_id: 1,
+            cancel: CancellationToken::new(),
+            handle: live,
+        };
+        assert!(reservation_check(&running_live).is_err());
+
+        // A finished tournament's slot: reclaimable (the bug — otherwise no
+        // further launch is ever possible).
+        let done = tokio::spawn(async {});
+        while !done.is_finished() {
+            tokio::task::yield_now().await;
+        }
+        let running_done = TournamentPhase::Running {
+            tournament_id: 1,
+            cancel: CancellationToken::new(),
+            handle: done,
+        };
+        assert!(reservation_check(&running_done).is_ok());
     }
 
     /// 7×7, no walls/mud, random symmetric — the interesting validation case.
