@@ -75,7 +75,7 @@ pub async fn probe_bot(
     debug!(port, agent_id, "probe: listening");
 
     // 2. Spawn bot (RAII: killed on drop)
-    let procs = launch_bots(
+    let mut procs = launch_bots(
         &[BotConfig {
             run_command,
             working_dir: PathBuf::from(&working_dir),
@@ -83,6 +83,11 @@ pub async fn probe_bot(
         }],
         port,
     )?;
+
+    // Drain stderr so a noisy cold `cargo`/`uv` build can't fill the OS pipe
+    // buffer and block the bot before it connects — the deadlock that would
+    // otherwise hang warmup during the exact "make startup calm" phase.
+    procs.drain_stderr_to_tracing();
 
     // 3. Accept one connection — wait as long as the process is alive
     let stream = tokio::select! {

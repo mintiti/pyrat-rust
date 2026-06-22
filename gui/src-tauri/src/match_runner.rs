@@ -4,7 +4,7 @@ use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use pyrat::game::game_logic::GameState;
 use pyrat::{Coordinates, Direction as EngineDirection};
@@ -156,33 +156,10 @@ pub async fn run_match(
 
         let mut launched = launch_bots(&bot_configs, port)?;
 
-        // Drain bot stderr so the OS pipe buffer doesn't fill and block the
-        // bot mid-write. Forwarded under the `bot_stderr` target at `debug` so
-        // it's quiet by default (a panicking bot surfaces as a match failure,
-        // not a stderr dump); `RUST_LOG=bot_stderr=debug` brings it back.
-        // Parallel to `forward_bot_stderr` in eval/orchestrator/src/run_match.rs.
-        for (agent_id, stderr) in launched.take_stderr_handles() {
-            tokio::task::spawn_blocking(move || {
-                use std::io::BufRead;
-                let reader = std::io::BufReader::new(stderr);
-                let mut count = 0usize;
-                const MAX_LINES: usize = 200;
-                for line in reader.lines() {
-                    match line {
-                        Ok(text) if count < MAX_LINES => {
-                            debug!(target: "bot_stderr", %agent_id, "{text}");
-                            count += 1;
-                        },
-                        Ok(_) if count == MAX_LINES => {
-                            debug!(target: "bot_stderr", %agent_id, "stderr truncated after {MAX_LINES} lines");
-                            count += 1;
-                        },
-                        Ok(_) => {},
-                        Err(_) => break,
-                    }
-                }
-            });
-        }
+        // Drain bot stderr (under the `bot_stderr` target, off by default) so a
+        // full pipe can't block the bot mid-write. Shared with the orchestrator
+        // and bot probing via the host-crate helper.
+        launched.drain_stderr_to_tracing();
         launched.start_exit_monitor(tracing::Span::current());
         _bot_processes = Some(launched);
 

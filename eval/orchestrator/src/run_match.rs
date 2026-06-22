@@ -529,7 +529,7 @@ async fn setup_players<D: Descriptor>(
                 }
             }
             let mut procs = launch_bots(&bot_configs, port).map_err(SetupError::Launch)?;
-            forward_bot_stderr(&mut procs);
+            procs.drain_stderr_to_tracing();
             procs.start_exit_monitor(tracing::Span::current());
             let result = tokio::select! {
                 biased;
@@ -589,42 +589,6 @@ async fn setup_players<D: Descriptor>(
         identities,
         bot_procs,
     })
-}
-
-/// Drain each bot's piped stderr under the `bot_stderr` target at `debug!`,
-/// tagged with `agent_id`. The dedicated target keeps subprocess noise (incl.
-/// Cargo build chatter) out of the default log view while staying reachable via
-/// `RUST_LOG=bot_stderr=debug`; a crashing bot still surfaces through its
-/// match failure, not a stderr dump. Caps each bot at 200 lines so a runaway
-/// bot can't flood logs. Without this, `BotProcesses` holds the stderr handles
-/// but no task reads them — bot diagnostics are silently swallowed for the
-/// lifetime of the match.
-///
-/// Each forwarder is a blocking task (line reads on `ChildStderr` are
-/// synchronous) and exits naturally on EOF, which happens when the child
-/// exits — including when `BotProcesses::Drop` kills it on cancel paths.
-fn forward_bot_stderr(procs: &mut BotProcesses) {
-    use std::cmp::Ordering;
-    use std::io::BufRead;
-    const MAX_LINES: usize = 200;
-    for (agent_id, stderr) in procs.take_stderr_handles() {
-        let span = tracing::Span::current();
-        tokio::task::spawn_blocking(move || {
-            let _guard = span.entered();
-            let reader = std::io::BufReader::new(stderr);
-            for (i, line) in reader.lines().map_while(Result::ok).enumerate() {
-                match i.cmp(&MAX_LINES) {
-                    Ordering::Less => tracing::debug!(target: "bot_stderr", %agent_id, "{line}"),
-                    Ordering::Equal => tracing::debug!(
-                        target: "bot_stderr",
-                        %agent_id,
-                        "stderr output truncated after {MAX_LINES} lines"
-                    ),
-                    Ordering::Greater => {},
-                }
-            }
-        });
-    }
 }
 
 fn slot_for(idx: usize) -> PlayerSlot {

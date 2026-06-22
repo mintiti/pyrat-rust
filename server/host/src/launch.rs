@@ -142,6 +142,42 @@ impl BotProcesses {
             .collect()
     }
 
+    /// Spawn one detached thread per child to drain its stderr to the
+    /// `bot_stderr` tracing target at `debug` (quiet by default; reachable via
+    /// `RUST_LOG=bot_stderr=debug`). The single drain used by the orchestrator,
+    /// the GUI single-match runner, and bot probing/warmup.
+    ///
+    /// Logs at most `MAX_LINES` per bot but **keeps reading to EOF** — stopping
+    /// early would let the OS pipe buffer fill and wedge the child mid-write (or
+    /// kill it with `SIGPIPE`), which is exactly the deadlock this prevents
+    /// during a noisy cold build. Threads are fire-and-forget and exit on EOF,
+    /// which arrives when the child is killed on `Drop`. Plain `std::thread`
+    /// (like `start_exit_monitor`) so the host crate stays runtime-agnostic and
+    /// callable outside a Tokio runtime.
+    pub fn drain_stderr_to_tracing(&mut self) {
+        use std::cmp::Ordering;
+        use std::io::BufRead;
+        const MAX_LINES: usize = 200;
+        for (agent_id, stderr) in self.take_stderr_handles() {
+            let span = tracing::Span::current();
+            std::thread::spawn(move || {
+                let _guard = span.enter();
+                let reader = std::io::BufReader::new(stderr);
+                for (i, line) in reader.lines().map_while(Result::ok).enumerate() {
+                    match i.cmp(&MAX_LINES) {
+                        Ordering::Less => debug!(target: "bot_stderr", %agent_id, "{line}"),
+                        Ordering::Equal => debug!(
+                            target: "bot_stderr",
+                            %agent_id,
+                            "stderr output truncated after {MAX_LINES} lines"
+                        ),
+                        Ordering::Greater => {}, // keep reading to EOF, don't log
+                    }
+                }
+            });
+        }
+    }
+
     /// Start a background thread that polls for bot process exits.
     ///
     /// Exits before `mark_game_over()` are logged as warnings (unexpected).
@@ -384,6 +420,39 @@ mod tests {
         let mut procs = launch_bots(&bots, 9999).unwrap();
         procs.kill_all();
         procs.kill_all(); // should not panic
+    }
+
+    /// Regression: a bot that floods stderr past the OS pipe buffer before
+    /// connecting must not wedge. Without `drain_stderr_to_tracing` the child
+    /// blocks on a full pipe and never exits; if the drain stopped reading
+    /// early it would break the pipe and the child would exit non-zero. So we
+    /// assert it exits *successfully*, which catches both failure modes.
+    #[test]
+    #[cfg(unix)]
+    fn drain_stderr_unblocks_a_flooding_child() {
+        // ~200 KB to stderr (well past the 64 KB pipe buffer), then exit 0.
+        let flood = "seq 1 20000 | sed 's/^/xxxxxxxxxx/' 1>&2";
+        let mut procs = launch_bots(&[bot("flood", flood)], 9999).unwrap();
+        procs.drain_stderr_to_tracing();
+
+        let step = std::time::Duration::from_millis(50);
+        let mut waited = std::time::Duration::ZERO;
+        let exit = loop {
+            if let Some(info) = procs.try_exited() {
+                break info;
+            }
+            assert!(
+                waited < std::time::Duration::from_secs(5),
+                "flooding child never exited — the stderr drain deadlocked"
+            );
+            std::thread::sleep(step);
+            waited += step;
+        };
+        assert_eq!(
+            exit.status.and_then(|s| s.code()),
+            Some(0),
+            "flooding child should exit 0; non-zero means the drain broke the pipe early"
+        );
     }
 
     #[test]
