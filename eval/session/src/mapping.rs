@@ -134,6 +134,7 @@ pub fn failure_reason_string(reason: &FailureReason) -> String {
         FailureReason::SpawnFailed => "spawn_failed".into(),
         FailureReason::HandshakeTimeout => "handshake_timeout".into(),
         FailureReason::Disconnected(slot) => format!("disconnected: {slot:?}"),
+        FailureReason::Timeout { slot, phase } => format!("timeout: {phase}: {slot:?}"),
         FailureReason::ProtocolError(s) => format!("protocol_error: {s}"),
         FailureReason::Panic => "panic".into(),
         FailureReason::Cancelled => "cancelled".into(),
@@ -363,5 +364,18 @@ mod tests {
     fn failure_reason_string_includes_payload() {
         let s = failure_reason_string(&FailureReason::ProtocolError("timeout: setup".into()));
         assert_eq!(s, "protocol_error: timeout: setup");
+    }
+
+    #[test]
+    fn failure_reason_string_timeout_is_stable_not_unknown() {
+        // Timeouts are the most common failure on a tight budget; they must
+        // land as a stable, greppable string, not the `unknown: …` Debug
+        // fallback that an unmapped `#[non_exhaustive]` variant would get.
+        let s = failure_reason_string(&FailureReason::Timeout {
+            slot: Player::Player2,
+            phase: pyrat_orchestrator::TimeoutPhase::Move,
+        });
+        assert_eq!(s, "timeout: move: Player2");
+        assert!(!s.starts_with("unknown"));
     }
 }

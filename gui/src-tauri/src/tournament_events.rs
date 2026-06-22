@@ -40,6 +40,10 @@ pub struct PlayerLite {
 pub struct TournamentPreparingEvent {
     pub done: u32,
     pub total: u32,
+    /// The bot currently being warmed (agent_id), or `None` on the final
+    /// completion emit. Drives "Preparing {bot}…" so the line reads as progress
+    /// even while `done` sits at 0 during the first cold build.
+    pub current: Option<String>,
 }
 
 /// Emitted once, right after the tournament row is created. Scaffolds the
@@ -54,6 +58,9 @@ pub struct TournamentStartedEvent {
     /// for round-robin.
     pub target: Option<String>,
     pub total_games: u32,
+    /// Games per matchup (= 2 × mazes under the paired schedule). Configurable,
+    /// so the matchup view reads this instead of a hardcoded count.
+    pub games_per_matchup: u32,
     pub anchor_id: String,
     /// Shared-core provenance string, identical in the launch line and the
     /// live header: e.g. "my-bot vs 6 (gauntlet) · tiny preset · 200 ms/move".
@@ -123,6 +130,10 @@ pub enum FailureKind {
     HandshakeTimeout,
     ProtocolError,
     Cancelled,
+    /// Tournament-infrastructure failure (panic, result-sink flush, internal),
+    /// not the bot's fault — kept distinct from `Other` so the UI doesn't read
+    /// an infra bug as "the bot failed".
+    Internal,
     Other,
 }
 

@@ -20,6 +20,7 @@ function started(): TournamentStartedEvent {
 		format: "round_robin",
 		target: null,
 		total_games: 4,
+		games_per_matchup: 4,
 		anchor_id: "a",
 		plan_summary: "",
 		players: [{ player_id: "a" }, { player_id: "b" }],

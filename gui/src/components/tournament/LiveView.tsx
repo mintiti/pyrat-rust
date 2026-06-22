@@ -143,8 +143,9 @@ export default function LiveView({ live }: { live: TournamentLive }) {
 	);
 }
 
-/** A small pulsing dot — the "something is happening" signal. */
-function PulseDot({ color = T.cheese }: { color?: string }) {
+/** A small pulsing dot — the "something is happening" signal. Exported so the
+ * launch screen's "Preparing bots…" line shares the same liveness vocabulary. */
+export function PulseDot({ color = T.cheese }: { color?: string }) {
 	return (
 		<Box
 			w={7}

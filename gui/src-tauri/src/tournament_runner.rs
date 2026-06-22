@@ -209,6 +209,7 @@ pub async fn run_tournament(
         format: format_str,
         target,
         total_games,
+        games_per_matchup: target_games_per_matchup,
         anchor_id: anchor_id.clone(),
         plan_summary,
         players: player_ids
@@ -247,17 +248,7 @@ pub async fn run_tournament(
                     Ok(SessionEvent::MatchFailed { descriptor, reason, .. }) => {
                         now_playing.remove(&descriptor.match_id.0);
                         orientation_by_match.remove(&descriptor.match_id.0);
-                        // Resolve the implicated bot from the descriptor's
-                        // recorded seat: the timeout/disconnect slot is an
-                        // engine seat, `canonicalize` maps (seat0, seat1) ->
-                        // (canonical p1, p2), so applying it to the canonical
-                        // ids gives the seat assignment to index by slot.
-                        let (seat0_id, seat1_id) = descriptor
-                            .orientation
-                            .canonicalize(descriptor.player1_id.clone(), descriptor.player2_id.clone());
-                        let failing_player_id = reason.implicated_slot().map(|slot| {
-                            if slot == PlayerSlot::Player1 { seat0_id } else { seat1_id }
-                        });
+                        let failing_player_id = implicated_player_id(&descriptor, &reason);
                         let (kind, timeout_phase) = failure_kind_for_wire(&reason);
                         // Tell the frontend to drop the now-playing row (a failed
                         // match emits no scored event, so its live row would
@@ -350,6 +341,29 @@ pub async fn run_tournament(
         .map_err(|e| format!("session join: {e}"))
 }
 
+/// Resolve the bot a failure points at (a timeout or clean disconnect) from the
+/// engine seat. The `MatchError` slot is an *engine seat*;
+/// `descriptor.orientation` records which canonical id sat there, and
+/// `SeatOrientation::canonicalize` is its own inverse (identity or a 2-swap), so
+/// applying it to the canonical ids yields the seat assignment to index by slot.
+/// `None` for failures with no single seat (spawn, sink, internal). This is the
+/// load-bearing attribution step behind the per-bot health marker — get it wrong
+/// and a flipped-seat timeout accuses the wrong bot, hence the table test.
+fn implicated_player_id(
+    descriptor: &EvalMatchDescriptor,
+    reason: &FailureReason,
+) -> Option<String> {
+    let slot = reason.implicated_slot()?;
+    let (seat0_id, seat1_id) = descriptor
+        .orientation
+        .canonicalize(descriptor.player1_id.clone(), descriptor.player2_id.clone());
+    Some(if slot == PlayerSlot::Player1 {
+        seat0_id
+    } else {
+        seat1_id
+    })
+}
+
 /// Map a `FailureReason` to the wire failure kind and, for timeouts, the
 /// phase. Payload strings are dropped (the implicated bot rides
 /// `failing_player_id`); `FailureReason` is `#[non_exhaustive]`, so the
@@ -370,6 +384,12 @@ fn failure_kind_for_wire(reason: &FailureReason) -> (FailureKind, Option<Timeout
         FailureReason::HandshakeTimeout => (FailureKind::HandshakeTimeout, None),
         FailureReason::ProtocolError(_) => (FailureKind::ProtocolError, None),
         FailureReason::Cancelled => (FailureKind::Cancelled, None),
+        // Infra failures — not the bot's fault; surface as a distinct kind.
+        FailureReason::Panic | FailureReason::SinkFlushError(_) | FailureReason::Internal(_) => {
+            (FailureKind::Internal, None)
+        },
+        // `FailureReason` is `#[non_exhaustive]`; only genuinely-future variants
+        // land here.
         _ => (FailureKind::Other, None),
     }
 }
@@ -630,6 +650,65 @@ mod tests {
         // Canonical: player1 = lex-min "a" scored 3; player2 = "b" scored 7.
         assert_eq!(key.player1_id(), "a");
         assert_eq!((p1, p2), (3.0, 7.0));
+    }
+
+    /// The load-bearing attribution behind the health marker: a timeout's
+    /// engine slot must resolve to the *canonical* bot through the seat
+    /// orientation. The neighboring flipped-seating test covers the *score*
+    /// direction of `canonicalize`; this pins the inverse (seat→id) use, which
+    /// a regression could silently break (accusing the wrong bot) with no other
+    /// test failing.
+    #[test]
+    fn implicated_player_id_resolves_seat_through_orientation() {
+        use pyrat_eval::orchestrator::{FailureReason, MatchId, TimeoutPhase};
+        use pyrat_eval::{EvalMatchDescriptor, SeatOrientation};
+        use pyrat_host::wire::Player;
+
+        // Canonical pair (a, b): a = lex-min, b = lex-max.
+        let desc = |orientation| EvalMatchDescriptor {
+            match_id: MatchId(0),
+            tournament_id: TournamentId(1),
+            game_config_id: "gc".into(),
+            player1_id: "a".into(),
+            player2_id: "b".into(),
+            seed: 0,
+            repetition_index: 0,
+            attempt_index: 0,
+            orientation,
+            planned_at: std::time::SystemTime::UNIX_EPOCH,
+        };
+        let timeout = |slot| FailureReason::Timeout {
+            slot,
+            phase: TimeoutPhase::Move,
+        };
+        let id = |o, slot| implicated_player_id(&desc(o), &timeout(slot));
+
+        // Canonical: engine seat0 = a, seat1 = b.
+        assert_eq!(
+            id(SeatOrientation::Canonical, Player::Player1).as_deref(),
+            Some("a")
+        );
+        assert_eq!(
+            id(SeatOrientation::Canonical, Player::Player2).as_deref(),
+            Some("b")
+        );
+        // Flipped: lex-max (b) was Rat (seat0), so seat0 = b, seat1 = a.
+        assert_eq!(
+            id(SeatOrientation::Flipped, Player::Player1).as_deref(),
+            Some("b")
+        );
+        assert_eq!(
+            id(SeatOrientation::Flipped, Player::Player2).as_deref(),
+            Some("a")
+        );
+        // No implicated slot → no attribution.
+        assert_eq!(
+            implicated_player_id(
+                &desc(SeatOrientation::Canonical),
+                &FailureReason::SpawnFailed
+            ),
+            None
+        );
     }
 
     /// The GUI's standings (elo + CI) must equal a direct

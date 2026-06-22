@@ -26,6 +26,7 @@ import { discoveredBotsAtom } from "../../stores/botConfigAtom";
 import { validate } from "../../stores/gameConfig";
 import { useTournamentStore } from "../../stores/tournamentStore";
 import GameFactoryForm from "./GameFactoryForm";
+import { PulseDot } from "./LiveView";
 import { T, shortId } from "./theme";
 
 // Rough wall-time estimate for the plan line. Not load-bearing — the planner
@@ -49,6 +50,7 @@ export default function LaunchView() {
 	const live = useTournamentStore((s) => s.live);
 	const showLive = useTournamentStore((s) => s.showLive);
 	const preparing = useTournamentStore((s) => s.preparing);
+	const clearPreparing = useTournamentStore((s) => s.clearPreparing);
 
 	const [selected, setSelected] = useState<Set<string>>(new Set());
 	const [target, setTarget] = useState<string | null>(null);
@@ -139,6 +141,7 @@ export default function LaunchView() {
 	const launch = async () => {
 		if (!factory || !method) return;
 		setError(null);
+		clearPreparing(); // drop any stale progress from a prior attempt
 		setLaunching(true);
 		const picks = selectedBots.map((b) => ({
 			agent_id: b.agent_id,
@@ -158,8 +161,14 @@ export default function LaunchView() {
 			tournament_seed: trimmedSeed === "" ? null : Number(trimmedSeed),
 		});
 		setLaunching(false);
-		if (res.status === "error") setError(res.error);
-		// On success the TournamentStartedEvent flips the store to the live view.
+		if (res.status === "error") {
+			clearPreparing();
+			// A user-initiated Stop during preparing surfaces as this; it's not
+			// an error to alarm on.
+			if (res.error !== "tournament start was cancelled") setError(res.error);
+		}
+		// On success the TournamentStartedEvent flips the store to the live view
+		// and clears `preparing`.
 	};
 
 	const tournamentRunning = live?.status === "running";
@@ -372,27 +381,43 @@ export default function LaunchView() {
 						</Text>
 					)}
 					{launching && preparing && (
-						<Text size="sm" c="dimmed" mb="sm">
-							Preparing bots… ({preparing.done}/{preparing.total})
-							{preparing.done < preparing.total
-								? " — first launch builds each bot once"
-								: ""}
-						</Text>
+						<Group gap="xs" mb="sm" wrap="nowrap">
+							<PulseDot />
+							<Text size="sm" c="dimmed">
+								{preparing.current
+									? `Preparing ${shortId(preparing.current)}… (${preparing.done}/${preparing.total})`
+									: `Preparing bots… (${preparing.total}/${preparing.total})`}
+								{preparing.done < preparing.total
+									? " — first launch builds each bot once"
+									: ""}
+							</Text>
+						</Group>
 					)}
-					<Button
-						color="yellow"
-						disabled={
-							selectedBots.length < 2 ||
-							launching ||
-							!factory ||
-							!method ||
-							hasFactoryError
-						}
-						loading={launching}
-						onClick={launch}
-					>
-						{launching && preparing ? "Preparing bots…" : "Launch"}
-					</Button>
+					<Group gap="sm">
+						<Button
+							color="yellow"
+							disabled={
+								selectedBots.length < 2 ||
+								launching ||
+								!factory ||
+								!method ||
+								hasFactoryError
+							}
+							loading={launching}
+							onClick={launch}
+						>
+							{launching && preparing ? "Preparing bots…" : "Launch"}
+						</Button>
+						{launching && preparing && (
+							<Button
+								variant="subtle"
+								color="red"
+								onClick={() => commands.stopTournament()}
+							>
+								Stop
+							</Button>
+						)}
+					</Group>
 				</Paper>
 
 				<Paper

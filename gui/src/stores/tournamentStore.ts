@@ -71,6 +71,9 @@ export interface TournamentLive {
 	abortReason: string | null;
 	done: number;
 	total: number;
+	/** Games per matchup (= 2 × mazes); the matchup view reads this instead of
+	 * a hardcoded count. */
+	gamesPerMatchup: number;
 	success: number;
 	failure: number;
 	standings: StandingRow[];
@@ -96,8 +99,8 @@ interface TournamentStore {
 	live: TournamentLive | null;
 	/** Transient pre-tournament warmup progress (no tournament id yet). Set by
 	 * `onPreparing`, cleared when the tournament starts. Drives the launch
-	 * screen's "Preparing bots…" line. */
-	preparing: { done: number; total: number } | null;
+	 * screen's "Preparing bots…" line. `current` is the bot being warmed. */
+	preparing: { done: number; total: number; current: string | null } | null;
 	nav: TournamentNav;
 	// navigation
 	showLaunch: () => void;
@@ -106,6 +109,9 @@ interface TournamentStore {
 	back: () => void;
 	// event handlers
 	onPreparing: (e: TournamentPreparingEvent) => void;
+	/** Drop the transient warmup progress (launch start / stop / failed launch),
+	 * so a failed or cancelled warmup leaves no stale "Preparing…" behind. */
+	clearPreparing: () => void;
 	onStarted: (e: TournamentStartedEvent, startedAt: number) => void;
 	onStandings: (e: StandingsUpdatedEvent) => void;
 	onMatchFinished: (e: TournamentMatchFinishedEvent) => void;
@@ -156,7 +162,10 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 			}
 		}),
 
-	onPreparing: (e) => set({ preparing: { done: e.done, total: e.total } }),
+	onPreparing: (e) =>
+		set({ preparing: { done: e.done, total: e.total, current: e.current } }),
+
+	clearPreparing: () => set({ preparing: null }),
 
 	onStarted: (e, startedAt) =>
 		set({
@@ -175,6 +184,7 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 				abortReason: null,
 				done: 0,
 				total: e.total_games,
+				gamesPerMatchup: e.games_per_matchup,
 				success: 0,
 				failure: 0,
 				standings: [],
@@ -409,6 +419,8 @@ export function failureLabel(
 			return "protocol error";
 		case "cancelled":
 			return "cancelled";
+		case "internal":
+			return "tournament error";
 		default:
 			return "failed";
 	}

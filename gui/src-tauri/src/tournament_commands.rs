@@ -545,6 +545,7 @@ async fn warmup_bots(
         let _ = TournamentPreparingEvent {
             done: i as u32,
             total,
+            current: Some(bot.agent_id.clone()),
         }
         .emit(app);
         let probe = probe_bot(
@@ -560,7 +561,12 @@ async fn warmup_bots(
             }
         }
     }
-    let _ = TournamentPreparingEvent { done: total, total }.emit(app);
+    let _ = TournamentPreparingEvent {
+        done: total,
+        total,
+        current: None,
+    }
+    .emit(app);
     Ok(())
 }
 

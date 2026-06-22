@@ -54,7 +54,7 @@ export default function MatchupView({ live, a, b, fromBot }: Props) {
 					{w}–{l}–{d}
 				</Text>
 				<Text size="sm" c="dimmed">
-					· {games.length}/15 games
+					· {games.length}/{live.gamesPerMatchup} games
 				</Text>
 				<Group gap={3}>
 					{games.slice(-5).map((g) => {

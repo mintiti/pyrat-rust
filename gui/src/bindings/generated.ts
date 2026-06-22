@@ -265,6 +265,18 @@ export type DiscoveredBot = { agent_id: string; name: string; run_command: strin
  */
 working_dir: string; description: string; developer: string; language: string; tags: string[] }
 /**
+ * Category of a match failure, for the per-bot health summary. Mirrors
+ * `pyrat_eval::orchestrator::FailureReason` collapsed to what the UI groups on
+ * (payload strings dropped; the implicated bot rides `failing_player_id`).
+ */
+export type FailureKind = "timeout" | "disconnected" | "spawn_failed" | "handshake_timeout" | "protocol_error" | "cancelled" | 
+/**
+ * Tournament-infrastructure failure (panic, result-sink flush, internal),
+ * not the bot's fault — kept distinct from `Other` so the UI doesn't read
+ * an infra bug as "the bot failed".
+ */
+"internal" | "other"
+/**
  * The game-instance distribution configured on the launch screen: board,
  * maze, start strategy, cheese. This is the *distribution*; the tournament
  * seed that selects which instances get drawn lives on `LaunchParams`.
@@ -389,6 +401,11 @@ export type StandingsSnapshot = { tournament_id: number; name: string | null; fo
 export type StandingsUpdatedEvent = { tournament_id: number; done: number; total: number; success: number; failure: number; standings: StandingRow[] }
 export type StopAnalysisTurnResult = { player1_action: Direction; player2_action: Direction }
 /**
+ * Which phase a timeout fired in, for labeling bot health
+ * ("move timeout" vs "preprocessing").
+ */
+export type TimeoutPhase = "setup" | "preprocessing" | "sync" | "move"
+/**
  * Terminal: tournament aborted (e.g. persistent sink-flush failure, or
  * user-requested stop). Carries a reason for the UI.
  */
@@ -406,18 +423,22 @@ export type TournamentFinishedEvent = { tournament_id: number }
  * `TournamentMatchFinishedEvent`, which means a *successful scored game* (form
  * dots, game cards, replay).
  */
-export type TournamentMatchFailedEvent = { tournament_id: number; match_id: number; player1_id: string; player2_id: string; failing_player_id: string | null; kind: FailureKind; timeout_phase: TimeoutPhase | null }
+export type TournamentMatchFailedEvent = { tournament_id: number; match_id: number; 
 /**
- * Category of a match failure, for the per-bot health summary. Mirrors
- * `pyrat_eval::orchestrator::FailureReason` collapsed to what the UI groups on
- * (payload strings dropped; the implicated bot rides `failing_player_id`).
+ * Canonical pair (player1_id = lex-min), so the frontend can attribute the
+ * failure to a matchup without a lookup.
  */
-export type FailureKind = "timeout" | "disconnected" | "spawn_failed" | "handshake_timeout" | "protocol_error" | "cancelled" | "other"
+player1_id: string; player2_id: string; 
 /**
- * Which phase a timeout fired in, for labeling bot health
- * ("move timeout" vs "preprocessing").
+ * The bot the failure points at (timeout / clean disconnect), resolved
+ * from the engine seat via the match's seat orientation. `None` for
+ * structural failures (spawn, sink, internal) with no single seat.
  */
-export type TimeoutPhase = "setup" | "preprocessing" | "sync" | "move"
+failing_player_id: string | null; kind: FailureKind; 
+/**
+ * Set only when `kind == Timeout`.
+ */
+timeout_phase: TimeoutPhase | null }
 /**
  * Emitted on every `MatchFinished`. Scores are canonical (player1_id is the
  * lex-min of the pair); the frontend re-orients per target / per displayed
@@ -436,12 +457,18 @@ export type TournamentMatchStartedEvent = { tournament_id: number; match_id: num
  * bots… (done/total)" state that clears when `TournamentStartedEvent` lands.
  * `done` increments before each bot's warmup and once more on completion.
  */
-export type TournamentPreparingEvent = { done: number; total: number }
+export type TournamentPreparingEvent = { done: number; total: number; 
+/**
+ * The bot currently being warmed (agent_id), or `None` on the final
+ * completion emit. Drives "Preparing {bot}…" so the line reads as progress
+ * even while `done` sits at 0 during the first cold build.
+ */
+current: string | null }
 /**
  * Emitted once, right after the tournament row is created. Scaffolds the
  * header, hero, and axis before any game finishes.
  */
-export type TournamentStartedEvent = { tournament_id: number; name: string | null;
+export type TournamentStartedEvent = { tournament_id: number; name: string | null; 
 /**
  * "gauntlet" or "round_robin".
  */
@@ -450,7 +477,12 @@ format: string;
  * In a gauntlet, the measured bot (highlighted, not clickable). `None`
  * for round-robin.
  */
-target: string | null; total_games: number; anchor_id: string; 
+target: string | null; total_games: number; 
+/**
+ * Games per matchup (= 2 × mazes under the paired schedule). Configurable,
+ * so the matchup view reads this instead of a hardcoded count.
+ */
+games_per_matchup: number; anchor_id: string; 
 /**
  * Shared-core provenance string, identical in the launch line and the
  * live header: e.g. "my-bot vs 6 (gauntlet) · tiny preset · 200 ms/move".
