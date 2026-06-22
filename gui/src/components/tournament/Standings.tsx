@@ -1,8 +1,10 @@
-import { Box, Group, Text } from "@mantine/core";
-import { IconChevronRight } from "@tabler/icons-react";
+import { Box, Group, Text, Tooltip } from "@mantine/core";
+import { IconAlertTriangle, IconChevronRight } from "@tabler/icons-react";
 import type { StandingRow } from "../../bindings/generated";
 import type { TournamentLive } from "../../stores/tournamentStore";
 import {
+	botFailures,
+	failureBreakdown,
 	resultFor,
 	sortedStandings,
 	useTournamentStore,
@@ -82,6 +84,12 @@ export default function Standings({ live }: { live: TournamentLive }) {
 								{shortId(r.player_id)}
 							</Text>
 
+							{/* Fixed-width health slot — kept constant so the bars
+							    below stay left-aligned across rows. */}
+							<Box w={34} style={{ textAlign: "right" }}>
+								<HealthMarker live={live} botId={r.player_id} />
+							</Box>
+
 							{/* bar + whisker track */}
 							<Box pos="relative" style={{ flex: 1, height: 18 }}>
 								<Box
@@ -131,6 +139,38 @@ export default function Standings({ live }: { live: TournamentLive }) {
 				Elo, 95% CI · anchor: {shortId(live.anchorId)} = 1000 (dashed)
 			</Text>
 		</Box>
+	);
+}
+
+/** A quiet "this bot is struggling" marker: a triangle + failure count, with
+ * the breakdown on hover. Renders nothing when the bot has no failures, so a
+ * healthy tournament shows no clutter. */
+function HealthMarker({
+	live,
+	botId,
+}: {
+	live: TournamentLive;
+	botId: string;
+}) {
+	const failures = botFailures(live, botId);
+	if (failures.length === 0) return null;
+	const summary = failureBreakdown(failures)
+		.map((b) => `${b.count} ${b.label}`)
+		.join(", ");
+	return (
+		<Tooltip label={summary} withArrow>
+			<Group
+				gap={2}
+				wrap="nowrap"
+				justify="flex-end"
+				style={{ color: T.muted }}
+			>
+				<IconAlertTriangle size={11} />
+				<Text size="xs" c="dimmed" ff="monospace">
+					{failures.length}
+				</Text>
+			</Group>
+		</Tooltip>
 	);
 }
 

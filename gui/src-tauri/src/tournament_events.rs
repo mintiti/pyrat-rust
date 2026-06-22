@@ -90,15 +90,53 @@ pub struct TournamentMatchStartedEvent {
     pub repetition_index: u32,
 }
 
+/// Which phase a timeout fired in, for labeling bot health
+/// ("move timeout" vs "preprocessing").
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum TimeoutPhase {
+    Setup,
+    Preprocessing,
+    Sync,
+    Move,
+}
+
+/// Category of a match failure, for the per-bot health summary. Mirrors
+/// `pyrat_eval::orchestrator::FailureReason` collapsed to what the UI groups on
+/// (payload strings dropped; the implicated bot rides `failing_player_id`).
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum FailureKind {
+    Timeout,
+    Disconnected,
+    SpawnFailed,
+    HandshakeTimeout,
+    ProtocolError,
+    Cancelled,
+    Other,
+}
+
 /// Terminal, per-match: a match failed (timeout, disconnect, spawn failure).
-/// Verdict-bearing data rides the lossless standings path; this carries only
-/// what the frontend needs to drop the now-playing row, so the payload is
-/// deliberately minimal. Distinct from `TournamentMatchFinishedEvent`, which
-/// means a *successful scored game* (form dots, game cards, replay).
+/// Verdict-bearing data (the success/failure tally) still rides the lossless
+/// standings path; this also carries enough to (a) drop the now-playing row
+/// and (b) accumulate per-bot health. Distinct from
+/// `TournamentMatchFinishedEvent`, which means a *successful scored game* (form
+/// dots, game cards, replay).
 #[derive(Serialize, Deserialize, Debug, Clone, Type, Event)]
 pub struct TournamentMatchFailedEvent {
     pub tournament_id: i64,
     pub match_id: u64,
+    /// Canonical pair (player1_id = lex-min), so the frontend can attribute the
+    /// failure to a matchup without a lookup.
+    pub player1_id: String,
+    pub player2_id: String,
+    /// The bot the failure points at (timeout / clean disconnect), resolved
+    /// from the engine seat via the match's seat orientation. `None` for
+    /// structural failures (spawn, sink, internal) with no single seat.
+    pub failing_player_id: Option<String>,
+    pub kind: FailureKind,
+    /// Set only when `kind == Timeout`.
+    pub timeout_phase: Option<TimeoutPhase>,
 }
 
 /// Throttled per-turn liveness from `live_events()` (slice B). Drives the

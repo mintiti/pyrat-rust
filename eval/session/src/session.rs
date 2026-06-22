@@ -140,6 +140,10 @@ pub enum SessionEvent {
     MatchFailed {
         descriptor: EvalMatchDescriptor,
         durable_record: bool,
+        /// Why it failed. Carried through so consumers (the GUI) can attribute
+        /// a timeout/disconnect to a specific bot and surface it as health,
+        /// rather than the verdict path's bare success/failure count.
+        reason: FailureReason,
     },
     TournamentFinished,
     /// Tournament terminated abnormally. Emitted in addition to the
@@ -167,6 +171,7 @@ impl SessionEvent {
             DriverEvent::MatchFailed { failure } => Some(SessionEvent::MatchFailed {
                 descriptor: failure.descriptor.clone(),
                 durable_record: failure.durable_record,
+                reason: failure.reason.clone(),
             }),
             _ => None,
         }

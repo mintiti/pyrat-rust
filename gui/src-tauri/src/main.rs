@@ -41,8 +41,15 @@ use tournament_events::{
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
+            // Default to a calm terminal: host runs at `info`, so per-turn
+            // recovery (`move timeout`, stale-action — all `debug!`) stays
+            // quiet during a tournament. Bot subprocess stderr is forwarded
+            // under the `bot_stderr` target (see `forward_bot_stderr`), which
+            // the bare `warn` default suppresses. Opt back in per source:
+            // `RUST_LOG=pyrat_host=debug` for host internals,
+            // `RUST_LOG=bot_stderr=debug` for raw bot output.
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "pyrat_gui=debug,pyrat_host=debug,warn".parse().unwrap()),
+                .unwrap_or_else(|_| "pyrat_gui=debug,pyrat_host=info,warn".parse().unwrap()),
         )
         .init();
 

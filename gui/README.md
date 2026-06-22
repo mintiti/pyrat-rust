@@ -76,10 +76,14 @@ cd gui
 pnpm dev           # starts Tauri with hot-reload
 ```
 
-Backend logging is controlled by `RUST_LOG`:
+Backend logging is controlled by `RUST_LOG`. The default
+(`pyrat_gui=debug,pyrat_host=info,warn`) keeps the terminal calm during a
+tournament: host per-turn recovery (`move timeout`, stale-action) and raw bot
+subprocess stderr are suppressed. Turn them back on per source:
 
 ```bash
-RUST_LOG=pyrat_gui=debug,pyrat_host=debug,warn pnpm dev
+RUST_LOG=pyrat_gui=debug,pyrat_host=debug,warn pnpm dev   # host internals
+RUST_LOG=bot_stderr=debug pnpm dev                        # raw bot stderr (incl. Cargo build output)
 ```
 
 ### Architecture

@@ -47,7 +47,7 @@ use crate::event::OrchestratorEvent;
 use crate::executor::{ExecutorInner, RunConfig};
 use crate::id::MatchId;
 use crate::matchup::{Matchup, PlayerSpec};
-use crate::outcome::{FailureReason, MatchFailure, MatchOutcome};
+use crate::outcome::{FailureReason, MatchFailure, MatchOutcome, TimeoutPhase};
 use crate::sink::SinkError;
 
 /// Adapter so a `Box<dyn EmbeddedBot>` (what factories produce) can be
@@ -591,11 +591,14 @@ async fn setup_players<D: Descriptor>(
     })
 }
 
-/// Drain each bot's piped stderr to `tracing::warn!` lines tagged with
-/// `agent_id`. Caps each bot at 200 lines so a runaway bot can't flood logs.
-/// Without this, `BotProcesses` holds the stderr handles but no task reads
-/// them — bot diagnostics are silently swallowed for the lifetime of the
-/// match.
+/// Drain each bot's piped stderr under the `bot_stderr` target at `debug!`,
+/// tagged with `agent_id`. The dedicated target keeps subprocess noise (incl.
+/// Cargo build chatter) out of the default log view while staying reachable via
+/// `RUST_LOG=bot_stderr=debug`; a crashing bot still surfaces through its
+/// match failure, not a stderr dump. Caps each bot at 200 lines so a runaway
+/// bot can't flood logs. Without this, `BotProcesses` holds the stderr handles
+/// but no task reads them — bot diagnostics are silently swallowed for the
+/// lifetime of the match.
 ///
 /// Each forwarder is a blocking task (line reads on `ChildStderr` are
 /// synchronous) and exits naturally on EOF, which happens when the child
@@ -611,8 +614,9 @@ fn forward_bot_stderr(procs: &mut BotProcesses) {
             let reader = std::io::BufReader::new(stderr);
             for (i, line) in reader.lines().map_while(Result::ok).enumerate() {
                 match i.cmp(&MAX_LINES) {
-                    Ordering::Less => tracing::warn!(%agent_id, "{line}"),
-                    Ordering::Equal => tracing::warn!(
+                    Ordering::Less => tracing::debug!(target: "bot_stderr", %agent_id, "{line}"),
+                    Ordering::Equal => tracing::debug!(
+                        target: "bot_stderr",
                         %agent_id,
                         "stderr output truncated after {MAX_LINES} lines"
                     ),
@@ -633,11 +637,26 @@ fn slot_for(idx: usize) -> PlayerSlot {
 
 fn failure_reason_from_match_error(err: &MatchError) -> FailureReason {
     match err {
-        MatchError::SetupTimeout(_)
-        | MatchError::PreprocessingTimeout(_)
-        | MatchError::SyncTimeout(_)
-        | MatchError::ActionTimeout(_)
-        | MatchError::ReadyHashMismatch { .. }
+        // Timeouts carry the slot that ran out of budget; preserve it (and the
+        // phase) so consumers can attribute the timeout to a specific bot
+        // instead of seeing an opaque protocol error.
+        MatchError::SetupTimeout(slot) => FailureReason::Timeout {
+            slot: *slot,
+            phase: TimeoutPhase::Setup,
+        },
+        MatchError::PreprocessingTimeout(slot) => FailureReason::Timeout {
+            slot: *slot,
+            phase: TimeoutPhase::Preprocessing,
+        },
+        MatchError::SyncTimeout(slot) => FailureReason::Timeout {
+            slot: *slot,
+            phase: TimeoutPhase::Sync,
+        },
+        MatchError::ActionTimeout(slot) => FailureReason::Timeout {
+            slot: *slot,
+            phase: TimeoutPhase::Move,
+        },
+        MatchError::ReadyHashMismatch { .. }
         | MatchError::ActionHashMismatch { .. }
         | MatchError::PersistentDesync(_)
         | MatchError::UnexpectedMessage { .. } => FailureReason::ProtocolError(err.to_string()),
@@ -651,5 +670,62 @@ fn failure_reason_from_match_error(err: &MatchError) -> FailureReason {
             },
         },
         MatchError::Internal(s) => FailureReason::Internal(s.clone()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pyrat_host::wire::Player as PlayerSlot;
+
+    use super::{failure_reason_from_match_error, FailureReason, MatchError, TimeoutPhase};
+
+    /// Every per-phase timeout `MatchError` must map to a slot-preserving
+    /// `FailureReason::Timeout`, not the lossy `ProtocolError` flattening — this
+    /// is what lets the GUI attribute a timeout to a specific bot.
+    #[test]
+    fn timeouts_preserve_slot_and_phase() {
+        let cases = [
+            (
+                MatchError::SetupTimeout(PlayerSlot::Player1),
+                PlayerSlot::Player1,
+                TimeoutPhase::Setup,
+            ),
+            (
+                MatchError::PreprocessingTimeout(PlayerSlot::Player2),
+                PlayerSlot::Player2,
+                TimeoutPhase::Preprocessing,
+            ),
+            (
+                MatchError::SyncTimeout(PlayerSlot::Player1),
+                PlayerSlot::Player1,
+                TimeoutPhase::Sync,
+            ),
+            (
+                MatchError::ActionTimeout(PlayerSlot::Player2),
+                PlayerSlot::Player2,
+                TimeoutPhase::Move,
+            ),
+        ];
+        for (err, want_slot, want_phase) in cases {
+            match failure_reason_from_match_error(&err) {
+                FailureReason::Timeout { slot, phase } => {
+                    assert_eq!(slot, want_slot, "slot for {err:?}");
+                    assert_eq!(phase, want_phase, "phase for {err:?}");
+                },
+                other => panic!("expected Timeout for {err:?}, got {other:?}"),
+            }
+        }
+    }
+
+    /// A clean disconnect keeps its slot; a non-attributable fault does not.
+    #[test]
+    fn disconnect_keeps_slot_protocol_has_none() {
+        let disc =
+            failure_reason_from_match_error(&MatchError::BotDisconnected(PlayerSlot::Player2));
+        assert_eq!(disc.implicated_slot(), Some(PlayerSlot::Player2));
+        let proto =
+            failure_reason_from_match_error(&MatchError::PersistentDesync(PlayerSlot::Player1));
+        assert!(matches!(proto, FailureReason::ProtocolError(_)));
+        assert_eq!(proto.implicated_slot(), None);
     }
 }

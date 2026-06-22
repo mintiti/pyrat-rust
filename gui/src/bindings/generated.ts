@@ -398,12 +398,24 @@ export type TournamentAbortedEvent = { tournament_id: number; reason: string }
 export type TournamentFinishedEvent = { tournament_id: number }
 /**
  * Terminal, per-match: a match failed (timeout, disconnect, spawn failure).
- * Verdict-bearing data rides the lossless standings path; this carries only
- * what the frontend needs to drop the now-playing row, so the payload is
- * deliberately minimal. Distinct from `TournamentMatchFinishedEvent`, which
- * means a *successful scored game* (form dots, game cards, replay).
+ * Verdict-bearing data (the success/failure tally) still rides the lossless
+ * standings path; this also carries enough to (a) drop the now-playing row
+ * and (b) accumulate per-bot health. Distinct from
+ * `TournamentMatchFinishedEvent`, which means a *successful scored game* (form
+ * dots, game cards, replay).
  */
-export type TournamentMatchFailedEvent = { tournament_id: number; match_id: number }
+export type TournamentMatchFailedEvent = { tournament_id: number; match_id: number; player1_id: string; player2_id: string; failing_player_id: string | null; kind: FailureKind; timeout_phase: TimeoutPhase | null }
+/**
+ * Category of a match failure, for the per-bot health summary. Mirrors
+ * `pyrat_eval::orchestrator::FailureReason` collapsed to what the UI groups on
+ * (payload strings dropped; the implicated bot rides `failing_player_id`).
+ */
+export type FailureKind = "timeout" | "disconnected" | "spawn_failed" | "handshake_timeout" | "protocol_error" | "cancelled" | "other"
+/**
+ * Which phase a timeout fired in, for labeling bot health
+ * ("move timeout" vs "preprocessing").
+ */
+export type TimeoutPhase = "setup" | "preprocessing" | "sync" | "move"
 /**
  * Emitted on every `MatchFinished`. Scores are canonical (player1_id is the
  * lex-min of the pair); the frontend re-orients per target / per displayed

@@ -24,8 +24,10 @@ use pyrat_eval::{
 };
 use pyrat_eval_store::{compute_elo_with_uncertainty, EloOptions, EvalStore, TournamentId};
 use pyrat_host::match_host::MatchEvent;
+use pyrat_host::wire::Player as PlayerSlot;
 use pyrat_orchestrator::{
-    DirectoryWriter, MatchSink, OrchestratorConfig, OrchestratorEvent, ReplaySink, SinkRole, Timing,
+    DirectoryWriter, FailureReason, MatchSink, OrchestratorConfig, OrchestratorEvent, ReplaySink,
+    SinkRole, TimeoutPhase as CoreTimeoutPhase, Timing,
 };
 use tauri::AppHandle;
 use tauri_specta::Event;
@@ -34,9 +36,9 @@ use tracing::warn;
 
 use crate::tournament_config;
 use crate::tournament_events::{
-    NowPlayingEvent, StandingRow, StandingsUpdatedEvent, TournamentAbortedEvent,
-    TournamentFinishedEvent, TournamentMatchFailedEvent, TournamentMatchFinishedEvent,
-    TournamentMatchStartedEvent, TournamentStartedEvent,
+    FailureKind, NowPlayingEvent, StandingRow, StandingsUpdatedEvent, TimeoutPhase,
+    TournamentAbortedEvent, TournamentFinishedEvent, TournamentMatchFailedEvent,
+    TournamentMatchFinishedEvent, TournamentMatchStartedEvent, TournamentStartedEvent,
 };
 
 /// Below this many games a non-anchor player's Elo is too noisy to show.
@@ -242,16 +244,32 @@ pub async fn run_tournament(
                         emit_standings(&app, tournament_id.0, &state, &elo_options, &player_ids,
                                        &anchor_id, total_games);
                     }
-                    Ok(SessionEvent::MatchFailed { descriptor, .. }) => {
+                    Ok(SessionEvent::MatchFailed { descriptor, reason, .. }) => {
                         now_playing.remove(&descriptor.match_id.0);
                         orientation_by_match.remove(&descriptor.match_id.0);
-                        // Tell the frontend to drop the now-playing row. Unlike
-                        // a finish, a failed match emits no scored event, so
-                        // without this its live row would freeze at its last
-                        // turn until the whole tournament ends.
+                        // Resolve the implicated bot from the descriptor's
+                        // recorded seat: the timeout/disconnect slot is an
+                        // engine seat, `canonicalize` maps (seat0, seat1) ->
+                        // (canonical p1, p2), so applying it to the canonical
+                        // ids gives the seat assignment to index by slot.
+                        let (seat0_id, seat1_id) = descriptor
+                            .orientation
+                            .canonicalize(descriptor.player1_id.clone(), descriptor.player2_id.clone());
+                        let failing_player_id = reason.implicated_slot().map(|slot| {
+                            if slot == PlayerSlot::Player1 { seat0_id } else { seat1_id }
+                        });
+                        let (kind, timeout_phase) = failure_kind_for_wire(&reason);
+                        // Tell the frontend to drop the now-playing row (a failed
+                        // match emits no scored event, so its live row would
+                        // otherwise freeze) and accumulate per-bot health.
                         let _ = TournamentMatchFailedEvent {
                             tournament_id: tournament_id.0,
                             match_id: descriptor.match_id.0,
+                            player1_id: descriptor.player1_id.clone(),
+                            player2_id: descriptor.player2_id.clone(),
+                            failing_player_id,
+                            kind,
+                            timeout_phase,
                         }
                         .emit(&app);
                         let state = state_rx.borrow().clone();
@@ -330,6 +348,30 @@ pub async fn run_tournament(
         .join()
         .await
         .map_err(|e| format!("session join: {e}"))
+}
+
+/// Map a `FailureReason` to the wire failure kind and, for timeouts, the
+/// phase. Payload strings are dropped (the implicated bot rides
+/// `failing_player_id`); `FailureReason` is `#[non_exhaustive]`, so the
+/// catch-all also covers panic / sink / internal failures as `Other`.
+fn failure_kind_for_wire(reason: &FailureReason) -> (FailureKind, Option<TimeoutPhase>) {
+    match reason {
+        FailureReason::Timeout { phase, .. } => {
+            let phase = match phase {
+                CoreTimeoutPhase::Setup => TimeoutPhase::Setup,
+                CoreTimeoutPhase::Preprocessing => TimeoutPhase::Preprocessing,
+                CoreTimeoutPhase::Sync => TimeoutPhase::Sync,
+                CoreTimeoutPhase::Move => TimeoutPhase::Move,
+            };
+            (FailureKind::Timeout, Some(phase))
+        },
+        FailureReason::Disconnected(_) => (FailureKind::Disconnected, None),
+        FailureReason::SpawnFailed => (FailureKind::SpawnFailed, None),
+        FailureReason::HandshakeTimeout => (FailureKind::HandshakeTimeout, None),
+        FailureReason::ProtocolError(_) => (FailureKind::ProtocolError, None),
+        FailureReason::Cancelled => (FailureKind::Cancelled, None),
+        _ => (FailureKind::Other, None),
+    }
 }
 
 fn emit_match_finished(

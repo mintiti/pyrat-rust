@@ -1,8 +1,10 @@
 import { create } from "zustand";
 import type {
+	FailureKind,
 	NowPlayingEvent,
 	StandingRow,
 	StandingsUpdatedEvent,
+	TimeoutPhase,
 	TournamentMatchFailedEvent,
 	TournamentMatchFinishedEvent,
 	TournamentMatchStartedEvent,
@@ -23,6 +25,20 @@ export interface FinishedGame {
 	player2Id: string;
 	player1Score: number;
 	player2Score: number;
+}
+
+/** A failed match, attributed to a bot where the failure points at one seat.
+ * `failingPlayerId` is resolved Rust-side from the engine seat via the match's
+ * orientation, so it's the canonical bot id (or null for structural failures
+ * with no single seat). Drives the standings health marker + matchup
+ * breakdown. */
+export interface MatchFailureRecord {
+	matchId: number;
+	player1Id: string;
+	player2Id: string;
+	failingPlayerId: string | null;
+	kind: FailureKind;
+	timeoutPhase: TimeoutPhase | null;
 }
 
 /** A match currently in flight (for the now-playing line + live row). */
@@ -59,6 +75,10 @@ export interface TournamentLive {
 	standings: StandingRow[];
 	/** Finished games keyed by canonical pair key. */
 	gamesByPair: Record<string, FinishedGame[]>;
+	/** Failed matches keyed by canonical pair key. Mirrors `gamesByPair` so the
+	 * matchup view reads its failures directly; the standings marker derives a
+	 * per-bot rollup via `botFailures`. */
+	failuresByPair: Record<string, MatchFailureRecord[]>;
 	/** In-flight matches keyed by match id. */
 	liveByMatch: Record<number, LiveMatch>;
 	/** Tombstones: match ids that have reached a terminal state (success OR
@@ -149,6 +169,7 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 				failure: 0,
 				standings: [],
 				gamesByPair: {},
+				failuresByPair: {},
 				liveByMatch: {},
 				terminalMatchIds: {},
 				startedAt,
@@ -208,16 +229,31 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 	// would freeze at its last turn until the whole tournament ends. Drop the
 	// row and tombstone the id so a late `MatchStarted` can't resurrect it. No
 	// `status === "running"` gate: a terminal event must always tombstone.
+	// Also record the failure (kind + implicated bot) for the health surface.
 	onMatchFailed: (e) => {
 		const live = get().live;
 		if (!live || live.tournamentId !== e.tournament_id) return;
+		const key = pairKey(e.player1_id, e.player2_id);
+		const record: MatchFailureRecord = {
+			matchId: e.match_id,
+			player1Id: e.player1_id,
+			player2Id: e.player2_id,
+			failingPlayerId: e.failing_player_id,
+			kind: e.kind,
+			timeoutPhase: e.timeout_phase,
+		};
 		set((s) => {
 			if (!s.live) return {};
 			const { [e.match_id]: _drop, ...liveByMatch } = s.live.liveByMatch;
+			const existing = s.live.failuresByPair[key] ?? [];
 			return {
 				live: {
 					...s.live,
 					liveByMatch,
+					failuresByPair: {
+						...s.live.failuresByPair,
+						[key]: [...existing, record],
+					},
 					terminalMatchIds: { ...s.live.terminalMatchIds, [e.match_id]: true },
 				},
 			};
@@ -333,4 +369,52 @@ export function resultFor(
 	if (mine > theirs) return "W";
 	if (mine < theirs) return "L";
 	return "D";
+}
+
+/** Failures attributed to a bot (resolved seat), across all its matchups. */
+export function botFailures(
+	live: TournamentLive,
+	botId: string,
+): MatchFailureRecord[] {
+	return Object.values(live.failuresByPair)
+		.flat()
+		.filter((f) => f.failingPlayerId === botId);
+}
+
+/** Short human label for a failure, e.g. "move timeout", "disconnected". */
+export function failureLabel(
+	kind: FailureKind,
+	phase: TimeoutPhase | null,
+): string {
+	switch (kind) {
+		case "timeout":
+			return phase ? `${phase} timeout` : "timeout";
+		case "disconnected":
+			return "disconnected";
+		case "spawn_failed":
+			return "failed to start";
+		case "handshake_timeout":
+			return "handshake timeout";
+		case "protocol_error":
+			return "protocol error";
+		case "cancelled":
+			return "cancelled";
+		default:
+			return "failed";
+	}
+}
+
+/** Roll a set of failures up into "{count} {label}" fragments, most-common
+ * first — the breakdown shown in the matchup view. */
+export function failureBreakdown(
+	failures: MatchFailureRecord[],
+): { label: string; count: number }[] {
+	const byLabel = new Map<string, number>();
+	for (const f of failures) {
+		const label = failureLabel(f.kind, f.timeoutPhase);
+		byLabel.set(label, (byLabel.get(label) ?? 0) + 1);
+	}
+	return [...byLabel.entries()]
+		.map(([label, count]) => ({ label, count }))
+		.sort((a, b) => b.count - a.count);
 }

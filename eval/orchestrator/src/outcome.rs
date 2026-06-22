@@ -43,13 +43,36 @@ pub struct MatchFailure<D: Descriptor> {
     pub durable_record: bool,
 }
 
+/// Which phase a timeout occurred in. The host's `MatchError` already
+/// distinguishes these per slot; preserving the phase lets a consumer label
+/// "move timeout" vs "preprocessing" precisely instead of flattening to a
+/// generic protocol error.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TimeoutPhase {
+    Setup,
+    Preprocessing,
+    Sync,
+    Move,
+}
+
+impl std::fmt::Display for TimeoutPhase {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Setup => "setup",
+            Self::Preprocessing => "preprocessing",
+            Self::Sync => "sync",
+            Self::Move => "move",
+        })
+    }
+}
+
 /// Why a match failed. Operational categories, not user-facing messages.
 ///
-/// `ProtocolError`, `Disconnected`, and `SinkFlushError` carry payloads so a
-/// failed-tournament forensic pass has enough context to triage without
-/// reaching back into per-match logs: the underlying error string for
-/// protocol faults, the player slot for clean disconnects, the propagated
-/// sink error string for flush failures.
+/// `ProtocolError`, `Disconnected`, `Timeout`, and `SinkFlushError` carry
+/// payloads so a failed-tournament forensic pass has enough context to triage
+/// without reaching back into per-match logs: the underlying error string for
+/// protocol faults, the player slot for clean disconnects and timeouts (which
+/// bot ran out of budget), the propagated sink error string for flush failures.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum FailureReason {
@@ -58,6 +81,14 @@ pub enum FailureReason {
     /// A player closed transport-cleanly while Match needed it. The slot
     /// identifies which one.
     Disconnected(PlayerSlot),
+    /// A player exceeded a per-phase time budget. The slot identifies which
+    /// bot; the phase says where (move / sync / preprocessing / setup). Kept
+    /// distinct from `ProtocolError` so consumers can attribute timeouts to a
+    /// bot and surface them as health rather than opaque protocol faults.
+    Timeout {
+        slot: PlayerSlot,
+        phase: TimeoutPhase,
+    },
     /// Protocol-layer fault (timeout, hash mismatch, malformed message).
     /// Payload is the underlying `MatchError`/`PlayerError` rendered via
     /// `Display` at the fault site, enough to triage without reaching back
@@ -83,11 +114,24 @@ impl std::fmt::Display for FailureReason {
                 write!(f, "bot did not complete the startup handshake in time")
             },
             Self::Disconnected(slot) => write!(f, "{slot:?} disconnected mid-match"),
+            Self::Timeout { slot, phase } => write!(f, "{slot:?} exceeded the {phase} time budget"),
             Self::ProtocolError(e) => write!(f, "protocol error: {e}"),
             Self::Panic => write!(f, "match task panicked"),
             Self::Cancelled => write!(f, "match was cancelled"),
             Self::SinkFlushError(e) => write!(f, "result sink failed: {e}"),
             Self::Internal(e) => write!(f, "internal error: {e}"),
+        }
+    }
+}
+
+impl FailureReason {
+    /// The player slot implicated when the failure is attributable to one bot
+    /// (a clean disconnect or a timeout). `None` for structural failures
+    /// (spawn, handshake, sink, internal) that don't point at a single seat.
+    pub fn implicated_slot(&self) -> Option<PlayerSlot> {
+        match self {
+            Self::Disconnected(slot) | Self::Timeout { slot, .. } => Some(*slot),
+            _ => None,
         }
     }
 }

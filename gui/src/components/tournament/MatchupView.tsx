@@ -1,6 +1,14 @@
 import { Box, Group, SimpleGrid, Text, Title } from "@mantine/core";
-import type { TournamentLive } from "../../stores/tournamentStore";
-import { resultFor, useTournamentStore } from "../../stores/tournamentStore";
+import { IconAlertTriangle } from "@tabler/icons-react";
+import type {
+	MatchFailureRecord,
+	TournamentLive,
+} from "../../stores/tournamentStore";
+import {
+	failureBreakdown,
+	resultFor,
+	useTournamentStore,
+} from "../../stores/tournamentStore";
 import GameCard from "./GameCard";
 import { T, pairKey, shortId } from "./theme";
 
@@ -34,6 +42,8 @@ export default function MatchupView({ live, a, b, fromBot }: Props) {
 		(m) => pairKey(m.player1Id, m.player2Id) === pairKey(a, b),
 	);
 
+	const failures = live.failuresByPair[pairKey(a, b)] ?? [];
+
 	return (
 		<Box>
 			<Title order={4} mt="sm">
@@ -61,6 +71,8 @@ export default function MatchupView({ live, a, b, fromBot }: Props) {
 					})}
 				</Group>
 			</Group>
+
+			{failures.length > 0 && <MatchupFailures failures={failures} />}
 
 			{liveMatch && (
 				<Group
@@ -106,5 +118,31 @@ export default function MatchupView({ live, a, b, fromBot }: Props) {
 				</SimpleGrid>
 			)}
 		</Box>
+	);
+}
+
+/** Per-pair failure breakdown, attributed to the implicated bot where known
+ * (a null `failingPlayerId` is shown unattributed). Calm by design — only
+ * renders when there are failures. */
+function MatchupFailures({ failures }: { failures: MatchFailureRecord[] }) {
+	const byBot = new Map<string | null, MatchFailureRecord[]>();
+	for (const f of failures) {
+		byBot.set(f.failingPlayerId, [...(byBot.get(f.failingPlayerId) ?? []), f]);
+	}
+	const text = [...byBot.entries()]
+		.map(([bot, fs]) => {
+			const br = failureBreakdown(fs)
+				.map((b) => `${b.count} ${b.label}`)
+				.join(", ");
+			return bot ? `${shortId(bot)}: ${br}` : br;
+		})
+		.join(" · ");
+	return (
+		<Group gap={6} mb="md" mt={-6} wrap="nowrap" style={{ color: T.muted }}>
+			<IconAlertTriangle size={12} />
+			<Text size="xs" c="dimmed">
+				{text}
+			</Text>
+		</Group>
 	);
 }

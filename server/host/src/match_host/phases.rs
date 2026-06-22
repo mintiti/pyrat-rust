@@ -526,7 +526,7 @@ impl Match<Playing> {
                     // policy: log and ignore — collection drops stale
                     // Actions the same way, and lag must not escalate into
                     // a fatal protocol error one window later.
-                    warn!(
+                    debug!(
                         ?slot,
                         msg_turn = turn,
                         advance_turn = pa.turn,

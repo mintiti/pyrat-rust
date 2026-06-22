@@ -1,11 +1,17 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type {
+	FailureKind,
+	TimeoutPhase,
 	TournamentMatchFailedEvent,
 	TournamentMatchFinishedEvent,
 	TournamentMatchStartedEvent,
 	TournamentStartedEvent,
 } from "../bindings/generated";
-import { useTournamentStore } from "./tournamentStore";
+import {
+	botFailures,
+	failureBreakdown,
+	useTournamentStore,
+} from "./tournamentStore";
 
 function started(): TournamentStartedEvent {
 	return {
@@ -42,8 +48,23 @@ function matchFinished(matchId: number): TournamentMatchFinishedEvent {
 	};
 }
 
-function matchFailed(matchId: number): TournamentMatchFailedEvent {
-	return { tournament_id: 1, match_id: matchId };
+function matchFailed(
+	matchId: number,
+	opts: {
+		failing?: string | null;
+		kind?: FailureKind;
+		phase?: TimeoutPhase | null;
+	} = {},
+): TournamentMatchFailedEvent {
+	return {
+		tournament_id: 1,
+		match_id: matchId,
+		player1_id: "a",
+		player2_id: "b",
+		failing_player_id: opts.failing ?? null,
+		kind: opts.kind ?? "timeout",
+		timeout_phase: opts.phase ?? "move",
+	};
 }
 
 describe("tournamentStore live-row guards", () => {
@@ -86,6 +107,28 @@ describe("tournamentStore live-row guards", () => {
 		s.onMatchFailed(matchFailed(8));
 		s.onMatchStarted(matchStarted(8));
 		expect(useTournamentStore.getState().live?.liveByMatch[8]).toBeUndefined();
+	});
+
+	it("accumulates per-bot failures attributed by failing_player_id", () => {
+		const s = useTournamentStore.getState();
+		s.onMatchFailed(
+			matchFailed(10, { failing: "a", kind: "timeout", phase: "move" }),
+		);
+		s.onMatchFailed(
+			matchFailed(11, { failing: "a", kind: "timeout", phase: "move" }),
+		);
+		s.onMatchFailed(
+			matchFailed(12, { failing: "b", kind: "disconnected", phase: null }),
+		);
+		const live = useTournamentStore.getState().live;
+		expect(live).not.toBeNull();
+		if (!live) return;
+		// Attribution follows the resolved failing bot, not the canonical pair.
+		expect(botFailures(live, "a")).toHaveLength(2);
+		expect(botFailures(live, "b")).toHaveLength(1);
+		expect(failureBreakdown(botFailures(live, "a"))).toEqual([
+			{ label: "move timeout", count: 2 },
+		]);
 	});
 
 	it("ignores MatchStarted / NowPlaying once the tournament is not running", () => {

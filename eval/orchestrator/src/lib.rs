@@ -21,7 +21,7 @@ pub use event::{DriverEvent, OrchestratorEvent};
 pub use executor::{Orchestrator, OrchestratorConfig};
 pub use id::{MatchId, MatchIdAllocator};
 pub use matchup::{EmbeddedBotFactory, Matchup, PlayerSpec, Timing};
-pub use outcome::{FailureReason, MatchFailure, MatchOutcome};
+pub use outcome::{FailureReason, MatchFailure, MatchOutcome, TimeoutPhase};
 pub use replay_event::{ReplayEvent, ReplayInfo, ReplayMatchConfig, ReplayMatchResult};
 pub use sink::{MatchSink, NoOpSink, SinkError, SinkRole};
 pub use sinks::composite::CompositeSink;
