@@ -11,9 +11,10 @@ use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri_specta::Event;
 
-/// One row of the live standings: Elo with a 95% CI band and game count.
-/// CI bounds come from `compute_elo_with_uncertainty` (point Elo alone has
-/// no covariance), so the frontend never reconstructs them.
+/// One row of the live standings: Elo with an uncertainty band and game count.
+/// Bounds come from `compute_elo_with_uncertainty` (point Elo alone has no
+/// uncertainty information), so the frontend never reconstructs them or
+/// promises a stronger statistical interpretation than the model supports.
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct StandingRow {
     pub player_id: String,
@@ -61,6 +62,11 @@ pub struct TournamentStartedEvent {
     /// Games per matchup (= 2 × mazes under the paired schedule). Configurable,
     /// so the matchup view reads this instead of a hardcoded count.
     pub games_per_matchup: u32,
+    /// Adjacent repetitions are the two seat-swapped legs of one shared maze.
+    pub paired: bool,
+    /// Configured executor concurrency. The live ETA uses the actual launch
+    /// conditions instead of assuming the default worker count.
+    pub max_parallel: u32,
     pub anchor_id: String,
     /// Shared-core provenance string, identical in the launch line and the
     /// live header: e.g. "my-bot vs 6 (gauntlet) · tiny preset · 200 ms/move".
@@ -91,6 +97,8 @@ pub struct TournamentMatchFinishedEvent {
     pub player1_id: String,
     pub player2_id: String,
     pub repetition_index: u32,
+    /// Canonical player id occupying the Rat seat in this leg.
+    pub rat_id: String,
     pub player1_score: f64,
     pub player2_score: f64,
     pub match_id: u64,
@@ -151,6 +159,9 @@ pub struct TournamentMatchFailedEvent {
     /// failure to a matchup without a lookup.
     pub player1_id: String,
     pub player2_id: String,
+    pub repetition_index: u32,
+    /// Canonical player id occupying the Rat seat in this failed leg.
+    pub rat_id: String,
     /// The bot the failure points at (timeout / clean disconnect), resolved
     /// from the engine seat via the match's seat orientation. `None` for
     /// structural failures (spawn, sink, internal) with no single seat.
@@ -158,6 +169,8 @@ pub struct TournamentMatchFailedEvent {
     pub kind: FailureKind,
     /// Set only when `kind == Timeout`.
     pub timeout_phase: Option<TimeoutPhase>,
+    /// Stable durable failure text retained for later inspection.
+    pub reason: String,
 }
 
 /// Throttled per-turn liveness from `live_events()` (slice B). Drives the

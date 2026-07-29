@@ -1,4 +1,4 @@
-import { Box, Group, SimpleGrid, Text, Title } from "@mantine/core";
+import { Box, Group, Text, Title } from "@mantine/core";
 import { IconAlertTriangle } from "@tabler/icons-react";
 import type {
 	MatchFailureRecord,
@@ -9,7 +9,7 @@ import {
 	resultFor,
 	useTournamentStore,
 } from "../../stores/tournamentStore";
-import GameCard from "./GameCard";
+import PairedGames from "./PairedGames";
 import { T, pairKey, shortId } from "./theme";
 
 type Props = {
@@ -38,7 +38,7 @@ export default function MatchupView({ live, a, b, fromBot }: Props) {
 		else d++;
 	}
 
-	const liveMatch = Object.values(live.liveByMatch).find(
+	const liveMatches = Object.values(live.liveByMatch).filter(
 		(m) => pairKey(m.player1Id, m.player2Id) === pairKey(a, b),
 	);
 
@@ -51,7 +51,7 @@ export default function MatchupView({ live, a, b, fromBot }: Props) {
 			</Title>
 			<Group gap="sm" mb="md" mt={4}>
 				<Text size="sm" c="dimmed" ff="monospace">
-					{w}–{l}–{d}
+					W–L–D {w}–{l}–{d}
 				</Text>
 				<Text size="sm" c="dimmed">
 					· {games.length}/{live.gamesPerMatchup} games
@@ -62,7 +62,7 @@ export default function MatchupView({ live, a, b, fromBot }: Props) {
 						const color = r === "W" ? T.win : r === "L" ? T.loss : T.draw;
 						return (
 							<Box
-								key={g.matchId}
+								key={g.gameKey}
 								w={7}
 								h={7}
 								style={{ borderRadius: "50%", background: color }}
@@ -74,10 +74,11 @@ export default function MatchupView({ live, a, b, fromBot }: Props) {
 
 			{failures.length > 0 && <MatchupFailures failures={failures} />}
 
-			{liveMatch && (
+			{liveMatches.map((liveMatch) => (
 				<Group
+					key={liveMatch.matchId}
 					gap="xs"
-					mb="md"
+					mb="xs"
 					p="xs"
 					style={{
 						background: T.panel2,
@@ -92,30 +93,26 @@ export default function MatchupView({ live, a, b, fromBot }: Props) {
 					/>
 					<Text size="sm">game in progress</Text>
 					<Text size="sm" c="dimmed" ff="monospace">
-						turn {liveMatch.turn} · {liveMatch.player1Score}–
-						{liveMatch.player2Score}
+						pair {Math.floor(liveMatch.repetitionIndex / 2) + 1} · turn{" "}
+						{liveMatch.turn} · {liveMatch.player1Score}–{liveMatch.player2Score}
 					</Text>
 				</Group>
-			)}
+			))}
 
 			{games.length === 0 ? (
 				<Text size="sm" c="dimmed">
 					no finished games yet
 				</Text>
 			) : (
-				<SimpleGrid cols={{ base: 3, sm: 4, md: 6 }} spacing="sm">
-					{[...games].reverse().map((g) => (
-						<GameCard
-							key={g.matchId}
-							tournamentId={live.tournamentId}
-							game={g}
-							perspectiveId={persp}
-							onOpen={() =>
-								navigate({ kind: "game", a, b, matchId: g.matchId, fromBot })
-							}
-						/>
-					))}
-				</SimpleGrid>
+				<PairedGames
+					tournamentId={live.tournamentId}
+					games={games}
+					perspectiveId={persp}
+					paired={live.paired}
+					onOpenGame={(matchId) =>
+						navigate({ kind: "game", a, b, matchId, fromBot })
+					}
+				/>
 			)}
 		</Box>
 	);

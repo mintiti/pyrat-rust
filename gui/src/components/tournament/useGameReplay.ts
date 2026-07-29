@@ -2,6 +2,11 @@ import { useEffect, useState } from "react";
 import { commands } from "../../bindings";
 import type { GameReplayState } from "../../bindings/generated";
 
+export type GameReplayLoadState =
+	| { kind: "loading" }
+	| GameReplayState
+	| { kind: "error"; reason: string };
+
 /**
  * Shared replay cache keyed by `(tournamentId, matchId)`. A matchup grid
  * mounts N `GameCard`s and the game page mounts one `GameView`, each of which
@@ -10,7 +15,7 @@ import type { GameReplayState } from "../../bindings/generated";
  * immutable, so caching the in-flight promise collapses all of that to one
  * call per match. A rejected fetch evicts itself so a later mount can retry.
  */
-const cache = new Map<string, Promise<GameReplayState | null>>();
+const cache = new Map<string, Promise<GameReplayState>>();
 
 function cacheKey(tournamentId: number, matchId: number): string {
 	return `${tournamentId}:${matchId}`;
@@ -19,13 +24,16 @@ function cacheKey(tournamentId: number, matchId: number): string {
 export function fetchGameReplay(
 	tournamentId: number,
 	matchId: number,
-): Promise<GameReplayState | null> {
+): Promise<GameReplayState> {
 	const key = cacheKey(tournamentId, matchId);
 	let pending = cache.get(key);
 	if (!pending) {
 		pending = commands
 			.getGameReplay(tournamentId, matchId)
-			.then((r) => (r.status === "ok" ? r.data : null))
+			.then((r) => {
+				if (r.status === "ok") return r.data;
+				throw new Error(r.error);
+			})
 			.catch((e) => {
 				cache.delete(key);
 				throw e;
@@ -35,22 +43,37 @@ export function fetchGameReplay(
 	return pending;
 }
 
-/** Load a game's replay through the shared cache. Returns `null` while the
- * fetch is in flight (or after a transient failure); a resolved value is one
- * of the `GameReplayState` variants (`available` / `missing`). */
+/** Load a game's replay through the shared cache. Loading, a deliberately
+ * missing replay, and a command failure are separate UI states: only the
+ * backend's `missing` variant means there is no replay for this match. */
 export function useGameReplay(
 	tournamentId: number,
-	matchId: number,
-): GameReplayState | null {
-	const [replay, setReplay] = useState<GameReplayState | null>(null);
+	matchId: number | null,
+): GameReplayLoadState {
+	const [replay, setReplay] = useState<GameReplayLoadState>(() =>
+		matchId === null
+			? { kind: "missing", reason: "legacy result has no replay id" }
+			: { kind: "loading" },
+	);
 	useEffect(() => {
 		let live = true;
+		if (matchId === null) {
+			setReplay({ kind: "missing", reason: "legacy result has no replay id" });
+			return () => {
+				live = false;
+			};
+		}
+		setReplay({ kind: "loading" });
 		fetchGameReplay(tournamentId, matchId)
 			.then((r) => {
 				if (live) setReplay(r);
 			})
-			.catch(() => {
-				/* evicted from cache; a remount retries */
+			.catch((error: unknown) => {
+				if (!live) return;
+				setReplay({
+					kind: "error",
+					reason: error instanceof Error ? error.message : String(error),
+				});
 			});
 		return () => {
 			live = false;

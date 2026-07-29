@@ -9,21 +9,34 @@ import type {
 	TournamentMatchFinishedEvent,
 	TournamentMatchStartedEvent,
 	TournamentPreparingEvent,
+	TournamentSnapshot,
 	TournamentStartedEvent,
 } from "../bindings/generated";
 import { pairKey } from "../components/tournament/theme";
 
 // ── Types ────────────────────────────────────────────────────────
 
-export type TournamentStatus = "running" | "finished" | "aborted";
+/** The GUI runner marks non-anchor ratings pending below this sample count. */
+export const MIN_GAMES_FOR_RATING = 4;
+
+export type TournamentStatus = "running" | "finished" | "aborted" | "partial";
+
+export interface TournamentTerminalNotice {
+	tournamentId: number;
+	status: Extract<TournamentStatus, "finished" | "aborted">;
+	reason: string | null;
+}
 
 /** One finished game, canonical orientation (player1Id is lex-min, and so
  * player1Score is the lex-min player's score regardless of who was Rat — the
  * Rust side canonicalizes seat-order scores before emitting). */
 export interface FinishedGame {
-	matchId: number;
+	gameKey: string;
+	matchId: number | null;
 	player1Id: string;
 	player2Id: string;
+	repetitionIndex: number;
+	ratId: string;
 	player1Score: number;
 	player2Score: number;
 }
@@ -34,12 +47,16 @@ export interface FinishedGame {
  * with no single seat). Drives the standings health marker + matchup
  * breakdown. */
 export interface MatchFailureRecord {
-	matchId: number;
+	failureKey: string;
+	matchId: number | null;
 	player1Id: string;
 	player2Id: string;
+	repetitionIndex: number;
+	ratId: string;
 	failingPlayerId: string | null;
 	kind: FailureKind;
 	timeoutPhase: TimeoutPhase | null;
+	reason: string;
 }
 
 /** A match currently in flight (for the now-playing line + live row). */
@@ -47,6 +64,7 @@ export interface LiveMatch {
 	matchId: number;
 	player1Id: string;
 	player2Id: string;
+	repetitionIndex: number;
 	turn: number;
 	player1Score: number;
 	player2Score: number;
@@ -60,6 +78,7 @@ export type TournamentNav =
 	| { kind: "game"; a: string; b: string; matchId: number; fromBot?: string };
 
 export interface TournamentLive {
+	origin: "active" | "stored";
 	tournamentId: number;
 	name: string | null;
 	format: string;
@@ -74,6 +93,11 @@ export interface TournamentLive {
 	/** Games per matchup (= 2 × mazes); the matchup view reads this instead of
 	 * a hardcoded count. */
 	gamesPerMatchup: number;
+	/** Adjacent repetitions are the two seat-swapped legs of one maze. */
+	paired: boolean;
+	/** Configured executor concurrency. ETA reads this instead of assuming the
+	 * launch default. */
+	maxParallel: number | null;
 	success: number;
 	failure: number;
 	standings: StandingRow[];
@@ -92,21 +116,40 @@ export interface TournamentLive {
 	terminalMatchIds: Record<number, true>;
 	/** Wall-clock start (epoch ms) for the elapsed counter. */
 	startedAt: number;
+	/** Captured when the terminal event arrives so a remounted finished view
+	 * keeps the real run duration instead of ticking until it is reopened. */
+	endedAt: number | null;
+	/** Durable creation time for reopened tournaments. */
+	createdAt: string | null;
 }
 
 interface TournamentStore {
 	screen: "launch" | "live";
+	/** A read-only stored tournament currently being inspected. Kept separate
+	 * from `live`, which is the sole destination for active runner events. */
+	viewing: TournamentLive | null;
 	live: TournamentLive | null;
+	/** The launch command is in its Starting/warmup phase. Kept at app scope so
+	 * leaving and returning to the tournament tab cannot make it look idle. */
+	starting: boolean;
 	/** Transient pre-tournament warmup progress (no tournament id yet). Set by
 	 * `onPreparing`, cleared when the tournament starts. Drives the launch
 	 * screen's "Preparing bots…" line. `current` is the bot being warmed. */
 	preparing: { done: number; total: number; current: string | null } | null;
+	/** One-shot cross-tab handoff when a running tournament reaches a terminal
+	 * state. The activity chip dismisses it after it is seen or times out. */
+	terminalNotice: TournamentTerminalNotice | null;
 	nav: TournamentNav;
 	// navigation
 	showLaunch: () => void;
 	showLive: () => void;
+	openSnapshot: (snapshot: TournamentSnapshot) => void;
+	restoreActive: (snapshot: TournamentSnapshot) => void;
+	reconcileSnapshot: (snapshot: TournamentSnapshot) => void;
 	navigate: (nav: TournamentNav) => void;
 	back: () => void;
+	beginLaunch: () => void;
+	dismissTerminalNotice: () => void;
 	// event handlers
 	onPreparing: (e: TournamentPreparingEvent) => void;
 	/** Drop the transient warmup progress (launch start / stop / failed launch),
@@ -118,22 +161,72 @@ interface TournamentStore {
 	onMatchFailed: (e: TournamentMatchFailedEvent) => void;
 	onMatchStarted: (e: TournamentMatchStartedEvent) => void;
 	onNowPlaying: (e: NowPlayingEvent) => void;
-	onFinished: () => void;
-	onAborted: (reason: string) => void;
+	onFinished: (tournamentId: number) => void;
+	onAborted: (tournamentId: number, reason: string) => void;
 }
 
 export const useTournamentStore = create<TournamentStore>((set, get) => ({
 	screen: "launch",
+	viewing: null,
 	live: null,
+	starting: false,
 	preparing: null,
+	terminalNotice: null,
 	nav: { kind: "overview" },
 
-	showLaunch: () => set({ screen: "launch", nav: { kind: "overview" } }),
+	showLaunch: () =>
+		set({ screen: "launch", viewing: null, nav: { kind: "overview" } }),
 
 	// Return to the live view (e.g. from the launch screen or the LiveChip).
 	// Only meaningful when a tournament is live; the chip / banner that call
 	// it are shown only then.
-	showLive: () => set({ screen: "live" }),
+	showLive: () =>
+		set({
+			screen: "live",
+			viewing: null,
+			nav: { kind: "overview" },
+			terminalNotice: null,
+		}),
+
+	openSnapshot: (snapshot) => {
+		const live = get().live;
+		if (live?.tournamentId === snapshot.tournament_id) {
+			set({
+				screen: "live",
+				viewing: null,
+				nav: { kind: "overview" },
+				terminalNotice: null,
+			});
+			return;
+		}
+		set({
+			screen: "live",
+			viewing: tournamentFromSnapshot(snapshot, "stored"),
+			nav: { kind: "overview" },
+		});
+	},
+
+	// Reattach the event destination after a webview reload. This does not open
+	// the page: the app-level chip is the handoff back to the still-running run.
+	restoreActive: (snapshot) => {
+		if (!snapshot.running) return;
+		set({ live: tournamentFromSnapshot(snapshot, "active") });
+	},
+
+	// Durable reconciliation repairs missed terminal lifecycle events without
+	// replacing in-flight liveness or navigation. It updates the active object
+	// and an independently viewed copy of the same stored tournament, if any.
+	reconcileSnapshot: (snapshot) =>
+		set((state) => ({
+			live:
+				state.live?.tournamentId === snapshot.tournament_id
+					? mergeTournamentSnapshot(state.live, snapshot)
+					: state.live,
+			viewing:
+				state.viewing?.tournamentId === snapshot.tournament_id
+					? tournamentFromSnapshot(snapshot, "stored")
+					: state.viewing,
+		})),
 
 	navigate: (nav) => set({ nav }),
 
@@ -162,17 +255,35 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 			}
 		}),
 
-	onPreparing: (e) =>
-		set({ preparing: { done: e.done, total: e.total, current: e.current } }),
+	beginLaunch: () =>
+		set({
+			screen: "launch",
+			viewing: null,
+			starting: true,
+			preparing: null,
+			terminalNotice: null,
+		}),
 
-	clearPreparing: () => set({ preparing: null }),
+	dismissTerminalNotice: () => set({ terminalNotice: null }),
+
+	onPreparing: (e) =>
+		set({
+			starting: true,
+			preparing: { done: e.done, total: e.total, current: e.current },
+		}),
+
+	clearPreparing: () => set({ starting: false, preparing: null }),
 
 	onStarted: (e, startedAt) =>
 		set({
 			screen: "live",
+			viewing: null,
 			nav: { kind: "overview" },
+			starting: false,
 			preparing: null,
+			terminalNotice: null,
 			live: {
+				origin: "active",
 				tournamentId: e.tournament_id,
 				name: e.name,
 				format: e.format,
@@ -185,6 +296,8 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 				done: 0,
 				total: e.total_games,
 				gamesPerMatchup: e.games_per_matchup,
+				paired: e.paired,
+				maxParallel: e.max_parallel,
 				success: 0,
 				failure: 0,
 				standings: [],
@@ -193,6 +306,8 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 				liveByMatch: {},
 				terminalMatchIds: {},
 				startedAt,
+				endedAt: null,
+				createdAt: null,
 			},
 		}),
 
@@ -224,20 +339,26 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 		if (!live || live.tournamentId !== e.tournament_id) return;
 		const key = pairKey(e.player1_id, e.player2_id);
 		const game: FinishedGame = {
+			gameKey: `match:${e.match_id}`,
 			matchId: e.match_id,
 			player1Id: e.player1_id,
 			player2Id: e.player2_id,
+			repetitionIndex: e.repetition_index,
+			ratId: e.rat_id,
 			player1Score: e.player1_score,
 			player2Score: e.player2_score,
 		};
 		set((s) => {
 			if (!s.live) return {};
 			const existing = s.live.gamesByPair[key] ?? [];
+			const games = existing.some((item) => item.matchId === e.match_id)
+				? existing
+				: [...existing, game];
 			const { [e.match_id]: _drop, ...liveByMatch } = s.live.liveByMatch;
 			return {
 				live: {
 					...s.live,
-					gamesByPair: { ...s.live.gamesByPair, [key]: [...existing, game] },
+					gamesByPair: { ...s.live.gamesByPair, [key]: games },
 					liveByMatch,
 					terminalMatchIds: { ...s.live.terminalMatchIds, [e.match_id]: true },
 				},
@@ -255,24 +376,31 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 		if (!live || live.tournamentId !== e.tournament_id) return;
 		const key = pairKey(e.player1_id, e.player2_id);
 		const record: MatchFailureRecord = {
+			failureKey: `match:${e.match_id}`,
 			matchId: e.match_id,
 			player1Id: e.player1_id,
 			player2Id: e.player2_id,
+			repetitionIndex: e.repetition_index,
+			ratId: e.rat_id,
 			failingPlayerId: e.failing_player_id,
 			kind: e.kind,
 			timeoutPhase: e.timeout_phase,
+			reason: e.reason,
 		};
 		set((s) => {
 			if (!s.live) return {};
 			const { [e.match_id]: _drop, ...liveByMatch } = s.live.liveByMatch;
 			const existing = s.live.failuresByPair[key] ?? [];
+			const failures = existing.some((item) => item.matchId === e.match_id)
+				? existing
+				: [...existing, record];
 			return {
 				live: {
 					...s.live,
 					liveByMatch,
 					failuresByPair: {
 						...s.live.failuresByPair,
-						[key]: [...existing, record],
+						[key]: failures,
 					},
 					terminalMatchIds: { ...s.live.terminalMatchIds, [e.match_id]: true },
 				},
@@ -304,6 +432,7 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 									matchId: e.match_id,
 									player1Id: e.player1_id,
 									player2Id: e.player2_id,
+									repetitionIndex: e.repetition_index,
 									turn: 0,
 									player1Score: 0,
 									player2Score: 0,
@@ -345,14 +474,45 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 		);
 	},
 
-	onFinished: () =>
+	onFinished: (tournamentId) => {
+		const live = get().live;
+		if (
+			!live ||
+			live.tournamentId !== tournamentId ||
+			live.status !== "running"
+		) {
+			return;
+		}
+		const endedAt = Date.now();
 		set((s) =>
 			s.live
-				? { live: { ...s.live, status: "finished", liveByMatch: {} } }
+				? {
+						live: {
+							...s.live,
+							status: "finished",
+							liveByMatch: {},
+							endedAt,
+						},
+						terminalNotice: {
+							tournamentId,
+							status: "finished",
+							reason: null,
+						},
+					}
 				: {},
-		),
+		);
+	},
 
-	onAborted: (reason) =>
+	onAborted: (tournamentId, reason) => {
+		const live = get().live;
+		if (
+			!live ||
+			live.tournamentId !== tournamentId ||
+			live.status !== "running"
+		) {
+			return;
+		}
+		const endedAt = Date.now();
 		set((s) =>
 			s.live
 				? {
@@ -361,11 +521,133 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 							status: "aborted",
 							abortReason: reason,
 							liveByMatch: {},
+							endedAt,
+						},
+						terminalNotice: {
+							tournamentId,
+							status: "aborted",
+							reason,
 						},
 					}
 				: {},
-		),
+		);
+	},
 }));
+
+function timestampMs(value: string | null): number | null {
+	if (!value) return null;
+	const normalized = value.includes("T")
+		? value
+		: `${value.replace(" ", "T")}Z`;
+	const parsed = Date.parse(normalized);
+	return Number.isFinite(parsed) ? parsed : null;
+}
+
+function tournamentFromSnapshot(
+	snapshot: TournamentSnapshot,
+	origin: TournamentLive["origin"],
+): TournamentLive {
+	const gamesByPair: Record<string, FinishedGame[]> = {};
+	for (const game of snapshot.games) {
+		const key = pairKey(game.player1_id, game.player2_id);
+		const pairGames = gamesByPair[key] ?? [];
+		pairGames.push({
+			gameKey: `attempt:${game.attempt_id}`,
+			matchId: game.match_id,
+			player1Id: game.player1_id,
+			player2Id: game.player2_id,
+			repetitionIndex: game.repetition_index,
+			ratId: game.rat_id,
+			player1Score: game.player1_score,
+			player2Score: game.player2_score,
+		});
+		gamesByPair[key] = pairGames;
+	}
+	for (const games of Object.values(gamesByPair)) {
+		games.sort((a, b) => a.repetitionIndex - b.repetitionIndex);
+	}
+
+	const failuresByPair: Record<string, MatchFailureRecord[]> = {};
+	for (const failure of snapshot.failures) {
+		const key = pairKey(failure.player1_id, failure.player2_id);
+		const pairFailures = failuresByPair[key] ?? [];
+		pairFailures.push({
+			failureKey: `attempt:${failure.attempt_id}`,
+			matchId: failure.match_id,
+			player1Id: failure.player1_id,
+			player2Id: failure.player2_id,
+			repetitionIndex: failure.repetition_index,
+			ratId: failure.rat_id,
+			failingPlayerId: failure.failing_player_id,
+			kind: failure.kind,
+			timeoutPhase: failure.timeout_phase,
+			reason: failure.reason,
+		});
+		failuresByPair[key] = pairFailures;
+	}
+
+	const terminalMatchIds: Record<number, true> = {};
+	for (const game of snapshot.games) {
+		if (game.match_id !== null) terminalMatchIds[game.match_id] = true;
+	}
+	for (const failure of snapshot.failures) {
+		if (failure.match_id !== null) terminalMatchIds[failure.match_id] = true;
+	}
+
+	const startedAt = timestampMs(snapshot.created_at) ?? Date.now();
+	const endedAt = snapshot.running
+		? null
+		: (timestampMs(snapshot.last_finished_at) ?? startedAt);
+	return {
+		origin,
+		tournamentId: snapshot.tournament_id,
+		name: snapshot.name,
+		format: snapshot.format,
+		target: snapshot.target,
+		anchorId: snapshot.anchor_id,
+		planSummary: snapshot.plan_summary,
+		players: snapshot.players,
+		status: snapshot.running
+			? "running"
+			: snapshot.finished
+				? "finished"
+				: "partial",
+		abortReason: null,
+		done: snapshot.done,
+		total: snapshot.total,
+		gamesPerMatchup: snapshot.games_per_matchup,
+		paired: snapshot.paired,
+		maxParallel: null,
+		success: snapshot.success,
+		failure: snapshot.failure,
+		standings: snapshot.standings,
+		gamesByPair,
+		failuresByPair,
+		liveByMatch: {},
+		terminalMatchIds,
+		startedAt,
+		endedAt,
+		createdAt: snapshot.created_at,
+	};
+}
+
+function mergeTournamentSnapshot(
+	current: TournamentLive,
+	snapshot: TournamentSnapshot,
+): TournamentLive {
+	const durable = tournamentFromSnapshot(snapshot, current.origin);
+	return {
+		...durable,
+		// Per-turn liveness is intentionally non-durable and remains event-fed.
+		liveByMatch: current.liveByMatch,
+		startedAt: current.startedAt,
+		endedAt: current.endedAt ?? durable.endedAt,
+		status: current.status === "running" ? durable.status : current.status,
+		abortReason: current.abortReason,
+		maxParallel: current.maxParallel,
+		createdAt: current.createdAt ?? durable.createdAt,
+	};
+}
 
 // ── Selectors / helpers ──────────────────────────────────────────
 
@@ -375,6 +657,18 @@ export function sortedStandings(rows: StandingRow[]): StandingRow[] {
 		if (a.pending !== b.pending) return a.pending ? 1 : -1;
 		return b.elo - a.elo;
 	});
+}
+
+/** Whether the terminal ladder is complete enough to carry a final verdict.
+ * A stopped run, an unfinished plan, or any unrated player is evidence in
+ * progress rather than a completed ranking. */
+export function hasFinalTournamentVerdict(live: TournamentLive): boolean {
+	return (
+		live.status === "finished" &&
+		live.done >= live.total &&
+		live.standings.length === live.players.length &&
+		live.standings.every((row) => !row.pending)
+	);
 }
 
 /** W/L/D from one player's perspective for a finished game. */

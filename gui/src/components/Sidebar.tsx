@@ -1,6 +1,7 @@
-import { AppShell, Stack, Tooltip, UnstyledButton } from "@mantine/core";
+import { AppShell, Stack, Tooltip } from "@mantine/core";
 import { IconCpu, IconGridDots, IconTrophy } from "@tabler/icons-react";
 import type { Icon } from "@tabler/icons-react";
+import PressableSurface from "./tournament/PressableSurface";
 
 export type Page = "game" | "bots" | "tournaments";
 
@@ -14,23 +15,17 @@ type NavbarLinkProps = {
 function NavbarLink({ icon: Icon, label, active, onClick }: NavbarLinkProps) {
 	return (
 		<Tooltip label={label} position="right">
-			<UnstyledButton
+			<PressableSurface
+				variant="bare"
+				motion="none"
+				className="pyrat-sidebar-button"
+				aria-label={label}
+				aria-current={active ? "page" : undefined}
+				data-active={active || undefined}
 				onClick={onClick}
-				style={{
-					width: "3rem",
-					height: "3rem",
-					display: "flex",
-					alignItems: "center",
-					justifyContent: "center",
-					borderLeft: `3px solid ${active ? "var(--mantine-primary-color-filled)" : "transparent"}`,
-					borderRight: "3px solid transparent",
-					color: active
-						? "var(--mantine-color-white)"
-						: "var(--mantine-color-dark-0)",
-				}}
 			>
-				<Icon size="1.5rem" stroke={1.5} />
-			</UnstyledButton>
+				<Icon size="1.5rem" stroke={1.5} aria-hidden="true" />
+			</PressableSurface>
 		</Tooltip>
 	);
 }

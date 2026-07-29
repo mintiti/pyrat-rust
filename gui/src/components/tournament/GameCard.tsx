@@ -1,10 +1,10 @@
-import { Box, Group, Paper, Text } from "@mantine/core";
+import { Box, Group, Text } from "@mantine/core";
 import { IconPlayerPlayFilled } from "@tabler/icons-react";
-import { useState } from "react";
 import { toDisplayState } from "../../stores/matchStore";
 import type { FinishedGame } from "../../stores/tournamentStore";
 import { resultFor } from "../../stores/tournamentStore";
 import MazeRenderer from "../MazeRenderer";
+import PressableSurface from "./PressableSurface";
 import { T } from "./theme";
 import { useGameReplay } from "./useGameReplay";
 
@@ -13,7 +13,7 @@ type Props = {
 	game: FinishedGame;
 	/** Whose perspective tints the card (gauntlet target). Defaults to canonical p1. */
 	perspectiveId?: string;
-	onOpen: () => void;
+	onOpen: (() => void) | null;
 };
 
 const resColor = (r: "W" | "L" | "D") =>
@@ -28,28 +28,25 @@ export default function GameCard({
 	perspectiveId,
 	onOpen,
 }: Props) {
-	const [hover, setHover] = useState(false);
 	const replay = useGameReplay(tournamentId, game.matchId);
 
 	const res = resultFor(game, perspectiveId ?? game.player1Id);
-	const available = replay?.kind === "available";
+	const available = replay.kind === "available";
+	const inspectable = game.matchId !== null && onOpen !== null;
 
 	return (
-		<Paper
-			withBorder
-			radius="sm"
-			p={6}
-			bg={T.panel2}
-			style={{
-				cursor: "pointer",
-				borderColor: hover ? T.cheeseDim : undefined,
-				boxShadow: `inset 3px 0 0 ${resColor(res)}`,
-				transform: hover ? "translateY(-2px)" : undefined,
-				transition: "border-color .15s, transform .15s",
-			}}
-			onMouseEnter={() => setHover(true)}
-			onMouseLeave={() => setHover(false)}
-			onClick={onOpen}
+		<PressableSurface
+			className="pyrat-game-card"
+			accent={resColor(res)}
+			motion="card"
+			aria-label={
+				inspectable
+					? `Open replay: ${game.player1Id} versus ${game.player2Id}, ${game.player1Score} to ${game.player2Score}`
+					: `Saved result: ${game.player1Id} versus ${game.player2Id}, ${game.player1Score} to ${game.player2Score}; replay unavailable`
+			}
+			style={{ padding: 6, borderRadius: "var(--mantine-radius-sm)" }}
+			disabled={!inspectable}
+			onClick={onOpen ?? undefined}
 		>
 			<Box pos="relative">
 				{available ? (
@@ -72,14 +69,20 @@ export default function GameCard({
 						}}
 					>
 						<Text size="xs" c="dimmed">
-							{replay ? "unavailable" : "…"}
+							{replay.kind === "loading"
+								? "loading…"
+								: replay.kind === "error"
+									? "couldn't load"
+									: "unavailable"}
 						</Text>
 					</Box>
 				)}
-				{available && hover && (
+				{available && (
 					<Box
+						className="pyrat-game-card__overlay"
 						pos="absolute"
 						inset={0}
+						aria-hidden="true"
 						style={{
 							display: "flex",
 							alignItems: "center",
@@ -105,6 +108,6 @@ export default function GameCard({
 					</Text>
 				)}
 			</Group>
-		</Paper>
+		</PressableSurface>
 	);
 }

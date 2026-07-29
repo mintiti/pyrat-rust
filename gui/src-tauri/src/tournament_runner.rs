@@ -18,9 +18,10 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use pyrat::game::builder::GameConfig;
 use pyrat_eval::{
-    gauntlet_slot_order, split_gauntlet_players, EvalMatchDescriptor, EvalSession, GauntletPlanner,
-    GauntletPlannerConfig, MatchupKey, MatchupOutcome, Planner, ResolvedPlayer, RoundRobinPlanner,
-    RoundRobinPlannerConfig, SeatPolicy, SessionConfig, SessionEvent, SessionMode, TournamentState,
+    failure_reason_string, gauntlet_slot_order, split_gauntlet_players, EvalMatchDescriptor,
+    EvalSession, GauntletPlanner, GauntletPlannerConfig, MatchupKey, MatchupOutcome, Planner,
+    ResolvedPlayer, RoundRobinPlanner, RoundRobinPlannerConfig, SeatPolicy, SessionConfig,
+    SessionEvent, SessionMode, TournamentState,
 };
 use pyrat_eval_store::{compute_elo_with_uncertainty, EloOptions, EvalStore, TournamentId};
 use pyrat_host::match_host::MatchEvent;
@@ -31,6 +32,7 @@ use pyrat_orchestrator::{
 };
 use tauri::AppHandle;
 use tauri_specta::Event;
+use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
@@ -93,14 +95,17 @@ pub struct TournamentRun {
 const NOW_PLAYING_FLUSH: Duration = Duration::from_millis(250);
 
 /// Run an already-created tournament to completion, emitting events along the
-/// way. Spawned on a tokio task by `start_tournament`; `cancel` is fired by
-/// `stop_tournament` or on app shutdown.
+/// way. Spawned on a tokio task by `start_tournament`; `startup` resolves once
+/// the session is live (or carries its startup failure), and `cancel` is fired
+/// by `stop_tournament` or on app shutdown.
 pub async fn run_tournament(
     app: AppHandle,
     store: Arc<Mutex<EvalStore>>,
     run: TournamentRun,
     cancel: CancellationToken,
+    startup: oneshot::Sender<Result<(), String>>,
 ) -> Result<(), String> {
+    let mut startup = Some(startup);
     let TournamentRun {
         tournament_id,
         game_config_id,
@@ -121,6 +126,7 @@ pub async fn run_tournament(
         timing,
         orchestrator_config,
     } = run;
+    let max_parallel = orchestrator_config.max_parallel as u32;
 
     // Build the planner for the chosen format from the resolved conditions.
     let elo_options = tournament_config::elo_options(&anchor_id);
@@ -141,8 +147,16 @@ pub async fn run_tournament(
             opponents,
         } => {
             let (challenger_p, opponent_ps) =
-                split_gauntlet_players(&players, challenger, opponents)
-                    .map_err(|e| e.to_string())?;
+                match split_gauntlet_players(&players, challenger, opponents) {
+                    Ok(players) => players,
+                    Err(error) => {
+                        let reason = error.to_string();
+                        if let Some(signal) = startup.take() {
+                            let _ = signal.send(Err(reason.clone()));
+                        }
+                        return Err(reason);
+                    },
+                };
             Box::new(GauntletPlanner::new(GauntletPlannerConfig {
                 challenger: challenger_p,
                 opponents: opponent_ps,
@@ -175,7 +189,7 @@ pub async fn run_tournament(
     }
 
     // 4. Start the session.
-    let session = EvalSession::start_with_extra_sinks(
+    let session = match EvalSession::start_with_extra_sinks(
         store,
         SessionMode { tournament_id },
         planner,
@@ -185,7 +199,16 @@ pub async fn run_tournament(
         extra_sinks,
     )
     .await
-    .map_err(|e| format!("start session: {e}"))?;
+    {
+        Ok(session) => session,
+        Err(error) => {
+            let reason = format!("start session: {error}");
+            if let Some(signal) = startup.take() {
+                let _ = signal.send(Err(reason.clone()));
+            }
+            return Err(reason);
+        },
+    };
 
     // 5. Subscribe: lossless lifecycle (snapshot + tail), the state watch, and
     //    the lossy per-turn stream for now-playing.
@@ -210,6 +233,8 @@ pub async fn run_tournament(
         target,
         total_games,
         games_per_matchup: target_games_per_matchup,
+        paired: matches!(seat_policy, SeatPolicy::Paired),
+        max_parallel,
         anchor_id: anchor_id.clone(),
         plan_summary,
         players: player_ids
@@ -220,6 +245,14 @@ pub async fn run_tournament(
             .collect(),
     }
     .emit(&app);
+
+    // `start_tournament` does not resolve successfully until the session is
+    // genuinely live. This closes the command/event gap where a spawned task
+    // could fail before `TournamentStartedEvent` and leave the frontend stuck
+    // in its global Starting state forever.
+    if let Some(signal) = startup.take() {
+        let _ = signal.send(Ok(()));
+    }
 
     // 7. Forwarding loop. Verdict-bearing data (scores, standings) comes from
     //    the lossless `events`/state path; now-playing rides the lossy `live`.
@@ -258,9 +291,12 @@ pub async fn run_tournament(
                             match_id: descriptor.match_id.0,
                             player1_id: descriptor.player1_id.clone(),
                             player2_id: descriptor.player2_id.clone(),
+                            repetition_index: descriptor.repetition_index,
+                            rat_id: rat_id(&descriptor),
                             failing_player_id,
                             kind,
                             timeout_phase,
+                            reason: failure_reason_string(&reason),
                         }
                         .emit(&app);
                         let state = state_rx.borrow().clone();
@@ -409,11 +445,19 @@ fn emit_match_finished(
         player1_id: key.player1_id().to_string(),
         player2_id: key.player2_id().to_string(),
         repetition_index: key.repetition_index(),
+        rat_id: rat_id(descriptor),
         player1_score: p1,
         player2_score: p2,
         match_id: descriptor.match_id.0,
     }
     .emit(app);
+}
+
+fn rat_id(descriptor: &EvalMatchDescriptor) -> String {
+    match descriptor.orientation {
+        pyrat_eval::SeatOrientation::Canonical => descriptor.player1_id.clone(),
+        pyrat_eval::SeatOrientation::Flipped => descriptor.player2_id.clone(),
+    }
 }
 
 /// Scores for the just-finished attempt of `key`, read from history — which

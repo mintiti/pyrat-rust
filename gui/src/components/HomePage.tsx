@@ -2,7 +2,7 @@ import {
 	Button,
 	Card,
 	Center,
-	Group,
+	SimpleGrid,
 	Stack,
 	Text,
 	ThemeIcon,
@@ -23,11 +23,17 @@ type Props = {
 
 export default function HomePage({ onNavigate, onOpenTournaments }: Props) {
 	return (
-		<Center h="100%">
-			<Group gap="lg">
-				<Card shadow="sm" withBorder padding="xl" w={260}>
-					<Stack align="center" justify="space-between" h="100%" gap="md">
-						<ThemeIcon size={56} radius="md" variant="light">
+		<Center mih="100%" py="lg">
+			<SimpleGrid
+				cols={{ base: 1, sm: 3 }}
+				spacing={{ base: "sm", sm: "md" }}
+				w="100%"
+				maw={900}
+				px="lg"
+			>
+				<Card shadow="sm" withBorder padding="lg">
+					<Stack align="center" justify="space-between" h="100%" gap="sm">
+						<ThemeIcon size={48} radius="md" variant="light">
 							<IconPlayerPlay size={32} />
 						</ThemeIcon>
 						<Stack align="center" gap={4}>
@@ -44,13 +50,13 @@ export default function HomePage({ onNavigate, onOpenTournaments }: Props) {
 								onNavigate("setup");
 							}}
 						>
-							Start
+							Play
 						</Button>
 					</Stack>
 				</Card>
-				<Card shadow="sm" withBorder padding="xl" w={260}>
-					<Stack align="center" justify="space-between" h="100%" gap="md">
-						<ThemeIcon size={56} radius="md" variant="light" color="violet">
+				<Card shadow="sm" withBorder padding="lg">
+					<Stack align="center" justify="space-between" h="100%" gap="sm">
+						<ThemeIcon size={48} radius="md" variant="light" color="violet">
 							<IconMicroscope size={32} />
 						</ThemeIcon>
 						<Stack align="center" gap={4}>
@@ -68,13 +74,13 @@ export default function HomePage({ onNavigate, onOpenTournaments }: Props) {
 								onNavigate("setup");
 							}}
 						>
-							Start
+							Analyze
 						</Button>
 					</Stack>
 				</Card>
-				<Card shadow="sm" withBorder padding="xl" w={260}>
-					<Stack align="center" justify="space-between" h="100%" gap="md">
-						<ThemeIcon size={56} radius="md" variant="light" color="yellow">
+				<Card shadow="sm" withBorder padding="lg">
+					<Stack align="center" justify="space-between" h="100%" gap="sm">
+						<ThemeIcon size={48} radius="md" variant="light" color="yellow">
 							<IconTrophy size={32} />
 						</ThemeIcon>
 						<Stack align="center" gap={4}>
@@ -89,11 +95,11 @@ export default function HomePage({ onNavigate, onOpenTournaments }: Props) {
 							fullWidth
 							onClick={onOpenTournaments}
 						>
-							Start
+							Open tournaments
 						</Button>
 					</Stack>
 				</Card>
-			</Group>
+			</SimpleGrid>
 		</Center>
 	);
 }

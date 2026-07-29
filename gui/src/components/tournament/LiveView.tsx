@@ -4,15 +4,19 @@ import {
 	Box,
 	Button,
 	Group,
+	Paper,
 	Progress,
-	Stack,
+	SimpleGrid,
 	Text,
 } from "@mantine/core";
 import { IconArrowLeft } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import { commands } from "../../bindings";
 import type { LiveMatch, TournamentLive } from "../../stores/tournamentStore";
-import { useTournamentStore } from "../../stores/tournamentStore";
+import {
+	hasFinalTournamentVerdict,
+	useTournamentStore,
+} from "../../stores/tournamentStore";
 import BotView from "./BotView";
 import GameView from "./GameView";
 import Hero from "./Hero";
@@ -21,12 +25,12 @@ import Standings from "./Standings";
 import { T, shortId } from "./theme";
 
 const EST_SECONDS_PER_GAME = 6.5;
-const MAX_PARALLEL = 4;
 
 export default function LiveView({ live }: { live: TournamentLive }) {
 	const nav = useTournamentStore((s) => s.nav);
 	const back = useTournamentStore((s) => s.back);
 	const showLaunch = useTournamentStore((s) => s.showLaunch);
+	const active = live.origin === "active";
 
 	// Ticking elapsed clock.
 	const [now, setNow] = useState(() => Date.now());
@@ -36,14 +40,28 @@ export default function LiveView({ live }: { live: TournamentLive }) {
 		return () => clearInterval(id);
 	}, [live.status]);
 
-	const elapsedSec = Math.floor((now - live.startedAt) / 1000);
-	const elapsed = `${Math.floor(elapsedSec / 60)}m${String(elapsedSec % 60).padStart(2, "0")}s`;
-	const finished = live.status !== "running";
-	const remaining = Math.max(0, live.total - live.done);
-	const etaMin = Math.max(
-		1,
-		Math.ceil((remaining * EST_SECONDS_PER_GAME) / MAX_PARALLEL / 60),
+	const elapsedSec = Math.max(
+		0,
+		Math.floor(((live.endedAt ?? now) - live.startedAt) / 1000),
 	);
+	const elapsed = `${Math.floor(elapsedSec / 60)}m${String(elapsedSec % 60).padStart(2, "0")}s`;
+	const createdLabel = live.createdAt
+		? new Date(`${live.createdAt.replace(" ", "T")}Z`).toLocaleString()
+		: null;
+	const terminal = live.status !== "running";
+	const finalVerdict = hasFinalTournamentVerdict(live);
+	const remaining = Math.max(0, live.total - live.done);
+	const etaMin =
+		live.maxParallel === null
+			? null
+			: Math.max(
+					1,
+					Math.ceil(
+						(remaining * EST_SECONDS_PER_GAME) /
+							Math.max(1, live.maxParallel) /
+							60,
+					),
+				);
 
 	const inFlight = Object.values(live.liveByMatch);
 	const statusBadge =
@@ -51,13 +69,21 @@ export default function LiveView({ live }: { live: TournamentLive }) {
 			<Badge color="yellow" variant="outline" leftSection={<PulseDot />}>
 				running
 			</Badge>
-		) : live.status === "finished" ? (
+		) : finalVerdict ? (
 			<Badge color="green" variant="outline">
 				finished
 			</Badge>
-		) : (
+		) : live.status === "finished" ? (
+			<Badge color="orange" variant="outline">
+				partial results
+			</Badge>
+		) : live.status === "aborted" ? (
 			<Badge color="red" variant="outline">
 				stopped
+			</Badge>
+		) : (
+			<Badge color="orange" variant="outline">
+				partial results
 			</Badge>
 		);
 
@@ -68,33 +94,29 @@ export default function LiveView({ live }: { live: TournamentLive }) {
 				? `back to ${shortId(nav.fromBot)}`
 				: nav.kind === "matchup" || nav.kind === "bot"
 					? "back to standings"
-					: "";
+					: "back to tournament setup";
 
 	return (
 		<Box p="lg" style={{ maxWidth: 980, margin: "0 auto" }}>
 			<Group gap="sm" align="center" mb={4}>
-				{nav.kind !== "overview" && (
-					<ActionIcon
-						variant="default"
-						radius="xl"
-						onClick={back}
-						title={backLabel}
-					>
-						<IconArrowLeft size={16} />
-					</ActionIcon>
-				)}
+				<ActionIcon
+					variant="default"
+					radius="xl"
+					onClick={nav.kind === "overview" ? showLaunch : back}
+					title={backLabel}
+					aria-label={backLabel}
+				>
+					<IconArrowLeft size={16} />
+				</ActionIcon>
 				<Text fw={700} size="xl">
 					{live.name ?? `#${live.tournamentId}`}
 				</Text>
 				{statusBadge}
 				<Text size="xs" c="dimmed">
-					· {elapsed}
+					· {active ? elapsed : (createdLabel ?? "saved tournament")}
 				</Text>
 				<Group gap="xs" ml="auto">
-					<Button size="compact-xs" variant="subtle" onClick={showLaunch}>
-						New tournament
-					</Button>
-					{live.status === "running" && (
+					{active && live.status === "running" && (
 						<Button
 							size="compact-xs"
 							variant="subtle"
@@ -120,13 +142,54 @@ export default function LiveView({ live }: { live: TournamentLive }) {
 					{live.done}/{live.total}
 				</span>{" "}
 				games · {live.planSummary}
-				{finished ? " · done" : ` · ~${etaMin} min left`}
+				{!terminal
+					? etaMin === null
+						? " · running"
+						: ` · ~${etaMin} min left`
+					: finalVerdict
+						? " · complete"
+						: " · partial, not a final ranking"}
 			</Text>
+			{live.status === "aborted" && (
+				<Paper
+					withBorder
+					p="sm"
+					radius="md"
+					mb="md"
+					bg={T.panel2}
+					style={{ borderColor: T.loss }}
+				>
+					<Text size="sm" fw={700}>
+						Tournament stopped. Results below are partial.
+					</Text>
+					{live.abortReason && (
+						<Text size="xs" c="dimmed" mt={2}>
+							Reason: {live.abortReason}
+						</Text>
+					)}
+				</Paper>
+			)}
+			{live.status === "partial" && (
+				<Paper withBorder p="sm" radius="md" mb="md" bg={T.panel2}>
+					<Text size="sm" fw={700}>
+						Saved partial results
+					</Text>
+					<Text size="xs" c="dimmed" mt={2}>
+						This tournament is no longer running. Its completed games remain
+						inspectable.
+					</Text>
+				</Paper>
+			)}
 
 			{nav.kind === "overview" && (
 				<>
 					<Hero live={live} />
-					<NowPlaying matches={inFlight} running={live.status === "running"} />
+					{active && (
+						<NowPlaying
+							matches={inFlight}
+							running={live.status === "running"}
+						/>
+					)}
 					<Box mt="md">
 						<Standings live={live} />
 					</Box>
@@ -148,12 +211,12 @@ export default function LiveView({ live }: { live: TournamentLive }) {
 export function PulseDot({ color = T.cheese }: { color?: string }) {
 	return (
 		<Box
+			className="pyrat-pulse-dot"
 			w={7}
 			h={7}
 			style={{
 				borderRadius: "50%",
 				background: color,
-				animation: "pulse 1.2s infinite",
 			}}
 		/>
 	);
@@ -179,7 +242,7 @@ function NowPlaying({
 					waiting for the next matches to start…
 				</Text>
 			) : (
-				<Stack gap={6}>
+				<SimpleGrid cols={{ base: 1, sm: 2 }} spacing={6}>
 					{matches.map((m) => (
 						<Group
 							key={m.matchId}
@@ -205,7 +268,7 @@ function NowPlaying({
 							</Text>
 						</Group>
 					))}
-				</Stack>
+				</SimpleGrid>
 			)}
 		</Box>
 	);

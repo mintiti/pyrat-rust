@@ -3,17 +3,19 @@ import { IconAlertTriangle, IconChevronRight } from "@tabler/icons-react";
 import type { StandingRow } from "../../bindings/generated";
 import type { TournamentLive } from "../../stores/tournamentStore";
 import {
+	MIN_GAMES_FOR_RATING,
 	botFailures,
 	failureBreakdown,
 	resultFor,
 	sortedStandings,
 	useTournamentStore,
 } from "../../stores/tournamentStore";
+import PressableSurface from "./PressableSurface";
 import { T, pairKey, shortId } from "./theme";
 
 const ANCHOR_ELO = 1000;
 
-/** Depth-1 evidence: Elo bars with 95% CI whiskers on a shared axis, a dashed
+/** Depth-1 evidence: Elo bars with uncertainty whiskers on a shared axis, a dashed
  * anchor tick, and pressable rows (the navigation into matchups). The gauntlet
  * target row is highlighted but not clickable — its breakdown is the rest of
  * the table. */
@@ -53,24 +55,20 @@ export default function Standings({ live }: { live: TournamentLive }) {
 				{rows.map((r, i) => {
 					const isTarget = r.player_id === live.target;
 					const clickable = !isTarget;
-					return (
-						<Group
-							key={r.player_id}
-							wrap="nowrap"
-							gap="sm"
-							px="sm"
-							py={7}
-							mb={6}
-							style={{
-								background: isTarget
-									? "linear-gradient(90deg, rgba(240,180,41,.08), var(--mantine-color-dark-5))"
-									: T.panel2,
-								border: `1px solid ${isTarget ? T.cheeseDim : T.line}`,
-								borderRadius: 8,
-								cursor: clickable ? "pointer" : "default",
-							}}
-							onClick={() => onRowClick(r.player_id)}
-						>
+					const health = healthSummary(live, r.player_id);
+					const standingEvidence = r.pending
+						? live.status === "running"
+							? `${r.games} of ${MIN_GAMES_FOR_RATING} games completed; rating appears at ${MIN_GAMES_FOR_RATING}`
+							: `not rated; ${r.games} of ${MIN_GAMES_FOR_RATING} games completed; ${MIN_GAMES_FOR_RATING} required`
+						: `rank ${i + 1}, Elo ${Math.round(r.elo)} plus or minus ${Math.round((r.elo_ci_high - r.elo_ci_low) / 2)}`;
+					const form = live.target
+						? gauntletForm(live, r.player_id)
+								.map(({ result }) => result)
+								.join(", ")
+						: "";
+					const accessibleEvidence = `${shortId(r.player_id)}, ${standingEvidence}${form ? `. Recent form: ${form}` : ""}${health ? `. ${health}` : ""}`;
+					const row = (
+						<Group wrap="nowrap" gap="sm" px="sm" py={7}>
 							<Text size="xs" c="dimmed" w={20} ta="right" ff="monospace">
 								{r.pending ? "·" : i + 1}
 							</Text>
@@ -119,24 +117,61 @@ export default function Standings({ live }: { live: TournamentLive }) {
 								)}
 							</Box>
 
-							<Text size="xs" ff="monospace" w={96} ta="right">
+							<Text size="xs" ff="monospace" w={104} ta="right">
 								{r.pending
-									? "warming up"
+									? live.status === "running"
+										? `${r.games}/${MIN_GAMES_FOR_RATING} to rating`
+										: `${r.games}/${MIN_GAMES_FOR_RATING} · not rated`
 									: `${Math.round(r.elo)} ±${Math.round((r.elo_ci_high - r.elo_ci_low) / 2)}`}
 							</Text>
-							<Box w={56} style={{ textAlign: "right" }}>
+							<Box w={72} style={{ textAlign: "right" }}>
 								{clickable && <RowScent live={live} rowId={r.player_id} />}
 							</Box>
 							<IconChevronRight
 								size={15}
 								color={clickable ? T.muted : "transparent"}
+								className={
+									clickable ? "pyrat-pressable-surface__chevron" : undefined
+								}
 							/>
 						</Group>
+					);
+					if (isTarget) {
+						return (
+							<Box
+								key={r.player_id}
+								title={health || undefined}
+								mb={6}
+								style={{
+									background:
+										"linear-gradient(90deg, rgba(240,180,41,.08), var(--mantine-color-dark-5))",
+									border: `1px solid ${T.cheeseDim}`,
+									borderRadius: 8,
+								}}
+							>
+								{row}
+							</Box>
+						);
+					}
+					const destination = live.target
+						? `View ${shortId(live.target)} versus ${shortId(r.player_id)}`
+						: `View ${shortId(r.player_id)} matchups`;
+					return (
+						<PressableSurface
+							key={r.player_id}
+							aria-label={`${destination}. ${accessibleEvidence}`}
+							title={health || undefined}
+							onClick={() => onRowClick(r.player_id)}
+							style={{ marginBottom: 6 }}
+						>
+							{row}
+						</PressableSurface>
 					);
 				})}
 			</div>
 			<Text size="xs" c="dimmed" mt="xs">
-				Elo, 95% CI · anchor: {shortId(live.anchorId)} = 1000 (dashed)
+				Elo estimate · uncertainty range · anchor: {shortId(live.anchorId)} =
+				1000 (dashed)
 			</Text>
 		</Box>
 	);
@@ -154,12 +189,12 @@ function HealthMarker({
 }) {
 	const failures = botFailures(live, botId);
 	if (failures.length === 0) return null;
-	const summary = failureBreakdown(failures)
-		.map((b) => `${b.count} ${b.label}`)
-		.join(", ");
+	const summary = healthSummary(live, botId);
 	return (
 		<Tooltip label={summary} withArrow>
 			<Group
+				role="img"
+				aria-label={summary}
 				gap={2}
 				wrap="nowrap"
 				justify="flex-end"
@@ -172,6 +207,16 @@ function HealthMarker({
 			</Group>
 		</Tooltip>
 	);
+}
+
+function healthSummary(live: TournamentLive, botId: string): string {
+	const failures = botFailures(live, botId);
+	if (failures.length === 0) return "";
+	return `${failures.length} match ${failures.length === 1 ? "failure" : "failures"}: ${failureBreakdown(
+		failures,
+	)
+		.map((breakdown) => `${breakdown.count} ${breakdown.label}`)
+		.join(", ")}`;
 }
 
 function Whisker({ lo, hi }: { lo: number; hi: number }) {
@@ -195,20 +240,37 @@ function Whisker({ lo, hi }: { lo: number; hi: number }) {
 function RowScent({ live, rowId }: { live: TournamentLive; rowId: string }) {
 	const target = live.target;
 	if (target) {
-		const games = live.gamesByPair[pairKey(target, rowId)] ?? [];
-		const last5 = games.slice(-5);
+		const form = gauntletForm(live, rowId);
 		return (
-			<Group gap={3} justify="flex-end" wrap="nowrap">
-				{last5.map((g) => {
-					const res = resultFor(g, target);
-					const color = res === "W" ? T.win : res === "L" ? T.loss : T.draw;
+			<Group
+				gap={2}
+				justify="flex-end"
+				wrap="nowrap"
+				role="img"
+				aria-label={`Recent form: ${form.map(({ result }) => result).join(", ") || "no games"}`}
+			>
+				{form.map(({ gameKey, result }) => {
+					const color =
+						result === "W" ? T.win : result === "L" ? T.loss : T.draw;
 					return (
 						<Box
-							key={g.matchId}
-							w={7}
-							h={7}
-							style={{ borderRadius: "50%", background: color }}
-						/>
+							key={gameKey}
+							aria-hidden="true"
+							w={12}
+							h={12}
+							style={{
+								borderRadius: "50%",
+								background: color,
+								color: "#15171d",
+								display: "grid",
+								placeItems: "center",
+								fontSize: 8,
+								fontWeight: 800,
+								lineHeight: 1,
+							}}
+						>
+							{result}
+						</Box>
 					);
 				})}
 			</Group>
@@ -231,4 +293,14 @@ function RowScent({ live, rowId }: { live: TournamentLive; rowId: string }) {
 			{w}–{l}–{d}
 		</Text>
 	);
+}
+
+function gauntletForm(live: TournamentLive, rowId: string) {
+	const target = live.target;
+	if (!target || rowId === target) return [];
+	const games = live.gamesByPair[pairKey(target, rowId)] ?? [];
+	return games.slice(-5).map((game) => ({
+		gameKey: game.gameKey,
+		result: resultFor(game, target),
+	}));
 }

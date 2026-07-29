@@ -365,7 +365,7 @@ export default function SetupView({ onBack, onStartMatch }: Props) {
 
 						<Divider label="Maze" labelPosition="left" />
 
-						<SettingRow label="Wall Density">
+						<SettingRow label="Wall Density" controlTarget="slider-thumb">
 							<Slider
 								min={0}
 								max={1}
@@ -377,7 +377,7 @@ export default function SetupView({ onBack, onStartMatch }: Props) {
 							/>
 						</SettingRow>
 
-						<SettingRow label="Mud Density">
+						<SettingRow label="Mud Density" controlTarget="slider-thumb">
 							<Slider
 								min={0}
 								max={1}

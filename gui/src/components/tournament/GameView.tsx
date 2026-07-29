@@ -15,7 +15,7 @@ export default function GameView({
 }) {
 	const replay = useGameReplay(tournamentId, matchId);
 
-	if (!replay) {
+	if (replay.kind === "loading") {
 		return (
 			<Text size="sm" c="dimmed" mt="sm">
 				loading…
@@ -30,6 +30,21 @@ export default function GameView({
 				</Title>
 				<Text size="sm" c="dimmed">
 					{replay.reason}
+				</Text>
+			</Box>
+		);
+	}
+	if (replay.kind === "error") {
+		return (
+			<Box mt="sm">
+				<Title order={4} mb="sm">
+					Couldn&apos;t load this game
+				</Title>
+				<Text size="sm" c="dimmed">
+					{replay.reason}
+				</Text>
+				<Text size="xs" c="dimmed" mt="xs">
+					Return to the matchup and reopen the game to retry.
 				</Text>
 			</Box>
 		);

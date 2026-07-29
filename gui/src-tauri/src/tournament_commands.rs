@@ -15,10 +15,11 @@ use pyrat::game::builder::{
     CheeseStrategy, GameBuilder, GameConfig, MazeParams, MazeStrategy, PlayerStrategy,
 };
 use pyrat_eval::{
-    EvalSession, MatchupKey, ResolvedPlayer, TournamentParams, TournamentSpec, TournamentState,
+    EvalSession, MatchupKey, ResolvedPlayer, SeatPolicy, TournamentMethodology, TournamentParams,
+    TournamentSpec, TournamentState, TournamentTimingMode,
 };
-use pyrat_eval_store::{EvalStore, TournamentId};
-use pyrat_host::probe::probe_bot;
+use pyrat_eval_store::{AttemptOutcome, EvalStore, SeatOrientation, TournamentId};
+use pyrat_host::probe::{preflight_bot, PreflightConfig};
 use pyrat_orchestrator::{PlayerSpec, ReplayEvent, ReplayFile};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -29,7 +30,7 @@ use tracing::warn;
 use crate::commands::{MazeState, MudEntry, PlayerState, WallEntry};
 use crate::state::{AppState, TournamentPhase};
 use crate::tournament_config;
-use crate::tournament_events::{StandingRow, TournamentPreparingEvent};
+use crate::tournament_events::{FailureKind, StandingRow, TimeoutPhase, TournamentPreparingEvent};
 use crate::tournament_runner::{
     build_standings, ordered_player_ids, run_tournament, total_games, RunnerFormat, TournamentRun,
 };
@@ -55,7 +56,7 @@ const MAX_JS_SAFE_SEED: u64 = (1 << 53) - 1;
 
 /// Player start strategy for the game-instance factory. Mirrors the engine's
 /// `PlayerStrategy` (corners | random); fixed positions are parked.
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, Type)]
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
 #[serde(rename_all = "snake_case")]
 pub enum PlayerStart {
     Corners,
@@ -229,6 +230,9 @@ pub struct TournamentSummary {
     pub name: Option<String>,
     pub format: String,
     pub created_at: String,
+    /// The app-owned runner is currently executing this tournament. Separate
+    /// from `finished`: navigation never owns runner lifetime.
+    pub running: bool,
     /// All expected (pair, repetition) slots are done (success or
     /// failure-exhausted) — `slot_done` semantics, not raw count-vs-target.
     pub finished: bool,
@@ -247,6 +251,108 @@ pub struct StandingsSnapshot {
     pub done: u32,
     pub total: u32,
     pub standings: Vec<StandingRow>,
+}
+
+/// One durable successful attempt. Canonical player ids/scores stay stable
+/// across the two seat-swapped legs; `rat_id` makes the actual seat visible.
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct StoredFinishedGame {
+    pub attempt_id: i64,
+    /// Absent on rows written before migration 6. Those results remain
+    /// inspectable, but have no direct replay link.
+    pub match_id: Option<u64>,
+    pub player1_id: String,
+    pub player2_id: String,
+    pub repetition_index: u32,
+    pub rat_id: String,
+    pub player1_score: f64,
+    pub player2_score: f64,
+}
+
+/// One durable failed attempt, retained in historical tournament inspection.
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct StoredMatchFailure {
+    pub attempt_id: i64,
+    pub match_id: Option<u64>,
+    pub player1_id: String,
+    pub player2_id: String,
+    pub repetition_index: u32,
+    pub rat_id: String,
+    pub failing_player_id: Option<String>,
+    pub kind: FailureKind,
+    pub timeout_phase: Option<TimeoutPhase>,
+    pub reason: String,
+}
+
+/// Wire-safe projection of the store-native timing mode.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum StoredTimingMode {
+    Wait,
+    Clock,
+}
+
+/// Durable execution conditions for a tournament. Kept as one optional
+/// object: a missing object means the pre-migration row did not record any of
+/// these values, rather than inheriting today's launch defaults.
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct StoredTournamentMethodology {
+    pub timing_mode: StoredTimingMode,
+    pub move_timeout_ms: u32,
+    pub preprocessing_timeout_ms: u32,
+    pub startup_timeout_ms: u32,
+    pub configure_timeout_ms: u32,
+    pub network_grace_ms: u32,
+    pub max_parallel: u32,
+}
+
+impl From<TournamentMethodology> for StoredTournamentMethodology {
+    fn from(value: TournamentMethodology) -> Self {
+        Self {
+            timing_mode: match value.timing_mode {
+                TournamentTimingMode::Wait => StoredTimingMode::Wait,
+                TournamentTimingMode::Clock => StoredTimingMode::Clock,
+            },
+            move_timeout_ms: value.move_timeout_ms,
+            preprocessing_timeout_ms: value.preprocessing_timeout_ms,
+            startup_timeout_ms: value.startup_timeout_ms,
+            configure_timeout_ms: value.configure_timeout_ms,
+            network_grace_ms: value.network_grace_ms,
+            max_parallel: value.max_parallel,
+        }
+    }
+}
+
+/// Complete read model for one inspectable tournament. The same command
+/// hydrates historical rows and reconciles an active event-fed view from
+/// durable truth when lifecycle broadcasts lag.
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct TournamentSnapshot {
+    pub tournament_id: i64,
+    pub name: Option<String>,
+    pub format: String,
+    pub target: Option<String>,
+    pub anchor_id: String,
+    pub running: bool,
+    pub finished: bool,
+    pub paired: bool,
+    /// Absent only when an older tournament row did not record its execution
+    /// conditions. Optional in TypeScript so existing fixture consumers remain
+    /// compatible; current rows always include it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub methodology: Option<StoredTournamentMethodology>,
+    pub created_at: String,
+    pub last_finished_at: Option<String>,
+    pub plan_summary: String,
+    pub players: Vec<String>,
+    pub games_per_matchup: u32,
+    pub done: u32,
+    pub total: u32,
+    pub success: u32,
+    pub failure: u32,
+    pub standings: Vec<StandingRow>,
+    pub games: Vec<StoredFinishedGame>,
+    pub failures: Vec<StoredMatchFailure>,
 }
 
 /// Final-position board + verdict for one finished game, or a reason it's
@@ -290,8 +396,21 @@ fn reservation_check(phase: &TournamentPhase) -> Result<(), String> {
     }
 }
 
+async fn current_running_tournament(state: &AppState) -> Option<i64> {
+    let phase = state.tournament_phase.lock().await;
+    match &*phase {
+        TournamentPhase::Running {
+            tournament_id,
+            handle,
+            ..
+        } if !handle.is_finished() => Some(*tournament_id),
+        _ => None,
+    }
+}
+
 /// Create a tournament and start running it in the background. Returns the
-/// new tournament id. Rejects if one is already running.
+/// new tournament id only after the runner acknowledges that its session is
+/// live. Rejects if one is already running.
 #[tauri::command]
 #[specta::specta]
 pub async fn start_tournament(
@@ -329,24 +448,42 @@ pub async fn start_tournament(
     };
 
     match build_and_spawn(&app, params, cancel.clone()).await {
-        Ok((tournament_id, handle)) => {
-            let mut phase = state.tournament_phase.lock().await;
-            if matches!(*phase, TournamentPhase::Starting { .. }) {
-                *phase = TournamentPhase::Running {
-                    tournament_id,
-                    cancel,
-                    handle,
-                };
-                Ok(tournament_id)
-            } else {
-                // A `stop_tournament` landed during the launch window (it reset
-                // the slot to Idle and already fired the token). Honor it:
-                // cancel (idempotent) and drain the runner we just spawned,
-                // rather than promoting a tournament the user asked to stop.
-                cancel.cancel();
+        Ok((tournament_id, handle, startup)) => match startup.await {
+            Ok(Ok(())) => {
+                let mut phase = state.tournament_phase.lock().await;
+                if matches!(*phase, TournamentPhase::Starting { .. }) {
+                    *phase = TournamentPhase::Running {
+                        tournament_id,
+                        cancel,
+                        handle,
+                    };
+                    Ok(tournament_id)
+                } else {
+                    // A `stop_tournament` landed during the launch window (it reset
+                    // the slot to Idle and already fired the token). Honor it:
+                    // cancel (idempotent) and drain the runner we just spawned,
+                    // rather than promoting a tournament the user asked to stop.
+                    cancel.cancel();
+                    let _ = handle.await;
+                    Err("tournament start was cancelled".into())
+                }
+            },
+            Ok(Err(error)) => {
                 let _ = handle.await;
-                Err("tournament start was cancelled".into())
-            }
+                let mut phase = state.tournament_phase.lock().await;
+                if matches!(*phase, TournamentPhase::Starting { .. }) {
+                    *phase = TournamentPhase::Idle;
+                }
+                Err(error)
+            },
+            Err(_) => {
+                let _ = handle.await;
+                let mut phase = state.tournament_phase.lock().await;
+                if matches!(*phase, TournamentPhase::Starting { .. }) {
+                    *phase = TournamentPhase::Idle;
+                }
+                Err("tournament runner exited before startup completed".into())
+            },
         },
         Err(e) => {
             // Roll back the reservation so a failed launch can't wedge the slot.
@@ -377,8 +514,9 @@ pub async fn get_tournament_launch_defaults() -> Result<LaunchDefaults, String> 
 }
 
 /// Create the tournament row and spawn its runner. Returns the new id plus the
-/// runner handle; the caller installs them (with the `cancel` it owns) into
-/// `TournamentPhase::Running`. Phase management lives entirely in
+/// runner handle and startup acknowledgement; the caller installs the live
+/// runner (with the `cancel` it owns) into `TournamentPhase::Running`. Phase
+/// management lives entirely in
 /// `start_tournament`; this is the fallible build body it wraps so every error
 /// path releases the `Starting` slot. `cancel` is the start-lifetime token: it
 /// gates warmup and is reused as the runner's token.
@@ -386,7 +524,14 @@ async fn build_and_spawn(
     app: &tauri::AppHandle,
     params: LaunchParams,
     cancel: CancellationToken,
-) -> Result<(i64, tokio::task::JoinHandle<()>), String> {
+) -> Result<
+    (
+        i64,
+        tokio::task::JoinHandle<()>,
+        tokio::sync::oneshot::Receiver<Result<(), String>>,
+    ),
+    String,
+> {
     let store = open_store(app)?;
     let players = resolve_players(&params.bots);
 
@@ -441,7 +586,7 @@ async fn build_and_spawn(
     // message, no dangling row) rather than inside the runner. For random
     // starts this validates only one draw; the seed-independent invariants in
     // `to_game_config` cover the rest.
-    game_config
+    let representative_game = game_config
         .create(Some(tournament_seed))
         .map_err(|e| format!("invalid game config: {e}"))?;
 
@@ -474,6 +619,15 @@ async fn build_and_spawn(
             seat_policy,
         }
         .to_json(),
+        methodology: Some(TournamentMethodology {
+            timing_mode: TournamentTimingMode::Wait,
+            move_timeout_ms: timing.move_timeout_ms,
+            preprocessing_timeout_ms: timing.preprocessing_timeout_ms,
+            startup_timeout_ms: tournament_config::STARTUP_TIMEOUT_MS,
+            configure_timeout_ms: tournament_config::CONFIGURE_TIMEOUT_MS,
+            network_grace_ms: tournament_config::NETWORK_GRACE_MS,
+            max_parallel: params.max_parallel.max(1),
+        }),
         game_config: game_config.clone(),
         tournament_seed,
     };
@@ -483,7 +637,15 @@ async fn build_and_spawn(
     // out cold), drain build chatter before matches, and catch a dead bot here
     // (clear error, no dangling row) rather than mid-run. Aborts cleanly on a
     // stop landing during warmup.
-    warmup_bots(app, &params.bots, &cancel).await?;
+    let preflight = PreflightConfig::new(
+        &representative_game,
+        timing.mode,
+        timing.move_timeout_ms,
+        timing.preprocessing_timeout_ms,
+        orchestrator_config.handshake_timeout,
+        orchestrator_config.setup_timing.configure_timeout,
+    );
+    warmup_bots(app, &params.bots, &cancel, preflight).await?;
 
     let created =
         EvalSession::create_tournament(store.clone(), spec.clone(), canonical_players.clone())
@@ -514,13 +676,14 @@ async fn build_and_spawn(
     };
 
     let app_for_task = app.clone();
+    let (startup_tx, startup_rx) = tokio::sync::oneshot::channel();
     let handle = tokio::spawn(async move {
-        if let Err(e) = run_tournament(app_for_task, store, run, cancel).await {
+        if let Err(e) = run_tournament(app_for_task, store, run, cancel, startup_tx).await {
             warn!(error = %e, "tournament runner exited with error");
         }
     });
 
-    Ok((tournament_id.0, handle))
+    Ok((tournament_id.0, handle, startup_rx))
 }
 
 /// Smoke-build each distinct bot once before the tournament starts.
@@ -548,6 +711,7 @@ async fn warmup_bots(
     app: &tauri::AppHandle,
     bots: &[BotPick],
     cancel: &CancellationToken,
+    preflight: PreflightConfig,
 ) -> Result<(), String> {
     let distinct = distinct_by_agent(bots);
     let total = distinct.len() as u32;
@@ -558,16 +722,17 @@ async fn warmup_bots(
             current: Some(bot.agent_id.clone()),
         }
         .emit(app);
-        let probe = probe_bot(
+        let probe = preflight_bot(
             bot.run_command.clone(),
             bot.working_dir.clone(),
             bot.agent_id.clone(),
+            preflight.clone(),
         );
         tokio::select! {
             biased;
             () = cancel.cancelled() => return Err("tournament start was cancelled".into()),
             result = probe => {
-                result.map_err(|e| format!("bot `{}` failed to start: {e}", bot.agent_id))?;
+                result.map_err(|e| format!("bot `{}` failed compatibility check: {e}", bot.agent_id))?;
             }
         }
     }
@@ -610,26 +775,19 @@ pub async fn stop_tournament(state: tauri::State<'_, AppState>) -> Result<(), St
 #[tauri::command]
 #[specta::specta]
 pub async fn tournament_status(state: tauri::State<'_, AppState>) -> Result<Option<i64>, String> {
-    let phase = state.tournament_phase.lock().await;
-    Ok(match &*phase {
-        // Only a *live* runner counts: a finished tournament's slot may not be
-        // freed yet (the runner doesn't reset the phase), so report it as
-        // not-live — else a reloaded window would re-attach to a done one.
-        TournamentPhase::Running {
-            tournament_id,
-            handle,
-            ..
-        } if !handle.is_finished() => Some(*tournament_id),
-        // Starting: the row isn't created yet, so there's no id to report —
-        // the chip appears once the runner is promoted to Running.
-        _ => None,
-    })
+    // Only a *live* runner counts. Starting has no row/id yet, and a finished
+    // handle may still occupy the phase slot until the next reservation.
+    Ok(current_running_tournament(&state).await)
 }
 
 /// List tournaments in the store, newest first, with finished-inference.
 #[tauri::command]
 #[specta::specta]
-pub async fn list_tournaments(app: tauri::AppHandle) -> Result<Vec<TournamentSummary>, String> {
+pub async fn list_tournaments(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<TournamentSummary>, String> {
+    let running_id = current_running_tournament(&state).await;
     let store = open_store(&app)?;
     let g = store.lock();
     let records = g
@@ -670,6 +828,7 @@ pub async fn list_tournaments(app: tauri::AppHandle) -> Result<Vec<TournamentSum
             name: rec.name,
             format: rec.format,
             created_at: rec.created_at,
+            running: running_id == Some(rec.id.0),
             finished,
             done,
             total,
@@ -754,6 +913,175 @@ pub async fn get_tournament_standings(
         done,
         total,
         standings,
+    })
+}
+
+/// Reopen one tournament as a complete read model. This is also the durable
+/// reconciliation endpoint for a running tournament: event delivery keeps the
+/// UI immediate, while this snapshot repairs any lifecycle event a lagging
+/// broadcast receiver missed.
+#[tauri::command]
+#[specta::specta]
+pub async fn get_tournament_snapshot(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+    tournament_id: i64,
+) -> Result<TournamentSnapshot, String> {
+    let running = current_running_tournament(&state).await == Some(tournament_id);
+    let store = open_store(&app)?;
+    let g = store.lock();
+    let tid = TournamentId(tournament_id);
+    let rec = g
+        .get_tournament(tid)
+        .map_err(|e| format!("get tournament: {e}"))?
+        .ok_or_else(|| format!("tournament {tournament_id} not found"))?;
+    let players: Vec<String> = g
+        .get_tournament_players(tid)
+        .map_err(|e| format!("tournament players: {e}"))?
+        .into_iter()
+        .map(|p| p.player_id)
+        .collect();
+    let attempts = g
+        .get_attempts(tid, None)
+        .map_err(|e| format!("attempts: {e}"))?;
+    let game_config = g
+        .get_game_config(&rec.game_config_id)
+        .map_err(|e| format!("game config: {e}"))?
+        .ok_or_else(|| {
+            format!(
+                "tournament {tournament_id} references missing game config {}",
+                rec.game_config_id
+            )
+        })?;
+    drop(g);
+
+    let mut tournament_state = TournamentState::empty(tid);
+    for attempt in &attempts {
+        tournament_state.fold_attempt(attempt);
+    }
+
+    let target = (rec.format == "gauntlet")
+        .then(|| players.first().cloned())
+        .flatten();
+    let anchor_id =
+        tournament_config::derive_anchor(&players, target.as_deref()).ok_or_else(|| {
+            format!(
+                "tournament {tournament_id} has no derivable Elo anchor \
+             (need at least one non-target player); stored shape looks corrupt"
+            )
+        })?;
+    let elo_options = tournament_config::elo_options(&anchor_id);
+    let standings = build_standings(&tournament_state, &elo_options, &players, &anchor_id);
+
+    let params = TournamentParams::from_json(&rec.params_json).unwrap_or(TournamentParams {
+        max_failures_per_pair: 0,
+        seat_policy: SeatPolicy::Legacy,
+    });
+    let games_per_matchup = rec.target_games_per_matchup.unwrap_or(0);
+    let total = matchup_count(&rec.format, players.len()) as u32 * games_per_matchup;
+    let success = success_count(&tournament_state);
+    let failure = attempts
+        .iter()
+        .filter(|attempt| matches!(attempt.outcome, AttemptOutcome::Failure { .. }))
+        .count() as u32;
+    let finished = tournament_finished(
+        &tournament_state,
+        &rec.format,
+        &players,
+        &rec.game_config_id,
+        games_per_matchup,
+        params.max_failures_per_pair,
+    );
+
+    let mut games = Vec::with_capacity(success as usize);
+    let mut failures = Vec::with_capacity(failure as usize);
+    for attempt in &attempts {
+        let rat_id = stored_rat_id(
+            attempt.key.orientation,
+            &attempt.key.player1_id,
+            &attempt.key.player2_id,
+        );
+        match &attempt.outcome {
+            AttemptOutcome::Success {
+                player1_score,
+                player2_score,
+                ..
+            } => games.push(StoredFinishedGame {
+                attempt_id: attempt.id,
+                match_id: attempt.key.match_id,
+                player1_id: attempt.key.player1_id.clone(),
+                player2_id: attempt.key.player2_id.clone(),
+                repetition_index: attempt.key.repetition_index,
+                rat_id,
+                player1_score: *player1_score,
+                player2_score: *player2_score,
+            }),
+            AttemptOutcome::Failure { failure_reason, .. } => {
+                let (kind, timeout_phase, failing_player_id) = stored_failure_projection(
+                    failure_reason,
+                    attempt.key.orientation,
+                    &attempt.key.player1_id,
+                    &attempt.key.player2_id,
+                );
+                failures.push(StoredMatchFailure {
+                    attempt_id: attempt.id,
+                    match_id: attempt.key.match_id,
+                    player1_id: attempt.key.player1_id.clone(),
+                    player2_id: attempt.key.player2_id.clone(),
+                    repetition_index: attempt.key.repetition_index,
+                    rat_id,
+                    failing_player_id,
+                    kind,
+                    timeout_phase,
+                    reason: failure_reason.clone(),
+                });
+            },
+        }
+    }
+
+    let last_finished_at = attempts
+        .iter()
+        .map(|attempt| attempt.finished_at.clone())
+        .max();
+    let field = match rec.format.as_str() {
+        "gauntlet" => format!(
+            "{} vs {}",
+            target.as_deref().unwrap_or("target"),
+            players.len().saturating_sub(1)
+        ),
+        _ => format!("all pairs of {}", players.len()),
+    };
+    let plan_summary = stored_plan_summary(
+        &field,
+        game_config.width,
+        game_config.height,
+        games_per_matchup,
+        rec.methodology,
+    );
+    let methodology = rec.methodology.map(StoredTournamentMethodology::from);
+
+    Ok(TournamentSnapshot {
+        tournament_id,
+        name: rec.name,
+        format: rec.format,
+        target,
+        anchor_id,
+        running,
+        finished,
+        paired: matches!(params.seat_policy, SeatPolicy::Paired),
+        methodology,
+        created_at: rec.created_at,
+        last_finished_at,
+        plan_summary,
+        players,
+        games_per_matchup,
+        done: success,
+        total,
+        success,
+        failure,
+        standings,
+        games,
+        failures,
     })
 }
 
@@ -909,6 +1237,72 @@ fn start_player(start: (u8, u8)) -> PlayerState {
     }
 }
 
+fn stored_rat_id(orientation: SeatOrientation, player1_id: &str, player2_id: &str) -> String {
+    match orientation {
+        SeatOrientation::Canonical => player1_id.to_string(),
+        SeatOrientation::Flipped => player2_id.to_string(),
+    }
+}
+
+fn stored_failure_projection(
+    reason: &str,
+    orientation: SeatOrientation,
+    player1_id: &str,
+    player2_id: &str,
+) -> (FailureKind, Option<TimeoutPhase>, Option<String>) {
+    let (kind, timeout_phase) = if let Some(payload) = reason.strip_prefix("timeout: ") {
+        let phase = payload.split(':').next().unwrap_or_default().trim();
+        let phase = match phase {
+            "setup" => Some(TimeoutPhase::Setup),
+            "preprocessing" => Some(TimeoutPhase::Preprocessing),
+            "sync" => Some(TimeoutPhase::Sync),
+            "move" => Some(TimeoutPhase::Move),
+            _ => None,
+        };
+        (FailureKind::Timeout, phase)
+    } else if reason.starts_with("disconnected:") {
+        (FailureKind::Disconnected, None)
+    } else if reason == "spawn_failed" {
+        (FailureKind::SpawnFailed, None)
+    } else if reason == "handshake_timeout" {
+        (FailureKind::HandshakeTimeout, None)
+    } else if reason.starts_with("protocol_error:") {
+        (FailureKind::ProtocolError, None)
+    } else if reason == "cancelled" {
+        (FailureKind::Cancelled, None)
+    } else if reason == "panic"
+        || reason.starts_with("sink_flush_error:")
+        || reason.starts_with("internal:")
+    {
+        (FailureKind::Internal, None)
+    } else {
+        (FailureKind::Other, None)
+    };
+
+    // Only timeout/disconnect variants carry an implicated engine seat in the
+    // durable format. Do not grep arbitrary payloads: a protocol/internal
+    // message may mention "Player1" without assigning bot blame, and the live
+    // event path deliberately leaves those structural failures unattributed.
+    let implicated_slot = if reason.starts_with("timeout: ") || reason.starts_with("disconnected: ")
+    {
+        reason.rsplit_once(": ").map(|(_, slot)| slot)
+    } else {
+        None
+    };
+
+    // Apply the stored orientation once to map the engine seat back to the
+    // canonical bot id.
+    let (slot0, slot1) = orientation.canonicalize(player1_id, player2_id);
+    let failing_player_id = if implicated_slot == Some("Player1") {
+        Some(slot0.to_string())
+    } else if implicated_slot == Some("Player2") {
+        Some(slot1.to_string())
+    } else {
+        None
+    };
+    (kind, timeout_phase, failing_player_id)
+}
+
 fn open_store(app: &tauri::AppHandle) -> Result<Arc<Mutex<EvalStore>>, String> {
     let path = crate::tournament_paths::store_path(app)?;
     let store =
@@ -953,6 +1347,25 @@ fn plan_summary(
             )
         },
         None => format!("all pairs of {player_count} (round-robin) · {conditions}"),
+    }
+}
+
+fn stored_plan_summary(
+    field: &str,
+    width: u32,
+    height: u32,
+    games_per_matchup: u32,
+    methodology: Option<TournamentMethodology>,
+) -> String {
+    let base = format!("{field} · {width}×{height} · {games_per_matchup} games/matchup");
+    match methodology {
+        Some(methodology) => format!(
+            "{base} · {} ms/move · {} ms/preprocess · {} concurrent",
+            methodology.move_timeout_ms,
+            methodology.preprocessing_timeout_ms,
+            methodology.max_parallel
+        ),
+        None => format!("{base} · timing/concurrency not recorded"),
     }
 }
 
@@ -1036,6 +1449,18 @@ fn expected_pairs(format: &str, players: &[String]) -> Vec<(String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn recorded_methodology() -> TournamentMethodology {
+        TournamentMethodology {
+            timing_mode: TournamentTimingMode::Wait,
+            move_timeout_ms: 200,
+            preprocessing_timeout_ms: 2_000,
+            startup_timeout_ms: 120_000,
+            configure_timeout_ms: 5_000,
+            network_grace_ms: 50,
+            max_parallel: 4,
+        }
+    }
 
     fn pick(agent_id: &str, working_dir: &str) -> BotPick {
         BotPick {
@@ -1171,5 +1596,149 @@ mod tests {
             .create(Some(7))
             .expect("default factory builds");
         assert!(matches!(factory.player_start, PlayerStart::Corners));
+    }
+
+    #[test]
+    fn stored_methodology_projection_preserves_every_execution_condition() {
+        let projected = StoredTournamentMethodology::from(recorded_methodology());
+        assert_eq!(projected.timing_mode, StoredTimingMode::Wait);
+        assert_eq!(projected.move_timeout_ms, 200);
+        assert_eq!(projected.preprocessing_timeout_ms, 2_000);
+        assert_eq!(projected.startup_timeout_ms, 120_000);
+        assert_eq!(projected.configure_timeout_ms, 5_000);
+        assert_eq!(projected.network_grace_ms, 50);
+        assert_eq!(projected.max_parallel, 4);
+    }
+
+    #[test]
+    fn stored_plan_summary_distinguishes_recorded_from_legacy_unknown() {
+        let recorded =
+            stored_plan_summary("all pairs of 3", 11, 9, 16, Some(recorded_methodology()));
+        assert_eq!(
+            recorded,
+            "all pairs of 3 · 11×9 · 16 games/matchup · 200 ms/move · \
+             2000 ms/preprocess · 4 concurrent"
+        );
+
+        let legacy = stored_plan_summary("all pairs of 3", 11, 9, 16, None);
+        assert_eq!(
+            legacy,
+            "all pairs of 3 · 11×9 · 16 games/matchup · timing/concurrency not recorded"
+        );
+    }
+
+    #[test]
+    fn stored_failure_projection_restores_timeout_phase_and_canonical_bot() {
+        let (kind, phase, bot) = stored_failure_projection(
+            "timeout: move: Player1",
+            SeatOrientation::Canonical,
+            "alice",
+            "bob",
+        );
+        assert!(matches!(kind, FailureKind::Timeout));
+        assert!(matches!(phase, Some(TimeoutPhase::Move)));
+        assert_eq!(bot.as_deref(), Some("alice"));
+
+        // In a flipped leg, engine Player1 is the canonical second bot.
+        let (kind, phase, bot) = stored_failure_projection(
+            "timeout: preprocessing: Player1",
+            SeatOrientation::Flipped,
+            "alice",
+            "bob",
+        );
+        assert!(matches!(kind, FailureKind::Timeout));
+        assert!(matches!(phase, Some(TimeoutPhase::Preprocessing)));
+        assert_eq!(bot.as_deref(), Some("bob"));
+
+        let (kind, phase, bot) = stored_failure_projection(
+            "disconnected: Player2",
+            SeatOrientation::Flipped,
+            "alice",
+            "bob",
+        );
+        assert!(matches!(kind, FailureKind::Disconnected));
+        assert!(phase.is_none());
+        assert_eq!(bot.as_deref(), Some("alice"));
+    }
+
+    #[test]
+    fn stored_failure_projection_does_not_invent_blame_from_payload_text() {
+        let (kind, phase, bot) = stored_failure_projection(
+            "protocol_error: expected Ready from Player1",
+            SeatOrientation::Flipped,
+            "alice",
+            "bob",
+        );
+        assert!(matches!(kind, FailureKind::ProtocolError));
+        assert!(phase.is_none());
+        assert_eq!(bot, None);
+
+        let (kind, phase, bot) = stored_failure_projection(
+            "internal: Player2 channel bookkeeping failed",
+            SeatOrientation::Canonical,
+            "alice",
+            "bob",
+        );
+        assert!(matches!(kind, FailureKind::Internal));
+        assert!(phase.is_none());
+        assert_eq!(bot, None);
+    }
+
+    #[test]
+    fn stored_rat_id_tracks_the_actual_seat_across_a_pair() {
+        assert_eq!(
+            stored_rat_id(SeatOrientation::Canonical, "alice", "bob"),
+            "alice"
+        );
+        assert_eq!(
+            stored_rat_id(SeatOrientation::Flipped, "alice", "bob"),
+            "bob"
+        );
+    }
+
+    #[test]
+    fn stored_completion_uses_slot_semantics_not_success_count() {
+        let players = vec!["alice".to_string(), "bob".to_string()];
+        let config_id = "cfg";
+        let mut state = TournamentState::empty(TournamentId(1));
+        state.history.insert(
+            MatchupKey::from_pair("alice", "bob", config_id, 0),
+            vec![pyrat_eval::MatchupAttempt {
+                attempt_index: 0,
+                outcome: pyrat_eval::MatchupOutcome::Success {
+                    player1_score: 5.0,
+                    player2_score: 3.0,
+                },
+            }],
+        );
+        state.history.insert(
+            MatchupKey::from_pair("alice", "bob", config_id, 1),
+            vec![pyrat_eval::MatchupAttempt {
+                attempt_index: 0,
+                outcome: pyrat_eval::MatchupOutcome::Failure,
+            }],
+        );
+
+        // The historical snapshot reports one scored game, but the paired
+        // two-slot schedule is terminal because the other slot exhausted its
+        // failure allowance. It must not remain "running" forever merely
+        // because success_count is below the planned slot count.
+        assert_eq!(success_count(&state), 1);
+        assert!(tournament_finished(
+            &state,
+            "round_robin",
+            &players,
+            config_id,
+            2,
+            1,
+        ));
+        assert!(!tournament_finished(
+            &state,
+            "round_robin",
+            &players,
+            config_id,
+            2,
+            2,
+        ));
     }
 }

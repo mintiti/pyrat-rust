@@ -55,8 +55,16 @@ export default function GameFactoryForm({ value, onChange, errors }: Props) {
 
 	return (
 		<Stack gap="sm">
-			<SettingRow label="Board" description="size preset, or set fields below">
-				<Group gap={4}>
+			<Stack gap={4}>
+				<Group justify="space-between" align="baseline">
+					<Text size="sm" fw={500}>
+						Board
+					</Text>
+					<Text size="xs" c="dimmed">
+						size preset
+					</Text>
+				</Group>
+				<Group gap={4} wrap="nowrap">
 					{SIZE_PRESETS.map((name) => (
 						<Button
 							key={name}
@@ -69,7 +77,7 @@ export default function GameFactoryForm({ value, onChange, errors }: Props) {
 						</Button>
 					))}
 				</Group>
-			</SettingRow>
+			</Stack>
 
 			<Button
 				variant="subtle"
@@ -111,7 +119,7 @@ export default function GameFactoryForm({ value, onChange, errors }: Props) {
 							error={!!errors.max_turns}
 						/>
 					</SettingRow>
-					<SettingRow label="Wall density">
+					<SettingRow label="Wall density" controlTarget="slider-thumb">
 						<Slider
 							w={160}
 							min={0}
@@ -121,7 +129,7 @@ export default function GameFactoryForm({ value, onChange, errors }: Props) {
 							onChange={(v) => set({ wall_density: v })}
 						/>
 					</SettingRow>
-					<SettingRow label="Mud density">
+					<SettingRow label="Mud density" controlTarget="slider-thumb">
 						<Slider
 							w={160}
 							min={0}

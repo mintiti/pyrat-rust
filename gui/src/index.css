@@ -4,3 +4,173 @@
 		opacity: 0.25;
 	}
 }
+
+.pyrat-pulse-dot {
+	animation: pulse 1.2s infinite;
+}
+
+/* A persistent live-region lane without a visual footprint. */
+.pyrat-sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	white-space: nowrap;
+	border: 0;
+}
+
+/* One interaction grammar for row- and card-shaped navigation. */
+.pyrat-pressable-surface {
+	appearance: none;
+	box-sizing: border-box;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	margin: 0;
+	text-align: inherit;
+	-webkit-tap-highlight-color: transparent;
+}
+
+.pyrat-pressable-surface[data-variant="surface"] {
+	width: 100%;
+	display: block;
+	position: relative;
+	background: var(--mantine-color-dark-5);
+	border: 1px solid var(--mantine-color-dark-4);
+	border-radius: 8px;
+	box-shadow: inset 3px 0 0 var(--pyrat-pressable-accent, transparent);
+	cursor: pointer;
+	transition: background-color 150ms ease, border-color 150ms ease, box-shadow
+		150ms ease, transform 150ms ease;
+}
+
+.pyrat-pressable-surface[data-variant="surface"]:is(:hover, :focus-visible) {
+	background: color-mix(in srgb, var(--mantine-color-dark-5) 94%, white);
+	border-color: #8a6a1d;
+	box-shadow: inset 3px 0 0 var(--pyrat-pressable-accent, transparent), 0 6px
+		16px rgba(0, 0, 0, 0.16);
+}
+
+.pyrat-pressable-surface[data-variant="surface"][data-motion="row"]:is(
+		:hover,
+		:focus-visible
+	) {
+	transform: translateX(3px);
+}
+
+.pyrat-pressable-surface[data-variant="surface"][data-motion="card"]:is(
+		:hover,
+		:focus-visible
+	) {
+	transform: translateY(-2px);
+}
+
+.pyrat-pressable-surface:focus-visible {
+	outline: 2px solid var(--mantine-primary-color-filled);
+	outline-offset: 2px;
+}
+
+.pyrat-pressable-surface[data-variant="surface"][data-motion="card"]:active {
+	transform: translateY(0);
+}
+
+.pyrat-pressable-surface[data-variant="surface"][data-motion="row"]:active {
+	transform: translateX(1px);
+}
+
+.pyrat-pressable-surface:disabled {
+	cursor: not-allowed;
+	opacity: 0.55;
+}
+
+.pyrat-pressable-surface__chevron {
+	opacity: 0.65;
+	transition: color 150ms ease, opacity 150ms ease, transform 150ms ease;
+}
+
+.pyrat-pressable-surface:is(:hover, :focus-visible)
+	.pyrat-pressable-surface__chevron {
+	color: #f0b429;
+	opacity: 1;
+	transform: translateX(2px);
+}
+
+.pyrat-game-card__overlay {
+	opacity: 0;
+	pointer-events: none;
+	transition: opacity 150ms ease;
+}
+
+.pyrat-game-card:is(:hover, :focus-visible) .pyrat-game-card__overlay {
+	opacity: 1;
+}
+
+.pyrat-sidebar-button {
+	width: 3rem;
+	height: 3rem;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	background: transparent;
+	border: 0;
+	border-left: 3px solid transparent;
+	border-right: 3px solid transparent;
+	color: var(--mantine-color-dark-0);
+	cursor: pointer;
+	transition: background-color 150ms ease, border-color 150ms ease, color 150ms
+		ease;
+}
+
+.pyrat-sidebar-button:is(:hover, :focus-visible) {
+	background: rgba(255, 255, 255, 0.04);
+	color: var(--mantine-color-white);
+}
+
+.pyrat-sidebar-button[data-active="true"] {
+	border-left-color: var(--mantine-primary-color-filled);
+	color: var(--mantine-color-white);
+}
+
+.pyrat-live-chip {
+	border: 1px solid;
+	border-radius: 14px;
+	color: inherit;
+	cursor: pointer;
+	transition: background-color 150ms ease, border-color 150ms ease;
+}
+
+.pyrat-live-chip:is(:hover, :focus-visible) {
+	background: rgba(255, 255, 255, 0.05);
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.pyrat-pressable-surface,
+	.pyrat-pressable-surface__chevron,
+	.pyrat-game-card__overlay,
+	.pyrat-sidebar-button,
+	.pyrat-live-chip {
+		transition: none;
+	}
+
+	.pyrat-pressable-surface[data-variant="surface"][data-motion="row"]:is(
+			:hover,
+			:focus-visible
+		),
+	.pyrat-pressable-surface[data-variant="surface"][data-motion="card"]:is(
+			:hover,
+			:focus-visible
+		),
+	.pyrat-pressable-surface:is(:hover, :focus-visible)
+		.pyrat-pressable-surface__chevron {
+		transform: none;
+	}
+
+	.pyrat-pulse-dot {
+		animation: none;
+	}
+}

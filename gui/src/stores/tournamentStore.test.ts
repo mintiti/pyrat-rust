@@ -5,15 +5,19 @@ import type {
 	TournamentMatchFailedEvent,
 	TournamentMatchFinishedEvent,
 	TournamentMatchStartedEvent,
+	TournamentSnapshot,
 	TournamentStartedEvent,
 } from "../bindings/generated";
 import {
 	botFailures,
 	failureBreakdown,
+	hasFinalTournamentVerdict,
 	useTournamentStore,
 } from "./tournamentStore";
 
-function started(): TournamentStartedEvent {
+function started(
+	overrides: Partial<TournamentStartedEvent> = {},
+): TournamentStartedEvent {
 	return {
 		tournament_id: 1,
 		name: null,
@@ -21,11 +25,18 @@ function started(): TournamentStartedEvent {
 		target: null,
 		total_games: 4,
 		games_per_matchup: 4,
+		paired: true,
+		max_parallel: 3,
 		anchor_id: "a",
 		plan_summary: "",
 		players: [{ player_id: "a" }, { player_id: "b" }],
+		...overrides,
 	};
 }
+
+beforeEach(() => {
+	useTournamentStore.setState(useTournamentStore.getInitialState(), true);
+});
 
 function matchStarted(matchId: number): TournamentMatchStartedEvent {
 	return {
@@ -44,6 +55,7 @@ function matchFinished(matchId: number): TournamentMatchFinishedEvent {
 		player1_id: "a",
 		player2_id: "b",
 		repetition_index: 0,
+		rat_id: "a",
 		player1_score: 5,
 		player2_score: 3,
 	};
@@ -62,9 +74,40 @@ function matchFailed(
 		match_id: matchId,
 		player1_id: "a",
 		player2_id: "b",
+		repetition_index: 0,
+		rat_id: "a",
 		failing_player_id: opts.failing ?? null,
 		kind: opts.kind ?? "timeout",
 		timeout_phase: opts.phase ?? "move",
+		reason: "timeout: move: Player1",
+	};
+}
+
+function snapshot(
+	overrides: Partial<TournamentSnapshot> = {},
+): TournamentSnapshot {
+	return {
+		tournament_id: 2,
+		name: "saved tournament",
+		format: "round_robin",
+		target: null,
+		anchor_id: "a",
+		running: false,
+		finished: true,
+		paired: true,
+		created_at: "2026-07-17 10:00:00",
+		last_finished_at: "2026-07-17 10:01:00",
+		plan_summary: "all pairs of 2 · 7×7 · 2 games/matchup",
+		players: ["a", "b"],
+		games_per_matchup: 2,
+		done: 2,
+		total: 2,
+		success: 2,
+		failure: 0,
+		standings: [],
+		games: [],
+		failures: [],
+		...overrides,
 	};
 }
 
@@ -134,7 +177,7 @@ describe("tournamentStore live-row guards", () => {
 
 	it("ignores MatchStarted / NowPlaying once the tournament is not running", () => {
 		const s = useTournamentStore.getState();
-		s.onFinished();
+		s.onFinished(1);
 		expect(useTournamentStore.getState().live?.status).toBe("finished");
 
 		s.onMatchStarted(matchStarted(9));
@@ -157,7 +200,7 @@ describe("tournamentStore launch ↔ live navigation", () => {
 		s.onStarted(started(), 0);
 		expect(useTournamentStore.getState().screen).toBe("live");
 
-		// Leave the live view to start another tournament...
+		// Leave the detail view for setup. The runner remains app-owned.
 		s.showLaunch();
 		expect(useTournamentStore.getState().screen).toBe("launch");
 		expect(useTournamentStore.getState().nav).toEqual({ kind: "overview" });
@@ -167,5 +210,150 @@ describe("tournamentStore launch ↔ live navigation", () => {
 		expect(useTournamentStore.getState().screen).toBe("live");
 		// The live data is untouched by the nav round-trip.
 		expect(useTournamentStore.getState().live?.tournamentId).toBe(1);
+	});
+
+	it("keeps active events flowing while a different saved tournament is open", () => {
+		const s = useTournamentStore.getState();
+		s.onStarted(started(), 0);
+		s.openSnapshot(snapshot());
+
+		expect(useTournamentStore.getState()).toMatchObject({
+			screen: "live",
+			viewing: { tournamentId: 2, origin: "stored" },
+			live: { tournamentId: 1, origin: "active", done: 0 },
+		});
+
+		s.onMatchFinished(matchFinished(7));
+		s.onStandings({
+			tournament_id: 1,
+			done: 1,
+			total: 4,
+			success: 1,
+			failure: 0,
+			standings: [],
+		});
+
+		const state = useTournamentStore.getState();
+		expect(state.viewing).toMatchObject({ tournamentId: 2, done: 2 });
+		expect(state.live).toMatchObject({ tournamentId: 1, done: 1 });
+		expect(state.live?.gamesByPair["a|b"]).toHaveLength(1);
+	});
+
+	it("opens the active row without replacing its event-fed model", () => {
+		const s = useTournamentStore.getState();
+		s.onStarted(started({ max_parallel: 8 }), 123);
+		s.showLaunch();
+		s.openSnapshot(snapshot({ tournament_id: 1, running: true }));
+
+		expect(useTournamentStore.getState()).toMatchObject({
+			screen: "live",
+			viewing: null,
+			live: {
+				tournamentId: 1,
+				origin: "active",
+				maxParallel: 8,
+				startedAt: 123,
+			},
+		});
+	});
+
+	it("reopens legacy saved results even when no replay id was persisted", () => {
+		useTournamentStore.getState().openSnapshot(
+			snapshot({
+				done: 1,
+				total: 2,
+				finished: false,
+				games: [
+					{
+						attempt_id: 41,
+						match_id: null,
+						player1_id: "a",
+						player2_id: "b",
+						repetition_index: 0,
+						rat_id: "a",
+						player1_score: 5,
+						player2_score: 3,
+					},
+				],
+			}),
+		);
+
+		const viewing = useTournamentStore.getState().viewing;
+		expect(viewing).toMatchObject({
+			origin: "stored",
+			status: "partial",
+			maxParallel: null,
+		});
+		expect(viewing?.gamesByPair["a|b"][0]).toMatchObject({
+			gameKey: "attempt:41",
+			matchId: null,
+		});
+	});
+
+	it("keeps launch and preparation activity outside the launch view lifetime", () => {
+		const s = useTournamentStore.getState();
+		s.beginLaunch();
+		s.onPreparing({ done: 0, total: 2, current: "a" });
+		s.navigate({ kind: "bot", botId: "a" });
+
+		expect(useTournamentStore.getState()).toMatchObject({
+			starting: true,
+			preparing: { done: 0, total: 2, current: "a" },
+		});
+
+		s.onStarted(started(), 123);
+		expect(useTournamentStore.getState()).toMatchObject({
+			starting: false,
+			preparing: null,
+		});
+	});
+
+	it("preserves the configured matchup count and executor concurrency", () => {
+		useTournamentStore
+			.getState()
+			.onStarted(started({ games_per_matchup: 16, max_parallel: 8 }), 0);
+
+		expect(useTournamentStore.getState().live).toMatchObject({
+			gamesPerMatchup: 16,
+			maxParallel: 8,
+		});
+	});
+
+	it("scopes terminal events and makes their handoff one-shot", () => {
+		const s = useTournamentStore.getState();
+		s.onStarted(started(), 0);
+
+		s.onFinished(99);
+		expect(useTournamentStore.getState().live?.status).toBe("running");
+
+		s.onFinished(1);
+		expect(useTournamentStore.getState().live).toMatchObject({
+			status: "finished",
+			endedAt: expect.any(Number),
+		});
+		expect(useTournamentStore.getState().terminalNotice).toMatchObject({
+			tournamentId: 1,
+			status: "finished",
+		});
+
+		s.showLive();
+		expect(useTournamentStore.getState().terminalNotice).toBeNull();
+	});
+
+	it("keeps the stop reason and marks its ladder as non-final", () => {
+		const s = useTournamentStore.getState();
+		s.onStarted(started(), 0);
+		s.onAborted(1, "bot process exited");
+
+		const state = useTournamentStore.getState();
+		expect(state.live).toMatchObject({
+			status: "aborted",
+			abortReason: "bot process exited",
+		});
+		expect(state.terminalNotice).toMatchObject({
+			status: "aborted",
+			reason: "bot process exited",
+		});
+		expect(state.live && hasFinalTournamentVerdict(state.live)).toBe(false);
 	});
 });

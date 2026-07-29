@@ -1,6 +1,10 @@
 import { Group, Paper, Text } from "@mantine/core";
 import type { TournamentLive } from "../../stores/tournamentStore";
-import { sortedStandings } from "../../stores/tournamentStore";
+import {
+	MIN_GAMES_FOR_RATING,
+	hasFinalTournamentVerdict,
+	sortedStandings,
+} from "../../stores/tournamentStore";
 import { T, shortId } from "./theme";
 
 const ord = (n: number) =>
@@ -11,24 +15,27 @@ const ord = (n: number) =>
  * finishes. Round-robin has no single subject, so the hero only appears at the
  * end with a summary. */
 export default function Hero({ live }: { live: TournamentLive }) {
-	const finished = live.status === "finished";
+	const terminal = live.status !== "running";
+	const finalVerdict = hasFinalTournamentVerdict(live);
 
 	if (!live.target) {
-		if (!finished) return null;
+		if (!terminal) return null;
 		return (
 			<Paper
 				withBorder
 				p="sm"
 				radius="md"
 				bg={T.panel2}
-				style={{ borderColor: T.cheeseDim }}
+				style={{ borderColor: finalVerdict ? T.cheeseDim : T.line }}
 			>
 				<Group gap="md" align="baseline">
 					<Text fw={700} size="lg">
-						Finished
+						{finalVerdict ? "Finished" : "Partial results"}
 					</Text>
 					<Text size="sm" c="dimmed">
-						{live.done} games · one tournament row in the store
+						{finalVerdict
+							? `${live.done} games · final standings`
+							: `${live.done}/${live.total} games · not a final ranking`}
 					</Text>
 				</Group>
 			</Paper>
@@ -45,7 +52,7 @@ export default function Hero({ live }: { live: TournamentLive }) {
 			p="sm"
 			radius="md"
 			bg={T.panel2}
-			style={finished ? { borderColor: T.cheeseDim } : undefined}
+			style={finalVerdict ? { borderColor: T.cheeseDim } : undefined}
 		>
 			<Group gap="lg" align="baseline">
 				<Text fw={700} c="yellow">
@@ -53,11 +60,18 @@ export default function Hero({ live }: { live: TournamentLive }) {
 				</Text>
 				{!mine || mine.pending ? (
 					<Text size="sm" c="dimmed">
-						warming up — first games running
+						{terminal
+							? `not rated — ${mine?.games ?? 0}/${MIN_GAMES_FOR_RATING} completed games; ${MIN_GAMES_FOR_RATING} required`
+							: `${mine?.games ?? 0}/${MIN_GAMES_FOR_RATING} games — rating appears at ${MIN_GAMES_FOR_RATING}`}
 					</Text>
 				) : (
 					<>
 						<Text fw={700} size="xl">
+							{terminal && !finalVerdict && (
+								<Text span size="xs" c="dimmed">
+									provisional{" "}
+								</Text>
+							)}
 							{ord(rank)}{" "}
 							<Text span size="sm" c="dimmed">
 								of {rows.length}
@@ -70,8 +84,10 @@ export default function Hero({ live }: { live: TournamentLive }) {
 							</Text>
 						</Text>
 						<Text size="xs" c="dimmed" ml="auto">
-							{finished
-								? `final · ${live.done} games · one tournament row in the store`
+							{terminal
+								? finalVerdict
+									? `final · ${live.done} games`
+									: `partial · ${live.done}/${live.total} games · not final`
 								: `${mine.games} of ${live.total} games in`}
 						</Text>
 					</>
