@@ -182,12 +182,64 @@ const MIGRATION_5: &str = "
 ALTER TABLE match_attempts ADD COLUMN orientation INTEGER NOT NULL DEFAULT 0;
 ";
 
+// Migration 6 persists the orchestrator match id beside each durable attempt.
+// It is deliberately nullable: pre-migration attempts remain valid and fully
+// usable for standings/pair inspection, but cannot be joined to a replay file
+// by id. The field is informational and does not change attempt identity.
+const MIGRATION_6: &str = "
+ALTER TABLE match_attempts ADD COLUMN match_id INTEGER;
+";
+
+// Migration 7 makes the execution methodology durable on the tournament row.
+// Every column is nullable so older rows remain valid and honestly read as
+// "unknown"; current writers populate the complete set atomically. The final
+// column's CHECK prevents a partial methodology from masquerading as a
+// complete one, while the typed read boundary validates the enum/ranges too.
+const MIGRATION_7: &str = "
+ALTER TABLE tournaments ADD COLUMN timing_mode INTEGER
+    CHECK (timing_mode IS NULL OR timing_mode IN (0, 1));
+ALTER TABLE tournaments ADD COLUMN move_timeout_ms INTEGER
+    CHECK (move_timeout_ms IS NULL OR move_timeout_ms BETWEEN 0 AND 4294967295);
+ALTER TABLE tournaments ADD COLUMN preprocessing_timeout_ms INTEGER
+    CHECK (preprocessing_timeout_ms IS NULL OR preprocessing_timeout_ms BETWEEN 0 AND 4294967295);
+ALTER TABLE tournaments ADD COLUMN startup_timeout_ms INTEGER
+    CHECK (startup_timeout_ms IS NULL OR startup_timeout_ms BETWEEN 0 AND 4294967295);
+ALTER TABLE tournaments ADD COLUMN configure_timeout_ms INTEGER
+    CHECK (configure_timeout_ms IS NULL OR configure_timeout_ms BETWEEN 0 AND 4294967295);
+ALTER TABLE tournaments ADD COLUMN network_grace_ms INTEGER
+    CHECK (network_grace_ms IS NULL OR network_grace_ms BETWEEN 0 AND 4294967295);
+ALTER TABLE tournaments ADD COLUMN max_parallel INTEGER
+    CHECK (
+        (
+            timing_mode IS NULL
+            AND move_timeout_ms IS NULL
+            AND preprocessing_timeout_ms IS NULL
+            AND startup_timeout_ms IS NULL
+            AND configure_timeout_ms IS NULL
+            AND network_grace_ms IS NULL
+            AND max_parallel IS NULL
+        )
+        OR
+        (
+            timing_mode IS NOT NULL
+            AND move_timeout_ms IS NOT NULL
+            AND preprocessing_timeout_ms IS NOT NULL
+            AND startup_timeout_ms IS NOT NULL
+            AND configure_timeout_ms IS NOT NULL
+            AND network_grace_ms IS NOT NULL
+            AND max_parallel BETWEEN 1 AND 4294967295
+        )
+    );
+";
+
 const MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_1),
     (2, MIGRATION_2),
     (3, MIGRATION_3),
     (4, MIGRATION_4),
     (5, MIGRATION_5),
+    (6, MIGRATION_6),
+    (7, MIGRATION_7),
 ];
 
 pub fn initialize(conn: &mut Connection) -> Result<(), EvalError> {

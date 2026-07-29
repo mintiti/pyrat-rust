@@ -41,6 +41,7 @@ async fn tournament_row_not_orphaned_on_mid_bootstrap_failure() {
         format: "round_robin".into(),
         target_games_per_matchup: Some(1),
         params_json: "{}".into(),
+        methodology: None,
         game_config: small_game_config(),
         tournament_seed: 0xC0FFEE,
     };

@@ -15,6 +15,8 @@
 use std::path::Path;
 use std::process::Command;
 
+use pyrat_eval_store::{EvalStore, TournamentMethodology, TournamentTimingMode};
+
 fn eval_bin() -> &'static str {
     env!("CARGO_BIN_EXE_pyrat-eval")
 }
@@ -120,6 +122,26 @@ fn minimal_toml_round_robin_runs_through() {
     assert!(
         !stdout.contains(" INFO "),
         "tracing output leaked onto stdout.\nstdout: {stdout}"
+    );
+
+    // The durable row must preserve the resolved execution methodology, not
+    // require a later reader to reverse-engineer it from CLI text/defaults.
+    let tournaments = EvalStore::open(&store_path)
+        .unwrap()
+        .list_tournaments()
+        .unwrap();
+    assert_eq!(tournaments.len(), 1);
+    assert_eq!(
+        tournaments[0].methodology,
+        Some(TournamentMethodology {
+            timing_mode: TournamentTimingMode::Wait,
+            move_timeout_ms: 2_000,
+            preprocessing_timeout_ms: 5_000,
+            startup_timeout_ms: 10_000,
+            configure_timeout_ms: 3_000,
+            network_grace_ms: 50,
+            max_parallel: 1,
+        })
     );
 }
 

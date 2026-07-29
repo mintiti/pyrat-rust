@@ -121,7 +121,8 @@ pub(crate) struct RunArgs {
     pub(crate) save_as: Option<PathBuf>,
 
     /// Resume an existing tournament by id. Pass the same --config/flags the
-    /// tournament was created with — the store carries results, not the spec.
+    /// tournament was created with. The row records result provenance, but
+    /// resume still rebuilds runnable inputs from this invocation.
     /// Mutually exclusive with `--save-as`.
     #[arg(long)]
     pub(crate) resume: Option<i64>,

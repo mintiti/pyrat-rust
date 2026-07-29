@@ -10,7 +10,7 @@ use crate::types::{
     CreateTournamentError, DeletePlayerError, EvalError, GameConfigRecord, GameResultRecord,
     NewAttempt, NewAttemptOutcome, NewGameResult, NewPlayer, NewTournament, PlayerRecord,
     RecordAttemptError, RegisterPlayerError, ResultFilter, SeatOrientation, TournamentId,
-    TournamentParticipant, TournamentRecord,
+    TournamentMethodology, TournamentParticipant, TournamentRecord, TournamentTimingMode,
 };
 
 /// SQLite-backed store for game results, players, tournaments, and match
@@ -248,7 +248,10 @@ impl EvalStore {
         self.conn
             .query_row(
                 "SELECT id, format, target_games_per_matchup, params_json,
-                        game_config_id, tournament_seed, created_at, name
+                        game_config_id, tournament_seed, created_at, name,
+                        timing_mode, move_timeout_ms, preprocessing_timeout_ms,
+                        startup_timeout_ms, configure_timeout_ms, network_grace_ms,
+                        max_parallel
                    FROM tournaments WHERE id = ?1",
                 params![id.0],
                 read_tournament_row,
@@ -260,7 +263,10 @@ impl EvalStore {
     pub fn list_tournaments(&self) -> Result<Vec<TournamentRecord>, EvalError> {
         let mut stmt = self.conn.prepare(
             "SELECT id, format, target_games_per_matchup, params_json,
-                    game_config_id, tournament_seed, created_at, name
+                    game_config_id, tournament_seed, created_at, name,
+                    timing_mode, move_timeout_ms, preprocessing_timeout_ms,
+                    startup_timeout_ms, configure_timeout_ms, network_grace_ms,
+                    max_parallel
                FROM tournaments ORDER BY id",
         )?;
         let rows = stmt.query_map([], read_tournament_row)?;
@@ -311,8 +317,8 @@ impl EvalStore {
 
     /// Insert a match attempt row. The [`NewAttempt`] enum makes the
     /// success/failure shape a type-level guarantee; the DB CHECK is defense
-    /// in depth. Validates that `seed` fits in `i64` (SQLite INTEGER is
-    /// signed) before binding.
+    /// in depth. Validates that `seed` and an optional `match_id` fit in `i64`
+    /// (SQLite INTEGER is signed) before binding.
     pub fn record_attempt(&self, attempt: &NewAttempt) -> Result<i64, RecordAttemptError> {
         let NewAttempt {
             key,
@@ -323,6 +329,13 @@ impl EvalStore {
             return Err(RecordAttemptError::SeedOutOfRange { value: key.seed });
         }
         let seed_i64 = key.seed as i64;
+        let match_id_i64 = match key.match_id {
+            Some(value) => Some(
+                i64::try_from(value)
+                    .map_err(|_| RecordAttemptError::MatchIdOutOfRange { value })?,
+            ),
+            None => None,
+        };
         let (status, score1, score2, turns, failure_reason, started_at) = match outcome {
             NewAttemptOutcome::Success {
                 player1_score,
@@ -354,8 +367,8 @@ impl EvalStore {
                (tournament_id, game_config_id, player1_id, player2_id, seed,
                 repetition_index, attempt_index, status,
                 player1_score, player2_score, turns,
-                failure_reason, started_at, finished_at, orientation)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+                failure_reason, started_at, finished_at, orientation, match_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
             params![
                 key.tournament_id.0,
                 key.game_config_id,
@@ -372,6 +385,7 @@ impl EvalStore {
                 started_at,
                 finished_at,
                 key.orientation.to_db(),
+                match_id_i64,
             ],
         );
         match result {
@@ -397,7 +411,7 @@ impl EvalStore {
             "SELECT id, tournament_id, game_config_id, player1_id, player2_id, seed,
                     repetition_index, attempt_index, status,
                     player1_score, player2_score, turns,
-                    failure_reason, started_at, finished_at, orientation
+                    failure_reason, started_at, finished_at, orientation, match_id
                FROM match_attempts WHERE tournament_id = ?1",
         );
         if status_filter.is_some() {
@@ -540,11 +554,33 @@ fn create_tournament_on(
         i64::try_from(t.tournament_seed).map_err(|_| CreateTournamentError::SeedOutOfRange {
             seed: t.tournament_seed,
         })?;
+    let (
+        timing_mode,
+        move_timeout_ms,
+        preprocessing_timeout_ms,
+        startup_timeout_ms,
+        configure_timeout_ms,
+        network_grace_ms,
+        max_parallel,
+    ) = match t.methodology {
+        Some(methodology) => (
+            Some(methodology.timing_mode.to_db()),
+            Some(methodology.move_timeout_ms),
+            Some(methodology.preprocessing_timeout_ms),
+            Some(methodology.startup_timeout_ms),
+            Some(methodology.configure_timeout_ms),
+            Some(methodology.network_grace_ms),
+            Some(methodology.max_parallel),
+        ),
+        None => (None, None, None, None, None, None, None),
+    };
     conn.execute(
         "INSERT INTO tournaments
            (format, target_games_per_matchup, params_json,
-            game_config_id, tournament_seed, name)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            game_config_id, tournament_seed, name, timing_mode,
+            move_timeout_ms, preprocessing_timeout_ms, startup_timeout_ms,
+            configure_timeout_ms, network_grace_ms, max_parallel)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             t.format,
             t.target_games_per_matchup,
@@ -552,6 +588,13 @@ fn create_tournament_on(
             t.game_config_id,
             seed_i64,
             t.name,
+            timing_mode,
+            move_timeout_ms,
+            preprocessing_timeout_ms,
+            startup_timeout_ms,
+            configure_timeout_ms,
+            network_grace_ms,
+            max_parallel,
         ],
     )
     .map_err(EvalError::from)?;
@@ -671,6 +714,51 @@ fn read_player_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<PlayerRecord> {
 
 fn read_tournament_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TournamentRecord> {
     let seed_i64: i64 = row.get(5)?;
+    let methodology_parts = (
+        row.get::<_, Option<i64>>(8)?,
+        row.get::<_, Option<u32>>(9)?,
+        row.get::<_, Option<u32>>(10)?,
+        row.get::<_, Option<u32>>(11)?,
+        row.get::<_, Option<u32>>(12)?,
+        row.get::<_, Option<u32>>(13)?,
+        row.get::<_, Option<u32>>(14)?,
+    );
+    let methodology = match methodology_parts {
+        (None, None, None, None, None, None, None) => None,
+        (
+            Some(timing_mode),
+            Some(move_timeout_ms),
+            Some(preprocessing_timeout_ms),
+            Some(startup_timeout_ms),
+            Some(configure_timeout_ms),
+            Some(network_grace_ms),
+            Some(max_parallel),
+        ) => {
+            let timing_mode = TournamentTimingMode::from_db(timing_mode).ok_or_else(|| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    8,
+                    rusqlite::types::Type::Integer,
+                    format!("invalid tournament timing mode: {timing_mode}").into(),
+                )
+            })?;
+            Some(TournamentMethodology {
+                timing_mode,
+                move_timeout_ms,
+                preprocessing_timeout_ms,
+                startup_timeout_ms,
+                configure_timeout_ms,
+                network_grace_ms,
+                max_parallel,
+            })
+        },
+        _ => {
+            return Err(rusqlite::Error::FromSqlConversionFailure(
+                8,
+                rusqlite::types::Type::Null,
+                "partial tournament methodology".into(),
+            ));
+        },
+    };
     Ok(TournamentRecord {
         id: TournamentId(row.get(0)?),
         format: row.get(1)?,
@@ -678,6 +766,7 @@ fn read_tournament_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TournamentRe
         params_json: row.get(3)?,
         game_config_id: row.get(4)?,
         tournament_seed: seed_i64 as u64,
+        methodology,
         created_at: row.get(6)?,
         name: row.get(7)?,
     })
@@ -704,11 +793,24 @@ fn read_attempt_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AttemptRecord> 
             format!("invalid seat orientation: {orientation_raw}").into(),
         )
     })?;
+    let match_id_i64: Option<i64> = row.get(16)?;
+    let match_id = match_id_i64
+        .map(|id| {
+            u64::try_from(id).map_err(|_| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    16,
+                    rusqlite::types::Type::Integer,
+                    format!("invalid negative match id: {id}").into(),
+                )
+            })
+        })
+        .transpose()?;
     let key = AttemptKey {
         tournament_id: TournamentId(row.get(1)?),
         game_config_id: row.get(2)?,
         player1_id: row.get(3)?,
         player2_id: row.get(4)?,
+        match_id,
         seed: seed_i64 as u64,
         repetition_index: row.get(6)?,
         attempt_index: row.get(7)?,
@@ -851,6 +953,18 @@ mod tests {
         store.ensure_player("bob", "Bob").unwrap();
     }
 
+    fn methodology() -> TournamentMethodology {
+        TournamentMethodology {
+            timing_mode: TournamentTimingMode::Wait,
+            move_timeout_ms: 200,
+            preprocessing_timeout_ms: 2_000,
+            startup_timeout_ms: 120_000,
+            configure_timeout_ms: 5_000,
+            network_grace_ms: 50,
+            max_parallel: 4,
+        }
+    }
+
     fn setup_tournament(store: &EvalStore) -> (TournamentId, String) {
         setup_players(store);
         let config_id = store.ensure_game_config(&sample_config()).unwrap();
@@ -862,6 +976,7 @@ mod tests {
                 params_json: "{}".into(),
                 game_config_id: config_id.clone(),
                 tournament_seed: 0xC0FFEE,
+                methodology: None,
             })
             .unwrap();
         store.add_tournament_player(tid, "alice", 0).unwrap();
@@ -882,6 +997,7 @@ mod tests {
             game_config_id: cid.into(),
             player1_id: p1.into(),
             player2_id: p2.into(),
+            match_id: None,
             seed,
             repetition_index: 0,
             attempt_index,
@@ -1225,7 +1341,7 @@ mod tests {
     #[test]
     fn migration_fresh_db_ends_at_latest_user_version() {
         let store = EvalStore::open_in_memory().unwrap();
-        assert_eq!(user_version(&store), 5);
+        assert_eq!(user_version(&store), 7);
 
         let tables: Vec<String> = store
             .conn
@@ -1293,7 +1409,7 @@ mod tests {
         assert_eq!(v, 0);
 
         let store = EvalStore::from_connection(conn).unwrap();
-        assert_eq!(user_version(&store), 5);
+        assert_eq!(user_version(&store), 7);
 
         // Migration 2 added these columns to players. Confirm they exist.
         let cols: Vec<String> = store
@@ -1319,14 +1435,14 @@ mod tests {
         let v: u32 = conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(v, 5);
+        assert_eq!(v, 7);
         // Second run on the same connection: each migration's `version > current`
         // guard makes the loop a no-op. Must not error.
         schema::initialize(&mut conn).unwrap();
         let v: u32 = conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(v, 5);
+        assert_eq!(v, 7);
     }
 
     /// Migration 3 refuses to run if `tournaments` has pre-migration rows,
@@ -1397,11 +1513,12 @@ mod tests {
         }
     }
 
-    /// Migrations 4 (name) and 5 (orientation) are plain `ADD COLUMN`s, but
+    /// Migrations 4–7 are additive, but
     /// migration 3 already proved row-loss is a real failure mode — so pin the
     /// production path: a populated v3 DB (existing CLI ladder shape) survives
     /// the upgrade with its rows intact, `name = NULL`, and legacy attempts
-    /// defaulting to `orientation = Canonical`.
+    /// defaulting to `orientation = Canonical`, `match_id = NULL`, and an
+    /// unknown methodology rather than today's defaults.
     #[test]
     fn migration_v3_to_latest_preserves_rows_and_defaults() {
         let conn = Connection::open_in_memory().unwrap();
@@ -1466,7 +1583,7 @@ mod tests {
         .unwrap();
 
         let store = EvalStore::from_connection(conn).unwrap();
-        assert_eq!(user_version(&store), 5);
+        assert_eq!(user_version(&store), 7);
 
         // Tournament row survived with name defaulting to NULL (migration 4).
         let t = store
@@ -1474,12 +1591,14 @@ mod tests {
             .unwrap()
             .expect("tournament row survived migration");
         assert_eq!(t.name, None);
+        assert_eq!(t.methodology, None);
 
         // Attempt row survived; legacy orientation reads back as Canonical
         // (migration 5 default 0).
         let attempts = store.get_attempts(TournamentId(1), None).unwrap();
         assert_eq!(attempts.len(), 1);
         assert_eq!(attempts[0].key.orientation, SeatOrientation::Canonical);
+        assert_eq!(attempts[0].key.match_id, None);
         match attempts[0].outcome {
             AttemptOutcome::Success {
                 player1_score,
@@ -1508,6 +1627,7 @@ mod tests {
                 game_config_id: cid.clone(),
                 player1_id: "alice".into(),
                 player2_id: "bob".into(),
+                match_id: Some(u64::from(rep)),
                 seed: 1,
                 repetition_index: rep,
                 attempt_index: 0,
@@ -1556,6 +1676,7 @@ mod tests {
             params_json: "{}".into(),
             game_config_id: "nonexistent".into(),
             tournament_seed: 0,
+            methodology: None,
         }) {
             Err(CreateTournamentError::GameConfigNotFound(id)) => {
                 assert_eq!(id, "nonexistent");
@@ -1578,14 +1699,38 @@ mod tests {
                 params_json: "{}".into(),
                 game_config_id: cid.clone(),
                 tournament_seed: i64::MAX as u64,
+                methodology: Some(methodology()),
             })
             .unwrap();
         let t = store.get_tournament(tid).unwrap().unwrap();
         assert_eq!(t.game_config_id, cid);
         // Seed round-trips bit-identically — no masking.
         assert_eq!(t.tournament_seed, i64::MAX as u64);
+        assert_eq!(t.methodology, Some(methodology()));
         // No name supplied → column is NULL (the CLI path).
         assert_eq!(t.name, None);
+    }
+
+    #[test]
+    fn tournament_methodology_is_atomic_at_the_store_boundary() {
+        let store = EvalStore::open_in_memory().unwrap();
+        let (tid, _) = setup_tournament(&store);
+
+        let error = store
+            .conn
+            .execute(
+                "UPDATE tournaments SET timing_mode = 0 WHERE id = ?1",
+                params![tid.0],
+            )
+            .expect_err("partial methodology must violate the migration-7 CHECK");
+        assert!(
+            error.to_string().contains("CHECK constraint failed"),
+            "unexpected error: {error}"
+        );
+        assert_eq!(
+            store.get_tournament(tid).unwrap().unwrap().methodology,
+            None
+        );
     }
 
     #[test]
@@ -1600,6 +1745,7 @@ mod tests {
                 params_json: "{}".into(),
                 game_config_id: cid,
                 tournament_seed: 7,
+                methodology: None,
             })
             .unwrap();
         // The named row round-trips through get_tournament and list_tournaments.
@@ -1626,6 +1772,7 @@ mod tests {
             params_json: "{}".into(),
             game_config_id: cid,
             tournament_seed: seed,
+            methodology: None,
         }) {
             Err(CreateTournamentError::SeedOutOfRange { seed: got }) => {
                 assert_eq!(got, seed);
@@ -1721,6 +1868,60 @@ mod tests {
         let attempts = store.get_attempts(tid, None).unwrap();
         assert_eq!(attempts.len(), 1);
         assert_eq!(attempts[0].key.seed, i64::MAX as u64);
+    }
+
+    #[test]
+    fn record_attempt_match_id_bound_and_roundtrip() {
+        let store = EvalStore::open_in_memory().unwrap();
+        let (tid, cid) = setup_tournament(&store);
+
+        // The current runner always supplies a replay-bearing match id. Pin
+        // the largest value SQLite can represent so the conversion cannot
+        // silently wrap at the storage boundary.
+        let mut at_max = success_attempt(tid, &cid, "alice", "bob", 0, 8.0, 2.0);
+        at_max.key.match_id = Some(i64::MAX as u64);
+        store.record_attempt(&at_max).unwrap();
+
+        let attempts = store.get_attempts(tid, None).unwrap();
+        assert_eq!(attempts.len(), 1);
+        assert_eq!(attempts[0].key.match_id, Some(i64::MAX as u64));
+
+        let mut out_of_range = success_attempt(tid, &cid, "alice", "bob", 1, 5.0, 5.0);
+        out_of_range.key.match_id = Some((i64::MAX as u64) + 1);
+        match store.record_attempt(&out_of_range) {
+            Err(RecordAttemptError::MatchIdOutOfRange { value }) => {
+                assert_eq!(value, (i64::MAX as u64) + 1);
+            },
+            other => panic!("expected MatchIdOutOfRange, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn get_attempts_rejects_corrupt_negative_match_id() {
+        let store = EvalStore::open_in_memory().unwrap();
+        let (tid, cid) = setup_tournament(&store);
+        let mut attempt = success_attempt(tid, &cid, "alice", "bob", 0, 8.0, 2.0);
+        attempt.key.match_id = Some(7);
+        let attempt_id = store.record_attempt(&attempt).unwrap();
+
+        // SQLite itself accepts this value because the migrated column is
+        // nullable/informational. The typed read boundary must reject it
+        // instead of casting -1 into a huge replay id.
+        store
+            .conn
+            .execute(
+                "UPDATE match_attempts SET match_id = -1 WHERE id = ?1",
+                params![attempt_id],
+            )
+            .unwrap();
+
+        let error = store
+            .get_attempts(tid, None)
+            .expect_err("negative match id must be rejected");
+        assert!(
+            error.to_string().contains("invalid negative match id: -1"),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]
@@ -1916,6 +2117,7 @@ mod tests {
                 params_json: "{}".into(),
                 game_config_id: cid,
                 tournament_seed: 0,
+                methodology: None,
             })
             .unwrap();
         store.add_tournament_player(tid, "alice", 0).unwrap();
@@ -1991,6 +2193,7 @@ mod tests {
                 params_json: "{}".into(),
                 game_config_id: cid.clone(),
                 tournament_seed: 0xDEAD_BEEF,
+                methodology: None,
             })
             .unwrap();
         store.add_tournament_player(other, "alice", 0).unwrap();

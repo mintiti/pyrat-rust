@@ -50,6 +50,7 @@ async fn resume_skips_completed_matchups() {
                 params_json: "{}".into(),
                 game_config_id: game_config_id.clone(),
                 tournament_seed: 0xC0FFEE,
+                methodology: None,
             })
             .unwrap();
         for (slot, p) in [&p1, &p2, &p3].iter().enumerate() {
@@ -176,6 +177,7 @@ async fn resume_retries_durably_failed_matchup_at_next_attempt_index() {
                 params_json: "{}".into(),
                 game_config_id: game_config_id.clone(),
                 tournament_seed: 0xC0FFEE,
+                methodology: None,
             })
             .unwrap();
         s.add_tournament_player(tid, &p1.id, 0).unwrap();
@@ -268,6 +270,7 @@ async fn resume_re_issues_kill9_matchup_at_attempt_zero_with_canonical_seed() {
                 params_json: "{}".into(),
                 game_config_id: game_config_id.clone(),
                 tournament_seed: 0xC0FFEE,
+                methodology: None,
             })
             .unwrap();
         for (slot, p) in [&p1, &p2, &p3].iter().enumerate() {
@@ -362,6 +365,7 @@ async fn subscribe_immediately_after_resume_sees_standings() {
             seat_policy: pyrat_eval::SeatPolicy::Legacy,
         }
         .to_json(),
+        methodology: None,
         game_config: small_game_config(),
         tournament_seed: 0xC0FFEE,
     };

@@ -142,6 +142,7 @@ async fn end_to_end_round_robin_with_replay_sink() {
             seat_policy: pyrat_eval::SeatPolicy::Legacy,
         }
         .to_json(),
+        methodology: None,
         game_config: game_config.clone(),
         tournament_seed,
     };

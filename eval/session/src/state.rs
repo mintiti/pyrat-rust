@@ -476,6 +476,7 @@ mod tests {
             game_config_id: "gc".into(),
             player1_id: "a".into(),
             player2_id: "b".into(),
+            match_id: Some(1),
             seed: 0,
             repetition_index: 0,
             attempt_index: 0,

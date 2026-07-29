@@ -180,6 +180,53 @@ impl SeatOrientation {
     }
 }
 
+/// Timing mode used for every match in a tournament.
+///
+/// Store-native mirror of the wire protocol enum: the eval store deliberately
+/// does not depend on host/wire crates. Keeping the mode in the durable
+/// methodology means a future Clock-mode tournament will not be
+/// indistinguishable from today's Wait-mode runs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TournamentTimingMode {
+    Wait,
+    Clock,
+}
+
+impl TournamentTimingMode {
+    pub(crate) fn to_db(self) -> i64 {
+        match self {
+            Self::Wait => 0,
+            Self::Clock => 1,
+        }
+    }
+
+    pub(crate) fn from_db(value: i64) -> Option<Self> {
+        match value {
+            0 => Some(Self::Wait),
+            1 => Some(Self::Clock),
+            _ => None,
+        }
+    }
+}
+
+/// Execution conditions needed to interpret one tournament's results.
+///
+/// This is separate from opaque planner params and the content-addressed game
+/// config: all of these values can change whether a match succeeds, times out,
+/// or competes for host resources. Tournament rows written before migration 7
+/// expose `None` for the whole methodology rather than inheriting today's
+/// defaults and pretending those were the conditions that actually ran.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TournamentMethodology {
+    pub timing_mode: TournamentTimingMode,
+    pub move_timeout_ms: u32,
+    pub preprocessing_timeout_ms: u32,
+    pub startup_timeout_ms: u32,
+    pub configure_timeout_ms: u32,
+    pub network_grace_ms: u32,
+    pub max_parallel: u32,
+}
+
 #[derive(Debug, Clone)]
 pub struct TournamentRecord {
     pub id: TournamentId,
@@ -198,6 +245,9 @@ pub struct TournamentRecord {
     /// so this value round-trips bit-identically with what the caller
     /// passed.
     pub tournament_seed: u64,
+    /// Exact execution conditions for current rows. `None` means the row
+    /// predates durable methodology; callers must present that as unknown.
+    pub methodology: Option<TournamentMethodology>,
     pub created_at: String,
 }
 
@@ -220,6 +270,9 @@ pub struct NewTournament {
     /// rather than masking, so the value the caller passes always equals
     /// the value the row stores.
     pub tournament_seed: u64,
+    /// Exact execution conditions. `None` is retained only for compatibility
+    /// callers and legacy fixtures that genuinely do not know them.
+    pub methodology: Option<TournamentMethodology>,
 }
 
 #[derive(Debug, Clone)]
@@ -254,16 +307,19 @@ impl AttemptStatus {
 
 /// Common identifying fields shared by both attempt variants.
 ///
-/// `seed` and `orientation` are carried here but are NOT part of the matchup
-/// UNIQUE constraint — they are forensic/informational fields (the seed is
-/// functionally derived; the orientation records who was Rat) that ride
-/// alongside the identity tuple.
+/// `match_id`, `seed`, and `orientation` are carried here but are NOT part of
+/// the matchup UNIQUE constraint — they are forensic/informational fields
+/// that ride alongside the identity tuple. `match_id` is nullable for rows
+/// written before migration 6; current sessions persist it so durable attempt
+/// rows can be joined back to replay files and live UIs can reconcile missed
+/// lifecycle events from the store.
 #[derive(Debug, Clone)]
 pub struct AttemptKey {
     pub tournament_id: TournamentId,
     pub game_config_id: String,
     pub player1_id: String,
     pub player2_id: String,
+    pub match_id: Option<u64>,
     pub seed: u64,
     pub repetition_index: u32,
     /// Per-matchup-key retry counter chosen by the session (next free integer).
@@ -420,6 +476,9 @@ pub enum RecordAttemptError {
     /// masked to fit; this is a defense-in-depth check at the store boundary.
     #[error("seed {value} exceeds i64::MAX (cannot store as SQLite INTEGER)")]
     SeedOutOfRange { value: u64 },
+
+    #[error("match id {value} exceeds i64::MAX (cannot store as SQLite INTEGER)")]
+    MatchIdOutOfRange { value: u64 },
 
     /// An attempt with this `(tournament, game_config, p1, p2,
     /// repetition_index, attempt_index)` already exists. Typically signals a

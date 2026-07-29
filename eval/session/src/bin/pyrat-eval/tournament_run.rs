@@ -21,8 +21,8 @@ use pyrat_eval::MatchupOutcome;
 use pyrat_eval::{
     gauntlet_slot_order, split_gauntlet_players, EvalMatchDescriptor, EvalSession, GauntletPlanner,
     GauntletPlannerConfig, Planner, ResolvedPlayer, RoundRobinPlanner, RoundRobinPlannerConfig,
-    SessionConfig, SessionError, SessionMode, TournamentMismatch, TournamentParams, TournamentSpec,
-    TournamentState,
+    SessionConfig, SessionError, SessionMode, TournamentMethodology, TournamentMismatch,
+    TournamentParams, TournamentSpec, TournamentState, TournamentTimingMode,
 };
 use pyrat_eval_store::{compute_elo_with_uncertainty, EloOptions, EvalStore, TournamentId};
 use pyrat_host::wire::TimingMode;
@@ -278,6 +278,15 @@ async fn bootstrap_new(
         format: format_str,
         target_games_per_matchup: Some(resolved.target_games_per_matchup),
         params_json: params.to_json(),
+        methodology: Some(TournamentMethodology {
+            timing_mode: TournamentTimingMode::Wait,
+            move_timeout_ms: resolved.timing.move_timeout_ms,
+            preprocessing_timeout_ms: resolved.timing.preprocessing_timeout_ms,
+            startup_timeout_ms: resolved.timing.startup_timeout_ms,
+            configure_timeout_ms: resolved.timing.configure_timeout_ms,
+            network_grace_ms: resolved.timing.network_grace_ms,
+            max_parallel: resolved.max_parallel,
+        }),
         game_config: game_config.clone(),
         tournament_seed: seed,
     };

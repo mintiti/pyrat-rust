@@ -40,8 +40,9 @@ pub use plan::{
     GauntletPlannerConfig, Planner, PlayerNotInList, ResolvedPlayer, RoundRobinPlanner,
     RoundRobinPlannerConfig, SeatPolicy, TournamentParams,
 };
-// Re-export the store's seat marker so consumers (CLI, GUI) name one type.
-pub use pyrat_eval_store::SeatOrientation;
+// Re-export store-native tournament records so consumers (CLI, GUI) name one
+// type at the session boundary.
+pub use pyrat_eval_store::{SeatOrientation, TournamentMethodology, TournamentTimingMode};
 pub use session::{
     CreatedTournament, EvalSession, SessionConfig, SessionError, SessionEvent, SessionMode,
     TournamentMismatch, TournamentSpec,

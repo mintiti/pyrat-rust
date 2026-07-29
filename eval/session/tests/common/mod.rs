@@ -130,6 +130,7 @@ pub fn round_robin_spec() -> TournamentSpec {
             seat_policy: pyrat_eval::SeatPolicy::Legacy,
         }
         .to_json(),
+        methodology: None,
         game_config: small_game_config(),
         tournament_seed: 0xC0FFEE,
     }

@@ -21,8 +21,8 @@ use parking_lot::Mutex;
 use pyrat::game::builder::GameConfig;
 use pyrat_eval_store::{
     AddTournamentPlayerError, CreateTournamentError, EloOptions, EvalError, EvalStore,
-    GameConfigRecord, NewTournament, RegisterPlayerError, TournamentId, TournamentParticipant,
-    TournamentRecord,
+    GameConfigRecord, NewTournament, RegisterPlayerError, TournamentId, TournamentMethodology,
+    TournamentParticipant, TournamentRecord,
 };
 use pyrat_orchestrator::{
     CompositeSink, DriverEvent, FailureReason, MatchSink, Orchestrator, OrchestratorConfig,
@@ -43,12 +43,12 @@ use crate::store_sink::StoreSink;
 // Public types
 // ---------------------------------------------------------------------------
 
-/// Specification for a brand-new tournament. `format`, `target_games_per_matchup`,
-/// and `params_json` are stored opaquely; planners deserialize whatever they
-/// need from `params_json`. `game_config` and `tournament_seed` are the
-/// tournament's runtime identity. Bootstrap derives the durable record from
-/// the config (via `mapping::game_config_to_record`) and stores both on the
-/// tournament row so resume can validate the planner.
+/// Specification for a brand-new tournament. `format`,
+/// `target_games_per_matchup`, planner params, execution methodology, game
+/// config, and tournament seed all survive on the durable tournament row.
+/// Planners deserialize whatever they need from `params_json`. Bootstrap
+/// derives the content-addressed game-config record via
+/// `mapping::game_config_to_record`.
 ///
 /// `Debug` and `Clone` are not derived: `GameConfig` itself is `Clone` but
 /// not `Debug` — callers that need to log a spec should format the relevant
@@ -62,6 +62,10 @@ pub struct TournamentSpec {
     pub format: String,
     pub target_games_per_matchup: Option<u32>,
     pub params_json: String,
+    /// Exact execution conditions to persist beside the tournament. `None`
+    /// is only for compatibility callers that genuinely do not know them;
+    /// current CLI and GUI creation paths always supply the resolved values.
+    pub methodology: Option<TournamentMethodology>,
     /// Runtime config — caller hands one source of truth. The bootstrap
     /// derives the `GameConfigRecord`, ensures the row, and returns the id.
     pub game_config: GameConfig,
@@ -694,6 +698,7 @@ async fn bootstrap_new_tournament(
     let target_games_per_matchup = spec.target_games_per_matchup;
     let params_json = spec.params_json.clone();
     let tournament_seed = spec.tournament_seed;
+    let methodology = spec.methodology;
     let players_to_register: Vec<_> = players
         .iter()
         .map(|p| pyrat_eval_store::NewPlayer {
@@ -724,6 +729,7 @@ async fn bootstrap_new_tournament(
                 params_json,
                 game_config_id: game_config_id.clone(),
                 tournament_seed,
+                methodology,
             };
             let tid = tx.create_tournament(&new_tournament)?;
             for (slot, p) in players_to_register.iter().enumerate() {
@@ -1313,6 +1319,7 @@ mod tests {
             format: "round_robin".into(),
             target_games_per_matchup: Some(10),
             params_json: "{}".into(),
+            methodology: None,
             game_config: game_config.clone(),
             tournament_seed: 0xC0FFEE,
         };
