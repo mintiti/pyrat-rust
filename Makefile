@@ -1,6 +1,6 @@
 # PyRat Monorepo Makefile
 
-.PHONY: all engine gui examples test bench clean help sync lint lint-engine lint-sdk-python test-engine test-sdk-python test-wire test-host test-eval-cli test-eval test-orch generate-wire fmt fmt-gui check check-gui dev-setup test-botpack
+.PHONY: all engine gui examples test bench bench-python bench-smoke clean help sync lint lint-engine lint-sdk-python test-engine test-sdk-python test-wire test-host test-eval-cli test-eval test-orch generate-wire fmt fmt-gui check check-gui dev-setup test-botpack
 
 # Default target
 all: sync engine
@@ -79,9 +79,22 @@ test-botpack:
 
 # Benchmarking
 bench:
-	@echo "Running benchmarks..."
-	@echo "Note: Requires Python environment activated"
+	@echo "Running Rust engine benchmarks..."
 	cargo bench -p pyrat-rust --bench game_benchmarks
+
+bench-python:
+	@echo "Building the release Python extension..."
+	uv run --directory engine maturin develop --release
+	@echo "Running Python boundary benchmarks..."
+	uv run --directory engine python python/benchmarks/benchmark_engine.py
+
+bench-smoke:
+	@echo "Smoke-testing Rust engine benchmarks..."
+	cargo bench -p pyrat-rust --bench game_benchmarks --no-default-features -- --test
+	@echo "Building the release Python extension..."
+	uv run --directory engine maturin develop --release
+	@echo "Smoke-testing Python boundary benchmarks..."
+	uv run --directory engine python python/benchmarks/benchmark_engine.py --smoke --json -
 
 # Code quality
 fmt: fmt-gui
@@ -168,7 +181,9 @@ help:
 	@echo "  lint-sdk-python  - Lint SDK Python code"
 	@echo ""
 	@echo "Other:"
-	@echo "  bench              - Run performance benchmarks"
+	@echo "  bench              - Run the Rust engine benchmark matrix"
+	@echo "  bench-python       - Build release bindings and run Python benchmarks"
+	@echo "  bench-smoke        - Functionally smoke-test both benchmark surfaces"
 	@echo "  generate-wire      - Regenerate FlatBuffers code (requires flatc)"
 	@echo "  clean              - Remove build artifacts"
 	@echo "  help               - Show this help message"

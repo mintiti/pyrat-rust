@@ -265,7 +265,34 @@ All re-exported from the crate root (`use pyrat::*`):
 
 ### Performance
 
-The engine processes 10+ million moves per second on standard configurations (benchmarked with criterion on an M-series Mac). Run `cargo bench -p pyrat-rust --bench game_benchmarks` to measure on your hardware.
+Performance measurements use two surfaces so Rust work and Python-boundary work stay separate.
+Neither surface applies a wall-clock pass/fail threshold.
+
+The Criterion matrix measures random and fixed creation, maze and cheese generation, topology
+compilation, turns, make/unmake, and complete episodes:
+
+```bash
+cargo bench -p pyrat-rust --bench game_benchmarks
+
+# Focus one reproducible scenario
+cargo bench -p pyrat-rust --bench game_benchmarks -- process_turn/classic/medium/21x15
+```
+
+The Python harness must use a release extension. It measures creation, reset, paired observations,
+`PyRat.step`, and `PyRatEnv.step`, and can retain raw samples plus host and interpreter metadata:
+
+```bash
+uv run --directory engine maturin develop --release
+uv run --directory engine python python/benchmarks/benchmark_engine.py
+uv run --directory engine python python/benchmarks/benchmark_engine.py \
+  --json ../target/python-engine-benchmark.json
+```
+
+Run both harnesses functionally, without asserting speed, with:
+
+```bash
+make bench-smoke
+```
 
 ## Game rules
 

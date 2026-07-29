@@ -55,14 +55,24 @@ jobs:
           pyproject.toml
           engine/pyproject.toml
 
-    - name: Sync workspace dependencies
-      run: uv sync --all-extras
+    - name: Create isolated engine environment
+      run: |
+        uv venv --no-project --python "${{ matrix.python-version }}" engine/.venv
+        uv pip install --python engine/.venv/bin/python "maturin>=1.4,<2.0"
 
     - name: Build Rust extension
-      run: uv run --directory engine maturin develop --release
+      working-directory: engine
+      env:
+        VIRTUAL_ENV: ${{ github.workspace }}/engine/.venv
+      run: .venv/bin/maturin develop --release --uv --extras dev
 
     - name: Run Engine tests
-      run: uv run --directory engine pytest python/tests -v
+      working-directory: engine
+      run: .venv/bin/pytest python/tests -v
+
+    - name: Smoke-test Python benchmarks
+      working-directory: engine
+      run: .venv/bin/python python/benchmarks/benchmark_engine.py --smoke --json -
 
   test-sdk-python:
     name: SDK Python Tests (Python ${{ matrix.python-version }})
