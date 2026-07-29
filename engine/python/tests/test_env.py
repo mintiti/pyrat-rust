@@ -82,6 +82,56 @@ def test_env_step() -> None:
         assert 0 <= obs.player_position.y < TEST_GAME_HEIGHT
 
 
+def test_env_reset_uses_the_game_owned_observation_state() -> None:
+    """Reset observations match the game's regenerated topology and cheese."""
+    config = GameConfig.classic(7, 5, 5)
+    env = PyRatEnv(config, seed=42)
+
+    observations, _ = env.reset(seed=123)
+
+    for agent, is_player_one in (("player_1", True), ("player_2", False)):
+        expected = env.game.get_observation(is_player_one)
+        actual = observations[agent]
+        np.testing.assert_array_equal(actual.cheese_matrix, expected.cheese_matrix)
+        np.testing.assert_array_equal(actual.movement_matrix, expected.movement_matrix)
+        assert actual.cheese_matrix.shape == (7, 5)
+        assert actual.movement_matrix.shape == (7, 5, 4)
+        assert actual.cheese_matrix.dtype == np.uint8
+        assert actual.movement_matrix.dtype == np.int8
+
+    np.testing.assert_array_equal(
+        observations["player_1"].cheese_matrix,
+        observations["player_2"].cheese_matrix,
+    )
+    np.testing.assert_array_equal(
+        observations["player_1"].movement_matrix,
+        observations["player_2"].movement_matrix,
+    )
+
+
+def test_env_step_updates_collected_cheese() -> None:
+    """The environment observes cheese removed by its game step."""
+    config = (
+        GameBuilder(3, 3)
+        .with_open_maze()
+        .with_custom_positions((0, 0), (2, 2))
+        .with_custom_cheese([(1, 0), (0, 2)])
+        .build()
+    )
+    env = PyRatEnv(config)
+    env.reset()
+
+    observations, *_ = env.step(
+        {
+            "player_1": Direction.RIGHT,
+            "player_2": Direction.STAY,
+        }
+    )
+
+    assert observations["player_1"].cheese_matrix[1, 0] == 0
+    assert observations["player_2"].cheese_matrix[1, 0] == 0
+
+
 def test_env_symmetry() -> None:
     """Test symmetric observations between players."""
     env = PyRatEnv(_test_config())

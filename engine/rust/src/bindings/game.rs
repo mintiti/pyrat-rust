@@ -747,6 +747,8 @@ impl PyRat {
         })?;
 
         let undo = self.game.make_move(p1_dir, p2_dir);
+        self.observation_handler
+            .update_collected_cheese(&undo.collected_cheese);
         Ok(PyMoveUndo { inner: undo })
     }
 
@@ -756,16 +758,18 @@ impl PyRat {
     /// `make_move()` call. Undo objects must be applied in LIFO order.
     fn unmake_move(&mut self, undo: &PyMoveUndo) {
         self.game.unmake_move(undo.inner.clone());
-        // Need full refresh after unmake
-        self.observation_handler.refresh_cheese(&self.game);
+        for &pos in &undo.inner.collected_cheese {
+            self.observation_handler.restore_cheese(pos);
+        }
     }
 
     /// Reset the game state using the stored config.
     #[pyo3(signature = (seed=None))]
     fn reset(&mut self, seed: Option<u64>) -> PyResult<()> {
-        self.game = self.config.create(seed).map_err(PyValueError::new_err)?;
-        // Need full refresh after reset
-        self.observation_handler.refresh_cheese(&self.game);
+        let game = self.config.create(seed).map_err(PyValueError::new_err)?;
+        let observation_handler = ObservationHandler::new(&game);
+        self.game = game;
+        self.observation_handler = observation_handler;
         Ok(())
     }
 

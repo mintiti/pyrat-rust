@@ -7,8 +7,6 @@ from gymnasium.spaces import Box, Discrete
 from gymnasium.spaces import Dict as SpaceDict
 from pettingzoo.utils.env import AgentID, ParallelEnv
 
-from pyrat_engine.core import ObservationHandler as PyObservationHandler
-
 if TYPE_CHECKING:
     from pyrat_engine.core.builder import GameConfig
     from pyrat_engine.core.types import Direction
@@ -60,11 +58,10 @@ class PyRatEnv(ParallelEnv):  # type: ignore[misc]
 
         self.possible_agents = ["player_1", "player_2"]
 
-        # Create game state and observation handler
+        # PyRat owns the canonical observation state.
         self.game = config.create(seed)
         width = config.width
         height = config.height
-        self.obs_handler = PyObservationHandler(self.game)
         cheese_count = len(self.game.cheese_positions())
         max_turns = self.game.max_turns
 
@@ -109,8 +106,8 @@ class PyRatEnv(ParallelEnv):  # type: ignore[misc]
         self.game.reset(seed)
 
         observations = {
-            "player_1": self.obs_handler.get_observation(self.game, True),
-            "player_2": self.obs_handler.get_observation(self.game, False),
+            "player_1": self.game.get_observation(True),
+            "player_2": self.game.get_observation(False),
         }
         infos: dict[str, Any] = {agent: {} for agent in self.agents}
 
@@ -131,7 +128,7 @@ class PyRatEnv(ParallelEnv):  # type: ignore[misc]
         prev_p2_score = self.game.player2_score
 
         # Process moves
-        game_over, collected = self.game.step(
+        game_over, _ = self.game.step(
             actions["player_1"],
             actions["player_2"],
         )
@@ -148,8 +145,8 @@ class PyRatEnv(ParallelEnv):  # type: ignore[misc]
 
         # Update observations
         observations = {
-            "player_1": self.obs_handler.get_observation(self.game, True),
-            "player_2": self.obs_handler.get_observation(self.game, False),
+            "player_1": self.game.get_observation(True),
+            "player_2": self.game.get_observation(False),
         }
 
         terminations = {
