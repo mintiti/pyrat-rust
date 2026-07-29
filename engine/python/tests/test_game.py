@@ -9,8 +9,41 @@ This tests the game state implementation including:
 """
 # ruff: noqa: PLR2004
 
+import numpy as np
 import pytest
-from pyrat_engine import GameBuilder, GameConfig
+from pyrat_engine import Direction, GameBuilder, GameConfig
+
+
+def _movement_matrix_from_public_state(game):
+    """Reconstruct movement observations without using their cached matrix."""
+
+    def edge(first, second):
+        return tuple(sorted((first, second)))
+
+    walls = {
+        edge((wall.pos1.x, wall.pos1.y), (wall.pos2.x, wall.pos2.y))
+        for wall in game.wall_entries()
+    }
+    mud = {
+        edge((entry.pos1.x, entry.pos1.y), (entry.pos2.x, entry.pos2.y)): entry.value
+        for entry in game.mud_entries()
+    }
+    matrix = np.zeros((game.width, game.height, 4), dtype=np.int8)
+
+    for x in range(game.width):
+        for y in range(game.height):
+            for direction, (dx, dy) in enumerate(((0, 1), (1, 0), (0, -1), (-1, 0))):
+                target = (x + dx, y + dy)
+                if not (0 <= target[0] < game.width and 0 <= target[1] < game.height):
+                    matrix[x, y, direction] = -1
+                    continue
+
+                passage = edge((x, y), target)
+                matrix[x, y, direction] = (
+                    -1 if passage in walls else mud.get(passage, 0)
+                )
+
+    return matrix
 
 
 class TestGameCreation:
@@ -327,6 +360,76 @@ class TestResetSymmetry:
         assert game.width == 21
         assert game.height == 15
         assert len(game.cheese_positions()) > 0
+
+
+class TestObservationCoherence:
+    """Observation matrices stay synchronized with every game mutation path."""
+
+    def test_reset_rebuilds_movement_and_cheese_matrices(self):
+        config = GameConfig.classic(7, 5, 5)
+        game = config.create(seed=42)
+        before = game.get_observation(True)
+        before_movement = before.movement_matrix.copy()
+        before_cheese = before.cheese_matrix.copy()
+
+        game.reset(seed=123)
+        after = game.get_observation(True)
+        expected_cheese = np.zeros((game.width, game.height), dtype=np.uint8)
+        for position in game.cheese_positions():
+            expected_cheese[position.x, position.y] = 1
+
+        # These seeds exercise both regenerated topology and regenerated cheese.
+        assert not np.array_equal(before.movement_matrix, after.movement_matrix)
+        assert not np.array_equal(before.cheese_matrix, after.cheese_matrix)
+
+        np.testing.assert_array_equal(
+            after.movement_matrix,
+            _movement_matrix_from_public_state(game),
+        )
+        np.testing.assert_array_equal(after.cheese_matrix, expected_cheese)
+        np.testing.assert_array_equal(before.movement_matrix, before_movement)
+        np.testing.assert_array_equal(before.cheese_matrix, before_cheese)
+
+    def test_nested_make_unmake_tracks_only_changed_cheese(self):
+        config = (
+            GameBuilder(3, 3)
+            .with_open_maze()
+            .with_custom_positions((0, 0), (2, 2))
+            .with_custom_cheese([(1, 0), (2, 0)])
+            .build()
+        )
+        game = config.create()
+        original = game.get_observation(True)
+
+        first_undo = game.make_move(Direction.RIGHT, Direction.STAY)
+        after_first = game.get_observation(True)
+        assert after_first.cheese_matrix[1, 0] == 0
+        assert after_first.cheese_matrix[2, 0] == 1
+
+        second_undo = game.make_move(Direction.RIGHT, Direction.STAY)
+        after_second = game.get_observation(True)
+        assert after_second.cheese_matrix[1, 0] == 0
+        assert after_second.cheese_matrix[2, 0] == 0
+
+        # Previously returned observations remain snapshots.
+        assert original.cheese_matrix[1, 0] == 1
+        assert original.cheese_matrix[2, 0] == 1
+
+        game.unmake_move(second_undo)
+        after_second_undo = game.get_observation(True)
+        assert after_second_undo.cheese_matrix[1, 0] == 0
+        assert after_second_undo.cheese_matrix[2, 0] == 1
+
+        game.unmake_move(first_undo)
+        after_first_undo = game.get_observation(True)
+        np.testing.assert_array_equal(
+            after_first_undo.cheese_matrix,
+            original.cheese_matrix,
+        )
+        assert after_first.cheese_matrix[1, 0] == 0
+        assert after_first.cheese_matrix[2, 0] == 1
+        assert after_second.cheese_matrix[1, 0] == 0
+        assert after_second.cheese_matrix[2, 0] == 0
 
 
 class TestEffectiveMoves:
