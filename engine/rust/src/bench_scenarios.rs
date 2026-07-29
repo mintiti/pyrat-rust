@@ -32,7 +32,7 @@ pub const SIZES: &[BoardSize] = &[
     BoardSize {
         name: "small",
         width: 15,
-        height: 11,
+        height: 13,
         cheese: 21,
         max_turns: 200,
     },
@@ -106,4 +106,33 @@ pub fn create_game(size: &BoardSize, combo: &FeatureCombo, seed: u64) -> GameSta
         .build()
         .create(Some(seed))
         .unwrap()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::game::builder::CheeseStrategy;
+    use crate::GameConfig;
+
+    #[test]
+    fn named_sizes_match_engine_presets() {
+        for size in SIZES {
+            let preset = GameConfig::preset(size.name).unwrap();
+            assert_eq!(preset.width(), size.width, "{} width", size.name);
+            assert_eq!(preset.height(), size.height, "{} height", size.name);
+            assert_eq!(
+                preset.max_turns(),
+                size.max_turns,
+                "{} max turns",
+                size.name
+            );
+            match preset.cheese() {
+                CheeseStrategy::Random { count, symmetric } => {
+                    assert_eq!(*count, size.cheese, "{} cheese", size.name);
+                    assert!(*symmetric, "{} cheese symmetry", size.name);
+                },
+                CheeseStrategy::Fixed(_) => panic!("{} preset cheese is fixed", size.name),
+            }
+        }
+    }
 }

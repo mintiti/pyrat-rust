@@ -52,9 +52,16 @@ make test-engine
 - **Rust module**: `pyrat_engine._core`
 
 ## Performance Notes
-- `cargo bench` runs criterion benchmarks (game init + full game across preset sizes and wall/mud combos)
-- `cargo run --bin profile_game --release --no-default-features` prints a throughput table for all scenarios
-- `cargo run --bin profile_game --release --no-default-features -- <size>/<combo>` runs a single scenario in a tight loop for profiling (e.g. `default/default`, `large/walls_only`)
+- `cargo bench -p pyrat-rust --bench game_benchmarks` runs the Criterion cost matrix for creation,
+  maze and cheese generation, topology compilation, turns, make/unmake, and complete episodes.
+- `uv run --directory engine maturin develop --release` followed by
+  `uv run --directory engine python python/benchmarks/benchmark_engine.py` measures the real Python
+  creation, reset, observation, `PyRat.step`, and `PyRatEnv.step` boundaries.
+- `make bench-smoke` functionally executes both harnesses without a timing threshold.
+- `cargo run --bin profile_game --release --no-default-features` prints a throughput table for all
+  scenarios.
+- `cargo run --bin profile_game --release --no-default-features -- <size>/<combo>` runs a single
+  scenario in a tight loop for profiling (e.g. `medium/classic`, `large/walls_only`).
 - The per-turn hot path is documented in `rust/src/game/game_logic.rs` (module-level doc comment)
 
 ### Profiling with samply

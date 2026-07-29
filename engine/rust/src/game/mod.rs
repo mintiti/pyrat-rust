@@ -7,5 +7,7 @@ pub mod game_logic;
 pub mod maze_generation;
 #[cfg(feature = "python")]
 pub mod observations;
+#[cfg(test)]
+mod semantic_compatibility;
 pub mod types;
 pub mod zobrist;

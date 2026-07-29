@@ -54,6 +54,9 @@ jobs:
     - name: Run engine tests
       run: cargo test -p pyrat-rust --lib --no-default-features --verbose
 
+    - name: Smoke-test engine benchmarks
+      run: cargo bench -p pyrat-rust --bench game_benchmarks --no-default-features -- --test
+
     - name: Run wire tests
       run: cargo test -p pyrat-wire --verbose
 
