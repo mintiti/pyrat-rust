@@ -1,21 +1,25 @@
 //! One-shot bot probing.
 //!
-//! Spawns a bot, accepts its connection, reads its `Identify` message, and
-//! returns the declared metadata (name, author, options). Used by the GUI's
-//! bot-config panel to populate per-bot option pickers without running a
-//! full match.
+//! [`probe_bot`] stops after `Identify` and returns the declared metadata for
+//! configuration UIs. [`preflight_bot`] drives the real tournament handshake
+//! through `Identify -> Welcome -> Configure -> Ready`, including the initial
+//! engine-state hash check, without paying for preprocessing or playing a
+//! match.
 
 use std::path::PathBuf;
 use std::time::Duration;
 
+use pyrat::GameState;
 use tokio::net::TcpListener;
 use tracing::debug;
 
-use pyrat_protocol::{extract_bot_msg, BotMsg, OptionDef};
+use pyrat_protocol::{extract_bot_msg, BotMsg, HostMsg, MatchConfig, OptionDef};
 use pyrat_wire::framing::FrameReader;
-use pyrat_wire::BotPacket;
+use pyrat_wire::{BotPacket, Player as PlayerSlot, TimingMode};
 
 use crate::launch::{launch_bots, BotConfig, BotProcesses, LaunchError};
+use crate::match_config::build_match_config;
+use crate::player::{accept_players, AcceptError, EventSink, Player};
 
 // ── Public types ─────────────────────────────────────
 
@@ -28,6 +32,56 @@ pub struct ProbeResult {
     pub options: Vec<OptionDef>,
 }
 
+/// The representative game and deadlines used by [`preflight_bot`].
+///
+/// Constructing this from an engine [`GameState`] keeps the wire
+/// [`MatchConfig`] and expected hash coupled to the same state, avoiding a
+/// preflight that can accidentally validate against a hand-written config.
+#[derive(Debug, Clone)]
+pub struct PreflightConfig {
+    match_config: MatchConfig,
+    expected_state_hash: u64,
+    options: Vec<(String, String)>,
+    connect_timeout: Duration,
+    ready_timeout: Duration,
+}
+
+impl PreflightConfig {
+    /// Build a preflight from a deterministic representative game.
+    ///
+    /// `connect_timeout` covers process startup plus `Identify -> Welcome`;
+    /// `ready_timeout` covers the subsequent `Configure -> Ready` exchange.
+    #[must_use]
+    pub fn new(
+        game: &GameState,
+        timing: TimingMode,
+        move_timeout_ms: u32,
+        preprocessing_timeout_ms: u32,
+        connect_timeout: Duration,
+        ready_timeout: Duration,
+    ) -> Self {
+        Self {
+            match_config: build_match_config(
+                game,
+                timing,
+                move_timeout_ms,
+                preprocessing_timeout_ms,
+            ),
+            expected_state_hash: game.state_hash(),
+            options: Vec::new(),
+            connect_timeout,
+            ready_timeout,
+        }
+    }
+
+    /// Apply option overrides during the compatibility check.
+    #[must_use]
+    pub fn with_options(mut self, options: Vec<(String, String)>) -> Self {
+        self.options = options;
+        self
+    }
+}
+
 /// What can go wrong when probing a bot.
 #[derive(Debug, thiserror::Error)]
 pub enum ProbeError {
@@ -37,6 +91,12 @@ pub enum ProbeError {
     ProcessExited(String),
     #[error("no Identify within {0:?}")]
     IdentifyTimeout(Duration),
+    #[error("no Ready within {0:?}")]
+    ReadyTimeout(Duration),
+    #[error("bot disconnected before Ready")]
+    DisconnectedBeforeReady,
+    #[error("ready hash mismatch: expected {expected:#x}, got {got:#x}")]
+    ReadyHashMismatch { expected: u64, got: u64 },
     #[error("protocol error: {0}")]
     ProtocolError(String),
     #[error("I/O error: {0}")]
@@ -137,4 +197,242 @@ pub async fn probe_bot(
     }
 
     // procs drops here, killing the bot process
+}
+
+/// Spawn a bot and verify the complete pre-match compatibility handshake.
+///
+/// This follows the same transport path as a real subprocess match:
+/// [`accept_players`] validates `Identify`, assigns `Player1`, and sends
+/// `Welcome`; the probe then sends `Configure` and requires a `Ready` carrying
+/// the representative engine state's exact hash. The bot process is killed
+/// when this function returns. Dropping the future is cancellation-safe via
+/// [`BotProcesses`]' RAII cleanup.
+pub async fn preflight_bot(
+    run_command: String,
+    working_dir: String,
+    agent_id: String,
+    config: PreflightConfig,
+) -> Result<(), ProbeError> {
+    let listener = TcpListener::bind("127.0.0.1:0").await?;
+    let port = listener.local_addr()?.port();
+    debug!(port, agent_id, "preflight: listening");
+
+    let mut procs = launch_bots(
+        &[BotConfig {
+            run_command,
+            working_dir: PathBuf::from(&working_dir),
+            agent_id: agent_id.clone(),
+        }],
+        port,
+    )?;
+    procs.drain_stderr_to_tracing();
+
+    let expected = [(PlayerSlot::Player1, agent_id.clone())];
+    let accepted = tokio::select! {
+        result = accept_players(
+            &listener,
+            &expected,
+            EventSink::noop(),
+            config.connect_timeout,
+        ) => result,
+        dead = poll_process_exit(&procs) => {
+            return Err(ProbeError::ProcessExited(dead));
+        }
+    }
+    .map_err(|error| match error {
+        AcceptError::Timeout => ProbeError::IdentifyTimeout(config.connect_timeout),
+        other => ProbeError::ProtocolError(format!("Identify -> Welcome: {other}")),
+    })?;
+
+    let [player, _] = accepted;
+    let mut player = player.ok_or_else(|| {
+        ProbeError::ProtocolError("Identify -> Welcome returned no Player1 handle".into())
+    })?;
+
+    verify_ready(&mut player, config).await
+    // `player` and `procs` drop here. Closing the host side wakes the TCP
+    // session task; BotProcesses then kills the subprocess tree.
+}
+
+/// Drive an already-welcomed player through the compatibility-bearing part
+/// of setup. Kept separate so the protocol/error behavior is unit-testable
+/// without launching a subprocess.
+async fn verify_ready(player: &mut dyn Player, config: PreflightConfig) -> Result<(), ProbeError> {
+    let PreflightConfig {
+        match_config,
+        expected_state_hash,
+        options,
+        connect_timeout: _,
+        ready_timeout,
+    } = config;
+
+    player
+        .send(HostMsg::Configure {
+            options,
+            match_config: Box::new(match_config),
+        })
+        .await
+        .map_err(|error| ProbeError::ProtocolError(format!("send Configure: {error}")))?;
+
+    let message = tokio::time::timeout(ready_timeout, player.recv())
+        .await
+        .map_err(|_| ProbeError::ReadyTimeout(ready_timeout))?
+        .map_err(|error| ProbeError::ProtocolError(format!("receive Ready: {error}")))?
+        .ok_or(ProbeError::DisconnectedBeforeReady)?;
+
+    match message {
+        BotMsg::Ready { state_hash } if state_hash == expected_state_hash => Ok(()),
+        BotMsg::Ready { state_hash } => Err(ProbeError::ReadyHashMismatch {
+            expected: expected_state_hash,
+            got: state_hash,
+        }),
+        other => Err(ProbeError::ProtocolError(format!(
+            "expected Ready after Configure, got {other:?}"
+        ))),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use async_trait::async_trait;
+    use pyrat::{Coordinates, Direction, GameBuilder};
+
+    use super::*;
+    use crate::player::{PlayerError, PlayerIdentity};
+
+    struct FakePlayer {
+        identity: PlayerIdentity,
+        response: Option<Result<Option<BotMsg>, PlayerError>>,
+        configured: Arc<Mutex<bool>>,
+    }
+
+    impl FakePlayer {
+        fn with_response(response: Result<Option<BotMsg>, PlayerError>) -> Self {
+            Self {
+                identity: PlayerIdentity {
+                    name: "fake".into(),
+                    author: "tests".into(),
+                    agent_id: "fake/test".into(),
+                    slot: PlayerSlot::Player1,
+                },
+                response: Some(response),
+                configured: Arc::new(Mutex::new(false)),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Player for FakePlayer {
+        fn identity(&self) -> &PlayerIdentity {
+            &self.identity
+        }
+
+        async fn send(&mut self, msg: HostMsg) -> Result<(), PlayerError> {
+            if matches!(msg, HostMsg::Configure { .. }) {
+                *self.configured.lock().expect("configured lock") = true;
+                Ok(())
+            } else {
+                Err(PlayerError::ProtocolError(format!(
+                    "expected Configure, got {msg:?}"
+                )))
+            }
+        }
+
+        async fn recv(&mut self) -> Result<Option<BotMsg>, PlayerError> {
+            self.response.take().expect("single recv")
+        }
+
+        fn take_provisional(
+            &mut self,
+            _expected_turn: u16,
+            _expected_hash: u64,
+        ) -> Option<Direction> {
+            None
+        }
+
+        async fn close(self: Box<Self>) -> Result<(), PlayerError> {
+            Ok(())
+        }
+    }
+
+    fn game() -> GameState {
+        GameBuilder::new(3, 3)
+            .with_open_maze()
+            .with_custom_positions(Coordinates::new(0, 0), Coordinates::new(2, 2))
+            .with_custom_cheese(vec![Coordinates::new(1, 1)])
+            .build()
+            .create(Some(42))
+            .expect("game")
+    }
+
+    fn config(game: &GameState) -> PreflightConfig {
+        PreflightConfig::new(
+            game,
+            TimingMode::Wait,
+            200,
+            1_000,
+            Duration::from_secs(1),
+            Duration::from_secs(1),
+        )
+    }
+
+    #[tokio::test]
+    async fn verify_ready_accepts_matching_engine_hash() {
+        let game = game();
+        let mut player = FakePlayer::with_response(Ok(Some(BotMsg::Ready {
+            state_hash: game.state_hash(),
+        })));
+        let configured = Arc::clone(&player.configured);
+
+        verify_ready(&mut player, config(&game))
+            .await
+            .expect("matching Ready");
+
+        assert!(*configured.lock().expect("configured lock"));
+    }
+
+    #[tokio::test]
+    async fn verify_ready_rejects_stale_protocol_zero_hash() {
+        let game = game();
+        let expected = game.state_hash();
+        assert_ne!(expected, 0, "fixture must catch the old empty Ready packet");
+        let mut player = FakePlayer::with_response(Ok(Some(BotMsg::Ready { state_hash: 0 })));
+
+        let error = verify_ready(&mut player, config(&game))
+            .await
+            .expect_err("zero hash must fail");
+
+        assert!(matches!(
+            error,
+            ProbeError::ReadyHashMismatch { expected: got_expected, got: 0 }
+                if got_expected == expected
+        ));
+    }
+
+    #[tokio::test]
+    async fn verify_ready_reports_disconnect_before_ready() {
+        let game = game();
+        let mut player = FakePlayer::with_response(Ok(None));
+
+        let error = verify_ready(&mut player, config(&game))
+            .await
+            .expect_err("disconnect must fail");
+
+        assert!(matches!(error, ProbeError::DisconnectedBeforeReady));
+    }
+
+    #[tokio::test]
+    async fn verify_ready_rejects_out_of_sequence_message() {
+        let game = game();
+        let mut player = FakePlayer::with_response(Ok(Some(BotMsg::PreprocessingDone)));
+
+        let error = verify_ready(&mut player, config(&game))
+            .await
+            .expect_err("wrong phase message must fail");
+
+        assert!(matches!(error, ProbeError::ProtocolError(message)
+            if message.contains("expected Ready after Configure")));
+    }
 }
