@@ -283,7 +283,7 @@ impl GameState {
             p2_score: self.player2.score,
             p2_misses: self.player2.misses,
 
-            collected_cheese: Vec::with_capacity(2),
+            collected_cheese: Vec::new(),
             turn: self.turn,
             state_hash: self.state_hash,
         };
@@ -377,7 +377,7 @@ impl GameState {
 
     #[inline]
     pub fn process_cheese_collection(&mut self) -> Vec<Coordinates> {
-        let mut collected = Vec::with_capacity(2);
+        let mut collected = Vec::new();
 
         // Check for simultaneous collection first
         if self.player1.can_collect_cheese()
@@ -982,6 +982,17 @@ mod tests {
         use super::*;
 
         #[test]
+        fn test_no_cheese_collection() {
+            let mut game = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
+
+            let result = game.process_turn(Direction::Right, Direction::Left);
+
+            assert!(result.collected_cheese.is_empty());
+            assert_eq!(game.player1.score, 0.0);
+            assert_eq!(game.player2.score, 0.0);
+        }
+
+        #[test]
         fn test_basic_cheese_collection() {
             let mut game = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
 
@@ -993,6 +1004,25 @@ mod tests {
             assert!(result.collected_cheese.contains(&Coordinates::new(1, 0)));
             assert_eq!(game.player1.score, 1.0);
             assert_eq!(game.player2.score, 0.0);
+            assert_eq!(game.cheese.remaining_cheese(), 0);
+        }
+
+        #[test]
+        fn test_two_distinct_cheese_collection() {
+            let mut game = create_test_game(Coordinates::new(0, 0), Coordinates::new(2, 2));
+            let player1_cheese = Coordinates::new(1, 0);
+            let player2_cheese = Coordinates::new(1, 2);
+            game.cheese.place_cheese(player1_cheese);
+            game.cheese.place_cheese(player2_cheese);
+
+            let result = game.process_turn(Direction::Right, Direction::Left);
+
+            assert_eq!(
+                result.collected_cheese,
+                vec![player1_cheese, player2_cheese]
+            );
+            assert_eq!(game.player1.score, 1.0);
+            assert_eq!(game.player2.score, 1.0);
             assert_eq!(game.cheese.remaining_cheese(), 0);
         }
 
@@ -1692,6 +1722,7 @@ mod make_unmake_tests {
 
         // Make a move
         let undo = game.make_move(Direction::Right, Direction::Left);
+        assert!(undo.collected_cheese.is_empty());
 
         // State should be different
         assert_ne!(game.player1.current_pos, initial_state.player1.current_pos);
@@ -1722,6 +1753,7 @@ mod make_unmake_tests {
         let undo = game.make_move(Direction::Right, Direction::Stay);
 
         // Verify cheese was collected
+        assert_eq!(undo.collected_cheese, vec![cheese_pos]);
         assert_eq!(game.cheese.remaining_cheese(), initial_remaining - 1);
         assert_eq!(game.cheese.total_cheese(), initial_cheese_count); // Should be unchanged
         assert_eq!(game.player1.score, 1.0);
@@ -1751,6 +1783,7 @@ mod make_unmake_tests {
         let undo = game.make_move(Direction::Right, Direction::Left);
 
         // Verify simultaneous collection
+        assert_eq!(undo.collected_cheese, vec![cheese_pos]);
         assert_eq!(game.player1.score, 0.5);
         assert_eq!(game.player2.score, 0.5);
         assert!(!game.cheese.has_cheese(cheese_pos));
