@@ -223,6 +223,52 @@ fn bench_make_unmake(c: &mut Criterion, scenarios: &[PreparedScenario]) {
     group.finish();
 }
 
+fn bench_make_unmake_no_collection(c: &mut Criterion, scenarios: &[PreparedScenario]) {
+    let mut group = c.benchmark_group("make_unmake_no_collection");
+    group.sample_size(50);
+    group.throughput(Throughput::Elements(TURN_BATCH_LEN as u64));
+
+    for scenario in scenarios {
+        let mut initial_game = scenario.initial_game.clone();
+        let mut collected_positions = Vec::new();
+
+        // Every pair is undone to the same root. Remove only cheese reachable
+        // by this tape so movement and game-over work remain representative.
+        for action in &scenario.turn_actions {
+            let undo = initial_game.make_move(action.p1, action.p2);
+            collected_positions.extend_from_slice(&undo.collected_cheese);
+            initial_game.unmake_move(undo);
+        }
+        for position in collected_positions {
+            initial_game.cheese.take_cheese(position);
+        }
+        initial_game.recompute_state_hash();
+        for action in &scenario.turn_actions {
+            let undo = initial_game.make_move(action.p1, action.p2);
+            assert!(undo.collected_cheese.is_empty());
+            initial_game.unmake_move(undo);
+        }
+
+        group.bench_function(
+            bench_id(scenario.spec.size, scenario.spec.combo),
+            |bencher| {
+                bencher.iter_batched_ref(
+                    || initial_game.clone(),
+                    |game| {
+                        for action in &scenario.turn_actions {
+                            let undo = black_box(game.make_move(action.p1, action.p2));
+                            game.unmake_move(undo);
+                        }
+                        black_box(&*game);
+                    },
+                    BatchSize::LargeInput,
+                );
+            },
+        );
+    }
+    group.finish();
+}
+
 fn bench_full_episode(c: &mut Criterion, scenarios: &[PreparedScenario]) {
     let mut group = c.benchmark_group("full_episode");
     group.sample_size(50);
@@ -264,6 +310,7 @@ fn bench_rust_matrix(c: &mut Criterion) {
     bench_fixed_create(c, &scenarios);
     bench_process_turn(c, &scenarios);
     bench_make_unmake(c, &scenarios);
+    bench_make_unmake_no_collection(c, &scenarios);
     bench_full_episode(c, &scenarios);
 }
 
