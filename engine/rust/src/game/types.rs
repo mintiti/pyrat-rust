@@ -247,10 +247,7 @@ impl MudMap {
 
     /// Get mud value between two positions (order doesn't matter)
     pub fn get(&self, pos1: Coordinates, pos2: Coordinates) -> Option<u8> {
-        self.inner
-            .get(&(pos1, pos2))
-            .or_else(|| self.inner.get(&(pos2, pos1)))
-            .copied()
+        self.inner.get(&(pos1, pos2)).copied()
     }
 
     /// Returns an iterator over all unique mud positions and their values
@@ -277,7 +274,7 @@ impl MudMap {
 
     /// Check if mud exists between two positions (order doesn't matter)
     pub fn contains(&self, pos1: Coordinates, pos2: Coordinates) -> bool {
-        self.inner.contains_key(&(pos1, pos2)) || self.inner.contains_key(&(pos2, pos1))
+        self.inner.contains_key(&(pos1, pos2))
     }
 }
 
@@ -486,12 +483,24 @@ mod tests {
 
         mud_map.insert(pos1, pos2, 2);
 
-        // Test bidirectional lookup
+        // Inserting once establishes the bidirectional invariant.
         assert_eq!(mud_map.get(pos1, pos2), Some(2));
         assert_eq!(mud_map.get(pos2, pos1), Some(2));
+        assert!(mud_map.contains(pos1, pos2));
+        assert!(mud_map.contains(pos2, pos1));
+        assert_eq!(mud_map.len(), 1);
+        assert_eq!(mud_map.iter().collect::<Vec<_>>(), vec![((pos1, pos2), 2)]);
+
+        // Reversed insertion updates the same logical edge in both directions.
+        mud_map.insert(pos2, pos1, 3);
+        assert_eq!(mud_map.get(pos1, pos2), Some(3));
+        assert_eq!(mud_map.get(pos2, pos1), Some(3));
+        assert_eq!(mud_map.len(), 1);
+        assert_eq!(mud_map.iter().collect::<Vec<_>>(), vec![((pos1, pos2), 3)]);
 
         // Test non-existent mud
         assert_eq!(mud_map.get(pos1, Coordinates::new(1, 0)), None);
+        assert!(!mud_map.contains(pos1, Coordinates::new(1, 0)));
     }
     mod coordinates {
         use super::*;
