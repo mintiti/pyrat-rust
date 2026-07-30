@@ -441,8 +441,7 @@ impl GameConfig {
                     mud_range: params.mud_range,
                     seed: Some(rng.random()),
                 };
-                let mut gen = MazeGenerator::new(maze_config);
-                gen.generate()
+                MazeGenerator::new(maze_config).generate_owned()
             },
         };
 

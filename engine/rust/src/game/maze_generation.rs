@@ -48,6 +48,17 @@ impl MazeGenerator {
 
     /// Generates a complete maze with walls and mud
     pub fn generate(&mut self) -> (WallMap, MudMap) {
+        let walls = self.generate_in_place();
+        (walls, self.mud.clone())
+    }
+
+    /// Generates a complete maze when the caller owns this generator.
+    pub(crate) fn generate_owned(mut self) -> (WallMap, MudMap) {
+        let walls = self.generate_in_place();
+        (walls, self.mud)
+    }
+
+    fn generate_in_place(&mut self) -> WallMap {
         self.generate_initial_layout();
 
         if self.config.connected {
@@ -62,9 +73,7 @@ impl MazeGenerator {
         }
 
         // Convert connections to walls (blocked passages)
-        let walls = self.connections_to_walls();
-
-        (walls, self.mud.clone())
+        self.connections_to_walls()
     }
 
     /// Generates the initial random layout of the maze
@@ -101,7 +110,6 @@ impl MazeGenerator {
 
                         if mud_value > 1 {
                             self.mud.insert(current, next, mud_value);
-                            self.mud.insert(next, current, mud_value);
                         }
 
                         // Handle symmetry exactly as Python
@@ -120,7 +128,6 @@ impl MazeGenerator {
 
                             if mud_value > 1 {
                                 self.mud.insert(sym_current, sym_next, mud_value);
-                                self.mud.insert(sym_next, sym_current, mud_value);
                             }
                         }
                     }
@@ -141,7 +148,6 @@ impl MazeGenerator {
 
                         if mud_value > 1 {
                             self.mud.insert(current, next, mud_value);
-                            self.mud.insert(next, current, mud_value);
                         }
 
                         if self.config.symmetry {
@@ -159,7 +165,6 @@ impl MazeGenerator {
 
                             if mud_value > 1 {
                                 self.mud.insert(sym_current, sym_next, mud_value);
-                                self.mud.insert(sym_next, sym_current, mud_value);
                             }
                         }
                     }
@@ -352,7 +357,6 @@ impl MazeGenerator {
 
             if mud_value > 1 {
                 self.mud.insert(from, to, mud_value);
-                self.mud.insert(to, from, mud_value);
             }
 
             // Handle symmetry exactly as Python
@@ -365,7 +369,6 @@ impl MazeGenerator {
 
                 if mud_value > 1 {
                     self.mud.insert(sym_from, sym_to, mud_value);
-                    self.mud.insert(sym_to, sym_from, mud_value);
                 }
             }
 
@@ -413,16 +416,14 @@ impl MazeGenerator {
         if self.rng.random::<f32>() < self.config.mud_density {
             let mud_value = self.rng.random_range(2..=self.config.mud_range);
 
-            // Add mud both ways for the passage
+            // MudMap stores both orientations for the passage.
             self.mud.insert(from, to, mud_value);
-            self.mud.insert(to, from, mud_value);
 
             // If symmetric, add mud for the symmetric passage
             if self.config.symmetry {
                 let sym_from = self.get_symmetric(from);
                 let sym_to = self.get_symmetric(to);
                 self.mud.insert(sym_from, sym_to, mud_value);
-                self.mud.insert(sym_to, sym_from, mud_value);
             }
         }
     }
@@ -707,6 +708,31 @@ mod tests {
         // Check basic properties
         assert!(!walls.is_empty());
         assert!(mud.len() <= walls.len());
+    }
+
+    #[test]
+    fn owned_generation_matches_borrowed_generation() {
+        let config = MazeConfig {
+            width: 5,
+            height: 4,
+            target_density: 0.55,
+            connected: false,
+            symmetry: true,
+            mud_density: 0.65,
+            mud_range: 4,
+            seed: Some(0xA11C_E5E5),
+        };
+
+        let mut borrowed_generator = MazeGenerator::new(config);
+        let (borrowed_walls, borrowed_mud) = borrowed_generator.generate();
+        let (owned_walls, owned_mud) = MazeGenerator::new(config).generate_owned();
+        let mut borrowed_mud: Vec<_> = borrowed_mud.iter().collect();
+        let mut owned_mud: Vec<_> = owned_mud.iter().collect();
+        borrowed_mud.sort_unstable();
+        owned_mud.sort_unstable();
+
+        assert_eq!(owned_walls, borrowed_walls);
+        assert_eq!(owned_mud, borrowed_mud);
     }
 
     #[test]

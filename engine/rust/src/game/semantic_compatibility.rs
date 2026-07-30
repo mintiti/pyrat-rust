@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{Coordinates, Direction, GameBuilder, GameState, MudMap};
+use crate::{Coordinates, Direction, GameBuilder, GameState, MazeParams, MudMap};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct Edge {
@@ -150,6 +150,40 @@ fn fixed_game(seed: Option<u64>) -> GameState {
         .build()
         .create(seed)
         .expect("fixed compatibility fixture should be valid")
+}
+
+fn seeded_disconnected_game(seed: u64) -> GameState {
+    GameBuilder::new(3, 3)
+        .with_random_maze(MazeParams {
+            wall_density: 0.55,
+            connected: false,
+            symmetric: true,
+            mud_density: 0.65,
+            mud_range: 4,
+        })
+        .with_corner_positions()
+        .with_custom_cheese(vec![coordinate(1, 1)])
+        .build()
+        .create(Some(seed))
+        .expect("seeded disconnected compatibility fixture should be valid")
+}
+
+#[test]
+fn seeded_disconnected_topology_and_state_hash_are_stable() {
+    let game = seeded_disconnected_game(0xA11C_E5E5);
+    let topology = TopologyFingerprint::from_game(&game);
+
+    assert_eq!(
+        topology.canonical_bytes(),
+        vec![
+            0x03, 0x03, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x01, 0x00, 0x02, 0x00, 0x01,
+            0x01, 0x01, 0x01, 0x00, 0x01, 0x01, 0x01, 0x01, 0x01, 0x02, 0x01, 0x01, 0x02, 0x01,
+            0x01, 0x02, 0x02, 0x02, 0x02, 0x00, 0x02, 0x01, 0x04, 0x00, 0x00, 0x00, 0x00, 0x01,
+            0x02, 0x00, 0x02, 0x01, 0x02, 0x02, 0x01, 0x00, 0x02, 0x00, 0x02, 0x02, 0x01, 0x02,
+            0x02, 0x02,
+        ]
+    );
+    assert_eq!(game.state_hash(), 0x8177_5E20_C1DE_7EE2);
 }
 
 #[test]
