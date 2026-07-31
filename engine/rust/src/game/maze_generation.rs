@@ -636,21 +636,22 @@ impl CheeseGenerator {
 
         // Generate candidate positions
         let mut candidates = Vec::new();
-        let mut considered = HashSet::new();
 
         for x in 0..self.width {
             for y in 0..self.height {
                 let pos = Coordinates::new(x, y);
-                if (!self.config.symmetry || !considered.contains(&pos))
-                    && pos != player1_pos
-                    && pos != player2_pos
-                    && pos != self.get_symmetric(pos)
-                {
+                let symmetric = self.get_symmetric(pos);
+                let precedes_symmetric =
+                    pos.x < symmetric.x || (pos.x == symmetric.x && pos.y < symmetric.y);
+                let represents_pair = !self.config.symmetry
+                    || precedes_symmetric
+                    // Preserve which half represents the pair when its earlier
+                    // coordinate is occupied by a player.
+                    || symmetric == player1_pos
+                    || symmetric == player2_pos;
+
+                if represents_pair && pos != player1_pos && pos != player2_pos && pos != symmetric {
                     candidates.push(pos);
-                    if self.config.symmetry {
-                        considered.insert(pos);
-                        considered.insert(self.get_symmetric(pos));
-                    }
                 }
             }
         }
@@ -664,7 +665,6 @@ impl CheeseGenerator {
             if self.config.symmetry {
                 let symmetric = self.get_symmetric(chosen);
                 pieces.push(symmetric);
-                candidates.retain(|&pos| pos != symmetric);
                 remaining -= 2;
             } else {
                 remaining -= 1;
@@ -688,6 +688,72 @@ impl CheeseGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn legacy_generate_cheese(
+        config: &CheeseConfig,
+        width: u8,
+        height: u8,
+        players: (Coordinates, Coordinates),
+        rng: &mut rand::rngs::StdRng,
+    ) -> Result<Vec<Coordinates>, String> {
+        let symmetric = |pos: Coordinates| Coordinates::new(width - 1 - pos.x, height - 1 - pos.y);
+        let mut pieces = Vec::new();
+        let mut remaining = config.count;
+
+        if config.symmetry && remaining % 2 == 1 {
+            if width.is_multiple_of(2) || height.is_multiple_of(2) {
+                return Err(
+                    "Cannot place odd number of cheese in symmetric maze with even dimensions"
+                        .to_string(),
+                );
+            }
+            let center = Coordinates::new(width / 2, height / 2);
+            if center != players.0 && center != players.1 {
+                pieces.push(center);
+                remaining -= 1;
+            }
+        }
+
+        let mut candidates = Vec::new();
+        let mut considered = HashSet::new();
+        for x in 0..width {
+            for y in 0..height {
+                let pos = Coordinates::new(x, y);
+                if (!config.symmetry || !considered.contains(&pos))
+                    && pos != players.0
+                    && pos != players.1
+                    && pos != symmetric(pos)
+                {
+                    candidates.push(pos);
+                    if config.symmetry {
+                        considered.insert(pos);
+                        considered.insert(symmetric(pos));
+                    }
+                }
+            }
+        }
+
+        while remaining > 0 && !candidates.is_empty() {
+            let idx = rng.random_range(0..candidates.len());
+            let chosen = candidates.swap_remove(idx);
+            pieces.push(chosen);
+
+            if config.symmetry {
+                let symmetric = symmetric(chosen);
+                pieces.push(symmetric);
+                candidates.retain(|&pos| pos != symmetric);
+                remaining -= 2;
+            } else {
+                remaining -= 1;
+            }
+        }
+
+        if remaining != 0 {
+            return Err("Too many pieces of cheese for maze dimensions".to_string());
+        }
+
+        Ok(pieces)
+    }
 
     #[test]
     fn test_basic_maze_generation() {
@@ -964,6 +1030,80 @@ mod tests {
             if *piece != symmetric {
                 // Ignore center piece
                 assert!(cheese.contains(&symmetric));
+            }
+        }
+    }
+
+    #[test]
+    fn test_seeded_symmetric_cheese_sequence_is_stable() {
+        let config = CheeseConfig {
+            count: 9,
+            symmetry: true,
+        };
+        let mut generator = CheeseGenerator::new(config, 7, 5, Some(42));
+        let player1 = Coordinates::new(0, 0);
+        let player2 = Coordinates::new(6, 4);
+
+        let first = generator.generate(player1, player2).unwrap();
+        let second = generator.generate(player1, player2).unwrap();
+
+        assert_eq!(
+            first,
+            vec![
+                Coordinates::new(3, 2),
+                Coordinates::new(0, 3),
+                Coordinates::new(6, 1),
+                Coordinates::new(1, 3),
+                Coordinates::new(5, 1),
+                Coordinates::new(0, 4),
+                Coordinates::new(6, 0),
+                Coordinates::new(3, 0),
+                Coordinates::new(3, 4),
+            ]
+        );
+        assert_eq!(
+            second,
+            vec![
+                Coordinates::new(3, 2),
+                Coordinates::new(2, 4),
+                Coordinates::new(4, 0),
+                Coordinates::new(2, 0),
+                Coordinates::new(4, 4),
+                Coordinates::new(3, 1),
+                Coordinates::new(3, 3),
+                Coordinates::new(1, 1),
+                Coordinates::new(5, 3),
+            ]
+        );
+    }
+
+    #[test]
+    fn test_cheese_generation_matches_legacy_bookkeeping() {
+        let cases = [
+            (7, false, 5, 4, (0, 0), (4, 3)),
+            (9, true, 7, 5, (0, 0), (6, 4)),
+            (8, true, 6, 4, (0, 0), (5, 3)),
+            (6, true, 5, 5, (0, 1), (3, 4)),
+            (100, true, 5, 5, (0, 0), (4, 4)),
+        ];
+
+        for (count, symmetry, width, height, player1, player2) in cases {
+            let config = CheeseConfig { count, symmetry };
+            let players = (
+                Coordinates::new(player1.0, player1.1),
+                Coordinates::new(player2.0, player2.1),
+            );
+            for seed in [0, 1, 42, u64::MAX] {
+                let mut generator = CheeseGenerator::new(config.clone(), width, height, Some(seed));
+                let mut legacy_rng = rand::SeedableRng::seed_from_u64(seed);
+
+                for generation in 0..2 {
+                    assert_eq!(
+                        generator.generate(players.0, players.1),
+                        legacy_generate_cheese(&config, width, height, players, &mut legacy_rng,),
+                        "width={width}, height={height}, seed={seed}, generation={generation}",
+                    );
+                }
             }
         }
     }
