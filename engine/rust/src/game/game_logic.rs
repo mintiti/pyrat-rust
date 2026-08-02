@@ -14,12 +14,12 @@
 //! - `MudMap` — HashMap lookup per move into a muddy passage;
 //!   this is the most expensive per-turn operation
 
-use crate::{CheeseBoard, Coordinates, Direction, MoveTable, Wall};
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-
 use crate::game::types::MudMap;
 use crate::game::zobrist;
+use crate::{CheeseBoard, Coordinates, Direction, MoveTable, Wall};
+use serde::{Deserialize, Serialize};
+#[cfg(test)]
+use std::collections::HashMap;
 
 /// Stores the state of a player including their movement status
 #[derive(Clone)]
@@ -94,77 +94,44 @@ impl GameState {
     pub const DEFAULT_WIDTH: u8 = 21;
     pub const DEFAULT_HEIGHT: u8 = 15;
     pub const DEFAULT_CHEESE_COUNT: u16 = 41;
-    #[must_use]
-    #[allow(clippy::needless_pass_by_value)] // We need to own the walls for MoveTable
-    pub(crate) fn new(
-        width: u8,
-        height: u8,
-        walls: HashMap<Coordinates, Vec<Coordinates>>,
-        max_turns: u16,
-    ) -> Self {
-        // Create move table for efficient move validation
-        let move_table = MoveTable::new(width, height, &walls);
-
-        // Initialize players at opposite corners
-        let player1 = PlayerState {
-            current_pos: Coordinates::new(0, 0), // Bottom left
-            mud_timer: 0,
-            score: 0.0,
-            misses: 0,
-        };
-
-        let player2 = PlayerState {
-            current_pos: Coordinates::new(width - 1, height - 1), // Top right
-            mud_timer: 0,
-            score: 0.0,
-            misses: 0,
-        };
-
-        Self {
-            width,
-            height,
-            move_table,
-            player1,
-            player2,
-            mud: MudMap::new(),
-            cheese: CheeseBoard::new(width, height),
-            turn: 0,
-            max_turns,
-            state_hash: 0, // Computed after full init in new_with_config
-        }
-    }
-
-    #[must_use]
-    pub(crate) fn new_with_positions(
-        width: u8,
-        height: u8,
-        walls: HashMap<Coordinates, Vec<Coordinates>>,
-        max_turns: u16,
-        player1_pos: Coordinates,
-        player2_pos: Coordinates,
-    ) -> Self {
-        let mut game = Self::new(width, height, walls, max_turns);
-        game.player1.current_pos = player1_pos;
-        game.player2.current_pos = player2_pos;
-        game
-    }
-
     #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub(crate) fn new_with_config(
         width: u8,
         height: u8,
-        walls: HashMap<Coordinates, Vec<Coordinates>>,
+        move_table: MoveTable,
         mud: MudMap,
         cheese_positions: &[Coordinates],
         player1_pos: Coordinates,
         player2_pos: Coordinates,
         max_turns: u16,
     ) -> Self {
-        let mut game =
-            Self::new_with_positions(width, height, walls, max_turns, player1_pos, player2_pos);
+        let player1 = PlayerState {
+            current_pos: player1_pos,
+            mud_timer: 0,
+            score: 0.0,
+            misses: 0,
+        };
 
-        game.mud = mud;
+        let player2 = PlayerState {
+            current_pos: player2_pos,
+            mud_timer: 0,
+            score: 0.0,
+            misses: 0,
+        };
+
+        let mut game = Self {
+            width,
+            height,
+            move_table,
+            player1,
+            player2,
+            mud,
+            cheese: CheeseBoard::new(width, height),
+            turn: 0,
+            max_turns,
+            state_hash: 0,
+        };
 
         // Add cheese
         for &pos in cheese_positions {
