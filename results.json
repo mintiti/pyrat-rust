@@ -7,39 +7,39 @@
   },
   "standings": [
     {
-      "player_id": "greedy-py",
-      "elo": 1092.2194212472618,
-      "elo_stderr": 66.2968169688441,
-      "games": 75
-    },
-    {
       "player_id": "greedy",
       "elo": 1000.0,
       "elo_stderr": 0.00017371779276124588,
       "games": 75
     },
     {
+      "player_id": "greedy-py",
+      "elo": 985.2404652542866,
+      "elo_stderr": 62.29157120845046,
+      "games": 75
+    },
+    {
       "player_id": "search",
-      "elo": 746.6438659134453,
-      "elo_stderr": 56.292917192921706,
+      "elo": 731.5637778243274,
+      "elo_stderr": 58.99957310076016,
       "games": 75
     },
     {
       "player_id": "search-py",
-      "elo": 654.0283264775622,
-      "elo_stderr": 57.323007438736504,
-      "games": 75
-    },
-    {
-      "player_id": "smart-random",
-      "elo": 293.316732758394,
-      "elo_stderr": 67.5548317586888,
+      "elo": 529.4566050111621,
+      "elo_stderr": 61.94809618772635,
       "games": 75
     },
     {
       "player_id": "smart-random-py",
-      "elo": 276.3706482034157,
-      "elo_stderr": 68.74152335550784,
+      "elo": 198.58043852939613,
+      "elo_stderr": 68.76686964974914,
+      "games": 75
+    },
+    {
+      "player_id": "smart-random",
+      "elo": 172.47569934938429,
+      "elo_stderr": 70.49099643952466,
       "games": 75
     }
   ]
