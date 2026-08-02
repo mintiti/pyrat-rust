@@ -55,6 +55,41 @@ impl MoveTable {
         Self { valid_moves, width }
     }
 
+    /// Build the packed movement masks for a board with no internal walls.
+    #[must_use]
+    pub(crate) fn open(width: u8, height: u8) -> Self {
+        let size = (width as usize * height as usize).div_ceil(2);
+        let mut valid_moves = vec![0u8; size];
+
+        for y in 0..height {
+            for x in 0..width {
+                let mut moves = 0u8;
+                if y < height - 1 {
+                    moves |= 1;
+                }
+                if x < width - 1 {
+                    moves |= 2;
+                }
+                if y > 0 {
+                    moves |= 4;
+                }
+                if x > 0 {
+                    moves |= 8;
+                }
+
+                let idx = Coordinates::new(x, y).to_index(width);
+                let byte_idx = idx / 2;
+                if idx.is_multiple_of(2) {
+                    valid_moves[byte_idx] |= moves;
+                } else {
+                    valid_moves[byte_idx] |= moves << 4;
+                }
+            }
+        }
+
+        Self { valid_moves, width }
+    }
+
     /// Check if a move is valid for a given position
     #[inline(always)]
     #[must_use]
@@ -198,6 +233,18 @@ mod tests {
         assert!(!move_table.is_move_valid(Coordinates::new(1, 1), Direction::Right)); // Grid boundary
         assert!(move_table.is_move_valid(Coordinates::new(1, 1), Direction::Down));
         assert!(move_table.is_move_valid(Coordinates::new(1, 1), Direction::Left));
+    }
+
+    #[test]
+    fn open_constructor_matches_empty_wall_compilation() {
+        let walls = HashMap::new();
+
+        for (width, height) in [(2, 2), (3, 4), (21, 15), (41, 31)] {
+            let compiled = MoveTable::new(width, height, &walls);
+            let open = MoveTable::open(width, height);
+
+            assert_eq!(open.bytes(), compiled.bytes(), "{width}x{height}");
+        }
     }
 
     #[test]

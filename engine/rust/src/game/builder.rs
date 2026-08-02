@@ -24,7 +24,7 @@
 
 use crate::game::maze_generation::{CheeseConfig, CheeseGenerator, MazeConfig, MazeGenerator};
 use crate::game::types::MudMap;
-use crate::{Coordinates, GameState};
+use crate::{Coordinates, GameState, MoveTable};
 use rand::{Rng, RngExt, SeedableRng};
 use std::collections::HashMap;
 use std::marker::PhantomData;
@@ -427,21 +427,34 @@ impl GameConfig {
         let mut rng: rand::rngs::StdRng =
             seed.map_or_else(rand::make_rng, SeedableRng::seed_from_u64);
 
-        // 1. Maze
-        let (walls, mud) = match &self.maze {
-            MazeStrategy::Fixed { walls, mud } => (walls.clone(), mud.clone()),
+        // 1. Maze topology
+        let (move_table, mud) = match &self.maze {
+            MazeStrategy::Fixed { walls, mud } => {
+                let walls = walls.clone();
+                (
+                    MoveTable::new(self.width(), self.height(), &walls),
+                    mud.clone(),
+                )
+            },
             MazeStrategy::Random(params) => {
-                let maze_config = MazeConfig {
-                    width: self.width(),
-                    height: self.height(),
-                    target_density: params.wall_density,
-                    connected: params.connected,
-                    symmetry: params.symmetric,
-                    mud_density: params.mud_density,
-                    mud_range: params.mud_range,
-                    seed: Some(rng.random()),
-                };
-                MazeGenerator::new(maze_config).generate_owned()
+                // Preserve the parent RNG stream even when the topology is predetermined.
+                let maze_seed = rng.random();
+                if params.wall_density == 0.0 && params.mud_density == 0.0 {
+                    (MoveTable::open(self.width(), self.height()), MudMap::new())
+                } else {
+                    let maze_config = MazeConfig {
+                        width: self.width(),
+                        height: self.height(),
+                        target_density: params.wall_density,
+                        connected: params.connected,
+                        symmetry: params.symmetric,
+                        mud_density: params.mud_density,
+                        mud_range: params.mud_range,
+                        seed: Some(maze_seed),
+                    };
+                    let (walls, mud) = MazeGenerator::new(maze_config).generate_owned();
+                    (MoveTable::new(self.width(), self.height(), &walls), mud)
+                }
             },
         };
 
@@ -479,7 +492,7 @@ impl GameConfig {
         Ok(GameState::new_with_config(
             self.width(),
             self.height(),
-            walls,
+            move_table,
             mud,
             &cheese_positions,
             p1,
@@ -703,6 +716,56 @@ mod tests {
 
         assert_eq!(game1.player1_position(), game2.player1_position());
         assert_eq!(game1.player2_position(), game2.player2_position());
+    }
+
+    #[test]
+    fn open_seed_fixture_is_stable() {
+        let config = GameBuilder::new(7, 5)
+            .with_open_maze()
+            .with_random_positions()
+            .with_random_cheese(6, false)
+            .build();
+
+        let fixtures = [
+            (
+                0,
+                Coordinates::new(3, 3),
+                Coordinates::new(5, 0),
+                vec![
+                    Coordinates::new(4, 0),
+                    Coordinates::new(6, 0),
+                    Coordinates::new(5, 1),
+                    Coordinates::new(5, 2),
+                    Coordinates::new(6, 3),
+                    Coordinates::new(1, 4),
+                ],
+                0xAFFC_C2CF_9E1D_D84E,
+            ),
+            (
+                0xA11C_E5E5,
+                Coordinates::new(3, 1),
+                Coordinates::new(6, 3),
+                vec![
+                    Coordinates::new(5, 2),
+                    Coordinates::new(1, 3),
+                    Coordinates::new(2, 3),
+                    Coordinates::new(0, 4),
+                    Coordinates::new(5, 4),
+                    Coordinates::new(6, 4),
+                ],
+                0xF27C_E9D7_0E7F_1C76,
+            ),
+        ];
+
+        for (seed, player1, player2, cheese, state_hash) in fixtures {
+            let game = config.create(Some(seed)).unwrap();
+            assert!(game.wall_entries().is_empty(), "seed={seed:#x}");
+            assert!(game.mud_positions().is_empty(), "seed={seed:#x}");
+            assert_eq!(game.player1_position(), player1, "seed={seed:#x}");
+            assert_eq!(game.player2_position(), player2, "seed={seed:#x}");
+            assert_eq!(game.cheese_positions(), cheese, "seed={seed:#x}");
+            assert_eq!(game.state_hash(), state_hash, "seed={seed:#x}");
+        }
     }
 
     #[test]
