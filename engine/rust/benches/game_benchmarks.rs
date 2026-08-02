@@ -80,6 +80,38 @@ fn bench_maze_generation(c: &mut Criterion, scenarios: &[PreparedScenario]) {
     group.finish();
 }
 
+fn bench_disconnected_maze_create_and_generate(c: &mut Criterion, scenarios: &[PreparedScenario]) {
+    let mut group = c.benchmark_group("disconnected_maze_create_and_generate");
+    group.sample_size(20);
+    group.throughput(Throughput::Elements(SEED_TAPE_LEN as u64));
+
+    for scenario in scenarios {
+        group.bench_function(
+            bench_id(scenario.spec.size, scenario.spec.combo),
+            |bencher| {
+                bencher.iter_batched(
+                    || {
+                        let configs: [_; SEED_TAPE_LEN] = std::array::from_fn(|index| {
+                            let mut config = scenario.spec.maze_config(scenario.maze_seeds[index]);
+                            config.connected = false;
+                            config
+                        });
+                        configs
+                    },
+                    |configs| {
+                        configs.map(|config| {
+                            let mut generator = MazeGenerator::new(config);
+                            generator.generate()
+                        })
+                    },
+                    BatchSize::LargeInput,
+                );
+            },
+        );
+    }
+    group.finish();
+}
+
 fn bench_cheese_generation(c: &mut Criterion, scenarios: &[PreparedScenario]) {
     let mut group = c.benchmark_group("cheese_generation");
     group.throughput(Throughput::Elements(SEED_TAPE_LEN as u64));
@@ -305,6 +337,7 @@ fn bench_rust_matrix(c: &mut Criterion) {
 
     bench_random_create(c, &scenarios);
     bench_maze_generation(c, &scenarios);
+    bench_disconnected_maze_create_and_generate(c, &scenarios);
     bench_cheese_generation(c, &scenarios);
     bench_topology_compilation(c, &scenarios);
     bench_fixed_create(c, &scenarios);
