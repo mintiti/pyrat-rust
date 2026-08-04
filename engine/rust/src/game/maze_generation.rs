@@ -1,7 +1,7 @@
 #![allow(clippy::uninlined_format_args)]
 
 use crate::{Coordinates, Direction};
-use rand::prelude::IndexedRandom;
+use rand::prelude::{IndexedRandom, SliceRandom};
 use rand::RngExt;
 use std::collections::{HashMap, HashSet};
 
@@ -86,6 +86,132 @@ impl ConnectionGrid {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct Passage {
+    first: Coordinates,
+    second: Coordinates,
+}
+
+impl Passage {
+    fn new(first: Coordinates, second: Coordinates) -> Self {
+        debug_assert!(
+            Direction::between(first, second).is_some(),
+            "passage endpoints must be adjacent: {first:?} -> {second:?}"
+        );
+
+        if first <= second {
+            Self { first, second }
+        } else {
+            Self {
+                first: second,
+                second: first,
+            }
+        }
+    }
+
+    fn rotated(self, width: u8, height: u8) -> Self {
+        let rotate = |position: Coordinates| {
+            Coordinates::new(width - 1 - position.x, height - 1 - position.y)
+        };
+        Self::new(rotate(self.first), rotate(self.second))
+    }
+
+    fn indices(self, width: u8) -> (usize, usize) {
+        (self.first.to_index(width), self.second.to_index(width))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct PassageOrbit {
+    representative: Passage,
+    mate: Option<Passage>,
+}
+
+impl PassageOrbit {
+    const fn singleton(passage: Passage) -> Self {
+        Self {
+            representative: passage,
+            mate: None,
+        }
+    }
+
+    fn rotational(passage: Passage, width: u8, height: u8) -> Self {
+        let rotated = passage.rotated(width, height);
+        if passage == rotated {
+            Self::singleton(passage)
+        } else if passage < rotated {
+            Self {
+                representative: passage,
+                mate: Some(rotated),
+            }
+        } else {
+            Self {
+                representative: rotated,
+                mate: Some(passage),
+            }
+        }
+    }
+
+    fn passages(self) -> impl Iterator<Item = Passage> {
+        std::iter::once(self.representative).chain(self.mate)
+    }
+}
+
+/// Disjoint-set forest with path compression and union by rank.
+struct DisjointSet {
+    parent: Vec<usize>,
+    rank: Vec<u8>,
+    component_count: usize,
+}
+
+impl DisjointSet {
+    fn new(element_count: usize) -> Self {
+        Self {
+            parent: (0..element_count).collect(),
+            rank: vec![0; element_count],
+            component_count: element_count,
+        }
+    }
+
+    fn find(&mut self, element: usize) -> usize {
+        let mut root = element;
+        while self.parent[root] != root {
+            root = self.parent[root];
+        }
+
+        let mut current = element;
+        while current != root {
+            let parent = self.parent[current];
+            self.parent[current] = root;
+            current = parent;
+        }
+        root
+    }
+
+    fn same_component(&mut self, first: usize, second: usize) -> bool {
+        self.find(first) == self.find(second)
+    }
+
+    fn union(&mut self, first: usize, second: usize) -> bool {
+        let first_root = self.find(first);
+        let second_root = self.find(second);
+        if first_root == second_root {
+            return false;
+        }
+
+        match self.rank[first_root].cmp(&self.rank[second_root]) {
+            std::cmp::Ordering::Less => self.parent[first_root] = second_root,
+            std::cmp::Ordering::Greater => self.parent[second_root] = first_root,
+            std::cmp::Ordering::Equal => {
+                self.parent[second_root] = first_root;
+                self.rank[first_root] += 1;
+            },
+        }
+        self.component_count -= 1;
+        true
+    }
+}
+
 /// Configuration for maze generation
 #[derive(Debug, Clone, Copy)]
 pub struct MazeConfig {
@@ -139,7 +265,7 @@ impl MazeGenerator {
         self.generate_initial_layout();
 
         if self.config.connected {
-            self.ensure_full_connectivity();
+            self.repair_connectivity();
         }
 
         self.add_border_connections();
@@ -239,200 +365,98 @@ impl MazeGenerator {
         }
     }
 
-    /// Ensures the maze is fully connected by connecting all isolated regions
-    fn ensure_full_connectivity(&mut self) {
-        loop {
-            // Find all connected components
-            let mut visited = HashSet::new();
-            let mut components = Vec::new();
+    /// Connects all initial components with one seeded Kruskal-style orbit scan.
+    fn repair_connectivity(&mut self) {
+        let mut components = self.component_forest();
+        if components.component_count <= 1 {
+            return;
+        }
 
-            for x in 0..self.config.width {
-                for y in 0..self.config.height {
-                    let pos = Coordinates::new(x, y);
-                    if !visited.contains(&pos) {
-                        // Found a new component, explore it
-                        let mut component = HashSet::new();
-                        let mut stack = vec![pos];
+        let mut candidates = self.closed_repair_orbits();
+        candidates.shuffle(&mut self.rng);
 
-                        while let Some(current) = stack.pop() {
-                            if component.insert(current) {
-                                visited.insert(current);
-
-                                // Add all connected neighbors to stack
-                                for next in self.connections.neighbors(current) {
-                                    if !component.contains(&next) {
-                                        stack.push(next);
-                                    }
-                                }
-                            }
-                        }
-
-                        components.push(component);
-                    }
-                }
+        for orbit in candidates {
+            let crosses_components = orbit.passages().any(|passage| {
+                let (first, second) = passage.indices(self.config.width);
+                !components.same_component(first, second)
+            });
+            if !crosses_components {
+                continue;
             }
 
-            // If there's only one component, we're done
-            if components.len() <= 1 {
-                break;
+            self.open_passage_orbit(orbit);
+            for passage in orbit.passages() {
+                let (first, second) = passage.indices(self.config.width);
+                components.union(first, second);
             }
 
-            // Connect the first component to another component
-            let component1 = &components[0];
-            let component2 = &components[1];
-
-            // Find the closest pair of cells between the two components
-            let mut best_pair = None;
-            let mut min_distance = u32::MAX;
-
-            for &pos1 in component1 {
-                for &pos2 in component2 {
-                    // Check if they're adjacent
-                    let dx = (pos1.x as i32 - pos2.x as i32).unsigned_abs();
-                    let dy = (pos1.y as i32 - pos2.y as i32).unsigned_abs();
-
-                    if (dx == 1 && dy == 0) || (dx == 0 && dy == 1) {
-                        // They're adjacent, we can connect them directly
-                        best_pair = Some((pos1, pos2));
-                        min_distance = 1;
-                        break;
-                    }
-
-                    let distance = dx + dy;
-                    if distance < min_distance {
-                        min_distance = distance;
-                        best_pair = Some((pos1, pos2));
-                    }
-                }
-
-                if min_distance == 1 {
-                    break;
-                }
+            if components.component_count == 1 {
+                return;
             }
+        }
 
-            // Connect the two components
-            if let Some((from, to)) = best_pair {
-                if min_distance == 1 {
-                    // They're adjacent, connect directly
-                    self.add_passage(from, to);
+        debug_assert_eq!(
+            components.component_count, 1,
+            "all grid-edge orbits were exhausted before the maze became connected"
+        );
+    }
 
-                    if self.config.symmetry {
-                        let sym_from = self.get_symmetric(from);
-                        let sym_to = self.get_symmetric(to);
-                        self.add_passage(sym_from, sym_to);
+    fn component_forest(&self) -> DisjointSet {
+        let mut components =
+            DisjointSet::new(usize::from(self.config.width) * usize::from(self.config.height));
+
+        for x in 0..self.config.width {
+            for y in 0..self.config.height {
+                let current = Coordinates::new(x, y);
+                for adjacent in [
+                    (x + 1 < self.config.width).then(|| Coordinates::new(x + 1, y)),
+                    (y + 1 < self.config.height).then(|| Coordinates::new(x, y + 1)),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    if self.has_connection(current, adjacent) {
+                        components.union(
+                            current.to_index(self.config.width),
+                            adjacent.to_index(self.config.width),
+                        );
                     }
-                } else {
-                    // They're not adjacent, we need to find a path
-                    // For simplicity, just ensure the old algorithm runs
-                    self.ensure_connectivity();
                 }
             }
         }
+
+        components
     }
 
-    /// Ensures the maze is fully connected using a modified DFS algorithm
-    fn ensure_connectivity(&mut self) {
-        let mut connected =
-            vec![vec![false; self.config.height as usize]; self.config.width as usize];
-        let mut possible_border = Vec::new();
-
-        // Start from top-left corner (0,0)
-        let start = Coordinates::new(0, 0);
-        connected[0][0] = true;
-        possible_border.push(start);
-
-        self.connect_region(&mut connected, &mut possible_border);
-    }
-
-    /// Recursively connects regions of the maze using DFS
-    fn connect_region(
-        &mut self,
-        connected: &mut [Vec<bool>],
-        possible_border: &mut Vec<Coordinates>,
-    ) {
-        while !possible_border.is_empty() {
-            let mut border = Vec::new();
-            let mut new_possible_border = Vec::new();
-
-            // Match Python's border creation exactly
-            for &current in possible_border.iter() {
-                let mut is_candidate = false;
-                let x = current.x as usize;
-                let y = current.y as usize;
-
-                // Check each direction exactly as Python does
-                if current.x + 1 < self.config.width
-                    && !self.has_connection(current, Coordinates::new(current.x + 1, current.y))
-                    && !connected[(current.x + 1) as usize][y]
+    fn closed_repair_orbits(&self) -> Vec<PassageOrbit> {
+        let mut candidates = Vec::new();
+        for x in 0..self.config.width {
+            for y in 0..self.config.height {
+                let current = Coordinates::new(x, y);
+                for adjacent in [
+                    (x + 1 < self.config.width).then(|| Coordinates::new(x + 1, y)),
+                    (y + 1 < self.config.height).then(|| Coordinates::new(x, y + 1)),
+                ]
+                .into_iter()
+                .flatten()
                 {
-                    border.push((current, Coordinates::new(current.x + 1, current.y)));
-                    is_candidate = true;
-                }
-                if current.x > 0
-                    && !self.has_connection(current, Coordinates::new(current.x - 1, current.y))
-                    && !connected[(current.x - 1) as usize][y]
-                {
-                    border.push((current, Coordinates::new(current.x - 1, current.y)));
-                    is_candidate = true;
-                }
-                if current.y + 1 < self.config.height
-                    && !self.has_connection(current, Coordinates::new(current.x, current.y + 1))
-                    && !connected[x][(current.y + 1) as usize]
-                {
-                    border.push((current, Coordinates::new(current.x, current.y + 1)));
-                    is_candidate = true;
-                }
-                if current.y > 0
-                    && !self.has_connection(current, Coordinates::new(current.x, current.y - 1))
-                    && !connected[x][(current.y - 1) as usize]
-                {
-                    border.push((current, Coordinates::new(current.x, current.y - 1)));
-                    is_candidate = true;
-                }
+                    if self.has_connection(current, adjacent) {
+                        continue;
+                    }
 
-                if is_candidate {
-                    new_possible_border.push(current);
+                    let passage = Passage::new(current, adjacent);
+                    let orbit = if self.config.symmetry {
+                        PassageOrbit::rotational(passage, self.config.width, self.config.height)
+                    } else {
+                        PassageOrbit::singleton(passage)
+                    };
+                    if !self.config.symmetry || orbit.representative == passage {
+                        candidates.push(orbit);
+                    }
                 }
             }
-
-            if border.is_empty() {
-                break;
-            }
-
-            // Select random border exactly as Python
-            let idx = self.rng.random_range(0..border.len());
-            let (from, to) = border[idx];
-
-            // Generate mud exactly as Python
-            let mud_value = if self.rng.random::<f32>() < self.config.mud_density {
-                self.rng.random_range(2..=self.config.mud_range)
-            } else {
-                1
-            };
-
-            // Add connections
-            self.connections.connect(from, to);
-
-            if mud_value > 1 {
-                self.mud.insert(from, to, mud_value);
-            }
-
-            // Handle symmetry exactly as Python
-            if self.config.symmetry {
-                let sym_from = self.get_symmetric(from);
-                let sym_to = self.get_symmetric(to);
-
-                self.connections.connect(sym_from, sym_to);
-
-                if mud_value > 1 {
-                    self.mud.insert(sym_from, sym_to, mud_value);
-                }
-            }
-
-            connected[to.x as usize][to.y as usize] = true;
-            possible_border.push(to);
-            *possible_border = new_possible_border;
         }
+        candidates
     }
     #[inline]
     fn has_connection(&self, from: Coordinates, to: Coordinates) -> bool {
@@ -447,37 +471,30 @@ impl MazeGenerator {
                 if self.is_border_cell(current) && !self.has_any_connection(current) {
                     let neighbors = self.get_valid_neighbors(current);
                     if let Some(&neighbor) = neighbors.choose(&mut self.rng) {
-                        self.add_passage(current, neighbor);
-
-                        if self.config.symmetry {
-                            let sym_current = self.get_symmetric(current);
-                            let sym_neighbor = self.get_symmetric(neighbor);
-                            self.add_passage(sym_current, sym_neighbor);
-                        }
+                        let passage = Passage::new(current, neighbor);
+                        let orbit = if self.config.symmetry {
+                            PassageOrbit::rotational(passage, self.config.width, self.config.height)
+                        } else {
+                            PassageOrbit::singleton(passage)
+                        };
+                        self.open_passage_orbit(orbit);
                     }
                 }
             }
         }
     }
 
-    /// Adds a passage between two cells with optional mud
+    /// Opens one logical repair orbit and performs one shared mud trial.
     #[inline(always)]
-    fn add_passage(&mut self, from: Coordinates, to: Coordinates) {
-        // First add the walls bidirectionally
-        self.connections.connect(from, to);
+    fn open_passage_orbit(&mut self, orbit: PassageOrbit) {
+        for passage in orbit.passages() {
+            self.connections.connect(passage.first, passage.second);
+        }
 
-        // Then handle mud if needed
         if self.rng.random::<f32>() < self.config.mud_density {
             let mud_value = self.rng.random_range(2..=self.config.mud_range);
-
-            // MudMap stores both orientations for the passage.
-            self.mud.insert(from, to, mud_value);
-
-            // If symmetric, add mud for the symmetric passage
-            if self.config.symmetry {
-                let sym_from = self.get_symmetric(from);
-                let sym_to = self.get_symmetric(to);
-                self.mud.insert(sym_from, sym_to, mud_value);
+            for passage in orbit.passages() {
+                self.mud.insert(passage.first, passage.second, mud_value);
             }
         }
     }
@@ -1048,29 +1065,92 @@ mod tests {
         assert!(!grid.has_any(Coordinates::new(3, 0)));
     }
 
+    const DISCONNECTED_LEGACY_CASES: [(u8, u8, f32, bool, f32, u8); 6] = [
+        (1, 1, 1.0, false, 0.0, 2),
+        (2, 1, 1.0, true, 1.0, 4),
+        (4, 3, 0.35, false, 0.65, 4),
+        (5, 4, 0.55, true, 0.35, 5),
+        (4, 5, 0.0, true, 0.0, 2),
+        (6, 4, 1.0, true, 0.5, 3),
+    ];
+
+    fn disconnected_config(
+        width: u8,
+        height: u8,
+        target_density: f32,
+        symmetry: bool,
+        mud_density: f32,
+        mud_range: u8,
+        seed: u64,
+    ) -> MazeConfig {
+        MazeConfig {
+            width,
+            height,
+            target_density,
+            connected: false,
+            symmetry,
+            mud_density,
+            mud_range,
+            seed: Some(seed),
+        }
+    }
+
     #[test]
-    fn disconnected_generation_matches_legacy_hash_backed_path() {
+    fn disconnected_initial_layout_matches_legacy_hash_backed_path() {
+        for (width, height, target_density, symmetry, mud_density, mud_range) in
+            DISCONNECTED_LEGACY_CASES
+        {
+            for seed in [0, 1, 42, u64::MAX] {
+                let config = disconnected_config(
+                    width,
+                    height,
+                    target_density,
+                    symmetry,
+                    mud_density,
+                    mud_range,
+                    seed,
+                );
+                let mut dense = MazeGenerator::new(config);
+                let mut legacy = LegacyDisconnectedMazeGenerator::new(config);
+
+                for generation in 1..=2 {
+                    dense.generate_initial_layout();
+                    legacy.generate_initial_layout();
+                    assert_eq!(
+                        dense.connections_to_walls(),
+                        legacy.connections_to_walls(),
+                        "initial wall mismatch for {width}x{height}, symmetry={symmetry}, seed={seed}, generation={generation}"
+                    );
+                    assert_eq!(
+                        sorted_mud_entries(&dense.mud),
+                        sorted_mud_entries(&legacy.mud),
+                        "initial mud mismatch for {width}x{height}, symmetry={symmetry}, seed={seed}, generation={generation}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn unaffected_disconnected_generation_matches_legacy_hash_backed_path() {
         let cases = [
             (1, 1, 1.0, false, 0.0, 2),
-            (2, 1, 1.0, true, 1.0, 4),
             (4, 3, 0.35, false, 0.65, 4),
-            (5, 4, 0.55, true, 0.35, 5),
+            (6, 4, 1.0, false, 0.5, 3),
             (4, 5, 0.0, true, 0.0, 2),
-            (6, 4, 1.0, true, 0.5, 3),
         ];
 
         for (width, height, target_density, symmetry, mud_density, mud_range) in cases {
             for seed in [0, 1, 42, u64::MAX] {
-                let config = MazeConfig {
+                let config = disconnected_config(
                     width,
                     height,
                     target_density,
-                    connected: false,
                     symmetry,
                     mud_density,
                     mud_range,
-                    seed: Some(seed),
-                };
+                    seed,
+                );
                 let mut dense = MazeGenerator::new(config);
                 let mut legacy = LegacyDisconnectedMazeGenerator::new(config);
 
@@ -1088,6 +1168,116 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn passage_orbits_respect_symmetry_mode_and_board_parity() {
+        let ordinary = Passage::new(Coordinates::new(0, 0), Coordinates::new(1, 0));
+        assert_eq!(
+            PassageOrbit::singleton(ordinary),
+            PassageOrbit {
+                representative: ordinary,
+                mate: None,
+            }
+        );
+
+        let paired = PassageOrbit::rotational(ordinary, 4, 3);
+        assert_eq!(paired.representative, ordinary);
+        assert_eq!(
+            paired.mate,
+            Some(Passage::new(Coordinates::new(2, 2), Coordinates::new(3, 2)))
+        );
+
+        let horizontal_center = Passage::new(Coordinates::new(1, 1), Coordinates::new(2, 1));
+        assert_eq!(
+            PassageOrbit::rotational(horizontal_center, 4, 3),
+            PassageOrbit::singleton(horizontal_center)
+        );
+
+        let vertical_center = Passage::new(Coordinates::new(1, 1), Coordinates::new(1, 2));
+        assert_eq!(
+            PassageOrbit::rotational(vertical_center, 3, 4),
+            PassageOrbit::singleton(vertical_center)
+        );
+    }
+
+    #[test]
+    fn closed_repair_orbits_are_stable_and_unique() {
+        let symmetric_config = MazeConfig {
+            width: 4,
+            height: 3,
+            target_density: 1.0,
+            connected: true,
+            symmetry: true,
+            mud_density: 0.0,
+            mud_range: 2,
+            seed: Some(0),
+        };
+        let symmetric = MazeGenerator::new(symmetric_config).closed_repair_orbits();
+        assert_eq!(symmetric.len(), 9);
+        assert_eq!(
+            symmetric
+                .iter()
+                .map(|orbit| orbit.representative)
+                .collect::<HashSet<_>>()
+                .len(),
+            symmetric.len()
+        );
+        assert_eq!(
+            symmetric
+                .iter()
+                .filter(|orbit| orbit.mate.is_none())
+                .count(),
+            1
+        );
+
+        let asymmetric = MazeGenerator::new(MazeConfig {
+            symmetry: false,
+            ..symmetric_config
+        })
+        .closed_repair_orbits();
+        assert_eq!(asymmetric.len(), 17);
+        assert!(asymmetric.iter().all(|orbit| orbit.mate.is_none()));
+    }
+
+    #[test]
+    fn mirrored_orbit_opens_atomically_when_its_mate_becomes_redundant() {
+        let config = MazeConfig {
+            width: 4,
+            height: 3,
+            target_density: 1.0,
+            connected: true,
+            symmetry: true,
+            mud_density: 1.0,
+            mud_range: 4,
+            seed: Some(7),
+        };
+        let passage = Passage::new(Coordinates::new(0, 0), Coordinates::new(1, 0));
+        let orbit = PassageOrbit::rotational(passage, config.width, config.height);
+        let mate = orbit.mate.expect("ordinary passage has a distinct mirror");
+        let mut components = DisjointSet::new(usize::from(config.width * config.height));
+        components.union(
+            passage.first.to_index(config.width),
+            mate.first.to_index(config.width),
+        );
+        components.union(
+            passage.second.to_index(config.width),
+            mate.second.to_index(config.width),
+        );
+        let (first, second) = passage.indices(config.width);
+        assert!(components.union(first, second));
+        let (first, second) = mate.indices(config.width);
+        assert!(!components.union(first, second));
+
+        let mut generator = MazeGenerator::new(config);
+        generator.open_passage_orbit(orbit);
+        for edge in orbit.passages() {
+            assert!(generator.connections.contains(edge.first, edge.second));
+            assert_eq!(
+                generator.mud.get(edge.first, edge.second),
+                generator.mud.get(passage.first, passage.second)
+            );
         }
     }
 
@@ -1182,25 +1372,37 @@ mod tests {
 
     #[test]
     fn connected_generation_preserves_grid_and_mud_invariants() {
-        for (width, height, symmetry) in [(3, 3, false), (4, 3, false), (5, 4, true), (4, 5, true)]
-        {
+        let mut generated = 0;
+        for (width, height, symmetry) in [
+            (3, 3, false),
+            (4, 3, false),
+            (5, 4, true),
+            (4, 5, true),
+            (4, 3, true),
+            (3, 4, true),
+            (4, 4, true),
+        ] {
             for target_density in [0.0, 0.7, 1.0] {
-                for seed in 0..4 {
-                    let config = MazeConfig {
-                        width,
-                        height,
-                        target_density,
-                        connected: true,
-                        symmetry,
-                        mud_density: 0.55,
-                        mud_range: 4,
-                        seed: Some(seed),
-                    };
-                    let (walls, mud) = MazeGenerator::new(config).generate_owned();
-                    assert_connected_generation_invariants(config, &walls, &mud);
+                for mud_density in [0.0, 0.55, 1.0] {
+                    for seed in 0..32 {
+                        let config = MazeConfig {
+                            width,
+                            height,
+                            target_density,
+                            connected: true,
+                            symmetry,
+                            mud_density,
+                            mud_range: 4,
+                            seed: Some(seed),
+                        };
+                        let (walls, mud) = MazeGenerator::new(config).generate_owned();
+                        assert_connected_generation_invariants(config, &walls, &mud);
+                        generated += 1;
+                    }
                 }
             }
         }
+        assert_eq!(generated, 2_016);
     }
 
     #[test]
@@ -1664,3 +1866,7 @@ mod tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "maze_generation_distribution_tests.rs"]
+mod distribution_tests;
