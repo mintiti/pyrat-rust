@@ -8,7 +8,7 @@ from gymnasium.spaces import Dict as SpaceDict
 from pettingzoo.utils.env import AgentID, ParallelEnv
 
 if TYPE_CHECKING:
-    from pyrat_engine.core.builder import GameConfig
+    from pyrat_engine.core.builder import GameConfig, MazeLayout
     from pyrat_engine.core.types import Direction
 
 
@@ -53,13 +53,17 @@ class PyRatEnv(ParallelEnv):  # type: ignore[misc]
         self,
         config: GameConfig,
         seed: int | None = None,
+        maze: MazeLayout | None = None,
     ):
         super().__init__()
 
         self.possible_agents = ["player_1", "player_2"]
 
         # PyRat owns the canonical observation state.
-        self.game = config.create(seed)
+        self._maze = maze
+        self.game = (
+            config.create(seed) if maze is None else config.create_with_maze(maze, seed)
+        )
         width = config.width
         height = config.height
         cheese_count = len(self.game.cheese_positions())
@@ -103,7 +107,10 @@ class PyRatEnv(ParallelEnv):  # type: ignore[misc]
         self, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         self.agents = self.possible_agents[:]
-        self.game.reset(seed)
+        if self._maze is None:
+            self.game.reset(seed)
+        else:
+            self.game.reset_with_maze(self._maze, seed)
 
         observations = {
             "player_1": self.game.get_observation(True),

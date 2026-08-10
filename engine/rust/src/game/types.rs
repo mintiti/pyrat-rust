@@ -6,6 +6,7 @@ use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 #[cfg_attr(
     feature = "python",
@@ -226,55 +227,256 @@ impl TryFrom<u8> for Direction {
     }
 }
 
-/// A wrapper around HashMap that handles bidirectional mud lookups
-#[derive(Clone, Default)]
+type MudKey = (Coordinates, Coordinates);
+type MudEntry = (MudKey, u8);
+
+/// A wrapper around bidirectional mud lookups.
+///
+/// Maps are mutable while they are being built. Once attached to a maze they
+/// become a compact, shared lookup table; mutating a shared map transparently
+/// thaws only that clone back into an owned `HashMap`.
+#[derive(Clone)]
 pub struct MudMap {
-    inner: HashMap<(Coordinates, Coordinates), u8>,
+    storage: MudStorage,
+}
+
+#[derive(Clone)]
+enum MudStorage {
+    Mutable(HashMap<MudKey, u8>),
+    Frozen(Arc<FrozenMudMap>),
+}
+
+struct FrozenMudMap {
+    width: u8,
+    height: u8,
+    costs: Box<[u8]>,
+    present: Box<[u64]>,
+    entries: Box<[MudEntry]>,
+    overflow: HashMap<MudKey, u8>,
+}
+
+enum MudMapIterInner<'a> {
+    Mutable(std::collections::hash_map::Iter<'a, MudKey, u8>),
+    Frozen(std::slice::Iter<'a, MudEntry>),
+}
+
+struct MudMapIter<'a> {
+    inner: MudMapIterInner<'a>,
+}
+
+impl Iterator for MudMapIter<'_> {
+    type Item = MudEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match &mut self.inner {
+            MudMapIterInner::Mutable(entries) => loop {
+                let (&(pos1, pos2), &value) = entries.next()?;
+                if pos1 < pos2 {
+                    return Some(((pos1, pos2), value));
+                }
+            },
+            MudMapIterInner::Frozen(entries) => entries.next().copied(),
+        }
+    }
+}
+
+impl FrozenMudMap {
+    fn from_mutable(width: u8, height: u8, mutable: HashMap<MudKey, u8>) -> Self {
+        let mut entries: Vec<_> = mutable
+            .iter()
+            .filter(|((pos1, pos2), _)| pos1 < pos2)
+            .map(|(&(pos1, pos2), &value)| ((pos1, pos2), value))
+            .collect();
+        entries.sort_unstable();
+
+        let has_dense_entries = mutable
+            .keys()
+            .any(|&(pos1, pos2)| mud_slot(width, height, pos1, pos2).is_some());
+        let slot_count = usize::from(width) * usize::from(height) * 4;
+        let mut costs = if has_dense_entries {
+            vec![0; slot_count]
+        } else {
+            Vec::new()
+        };
+        let mut present = if has_dense_entries {
+            vec![0; slot_count.div_ceil(64)]
+        } else {
+            Vec::new()
+        };
+        let mut overflow = HashMap::new();
+
+        for (&(pos1, pos2), &value) in &mutable {
+            if let Some(slot) = mud_slot(width, height, pos1, pos2) {
+                costs[slot] = value;
+                present[slot / 64] |= 1 << (slot % 64);
+            } else {
+                overflow.insert((pos1, pos2), value);
+            }
+        }
+
+        Self {
+            width,
+            height,
+            costs: costs.into_boxed_slice(),
+            present: present.into_boxed_slice(),
+            entries: entries.into_boxed_slice(),
+            overflow,
+        }
+    }
+
+    #[inline(always)]
+    fn get(&self, pos1: Coordinates, pos2: Coordinates) -> Option<u8> {
+        if let Some(slot) = mud_slot(self.width, self.height, pos1, pos2) {
+            if self.costs.is_empty() || self.present[slot / 64] & (1 << (slot % 64)) == 0 {
+                return None;
+            }
+            return Some(self.costs[slot]);
+        }
+        self.overflow.get(&(pos1, pos2)).copied()
+    }
+
+    fn to_mutable(&self) -> HashMap<MudKey, u8> {
+        let mut mutable = self.overflow.clone();
+        for &((pos1, pos2), value) in &self.entries {
+            mutable.insert((pos1, pos2), value);
+            mutable.insert((pos2, pos1), value);
+        }
+        mutable
+    }
+}
+
+#[inline(always)]
+fn mud_slot(width: u8, height: u8, pos1: Coordinates, pos2: Coordinates) -> Option<usize> {
+    if pos1.x >= width || pos1.y >= height || pos2.x >= width || pos2.y >= height {
+        return None;
+    }
+
+    let direction = if pos1.x == pos2.x {
+        if pos1.y.checked_add(1) == Some(pos2.y) {
+            0
+        } else if pos2.y.checked_add(1) == Some(pos1.y) {
+            2
+        } else {
+            return None;
+        }
+    } else if pos1.y == pos2.y {
+        if pos1.x.checked_add(1) == Some(pos2.x) {
+            1
+        } else if pos2.x.checked_add(1) == Some(pos1.x) {
+            3
+        } else {
+            return None;
+        }
+    } else {
+        return None;
+    };
+
+    Some(pos1.to_index(width) * 4 + direction)
 }
 
 impl MudMap {
     pub fn new() -> Self {
         Self {
-            inner: HashMap::new(),
+            storage: MudStorage::Mutable(HashMap::new()),
         }
+    }
+
+    pub(crate) fn freeze(self, width: u8, height: u8) -> Self {
+        match self.storage {
+            MudStorage::Mutable(mutable) => Self {
+                storage: MudStorage::Frozen(Arc::new(FrozenMudMap::from_mutable(
+                    width, height, mutable,
+                ))),
+            },
+            MudStorage::Frozen(frozen) if frozen.width == width && frozen.height == height => {
+                Self {
+                    storage: MudStorage::Frozen(frozen),
+                }
+            },
+            MudStorage::Frozen(frozen) => Self {
+                storage: MudStorage::Frozen(Arc::new(FrozenMudMap::from_mutable(
+                    width,
+                    height,
+                    frozen.to_mutable(),
+                ))),
+            },
+        }
+    }
+
+    fn mutable(&mut self) -> &mut HashMap<MudKey, u8> {
+        if let MudStorage::Frozen(frozen) = &self.storage {
+            self.storage = MudStorage::Mutable(frozen.to_mutable());
+        }
+        let MudStorage::Mutable(mutable) = &mut self.storage else {
+            unreachable!("frozen mud map was thawed")
+        };
+        mutable
     }
 
     /// Insert mud between two positions (order doesn't matter)
     pub fn insert(&mut self, pos1: Coordinates, pos2: Coordinates, value: u8) {
-        self.inner.insert((pos1, pos2), value);
-        self.inner.insert((pos2, pos1), value);
+        let mutable = self.mutable();
+        mutable.insert((pos1, pos2), value);
+        mutable.insert((pos2, pos1), value);
     }
 
     /// Get mud value between two positions (order doesn't matter)
+    #[inline(always)]
     pub fn get(&self, pos1: Coordinates, pos2: Coordinates) -> Option<u8> {
-        self.inner.get(&(pos1, pos2)).copied()
+        match &self.storage {
+            MudStorage::Mutable(mutable) => mutable.get(&(pos1, pos2)).copied(),
+            MudStorage::Frozen(frozen) => frozen.get(pos1, pos2),
+        }
     }
 
     /// Returns an iterator over all unique mud positions and their values
-    pub fn iter(&self) -> impl Iterator<Item = ((Coordinates, Coordinates), u8)> + '_ {
-        self.inner
-            .iter()
-            .filter(|((pos1, pos2), _)| pos1 < pos2) // Only return one direction
-            .map(|((pos1, pos2), &value)| ((*pos1, *pos2), value))
+    pub fn iter(&self) -> impl Iterator<Item = MudEntry> + '_ {
+        MudMapIter {
+            inner: match &self.storage {
+                MudStorage::Mutable(mutable) => MudMapIterInner::Mutable(mutable.iter()),
+                MudStorage::Frozen(frozen) => MudMapIterInner::Frozen(frozen.entries.iter()),
+            },
+        }
     }
 
     /// Clear all mud
     pub fn clear(&mut self) {
-        self.inner.clear();
+        self.storage = MudStorage::Mutable(HashMap::new());
     }
 
     /// Returns the number of unique mud positions
     pub fn len(&self) -> usize {
-        self.inner.len() / 2
+        match &self.storage {
+            MudStorage::Mutable(mutable) => mutable.len() / 2,
+            MudStorage::Frozen(frozen) => frozen.entries.len(),
+        }
     }
 
     pub fn is_empty(&self) -> bool {
-        self.inner.is_empty()
+        match &self.storage {
+            MudStorage::Mutable(mutable) => mutable.is_empty(),
+            MudStorage::Frozen(frozen) => frozen.entries.is_empty() && frozen.overflow.is_empty(),
+        }
     }
 
     /// Check if mud exists between two positions (order doesn't matter)
+    #[inline(always)]
     pub fn contains(&self, pos1: Coordinates, pos2: Coordinates) -> bool {
-        self.inner.contains_key(&(pos1, pos2))
+        self.get(pos1, pos2).is_some()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn shares_storage_with(&self, other: &Self) -> bool {
+        match (&self.storage, &other.storage) {
+            (MudStorage::Frozen(left), MudStorage::Frozen(right)) => Arc::ptr_eq(left, right),
+            _ => false,
+        }
+    }
+}
+
+impl Default for MudMap {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -501,6 +703,89 @@ mod tests {
         // Test non-existent mud
         assert_eq!(mud_map.get(pos1, Coordinates::new(1, 0)), None);
         assert!(!mud_map.contains(pos1, Coordinates::new(1, 0)));
+    }
+
+    #[test]
+    fn frozen_mud_map_preserves_dense_and_overflow_entries() {
+        let mut mud_map = MudMap::new();
+        let vertical = (Coordinates::new(0, 0), Coordinates::new(0, 1));
+        let horizontal = (Coordinates::new(1, 1), Coordinates::new(2, 1));
+        let outside = (Coordinates::new(250, 250), Coordinates::new(251, 250));
+        let self_edge = Coordinates::new(2, 2);
+        mud_map.insert(vertical.0, vertical.1, 0);
+        mud_map.insert(horizontal.0, horizontal.1, u8::MAX);
+        mud_map.insert(outside.0, outside.1, 7);
+        mud_map.insert(self_edge, self_edge, 9);
+
+        let mut expected_entries: Vec<_> = mud_map.iter().collect();
+        expected_entries.sort_unstable();
+        let frozen = mud_map.freeze(3, 3);
+
+        assert_eq!(frozen.get(vertical.0, vertical.1), Some(0));
+        assert_eq!(frozen.get(vertical.1, vertical.0), Some(0));
+        assert_eq!(frozen.get(horizontal.0, horizontal.1), Some(u8::MAX));
+        assert_eq!(frozen.get(outside.0, outside.1), Some(7));
+        assert_eq!(frozen.get(outside.1, outside.0), Some(7));
+        assert_eq!(frozen.get(self_edge, self_edge), Some(9));
+        assert_eq!(frozen.iter().collect::<Vec<_>>(), expected_entries);
+        assert_eq!(frozen.len(), expected_entries.len());
+        assert!(!frozen.is_empty());
+    }
+
+    #[test]
+    fn frozen_mud_lookup_matches_mutable_map_for_every_cell_pair() {
+        let width = 5;
+        let height = 4;
+        let mut mutable = MudMap::new();
+        for y in 0..height {
+            for x in 0..width {
+                let position = Coordinates::new(x, y);
+                if x + 1 < width {
+                    mutable.insert(position, Coordinates::new(x + 1, y), x + y);
+                }
+                if y + 1 < height {
+                    mutable.insert(position, Coordinates::new(x, y + 1), x + y + 1);
+                }
+            }
+        }
+        let expected = mutable.clone();
+        let frozen = mutable.freeze(width, height);
+
+        for first_y in 0..height {
+            for first_x in 0..width {
+                for second_y in 0..height {
+                    for second_x in 0..width {
+                        let first = Coordinates::new(first_x, first_y);
+                        let second = Coordinates::new(second_x, second_y);
+                        assert_eq!(frozen.get(first, second), expected.get(first, second));
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn mutating_frozen_mud_map_thaws_only_that_clone() {
+        let first = Coordinates::new(0, 0);
+        let second = Coordinates::new(0, 1);
+        let third = Coordinates::new(1, 1);
+        let mut original = MudMap::new();
+        original.insert(first, second, 2);
+        let frozen = original.freeze(3, 3);
+        let mut changed = frozen.clone();
+
+        assert!(frozen.shares_storage_with(&changed));
+        changed.insert(second, third, 3);
+
+        assert!(!frozen.shares_storage_with(&changed));
+        assert_eq!(frozen.get(first, second), Some(2));
+        assert_eq!(frozen.get(second, third), None);
+        assert_eq!(changed.get(first, second), Some(2));
+        assert_eq!(changed.get(second, third), Some(3));
+
+        changed.clear();
+        assert!(changed.is_empty());
+        assert_eq!(frozen.get(first, second), Some(2));
     }
     mod coordinates {
         use super::*;

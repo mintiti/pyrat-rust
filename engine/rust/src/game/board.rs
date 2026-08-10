@@ -1,5 +1,6 @@
-use crate::{Coordinates, Direction};
+use crate::{Coordinates, Direction, Wall};
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Pre-computed valid moves lookup table with packed storage
 #[derive(Clone)]
@@ -7,7 +8,7 @@ pub struct MoveTable {
     // Each byte stores moves for two positions
     // Bits 0-3: moves for position 2n
     // Bits 4-7: moves for position 2n+1
-    valid_moves: Vec<u8>,
+    valid_moves: Arc<[u8]>,
     width: u8,
 }
 
@@ -52,7 +53,10 @@ impl MoveTable {
             }
         }
 
-        Self { valid_moves, width }
+        Self {
+            valid_moves: valid_moves.into(),
+            width,
+        }
     }
 
     /// Pack one four-direction movement mask per cell into the runtime table.
@@ -76,7 +80,10 @@ impl MoveTable {
             valid_moves.push(low | (high << 4));
         }
 
-        Self { valid_moves, width }
+        Self {
+            valid_moves: valid_moves.into(),
+            width,
+        }
     }
 
     /// Build the packed movement masks for a board with no internal walls.
@@ -111,7 +118,10 @@ impl MoveTable {
             }
         }
 
-        Self { valid_moves, width }
+        Self {
+            valid_moves: valid_moves.into(),
+            width,
+        }
     }
 
     /// Check if a move is valid for a given position
@@ -136,7 +146,7 @@ impl MoveTable {
     #[must_use]
     #[inline(always)]
     pub fn bytes(&self) -> &[u8] {
-        &self.valid_moves
+        self.valid_moves.as_ref()
     }
 
     /// Iterator of valid cardinal directions from a position.
@@ -161,6 +171,36 @@ impl MoveTable {
         } else {
             moves >> 4
         }
+    }
+
+    /// Reconstruct each internal wall once from the packed movement masks.
+    pub(crate) fn wall_entries(&self, width: u8, height: u8) -> Vec<Wall> {
+        debug_assert_eq!(self.width, width);
+
+        let mut walls = Vec::new();
+        for y in 0..height {
+            for x in 0..width {
+                let pos = Coordinates::new(x, y);
+                if x + 1 < width && !self.is_move_valid(pos, Direction::Right) {
+                    walls.push(Wall {
+                        pos1: pos,
+                        pos2: Coordinates::new(x + 1, y),
+                    });
+                }
+                if y + 1 < height && !self.is_move_valid(pos, Direction::Up) {
+                    walls.push(Wall {
+                        pos1: pos,
+                        pos2: Coordinates::new(x, y + 1),
+                    });
+                }
+            }
+        }
+        walls
+    }
+
+    #[cfg(test)]
+    pub(crate) fn shares_storage_with(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.valid_moves, &other.valid_moves)
     }
 }
 
