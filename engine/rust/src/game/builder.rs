@@ -656,10 +656,36 @@ mod tests {
         let game1 = config.create(Some(42)).unwrap();
         let game2 = config.create(Some(42)).unwrap();
 
-        assert_eq!(
-            game1.cheese.get_all_cheese_positions(),
-            game2.cheese.get_all_cheese_positions()
-        );
+        let canonical_walls = |game: &GameState| {
+            let mut walls: Vec<_> = game
+                .wall_entries()
+                .into_iter()
+                .map(|wall| (wall.pos1, wall.pos2))
+                .collect();
+            walls.sort_unstable();
+            walls
+        };
+        let canonical_mud = |game: &GameState| {
+            let mut mud: Vec<_> = game
+                .mud_positions()
+                .iter()
+                .map(|((first, second), cost)| (first, second, cost))
+                .collect();
+            mud.sort_unstable();
+            mud
+        };
+        let canonical_cheese = |game: &GameState| {
+            let mut cheese = game.cheese_positions();
+            cheese.sort_unstable();
+            cheese
+        };
+
+        assert_eq!(canonical_walls(&game1), canonical_walls(&game2));
+        assert_eq!(canonical_mud(&game1), canonical_mud(&game2));
+        assert_eq!(game1.player1_position(), game2.player1_position());
+        assert_eq!(game1.player2_position(), game2.player2_position());
+        assert_eq!(canonical_cheese(&game1), canonical_cheese(&game2));
+        assert_eq!(game1.state_hash(), game2.state_hash());
     }
 
     #[test]

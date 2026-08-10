@@ -168,6 +168,32 @@ fn seeded_disconnected_game(seed: u64) -> GameState {
         .expect("seeded disconnected compatibility fixture should be valid")
 }
 
+fn seeded_connected_classic_game(seed: u64) -> GameState {
+    GameBuilder::new(7, 5)
+        .with_random_maze(MazeParams::classic())
+        .with_corner_positions()
+        .with_custom_cheese(vec![coordinate(3, 2)])
+        .build()
+        .create(Some(seed))
+        .expect("seeded connected compatibility fixture should be valid")
+}
+
+fn seeded_symmetric_border_repair_game(seed: u64) -> GameState {
+    GameBuilder::new(3, 3)
+        .with_random_maze(MazeParams {
+            wall_density: 1.0,
+            connected: false,
+            symmetric: true,
+            mud_density: 1.0,
+            mud_range: 4,
+        })
+        .with_corner_positions()
+        .with_custom_cheese(vec![coordinate(1, 1)])
+        .build()
+        .create(Some(seed))
+        .expect("seeded border-repair compatibility fixture should be valid")
+}
+
 #[test]
 fn seeded_disconnected_topology_and_state_hash_are_stable() {
     let game = seeded_disconnected_game(0xA11C_E5E5);
@@ -184,6 +210,39 @@ fn seeded_disconnected_topology_and_state_hash_are_stable() {
         ]
     );
     assert_eq!(game.state_hash(), 0x8177_5E20_C1DE_7EE2);
+}
+
+#[test]
+fn seeded_connected_classic_topology_and_state_hash_are_stable() {
+    let game = seeded_connected_classic_game(0xD15C_01A7);
+    let topology = TopologyFingerprint::from_game(&game);
+
+    assert_eq!(
+        topology.canonical_bytes(),
+        vec![
+            7, 5, 24, 0, 0, 2, 0, 3, 0, 3, 0, 4, 1, 0, 1, 1, 1, 0, 2, 0, 1, 1, 1, 2, 1, 1, 2, 1, 1,
+            3, 2, 3, 1, 4, 2, 4, 2, 2, 2, 3, 2, 2, 3, 2, 2, 3, 2, 4, 3, 0, 3, 1, 3, 2, 4, 2, 3, 3,
+            3, 4, 4, 0, 4, 1, 4, 0, 5, 0, 4, 1, 4, 2, 4, 1, 5, 1, 4, 3, 5, 3, 4, 4, 5, 4, 5, 2, 5,
+            3, 5, 3, 5, 4, 6, 0, 6, 1, 6, 1, 6, 2, 2, 0, 2, 4, 3, 4, 3, 3, 0, 4, 0, 3,
+        ]
+    );
+    assert_eq!(game.state_hash(), 0x4766_48D1_8D5C_2B13);
+}
+
+#[test]
+fn seeded_symmetric_border_repair_topology_and_state_hash_are_stable() {
+    let game = seeded_symmetric_border_repair_game(0xB04D_EA5E);
+    let topology = TopologyFingerprint::from_game(&game);
+
+    assert_eq!(
+        topology.canonical_bytes(),
+        vec![
+            3, 3, 6, 0, 0, 0, 0, 1, 0, 2, 1, 2, 1, 0, 1, 1, 1, 0, 2, 0, 1, 1, 1, 2, 2, 1, 2, 2, 6,
+            0, 0, 0, 1, 0, 2, 0, 1, 0, 2, 2, 0, 1, 1, 1, 3, 1, 1, 2, 1, 3, 1, 2, 2, 2, 2, 2, 0, 2,
+            1, 2,
+        ]
+    );
+    assert_eq!(game.state_hash(), 0xE511_3619_2A54_EA01);
 }
 
 #[test]
