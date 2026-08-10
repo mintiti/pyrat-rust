@@ -24,6 +24,7 @@
 
 use crate::game::maze_generation::{CheeseConfig, CheeseGenerator, MazeConfig, MazeGenerator};
 use crate::game::types::MudMap;
+use crate::game::zobrist;
 use crate::{Coordinates, GameState, MoveTable};
 use rand::{Rng, RngExt, SeedableRng};
 use std::collections::HashMap;
@@ -428,19 +429,24 @@ impl GameConfig {
             seed.map_or_else(rand::make_rng, SeedableRng::seed_from_u64);
 
         // 1. Maze topology
-        let (move_table, mud) = match &self.maze {
+        let (move_table, mud, topology_hash) = match &self.maze {
             MazeStrategy::Fixed { walls, mud } => {
                 let walls = walls.clone();
-                (
-                    MoveTable::new(self.width(), self.height(), &walls),
-                    mud.clone(),
-                )
+                let move_table = MoveTable::new(self.width(), self.height(), &walls);
+                let mud = mud.clone();
+                let topology_hash =
+                    zobrist::maze_hash(&move_table, &mud, self.width(), self.height());
+                (move_table, mud, topology_hash)
             },
             MazeStrategy::Random(params) => {
                 // Preserve the parent RNG stream even when the topology is predetermined.
                 let maze_seed = rng.random();
                 if params.wall_density == 0.0 && params.mud_density == 0.0 {
-                    (MoveTable::open(self.width(), self.height()), MudMap::new())
+                    let move_table = MoveTable::open(self.width(), self.height());
+                    let mud = MudMap::new();
+                    let topology_hash =
+                        zobrist::maze_hash(&move_table, &mud, self.width(), self.height());
+                    (move_table, mud, topology_hash)
                 } else {
                     let maze_config = MazeConfig {
                         width: self.width(),
@@ -452,8 +458,7 @@ impl GameConfig {
                         mud_range: params.mud_range,
                         seed: Some(maze_seed),
                     };
-                    let (walls, mud) = MazeGenerator::new(maze_config).generate_owned();
-                    (MoveTable::new(self.width(), self.height(), &walls), mud)
+                    MazeGenerator::new(maze_config).generate_runtime_topology()
                 }
             },
         };
@@ -494,6 +499,7 @@ impl GameConfig {
             self.height(),
             move_table,
             mud,
+            topology_hash,
             &cheese_positions,
             p1,
             p2,

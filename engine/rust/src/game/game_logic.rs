@@ -101,6 +101,7 @@ impl GameState {
         height: u8,
         move_table: MoveTable,
         mud: MudMap,
+        topology_hash: u64,
         cheese_positions: &[Coordinates],
         player1_pos: Coordinates,
         player2_pos: Coordinates,
@@ -139,8 +140,7 @@ impl GameState {
         }
 
         // Compute initial Zobrist hash: maze topology (static) XOR dynamic state
-        game.state_hash = zobrist::maze_hash(&game.move_table, &game.mud, width, height)
-            ^ zobrist::compute_from_scratch(&game);
+        game.state_hash = topology_hash ^ zobrist::compute_from_scratch(&game);
 
         game
     }
