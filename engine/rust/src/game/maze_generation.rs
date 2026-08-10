@@ -1,6 +1,7 @@
 #![allow(clippy::uninlined_format_args)]
 
-use crate::{Coordinates, Direction};
+use crate::game::zobrist;
+use crate::{Coordinates, Direction, MoveTable};
 use rand::prelude::{IndexedRandom, SliceRandom};
 use rand::RngExt;
 use std::collections::{HashMap, HashSet};
@@ -83,6 +84,10 @@ impl ConnectionGrid {
     #[inline]
     const fn in_bounds(&self, pos: Coordinates) -> bool {
         pos.x < self.width && pos.y < self.height
+    }
+
+    fn compile_move_table(&self) -> MoveTable {
+        MoveTable::from_cell_masks(self.width, self.height, &self.masks)
     }
 }
 
@@ -251,17 +256,33 @@ impl MazeGenerator {
 
     /// Generates a complete maze with walls and mud
     pub fn generate(&mut self) -> (WallMap, MudMap) {
-        let walls = self.generate_in_place();
+        self.generate_in_place();
+        let walls = self.connections_to_walls();
         (walls, self.mud.clone())
     }
 
     /// Generates a complete maze when the caller owns this generator.
+    #[cfg(test)]
     pub(crate) fn generate_owned(mut self) -> (WallMap, MudMap) {
-        let walls = self.generate_in_place();
+        self.generate_in_place();
+        let walls = self.connections_to_walls();
         (walls, self.mud)
     }
 
-    fn generate_in_place(&mut self) -> WallMap {
+    /// Generates and compiles the runtime topology without projecting a wall map.
+    pub(crate) fn generate_runtime_topology(mut self) -> (MoveTable, MudMap, u64) {
+        self.generate_in_place();
+        let move_table = self.connections.compile_move_table();
+        let topology_hash = zobrist::maze_hash(
+            &move_table,
+            &self.mud,
+            self.config.width,
+            self.config.height,
+        );
+        (move_table, self.mud, topology_hash)
+    }
+
+    fn generate_in_place(&mut self) {
         self.generate_initial_layout();
 
         if self.config.connected {
@@ -274,9 +295,6 @@ impl MazeGenerator {
         if let Err(e) = self.validate_output() {
             panic!("Maze generation failed validation: {e}");
         }
-
-        // Convert connections to walls (blocked passages)
-        self.connections_to_walls()
     }
 
     /// Generates the initial random layout of the maze
@@ -753,6 +771,7 @@ impl CheeseGenerator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::GameState;
 
     fn legacy_generate_cheese(
         config: &CheeseConfig,
@@ -1063,6 +1082,134 @@ mod tests {
         assert!(!grid.contains(corner, Coordinates::new(1, 1)));
         assert!(!grid.contains(corner, Coordinates::new(3, 0)));
         assert!(!grid.has_any(Coordinates::new(3, 0)));
+    }
+
+    #[test]
+    fn direct_runtime_topology_matches_wall_projection_and_action_traces() {
+        let cases = [
+            (3, 3, 0.0, true, true, 0.0, 2),
+            (4, 3, 0.35, true, false, 0.65, 4),
+            (7, 5, 0.7, true, true, 0.1, 5),
+            (8, 6, 1.0, false, true, 1.0, 4),
+        ];
+        let actions = [
+            (Direction::Right, Direction::Left),
+            (Direction::Up, Direction::Down),
+            (Direction::Up, Direction::Left),
+            (Direction::Left, Direction::Up),
+            (Direction::Down, Direction::Right),
+            (Direction::Right, Direction::Down),
+            (Direction::Stay, Direction::Stay),
+            (Direction::Down, Direction::Left),
+        ];
+
+        for (width, height, target_density, connected, symmetry, mud_density, mud_range) in cases {
+            for seed in [0, 1, 0xD15C_01A7, u64::MAX] {
+                let config = MazeConfig {
+                    width,
+                    height,
+                    target_density,
+                    connected,
+                    symmetry,
+                    mud_density,
+                    mud_range,
+                    seed: Some(seed),
+                };
+
+                let (walls, projected_mud) = MazeGenerator::new(config).generate_owned();
+                let projected_moves = MoveTable::new(width, height, &walls);
+                let projected_hash =
+                    zobrist::maze_hash(&projected_moves, &projected_mud, width, height);
+
+                let (direct_moves, direct_mud, direct_hash) =
+                    MazeGenerator::new(config).generate_runtime_topology();
+
+                assert_eq!(
+                    direct_moves.bytes(),
+                    projected_moves.bytes(),
+                    "packed movement masks changed for {config:?}"
+                );
+                assert_eq!(
+                    sorted_mud_entries(&direct_mud),
+                    sorted_mud_entries(&projected_mud),
+                    "mud projection changed for {config:?}"
+                );
+                assert_eq!(
+                    direct_hash, projected_hash,
+                    "static topology hash changed for {config:?}"
+                );
+
+                let cheese = [Coordinates::new(width / 2, height / 2)];
+                let player1 = Coordinates::new(0, 0);
+                let player2 = Coordinates::new(width - 1, height - 1);
+                let mut projected_game = GameState::new_with_config(
+                    width,
+                    height,
+                    projected_moves,
+                    projected_mud,
+                    projected_hash,
+                    &cheese,
+                    player1,
+                    player2,
+                    64,
+                );
+                let mut direct_game = GameState::new_with_config(
+                    width,
+                    height,
+                    direct_moves,
+                    direct_mud,
+                    direct_hash,
+                    &cheese,
+                    player1,
+                    player2,
+                    64,
+                );
+
+                assert_eq!(
+                    direct_game.wall_entries(),
+                    projected_game.wall_entries(),
+                    "public wall projection changed for {config:?}"
+                );
+                assert_eq!(
+                    direct_game.state_hash(),
+                    projected_game.state_hash(),
+                    "initial dynamic hash changed for {config:?}"
+                );
+
+                for (turn, &(player1_action, player2_action)) in
+                    actions.iter().cycle().take(32).enumerate()
+                {
+                    let projected_result =
+                        projected_game.process_turn(player1_action, player2_action);
+                    let direct_result = direct_game.process_turn(player1_action, player2_action);
+
+                    assert_eq!(
+                        (
+                            direct_result.p1_moved,
+                            direct_result.p2_moved,
+                            direct_result.game_over,
+                            direct_result.p1_score,
+                            direct_result.p2_score,
+                            direct_result.collected_cheese,
+                        ),
+                        (
+                            projected_result.p1_moved,
+                            projected_result.p2_moved,
+                            projected_result.game_over,
+                            projected_result.p1_score,
+                            projected_result.p2_score,
+                            projected_result.collected_cheese,
+                        ),
+                        "action result changed on turn {turn} for {config:?}"
+                    );
+                    assert_eq!(
+                        direct_game.state_hash(),
+                        projected_game.state_hash(),
+                        "dynamic hash changed on turn {turn} for {config:?}"
+                    );
+                }
+            }
+        }
     }
 
     const DISCONNECTED_LEGACY_CASES: [(u8, u8, f32, bool, f32, u8); 6] = [

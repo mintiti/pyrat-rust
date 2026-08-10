@@ -55,6 +55,30 @@ impl MoveTable {
         Self { valid_moves, width }
     }
 
+    /// Pack one four-direction movement mask per cell into the runtime table.
+    #[must_use]
+    pub(crate) fn from_cell_masks(width: u8, height: u8, masks: &[u8]) -> Self {
+        let cell_count = usize::from(width) * usize::from(height);
+        assert_eq!(
+            masks.len(),
+            cell_count,
+            "movement mask count must match board dimensions"
+        );
+        debug_assert!(
+            masks.iter().all(|mask| mask & !0x0f == 0),
+            "cell movement masks must use only the low four bits"
+        );
+
+        let mut valid_moves = Vec::with_capacity(cell_count.div_ceil(2));
+        for pair in masks.chunks(2) {
+            let low = pair[0];
+            let high = pair.get(1).copied().unwrap_or(0);
+            valid_moves.push(low | (high << 4));
+        }
+
+        Self { valid_moves, width }
+    }
+
     /// Build the packed movement masks for a board with no internal walls.
     #[must_use]
     pub(crate) fn open(width: u8, height: u8) -> Self {
