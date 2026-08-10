@@ -16,7 +16,7 @@
 
 use crate::game::types::MudMap;
 use crate::game::zobrist;
-use crate::{CheeseBoard, Coordinates, Direction, MoveTable, Wall};
+use crate::{CheeseBoard, Coordinates, Direction, MazeLayout, MoveTable, Wall};
 use serde::{Deserialize, Serialize};
 #[cfg(test)]
 use std::collections::HashMap;
@@ -94,19 +94,15 @@ impl GameState {
     pub const DEFAULT_WIDTH: u8 = 21;
     pub const DEFAULT_HEIGHT: u8 = 15;
     pub const DEFAULT_CHEESE_COUNT: u16 = 41;
-    #[allow(clippy::too_many_arguments)]
     #[must_use]
-    pub(crate) fn new_with_config(
-        width: u8,
-        height: u8,
-        move_table: MoveTable,
-        mud: MudMap,
-        topology_hash: u64,
+    pub(crate) fn new_with_layout(
+        maze: MazeLayout,
         cheese_positions: &[Coordinates],
         player1_pos: Coordinates,
         player2_pos: Coordinates,
         max_turns: u16,
     ) -> Self {
+        let (width, height, move_table, mud, topology_hash) = maze.into_parts();
         let player1 = PlayerState {
             current_pos: player1_pos,
             mud_timer: 0,
@@ -143,6 +139,29 @@ impl GameState {
         game.state_hash = topology_hash ^ zobrist::compute_from_scratch(&game);
 
         game
+    }
+
+    #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
+    #[must_use]
+    pub(crate) fn new_with_config(
+        width: u8,
+        height: u8,
+        move_table: MoveTable,
+        mud: MudMap,
+        topology_hash: u64,
+        cheese_positions: &[Coordinates],
+        player1_pos: Coordinates,
+        player2_pos: Coordinates,
+        max_turns: u16,
+    ) -> Self {
+        Self::new_with_layout(
+            MazeLayout::new(width, height, move_table, mud, topology_hash),
+            cheese_positions,
+            player1_pos,
+            player2_pos,
+            max_turns,
+        )
     }
 
     /// Process a single game turn.
@@ -481,27 +500,7 @@ impl GameState {
     /// deduplicates (each wall is visited exactly once).
     #[must_use]
     pub fn wall_entries(&self) -> Vec<Wall> {
-        let mut walls = Vec::new();
-        for y in 0..self.height {
-            for x in 0..self.width {
-                let pos = Coordinates::new(x, y);
-                // Check Right neighbor
-                if x + 1 < self.width && !self.move_table.is_move_valid(pos, Direction::Right) {
-                    walls.push(Wall {
-                        pos1: pos,
-                        pos2: Coordinates::new(x + 1, y),
-                    });
-                }
-                // Check Up neighbor
-                if y + 1 < self.height && !self.move_table.is_move_valid(pos, Direction::Up) {
-                    walls.push(Wall {
-                        pos1: pos,
-                        pos2: Coordinates::new(x, y + 1),
-                    });
-                }
-            }
-        }
-        walls
+        self.move_table.wall_entries(self.width, self.height)
     }
 
     /// Content-addressable hash of the game position (Zobrist, O(1) read).

@@ -28,7 +28,7 @@ from pyrat_engine.core.types import Direction  # noqa: E402
 
 # Conditionally import types for type checking to avoid "not valid as a type" errors
 if TYPE_CHECKING:
-    from pyrat_engine.core.builder import GameBuilder, GameConfig
+    from pyrat_engine.core.builder import GameBuilder, GameConfig, MazeLayout
     from pyrat_engine.core.game import PyMoveUndo as MoveUndo
     from pyrat_engine.core.game import PyRat
     from pyrat_engine.core.observation import PyGameObservation as GameObservation
@@ -40,6 +40,7 @@ else:
     ObservationHandler = _impl.observation.PyObservationHandler
     GameBuilder = _impl.builder.GameBuilder
     GameConfig = _impl.builder.GameConfig
+    MazeLayout = _impl.builder.MazeLayout
 
 __all__ = [
     # Submodules
@@ -61,4 +62,5 @@ __all__ = [
     # Builder
     "GameBuilder",
     "GameConfig",
+    "MazeLayout",
 ]

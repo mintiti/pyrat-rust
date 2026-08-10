@@ -3,6 +3,18 @@
 from pyrat_engine.core.game import PyRat
 from pyrat_engine.core.types import Coordinates, Mud, Wall
 
+class MazeLayout:
+    """Immutable maze topology reusable across independent games."""
+
+    @property
+    def width(self) -> int: ...
+    @property
+    def height(self) -> int: ...
+    @property
+    def topology_hash(self) -> int: ...
+    def wall_entries(self) -> list[Wall]: ...
+    def mud_entries(self) -> list[Mud]: ...
+
 class GameConfig:
     """Reusable game configuration. Stamps out PyRat instances via create().
 
@@ -24,6 +36,14 @@ class GameConfig:
 
     def create(self, seed: int | None = None) -> PyRat:
         """Stamp out a new game from this config."""
+        ...
+
+    def generate_maze(self, seed: int | None = None) -> MazeLayout:
+        """Generate and compile this config's maze for reuse."""
+        ...
+
+    def create_with_maze(self, maze: MazeLayout, seed: int | None = None) -> PyRat:
+        """Stamp out a new game on an already generated maze."""
         ...
 
     @property

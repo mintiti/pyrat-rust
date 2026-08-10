@@ -2,7 +2,7 @@ use pyrat::bench_scenarios::{BoardSize, FeatureCombo, COMBOS, SIZES};
 use pyrat::game::maze_generation::{CheeseGenerator, MazeGenerator, WallMap};
 use pyrat::{
     CheeseConfig, Coordinates, Direction, GameBuilder, GameConfig, GameState, MazeConfig,
-    MazeParams, MudMap,
+    MazeLayout, MazeParams, MudMap,
 };
 use rand::{Rng, RngExt, SeedableRng};
 
@@ -45,6 +45,7 @@ pub(crate) struct PreparedScenario {
     pub(crate) spec: ScenarioSpec,
     pub(crate) random_config: GameConfig,
     pub(crate) fixed_config: GameConfig,
+    pub(crate) reused_maze: MazeLayout,
     pub(crate) walls: WallMap,
     pub(crate) mud: MudMap,
     pub(crate) initial_game: GameState,
@@ -121,6 +122,7 @@ impl ScenarioSpec {
 impl PreparedScenario {
     fn new(spec: ScenarioSpec) -> Result<Self, String> {
         let random_config = spec.random_config();
+        let reused_maze = random_config.generate_maze(Some(spec.seeds.game));
 
         let mut maze_generator = MazeGenerator::new(spec.maze_config(spec.seeds.maze));
         let (walls, mud) = maze_generator.generate();
@@ -174,6 +176,7 @@ impl PreparedScenario {
             spec,
             random_config,
             fixed_config,
+            reused_maze,
             walls,
             mud,
             initial_game,

@@ -204,6 +204,74 @@ fn bench_fixed_create(c: &mut Criterion, scenarios: &[PreparedScenario]) {
     group.finish();
 }
 
+fn bench_reused_maze_create(c: &mut Criterion, scenarios: &[PreparedScenario]) {
+    let mut group = c.benchmark_group("reused_maze_create");
+    group.sample_size(20);
+    group.throughput(Throughput::Elements(SEED_TAPE_LEN as u64));
+
+    for scenario in scenarios {
+        group.bench_function(
+            bench_id(scenario.spec.size, scenario.spec.combo),
+            |bencher| {
+                bencher.iter_batched(
+                    || (),
+                    |()| {
+                        let games: [GameState; SEED_TAPE_LEN] = std::array::from_fn(|index| {
+                            scenario
+                                .random_config
+                                .create_with_maze(
+                                    &scenario.reused_maze,
+                                    Some(scenario.create_seeds[index]),
+                                )
+                                .unwrap()
+                        });
+                        games
+                    },
+                    BatchSize::LargeInput,
+                );
+            },
+        );
+    }
+    group.finish();
+}
+
+fn bench_paired_maze_setup(c: &mut Criterion, scenarios: &[PreparedScenario]) {
+    let mut group = c.benchmark_group("paired_maze_setup");
+    group.sample_size(20);
+    // Each element is one two-game, same-maze setup.
+    group.throughput(Throughput::Elements(SEED_TAPE_LEN as u64));
+
+    for scenario in scenarios {
+        group.bench_function(
+            bench_id(scenario.spec.size, scenario.spec.combo),
+            |bencher| {
+                bencher.iter_batched(
+                    || (),
+                    |()| {
+                        let pairs: [(GameState, GameState); SEED_TAPE_LEN] =
+                            std::array::from_fn(|index| {
+                                let seed = Some(scenario.create_seeds[index]);
+                                (
+                                    scenario
+                                        .random_config
+                                        .create_with_maze(&scenario.reused_maze, seed)
+                                        .unwrap(),
+                                    scenario
+                                        .random_config
+                                        .create_with_maze(&scenario.reused_maze, seed)
+                                        .unwrap(),
+                                )
+                            });
+                        pairs
+                    },
+                    BatchSize::LargeInput,
+                );
+            },
+        );
+    }
+    group.finish();
+}
+
 fn bench_process_turn(c: &mut Criterion, scenarios: &[PreparedScenario]) {
     let mut group = c.benchmark_group("process_turn");
     group.sample_size(50);
@@ -341,6 +409,8 @@ fn bench_rust_matrix(c: &mut Criterion) {
     bench_cheese_generation(c, &scenarios);
     bench_topology_compilation(c, &scenarios);
     bench_fixed_create(c, &scenarios);
+    bench_reused_maze_create(c, &scenarios);
+    bench_paired_maze_setup(c, &scenarios);
     bench_process_turn(c, &scenarios);
     bench_make_unmake(c, &scenarios);
     bench_make_unmake_no_collection(c, &scenarios);

@@ -4,7 +4,7 @@ use crate::game::game_logic::MoveUndo;
 use crate::game::observations::ObservationHandler;
 use crate::game::types::CoordinatesInput;
 use crate::game::types::MudMap;
-use crate::{Coordinates, Direction, GameState, Wall};
+use crate::{Coordinates, Direction, GameState, MazeLayout, Wall};
 use numpy::{PyArray2, PyArray3};
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
@@ -124,6 +124,61 @@ impl PyMoveUndo {
 // PyGameConfig — reusable game configuration
 // ---------------------------------------------------------------------------
 
+/// Immutable maze topology that can be reused across independent games.
+#[pyclass(name = "MazeLayout", frozen)]
+#[derive(Clone)]
+pub struct PyMazeLayout {
+    inner: MazeLayout,
+}
+
+#[pymethods]
+impl PyMazeLayout {
+    #[getter]
+    fn width(&self) -> u8 {
+        self.inner.width()
+    }
+
+    #[getter]
+    fn height(&self) -> u8 {
+        self.inner.height()
+    }
+
+    #[getter]
+    fn topology_hash(&self) -> u64 {
+        self.inner.topology_hash()
+    }
+
+    fn wall_entries(&self) -> Vec<Wall> {
+        self.inner.wall_entries()
+    }
+
+    fn mud_entries(&self) -> Vec<crate::Mud> {
+        self.inner
+            .mud_positions()
+            .iter()
+            .map(|((pos1, pos2), value)| crate::Mud { pos1, pos2, value })
+            .collect()
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "MazeLayout({}x{}, walls={}, mud={})",
+            self.inner.width(),
+            self.inner.height(),
+            self.inner.wall_entries().len(),
+            self.inner.mud_positions().len()
+        )
+    }
+
+    fn __copy__(&self) -> Self {
+        self.clone()
+    }
+
+    fn __deepcopy__(&self, _memo: &Bound<'_, PyAny>) -> Self {
+        self.clone()
+    }
+}
+
 /// Reusable game configuration. Stamps out `PyRat` instances via `create()`.
 #[pyclass(name = "GameConfig")]
 #[derive(Clone)]
@@ -165,6 +220,29 @@ impl PyGameConfig {
     #[pyo3(signature = (seed=None))]
     fn create(&self, seed: Option<u64>) -> PyResult<PyRat> {
         let game = self.inner.create(seed).map_err(PyValueError::new_err)?;
+        let observation_handler = ObservationHandler::new(&game);
+        Ok(PyRat {
+            game,
+            observation_handler,
+            config: self.inner.clone(),
+        })
+    }
+
+    /// Generate and compile this config's maze for reuse.
+    #[pyo3(signature = (seed=None))]
+    fn generate_maze(&self, seed: Option<u64>) -> PyMazeLayout {
+        PyMazeLayout {
+            inner: self.inner.generate_maze(seed),
+        }
+    }
+
+    /// Stamp out a new game on an already generated maze.
+    #[pyo3(signature = (maze, seed=None))]
+    fn create_with_maze(&self, maze: &PyMazeLayout, seed: Option<u64>) -> PyResult<PyRat> {
+        let game = self
+            .inner
+            .create_with_maze(&maze.inner, seed)
+            .map_err(PyValueError::new_err)?;
         let observation_handler = ObservationHandler::new(&game);
         Ok(PyRat {
             game,
@@ -503,14 +581,14 @@ impl PyGameBuilder {
         })?;
 
         Ok(PyGameConfig {
-            inner: GameConfig {
-                width: self.width,
-                height: self.height,
-                max_turns: self.max_turns,
+            inner: GameConfig::from_parts(
+                self.width,
+                self.height,
+                self.max_turns,
                 maze,
                 players,
                 cheese,
-            },
+            ),
         })
     }
 }
@@ -773,6 +851,19 @@ impl PyRat {
         Ok(())
     }
 
+    /// Reset the game on an already generated maze.
+    #[pyo3(signature = (maze, seed=None))]
+    fn reset_with_maze(&mut self, maze: &PyMazeLayout, seed: Option<u64>) -> PyResult<()> {
+        let game = self
+            .config
+            .create_with_maze(&maze.inner, seed)
+            .map_err(PyValueError::new_err)?;
+        let observation_handler = ObservationHandler::new(&game);
+        self.game = game;
+        self.observation_handler = observation_handler;
+        Ok(())
+    }
+
     // String representation
     fn __repr__(&self) -> String {
         format!(
@@ -984,5 +1075,6 @@ pub fn register_observation(m: &Bound<'_, PyModule>) -> PyResult<()> {
 pub fn register_builder(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyGameBuilder>()?;
     m.add_class::<PyGameConfig>()?;
+    m.add_class::<PyMazeLayout>()?;
     Ok(())
 }

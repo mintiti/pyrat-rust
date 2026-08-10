@@ -5,6 +5,7 @@ This module contains the main game state management:
 - MoveUndo: Undo information for game tree search
 """
 
+from pyrat_engine.core.builder import MazeLayout
 from pyrat_engine.core.observation import GameObservation
 from pyrat_engine.core.types import Coordinates, Mud, Wall
 
@@ -279,6 +280,10 @@ class PyRat:
         Args:
             seed: Optional random seed for reproducible maze generation
         """
+        ...
+
+    def reset_with_maze(self, maze: MazeLayout, seed: int | None = None) -> None:
+        """Reset the game on an already generated maze."""
         ...
 
     def get_observation(self, is_player_one: bool) -> GameObservation:

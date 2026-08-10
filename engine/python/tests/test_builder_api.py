@@ -3,7 +3,7 @@
 # ruff: noqa: PLR2004
 
 import pytest
-from pyrat_engine import Coordinates, GameBuilder, GameConfig, Mud, Wall
+from pyrat_engine import Coordinates, GameBuilder, GameConfig, MazeLayout, Mud, Wall
 
 
 class TestGameConfigPresets:
@@ -78,6 +78,95 @@ class TestGameConfigReuse:
             assert game.width == config.width
             assert game.height == config.height
             assert game.max_turns == config.max_turns
+
+
+class TestMazeLayoutReuse:
+    """Test the explicit generate-one-maze, create-many-games path."""
+
+    def test_layout_is_read_only_and_inspectable(self):
+        import copy
+
+        config = GameConfig.classic(11, 9, 13)
+        maze = config.generate_maze(seed=42)
+
+        assert isinstance(maze, MazeLayout)
+        assert maze.width == 11
+        assert maze.height == 9
+        assert isinstance(maze.topology_hash, int)
+        assert len(maze.wall_entries()) > 0
+        assert isinstance(maze.mud_entries(), list)
+        assert "MazeLayout(11x9" in repr(maze)
+        assert copy.copy(maze).topology_hash == maze.topology_hash
+        with pytest.raises(AttributeError):
+            maze.width = 7
+
+    def test_generated_maze_path_matches_one_shot_game_and_trace(self):
+        config = (
+            GameBuilder(11, 9)
+            .with_classic_maze()
+            .with_random_positions()
+            .with_random_cheese(13, symmetric=True)
+            .build()
+        )
+        direct = config.create(seed=42)
+        maze = config.generate_maze(seed=42)
+        reused = config.create_with_maze(maze, seed=42)
+
+        def canonical_mud(game):
+            return sorted(
+                (mud.pos1.x, mud.pos1.y, mud.pos2.x, mud.pos2.y, mud.value)
+                for mud in game.mud_entries()
+            )
+
+        def assert_same_game():
+            assert direct.state_hash == reused.state_hash
+            assert direct.player1_position == reused.player1_position
+            assert direct.player2_position == reused.player2_position
+            assert direct.cheese_positions() == reused.cheese_positions()
+            assert direct.wall_entries() == reused.wall_entries()
+            assert canonical_mud(direct) == canonical_mud(reused)
+
+        assert_same_game()
+        actions = [(0, 3), (1, 2), (4, 0), (3, 1), (2, 4)]
+        for turn in range(24):
+            action = actions[turn % len(actions)]
+            assert direct.step(*action) == reused.step(*action)
+            assert_same_game()
+
+    def test_create_with_maze_rejects_other_dimensions(self):
+        config = GameConfig.classic(11, 9, 13)
+        other_maze = GameConfig.classic(7, 5, 5).generate_maze(seed=42)
+
+        with pytest.raises(ValueError, match="Maze dimensions 7x5"):
+            config.create_with_maze(other_maze, seed=42)
+
+    def test_reset_with_maze_keeps_topology_and_changes_dynamic_state(self):
+        config = (
+            GameBuilder(9, 7)
+            .with_classic_maze()
+            .with_random_positions()
+            .with_random_cheese(9, symmetric=False)
+            .build()
+        )
+        maze = config.generate_maze(seed=500)
+        game = config.create_with_maze(maze, seed=71)
+        walls = game.wall_entries()
+        mud = game.mud_entries()
+        initial_dynamic = (
+            game.player1_position,
+            game.player2_position,
+            game.cheese_positions(),
+        )
+
+        game.reset_with_maze(maze, seed=72)
+
+        assert game.wall_entries() == walls
+        assert game.mud_entries() == mud
+        assert (
+            game.player1_position,
+            game.player2_position,
+            game.cheese_positions(),
+        ) != initial_dynamic
 
 
 class TestGameBuilderMazeStrategies:

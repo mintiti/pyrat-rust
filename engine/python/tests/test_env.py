@@ -109,6 +109,26 @@ def test_env_reset_uses_the_game_owned_observation_state() -> None:
     )
 
 
+def test_env_can_reuse_one_maze_across_resets() -> None:
+    """Supplying a maze fixes topology while seeds still select dynamic state."""
+    config = GameConfig.classic(7, 5, 5)
+    maze = config.generate_maze(seed=500)
+    env = PyRatEnv(config, seed=71, maze=maze)
+    initial_movement = env.game.get_observation(True).movement_matrix.copy()
+
+    observations, _ = env.reset(seed=72)
+    expected = config.create_with_maze(maze, seed=72)
+
+    np.testing.assert_array_equal(
+        observations["player_1"].movement_matrix,
+        initial_movement,
+    )
+    assert env.game.state_hash == expected.state_hash
+    assert env.game.player1_position == expected.player1_position
+    assert env.game.player2_position == expected.player2_position
+    assert env.game.cheese_positions() == expected.cheese_positions()
+
+
 def test_env_step_updates_collected_cheese() -> None:
     """The environment observes cheese removed by its game step."""
     config = (

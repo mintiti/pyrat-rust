@@ -21,5 +21,6 @@ pub use game::{
     cheese_board::CheeseBoard,
     game_logic::{GameState, MoveUndo, PlayerState},
     maze_generation::{CheeseConfig, MazeConfig},
+    maze_layout::MazeLayout,
     types::{Coordinates, Direction, Mud, MudMap, Wall},
 };

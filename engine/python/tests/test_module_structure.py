@@ -58,10 +58,11 @@ class TestModuleStructure:
 
     def test_builder_submodule_imports(self):
         """Test importing from the builder submodule."""
-        from pyrat_engine.core.builder import GameBuilder, GameConfig
+        from pyrat_engine.core.builder import GameBuilder, GameConfig, MazeLayout
 
         assert GameBuilder is not None
         assert GameConfig is not None
+        assert MazeLayout is not None
 
     def test_core_level_imports(self):
         """Test that commonly used classes are available at the core level."""
@@ -71,6 +72,7 @@ class TestModuleStructure:
             GameBuilder,
             GameConfig,
             GameObservation,
+            MazeLayout,
             MoveUndo,
             Mud,
             ObservationHandler,
@@ -91,15 +93,17 @@ class TestModuleStructure:
                 ObservationHandler,
                 GameBuilder,
                 GameConfig,
+                MazeLayout,
             ]
         )
 
     def test_top_level_imports(self):
         """Test that GameBuilder and GameConfig are available at the top level."""
-        from pyrat_engine import GameBuilder, GameConfig
+        from pyrat_engine import GameBuilder, GameConfig, MazeLayout
 
         assert GameBuilder is not None
         assert GameConfig is not None
+        assert MazeLayout is not None
 
 
 class TestTypesFunctionality:

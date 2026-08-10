@@ -52,8 +52,11 @@ EnvironmentAction = Dict[str, int]
 CASE_NAMES = (
     "create/random",
     "create/fixed",
+    "create/reused-maze",
+    "setup/paired-maze",
     "reset/random",
     "reset/fixed",
+    "reset/reused-maze",
     "observation/pair",
     "step/pyrat",
     "step/env",
@@ -67,6 +70,7 @@ MASK_U64 = (1 << 64) - 1
 
 RANDOM_OPERATIONS_PER_BATCH = 4
 FIXED_OPERATIONS_PER_BATCH = 16
+REUSED_OPERATIONS_PER_BATCH = 16
 OBSERVATION_PAIRS_PER_BATCH = 256
 MAX_TRACE_TURNS = 128
 MAX_ADAPTIVE_ITERATIONS = 100_000
@@ -108,6 +112,24 @@ class CreateContext:
 @dataclass(frozen=True)
 class ResetContext:
     game: Any
+    seeds: tuple[int, ...]
+    width: int
+    height: int
+
+
+@dataclass(frozen=True)
+class MazeCreateContext:
+    config: Any
+    maze: Any
+    seeds: tuple[int, ...]
+    width: int
+    height: int
+
+
+@dataclass(frozen=True)
+class MazeResetContext:
+    game: Any
+    maze: Any
     seeds: tuple[int, ...]
     width: int
     height: int
@@ -300,6 +322,61 @@ def _measure_reset(context: ResetContext) -> MeasuredBatch:
     return MeasuredBatch(elapsed_ns, len(seeds))
 
 
+def _measure_create_with_maze(context: MazeCreateContext) -> MeasuredBatch:
+    config = context.config
+    maze = context.maze
+    seeds = context.seeds
+    last_game = None
+
+    started_ns = time.perf_counter_ns()
+    for seed in seeds:
+        last_game = config.create_with_maze(maze, seed=seed)
+    elapsed_ns = time.perf_counter_ns() - started_ns
+
+    if last_game is None:
+        raise RuntimeError("Reused-maze create benchmark did not execute an operation")
+    _validate_dimensions(last_game, context.width, context.height)
+    return MeasuredBatch(elapsed_ns, len(seeds))
+
+
+def _measure_paired_maze_setup(context: MazeCreateContext) -> MeasuredBatch:
+    config = context.config
+    maze = context.maze
+    seeds = context.seeds
+    last_pair = None
+
+    started_ns = time.perf_counter_ns()
+    for seed in seeds:
+        last_pair = (
+            config.create_with_maze(maze, seed=seed),
+            config.create_with_maze(maze, seed=seed),
+        )
+    elapsed_ns = time.perf_counter_ns() - started_ns
+
+    if last_pair is None:
+        raise RuntimeError("Paired-maze setup benchmark did not execute an operation")
+    first, second = last_pair
+    _validate_dimensions(first, context.width, context.height)
+    _validate_dimensions(second, context.width, context.height)
+    if first.state_hash != second.state_hash:
+        raise RuntimeError("Same-seed paired setup produced different games")
+    return MeasuredBatch(elapsed_ns, len(seeds))
+
+
+def _measure_reset_with_maze(context: MazeResetContext) -> MeasuredBatch:
+    game = context.game
+    maze = context.maze
+    seeds = context.seeds
+
+    started_ns = time.perf_counter_ns()
+    for seed in seeds:
+        game.reset_with_maze(maze, seed=seed)
+    elapsed_ns = time.perf_counter_ns() - started_ns
+
+    _validate_dimensions(game, context.width, context.height)
+    return MeasuredBatch(elapsed_ns, len(seeds))
+
+
 def _measure_observation_pair(context: ObservationContext) -> MeasuredBatch:
     game = context.game
     tokens = context.tokens
@@ -404,6 +481,11 @@ def _build_cases() -> list[BenchmarkCase]:
         FIXED_SEED,
         FIXED_OPERATIONS_PER_BATCH,
     )
+    reused_seeds = _prepared_seeds(
+        RANDOM_SEED_BASE ^ FIXED_SEED,
+        REUSED_OPERATIONS_PER_BATCH,
+    )
+    reused_maze = random_config.generate_maze(seed=FIXED_SEED)
     trace_turns = min(MAX_TRACE_TURNS, max_turns // 2)
     action_pairs = _prepared_actions(ACTION_SEED, trace_turns)
     environment_actions = tuple(
@@ -426,6 +508,13 @@ def _build_cases() -> list[BenchmarkCase]:
         width,
         height,
     )
+    create_reused_maze = MazeCreateContext(
+        random_config,
+        reused_maze,
+        reused_seeds,
+        width,
+        height,
+    )
     reset_random = ResetContext(
         random_game,
         random_seeds,
@@ -435,6 +524,13 @@ def _build_cases() -> list[BenchmarkCase]:
     reset_fixed = ResetContext(
         fixed_config.create(seed=FIXED_SEED),
         fixed_seeds,
+        width,
+        height,
+    )
+    reset_reused_maze = MazeResetContext(
+        random_config.create_with_maze(reused_maze, seed=reused_seeds[0]),
+        reused_maze,
+        reused_seeds,
         width,
         height,
     )
@@ -465,12 +561,24 @@ def _build_cases() -> list[BenchmarkCase]:
             partial(_measure_create, create_fixed),
         ),
         BenchmarkCase(
+            "create/reused-maze",
+            partial(_measure_create_with_maze, create_reused_maze),
+        ),
+        BenchmarkCase(
+            "setup/paired-maze",
+            partial(_measure_paired_maze_setup, create_reused_maze),
+        ),
+        BenchmarkCase(
             "reset/random",
             partial(_measure_reset, reset_random),
         ),
         BenchmarkCase(
             "reset/fixed",
             partial(_measure_reset, reset_fixed),
+        ),
+        BenchmarkCase(
+            "reset/reused-maze",
+            partial(_measure_reset_with_maze, reset_reused_maze),
         ),
         BenchmarkCase(
             "observation/pair",

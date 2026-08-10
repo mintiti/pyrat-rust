@@ -9,5 +9,6 @@ import pyrat_engine._core as _impl
 # Re-export new API classes
 GameBuilder = _impl.builder.GameBuilder
 GameConfig = _impl.builder.GameConfig
+MazeLayout = _impl.builder.MazeLayout
 
-__all__ = ["GameBuilder", "GameConfig"]
+__all__ = ["GameBuilder", "GameConfig", "MazeLayout"]
