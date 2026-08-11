@@ -365,6 +365,88 @@ class TestResetSymmetry:
 class TestObservationCoherence:
     """Observation matrices stay synchronized with every game mutation path."""
 
+    def test_paired_observations_share_one_snapshot(self):
+        config = (
+            GameBuilder(4, 3)
+            .with_open_maze()
+            .with_custom_positions((0, 0), (3, 2))
+            .with_custom_cheese([(1, 0), (2, 2)])
+            .build()
+        )
+        game = config.create()
+
+        player_one, player_two = game.get_observations()
+        single_one = game.get_observation(True)
+        single_two = game.get_observation(False)
+
+        scalar_fields = (
+            "player_position",
+            "player_mud_turns",
+            "player_score",
+            "opponent_position",
+            "opponent_mud_turns",
+            "opponent_score",
+            "current_turn",
+            "max_turns",
+        )
+        for paired, single in ((player_one, single_one), (player_two, single_two)):
+            for field in scalar_fields:
+                assert getattr(paired, field) == getattr(single, field)
+        assert player_one.cheese_matrix is player_two.cheese_matrix
+        assert player_one.movement_matrix is player_two.movement_matrix
+        assert player_one.movement_matrix is single_one.movement_matrix
+        assert player_two.movement_matrix is single_two.movement_matrix
+        np.testing.assert_array_equal(
+            player_one.cheese_matrix, single_one.cheese_matrix
+        )
+        np.testing.assert_array_equal(
+            player_two.cheese_matrix, single_two.cheese_matrix
+        )
+        assert player_one.cheese_matrix.shape == (4, 3)
+        assert player_one.cheese_matrix.dtype == np.uint8
+        assert player_one.movement_matrix.shape == (4, 3, 4)
+        assert player_one.movement_matrix.dtype == np.int8
+        assert not player_one.movement_matrix.flags.writeable
+
+        with pytest.raises(ValueError, match="read-only"):
+            player_one.movement_matrix[0, 0, 0] = 1
+
+        game.step(Direction.RIGHT, Direction.STAY)
+        after_one, after_two = game.get_observations()
+
+        assert after_one.cheese_matrix is after_two.cheese_matrix
+        assert after_one.cheese_matrix is not player_one.cheese_matrix
+        assert after_one.movement_matrix is player_one.movement_matrix
+        assert player_one.cheese_matrix[1, 0] == 1
+        assert after_one.cheese_matrix[1, 0] == 0
+
+    def test_shared_layout_and_fixed_config_reuse_movement_export(self):
+        random_config = GameConfig.classic(7, 5, 5)
+        maze = random_config.generate_maze(seed=500)
+        first = random_config.create_with_maze(maze, seed=71)
+        second = random_config.create_with_maze(maze, seed=72)
+
+        first_movement = first.get_observation(True).movement_matrix
+        assert second.get_observation(False).movement_matrix is first_movement
+
+        first.reset_with_maze(maze, seed=73)
+        assert first.get_observation(True).movement_matrix is first_movement
+
+        fixed_config = (
+            GameBuilder(3, 3)
+            .with_custom_maze(walls=[], mud=[])
+            .with_corner_positions()
+            .with_custom_cheese([(1, 1)])
+            .build()
+        )
+        fixed_first = fixed_config.create()
+        fixed_second = fixed_config.create()
+        fixed_movement = fixed_first.get_observation(True).movement_matrix
+
+        assert fixed_second.get_observation(False).movement_matrix is fixed_movement
+        fixed_first.reset()
+        assert fixed_first.get_observation(True).movement_matrix is fixed_movement
+
     def test_reset_rebuilds_movement_and_cheese_matrices(self):
         config = GameConfig.classic(7, 5, 5)
         game = config.create(seed=42)
@@ -379,6 +461,7 @@ class TestObservationCoherence:
             expected_cheese[position.x, position.y] = 1
 
         # These seeds exercise both regenerated topology and regenerated cheese.
+        assert before.movement_matrix is not after.movement_matrix
         assert not np.array_equal(before.movement_matrix, after.movement_matrix)
         assert not np.array_equal(before.cheese_matrix, after.cheese_matrix)
 

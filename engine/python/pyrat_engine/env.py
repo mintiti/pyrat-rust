@@ -112,10 +112,8 @@ class PyRatEnv(ParallelEnv):  # type: ignore[misc]
         else:
             self.game.reset_with_maze(self._maze, seed)
 
-        observations = {
-            "player_1": self.game.get_observation(True),
-            "player_2": self.game.get_observation(False),
-        }
+        player_one, player_two = self.game.get_observations()
+        observations = {"player_1": player_one, "player_2": player_two}
         infos: dict[str, Any] = {agent: {} for agent in self.agents}
 
         return observations, infos
@@ -151,10 +149,8 @@ class PyRatEnv(ParallelEnv):  # type: ignore[misc]
         }
 
         # Update observations
-        observations = {
-            "player_1": self.game.get_observation(True),
-            "player_2": self.game.get_observation(False),
-        }
+        player_one, player_two = self.game.get_observations()
+        observations = {"player_1": player_one, "player_2": player_two}
 
         terminations = {
             "player_1": game_over,

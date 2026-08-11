@@ -297,5 +297,13 @@ class PyRat:
         """
         ...
 
+    def get_observations(self) -> tuple[GameObservation, GameObservation]:
+        """Get player 1 and player 2 observations over one matrix snapshot.
+
+        The observations keep player-relative scalar fields while sharing the same
+        cheese snapshot and read-only movement matrix.
+        """
+        ...
+
 # Alias for the Rust MoveUndo type
 PyMoveUndo = MoveUndo
