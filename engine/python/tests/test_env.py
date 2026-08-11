@@ -141,7 +141,7 @@ def test_env_step_updates_collected_cheese() -> None:
     env = PyRatEnv(config)
     env.reset()
 
-    observations, *_ = env.step(
+    observations, rewards, *_ = env.step(
         {
             "player_1": Direction.RIGHT,
             "player_2": Direction.STAY,
@@ -150,6 +150,36 @@ def test_env_step_updates_collected_cheese() -> None:
 
     assert observations["player_1"].cheese_matrix[1, 0] == 0
     assert observations["player_2"].cheese_matrix[1, 0] == 0
+    assert rewards == {"player_1": 1.0, "player_2": -1.0}
+
+
+def test_env_step_keeps_zero_sum_policy_for_shared_cheese() -> None:
+    """Equal simultaneous score changes produce zero reward for both players."""
+    config = (
+        GameBuilder(3, 2)
+        .with_open_maze()
+        .with_custom_positions((0, 0), (2, 0))
+        .with_custom_cheese([(1, 0)])
+        .build()
+    )
+    env = PyRatEnv(config)
+    env.reset()
+
+    observations, rewards, terminations, truncations, infos = env.step(
+        {
+            "player_1": Direction.RIGHT,
+            "player_2": Direction.LEFT,
+        }
+    )
+
+    assert rewards == {"player_1": 0.0, "player_2": 0.0}
+    assert terminations == {"player_1": True, "player_2": True}
+    assert truncations == {"player_1": False, "player_2": False}
+    assert infos == {}
+    shared_score = 0.5
+    assert observations["player_1"].player_score == shared_score
+    assert observations["player_2"].player_score == shared_score
+    assert not observations["player_1"].cheese_matrix.any()
 
 
 def test_env_symmetry() -> None:

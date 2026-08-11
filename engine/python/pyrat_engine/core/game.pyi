@@ -242,6 +242,25 @@ class PyRat:
         """
         ...
 
+    def step_with_observations(
+        self, p1_move: int, p2_move: int
+    ) -> tuple[bool, float, float, GameObservation, GameObservation]:
+        """Execute one game step and return both resulting observations.
+
+        The transition, score changes, and player-relative observation snapshots are
+        produced atomically through one Rust/Python crossing. Reward interpretation
+        and framework-specific containers remain the caller's responsibility.
+
+        Args:
+            p1_move: Direction for player 1 (0-4: UP, RIGHT, DOWN, LEFT, STAY)
+            p2_move: Direction for player 2 (0-4: UP, RIGHT, DOWN, LEFT, STAY)
+
+        Returns:
+            Tuple of ``(game_over, p1_score_change, p2_score_change,
+            p1_observation, p2_observation)``.
+        """
+        ...
+
     def make_move(self, p1_move: int, p2_move: int) -> MoveUndo:
         """Execute a move and return undo information for backtracking.
 
