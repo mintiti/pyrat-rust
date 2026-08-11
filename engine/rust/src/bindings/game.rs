@@ -1,7 +1,7 @@
 //! Python bindings for the `PyRat` game engine
 use crate::game::builder::{CheeseStrategy, GameConfig, MazeParams, MazeStrategy, PlayerStrategy};
 use crate::game::game_logic::MoveUndo;
-use crate::game::observations::ObservationHandler;
+use crate::game::observations::{GameObservation, MovementMatrixCache, ObservationHandler};
 use crate::game::types::CoordinatesInput;
 use crate::game::types::MudMap;
 use crate::{Coordinates, Direction, GameState, MazeLayout, Wall};
@@ -129,6 +129,7 @@ impl PyMoveUndo {
 #[derive(Clone)]
 pub struct PyMazeLayout {
     inner: MazeLayout,
+    movement_matrix: MovementMatrixCache,
 }
 
 #[pymethods]
@@ -184,6 +185,28 @@ impl PyMazeLayout {
 #[derive(Clone)]
 pub struct PyGameConfig {
     inner: GameConfig,
+    fixed_movement_matrix: Option<MovementMatrixCache>,
+}
+
+impl PyGameConfig {
+    fn from_inner(inner: GameConfig) -> Self {
+        let fixed_movement_matrix =
+            matches!(inner.maze(), MazeStrategy::Fixed { .. }).then(MovementMatrixCache::default);
+        Self {
+            inner,
+            fixed_movement_matrix,
+        }
+    }
+
+    fn create_bound_game(&self, game: GameState, movement_matrix: MovementMatrixCache) -> PyRat {
+        let observation_handler = ObservationHandler::with_movement_cache(&game, movement_matrix);
+        PyRat {
+            game,
+            observation_handler,
+            config: self.inner.clone(),
+            fixed_movement_matrix: self.fixed_movement_matrix.clone(),
+        }
+    }
 }
 
 #[pymethods]
@@ -192,7 +215,7 @@ impl PyGameConfig {
     #[staticmethod]
     fn preset(name: &str) -> PyResult<Self> {
         let inner = GameConfig::preset(name).map_err(PyValueError::new_err)?;
-        Ok(Self { inner })
+        Ok(Self::from_inner(inner))
     }
 
     /// Standard game: classic maze, corner starts, symmetric random cheese.
@@ -211,21 +234,15 @@ impl PyGameConfig {
         if cheese == 0 {
             return Err(PyValueError::new_err("cheese count must be > 0"));
         }
-        Ok(Self {
-            inner: GameConfig::classic(width, height, cheese),
-        })
+        Ok(Self::from_inner(GameConfig::classic(width, height, cheese)))
     }
 
     /// Stamp out a new game from this config.
     #[pyo3(signature = (seed=None))]
     fn create(&self, seed: Option<u64>) -> PyResult<PyRat> {
         let game = self.inner.create(seed).map_err(PyValueError::new_err)?;
-        let observation_handler = ObservationHandler::new(&game);
-        Ok(PyRat {
-            game,
-            observation_handler,
-            config: self.inner.clone(),
-        })
+        let movement_matrix = self.fixed_movement_matrix.clone().unwrap_or_default();
+        Ok(self.create_bound_game(game, movement_matrix))
     }
 
     /// Generate and compile this config's maze for reuse.
@@ -233,6 +250,7 @@ impl PyGameConfig {
     fn generate_maze(&self, seed: Option<u64>) -> PyMazeLayout {
         PyMazeLayout {
             inner: self.inner.generate_maze(seed),
+            movement_matrix: MovementMatrixCache::default(),
         }
     }
 
@@ -243,12 +261,7 @@ impl PyGameConfig {
             .inner
             .create_with_maze(&maze.inner, seed)
             .map_err(PyValueError::new_err)?;
-        let observation_handler = ObservationHandler::new(&game);
-        Ok(PyRat {
-            game,
-            observation_handler,
-            config: self.inner.clone(),
-        })
+        Ok(self.create_bound_game(game, maze.movement_matrix.clone()))
     }
 
     #[getter]
@@ -580,16 +593,14 @@ impl PyGameBuilder {
             )
         })?;
 
-        Ok(PyGameConfig {
-            inner: GameConfig::from_parts(
-                self.width,
-                self.height,
-                self.max_turns,
-                maze,
-                players,
-                cheese,
-            ),
-        })
+        Ok(PyGameConfig::from_inner(GameConfig::from_parts(
+            self.width,
+            self.height,
+            self.max_turns,
+            maze,
+            players,
+            cheese,
+        )))
     }
 }
 
@@ -603,6 +614,7 @@ pub struct PyRat {
     game: GameState,
     observation_handler: ObservationHandler,
     config: GameConfig,
+    fixed_movement_matrix: Option<MovementMatrixCache>,
 }
 
 #[pymethods]
@@ -845,7 +857,8 @@ impl PyRat {
     #[pyo3(signature = (seed=None))]
     fn reset(&mut self, seed: Option<u64>) -> PyResult<()> {
         let game = self.config.create(seed).map_err(PyValueError::new_err)?;
-        let observation_handler = ObservationHandler::new(&game);
+        let movement_matrix = self.fixed_movement_matrix.clone().unwrap_or_default();
+        let observation_handler = ObservationHandler::with_movement_cache(&game, movement_matrix);
         self.game = game;
         self.observation_handler = observation_handler;
         Ok(())
@@ -858,7 +871,8 @@ impl PyRat {
             .config
             .create_with_maze(&maze.inner, seed)
             .map_err(PyValueError::new_err)?;
-        let observation_handler = ObservationHandler::new(&game);
+        let observation_handler =
+            ObservationHandler::with_movement_cache(&game, maze.movement_matrix.clone());
         self.game = game;
         self.observation_handler = observation_handler;
         Ok(())
@@ -883,6 +897,7 @@ impl PyRat {
             game: self.game.clone(),
             observation_handler: self.observation_handler.clone(),
             config: self.config.clone(),
+            fixed_movement_matrix: self.fixed_movement_matrix.clone(),
         }
     }
 
@@ -900,18 +915,13 @@ impl PyRat {
             .observation_handler
             .get_observation(py, &self.game, is_player_one);
 
-        Ok(PyGameObservation {
-            player_position: obs.player_position,
-            player_mud_turns: obs.player_mud_turns,
-            player_score: obs.player_score,
-            opponent_position: obs.opponent_position,
-            opponent_mud_turns: obs.opponent_mud_turns,
-            opponent_score: obs.opponent_score,
-            current_turn: obs.current_turn,
-            max_turns: obs.max_turns,
-            cheese_matrix: obs.cheese_matrix.unbind(),
-            movement_matrix: obs.movement_matrix.unbind(),
-        })
+        Ok(obs.into())
+    }
+
+    /// Get both player-relative observations over one pair of matrix snapshots.
+    pub fn get_observations(&self, py: Python<'_>) -> (PyGameObservation, PyGameObservation) {
+        let [player_one, player_two] = self.observation_handler.get_observations(py, &self.game);
+        (player_one.into(), player_two.into())
     }
 }
 
@@ -924,11 +934,14 @@ impl PyRat {
 
     /// Wrap an existing `GameState` into a `PyRat` with a config for `reset()`.
     pub fn from_game_state(game: GameState, config: GameConfig) -> Self {
+        let fixed_movement_matrix =
+            matches!(config.maze(), MazeStrategy::Fixed { .. }).then(MovementMatrixCache::default);
         let observation_handler = ObservationHandler::new(&game);
         Self {
             game,
             observation_handler,
             config,
+            fixed_movement_matrix,
         }
     }
 }
@@ -945,6 +958,23 @@ pub struct PyGameObservation {
     max_turns: u16,
     cheese_matrix: Py<PyArray2<u8>>,
     movement_matrix: Py<PyArray3<i8>>,
+}
+
+impl From<GameObservation> for PyGameObservation {
+    fn from(observation: GameObservation) -> Self {
+        Self {
+            player_position: observation.player_position,
+            player_mud_turns: observation.player_mud_turns,
+            player_score: observation.player_score,
+            opponent_position: observation.opponent_position,
+            opponent_mud_turns: observation.opponent_mud_turns,
+            opponent_score: observation.opponent_score,
+            current_turn: observation.current_turn,
+            max_turns: observation.max_turns,
+            cheese_matrix: observation.cheese_matrix,
+            movement_matrix: observation.movement_matrix,
+        }
+    }
 }
 
 #[pymethods]
@@ -1010,7 +1040,7 @@ impl PyObservationHandler {
     #[new]
     fn new(game: &PyRat) -> Self {
         Self {
-            inner: ObservationHandler::new(&game.game),
+            inner: game.observation_handler.clone(),
         }
     }
 
@@ -1033,18 +1063,7 @@ impl PyObservationHandler {
         is_player_one: bool,
     ) -> PyResult<PyGameObservation> {
         let obs = self.inner.get_observation(py, &game.game, is_player_one);
-        Ok(PyGameObservation {
-            player_position: obs.player_position,
-            player_mud_turns: obs.player_mud_turns,
-            player_score: obs.player_score,
-            opponent_position: obs.opponent_position,
-            opponent_mud_turns: obs.opponent_mud_turns,
-            opponent_score: obs.opponent_score,
-            current_turn: obs.current_turn,
-            max_turns: obs.max_turns,
-            cheese_matrix: obs.cheese_matrix.unbind(),
-            movement_matrix: obs.movement_matrix.unbind(),
-        })
+        Ok(obs.into())
     }
 }
 

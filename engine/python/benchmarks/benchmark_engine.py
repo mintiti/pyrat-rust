@@ -385,8 +385,7 @@ def _measure_observation_pair(context: ObservationContext) -> MeasuredBatch:
 
     started_ns = time.perf_counter_ns()
     for _ in tokens:
-        player_one = game.get_observation(True)
-        player_two = game.get_observation(False)
+        player_one, player_two = game.get_observations()
     elapsed_ns = time.perf_counter_ns() - started_ns
 
     if player_one is None or player_two is None:

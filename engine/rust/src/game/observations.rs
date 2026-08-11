@@ -1,8 +1,10 @@
 use crate::{Coordinates, Direction, GameState};
 use ndarray::{Array2, Array3};
-use numpy::{PyArray2, PyArray3};
-use pyo3::{Bound, Python};
+use numpy::{PyArray2, PyArray3, PyArrayMethods};
+use pyo3::sync::GILOnceCell;
+use pyo3::{Py, Python};
 use std::convert::TryFrom;
+use std::sync::Arc;
 
 /// Represents the movement constraints (walls and mud) for each position and direction
 #[derive(Clone)]
@@ -67,17 +69,43 @@ impl MovementConstraints {
     }
 }
 
+/// Lazily materialized Python movement matrix shared by one maze topology.
+#[derive(Clone, Default)]
+pub(crate) struct MovementMatrixCache {
+    matrix: Arc<GILOnceCell<Py<PyArray3<i8>>>>,
+}
+
+impl MovementMatrixCache {
+    pub(crate) fn get(&self, py: Python<'_>, game: &GameState) -> Py<PyArray3<i8>> {
+        self.matrix
+            .get_or_init(py, || {
+                let matrix = MovementConstraints::new(game).matrix;
+                let array = PyArray3::from_owned_array(py, matrix);
+                array.readwrite().make_nonwriteable();
+                array.unbind()
+            })
+            .clone_ref(py)
+    }
+}
+
 /// Manages game observations and their efficient updates
 #[derive(Clone)]
 pub struct ObservationHandler {
-    movement_constraints: MovementConstraints,
+    movement_matrix: MovementMatrixCache,
     pub(crate) cheese_matrix: Array2<u8>,
 }
 
 impl ObservationHandler {
     pub fn new(game: &GameState) -> Self {
+        Self::with_movement_cache(game, MovementMatrixCache::default())
+    }
+
+    pub(crate) fn with_movement_cache(
+        game: &GameState,
+        movement_matrix: MovementMatrixCache,
+    ) -> Self {
         let mut handler = Self {
-            movement_constraints: MovementConstraints::new(game),
+            movement_matrix,
             cheese_matrix: Array2::zeros((game.width() as usize, game.height() as usize)),
         };
 
@@ -109,12 +137,39 @@ impl ObservationHandler {
     }
 
     /// Get current observation for a player
-    pub fn get_observation<'py>(
+    pub fn get_observation(
         &self,
-        py: Python<'py>,
+        py: Python<'_>,
         game: &GameState,
         is_player_one: bool,
-    ) -> GameObservation<'py> {
+    ) -> GameObservation {
+        let cheese_matrix = PyArray2::from_array(py, &self.cheese_matrix).unbind();
+        let movement_matrix = self.movement_matrix.get(py, game);
+        Self::build_observation(game, is_player_one, cheese_matrix, movement_matrix)
+    }
+
+    /// Get both player-relative observations over one pair of matrix snapshots.
+    pub fn get_observations(&self, py: Python<'_>, game: &GameState) -> [GameObservation; 2] {
+        let cheese_matrix = PyArray2::from_array(py, &self.cheese_matrix).unbind();
+        let movement_matrix = self.movement_matrix.get(py, game);
+
+        [
+            Self::build_observation(
+                game,
+                true,
+                cheese_matrix.clone_ref(py),
+                movement_matrix.clone_ref(py),
+            ),
+            Self::build_observation(game, false, cheese_matrix, movement_matrix),
+        ]
+    }
+
+    fn build_observation(
+        game: &GameState,
+        is_player_one: bool,
+        cheese_matrix: Py<PyArray2<u8>>,
+        movement_matrix: Py<PyArray3<i8>>,
+    ) -> GameObservation {
         let (player_pos, player_mud, player_score) = if is_player_one {
             (
                 game.player1_position(),
@@ -154,10 +209,8 @@ impl ObservationHandler {
 
             current_turn: game.turns(),
             max_turns: game.max_turns(),
-
-            // Convert matrices to numpy arrays
-            cheese_matrix: PyArray2::from_array(py, &self.cheese_matrix),
-            movement_matrix: PyArray3::from_array(py, &self.movement_constraints.matrix),
+            cheese_matrix,
+            movement_matrix,
         }
     }
 
@@ -169,7 +222,7 @@ impl ObservationHandler {
 }
 
 /// Game observation with numpy arrays for Python
-pub struct GameObservation<'py> {
+pub struct GameObservation {
     pub player_position: Coordinates,
     pub player_mud_turns: u8,
     pub player_score: f32,
@@ -178,8 +231,8 @@ pub struct GameObservation<'py> {
     pub opponent_score: f32,
     pub current_turn: u16,
     pub max_turns: u16,
-    pub cheese_matrix: Bound<'py, PyArray2<u8>>,
-    pub movement_matrix: Bound<'py, PyArray3<i8>>,
+    pub cheese_matrix: Py<PyArray2<u8>>,
+    pub movement_matrix: Py<PyArray3<i8>>,
 }
 
 #[cfg(test)]
