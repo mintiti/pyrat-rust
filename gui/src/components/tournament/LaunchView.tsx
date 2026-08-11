@@ -33,6 +33,7 @@ import {
 import { commands } from "../../bindings";
 import type {
 	GameFactoryConfig,
+	LaunchLimits,
 	TournamentSummary,
 } from "../../bindings/generated";
 import { discoveredBotsAtom } from "../../stores/botConfigAtom";
@@ -60,6 +61,59 @@ interface Methodology {
 	max_parallel: number;
 }
 
+function validateMethodology(
+	method: Methodology,
+	seedInput: string,
+	selectedBotCount: number,
+	target: string | null,
+	limits: LaunchLimits,
+): Record<string, string> {
+	const errors: Record<string, string> = {};
+	if (selectedBotCount < 2) errors.bots = "Select at least 2 bots";
+	else if (selectedBotCount > limits.max_participants)
+		errors.bots = `Select at most ${limits.max_participants} bots`;
+	if (!Number.isSafeInteger(method.mazes_per_matchup))
+		errors.mazes_per_matchup = "Whole number required";
+	else if (method.mazes_per_matchup < 1) errors.mazes_per_matchup = "Min 1";
+	else if (method.mazes_per_matchup > limits.max_mazes_per_matchup)
+		errors.mazes_per_matchup = `Max ${limits.max_mazes_per_matchup}`;
+	for (const [field, value] of [
+		["move_timeout_ms", method.move_timeout_ms],
+		["preprocessing_timeout_ms", method.preprocessing_timeout_ms],
+	] as const) {
+		if (!Number.isSafeInteger(value)) errors[field] = "Whole number required";
+		else if (value < 1) errors[field] = "Min 1 ms";
+		else if (value > limits.max_timeout_ms)
+			errors[field] = `Max ${limits.max_timeout_ms} ms`;
+	}
+	if (!Number.isSafeInteger(method.max_parallel))
+		errors.max_parallel = "Whole number required";
+	else if (method.max_parallel < 1) errors.max_parallel = "Min 1";
+	else if (method.max_parallel > limits.max_parallel)
+		errors.max_parallel = `Max ${limits.max_parallel}`;
+
+	const trimmedSeed = seedInput.trim();
+	if (trimmedSeed !== "") {
+		const seed = Number(trimmedSeed);
+		if (
+			!Number.isSafeInteger(seed) ||
+			seed < 0 ||
+			seed > limits.max_js_safe_seed
+		)
+			errors.tournament_seed = `Use an integer from 0 to ${limits.max_js_safe_seed}`;
+	}
+
+	if (!errors.bots && !errors.mazes_per_matchup) {
+		const matchups = target
+			? selectedBotCount - 1
+			: (selectedBotCount * (selectedBotCount - 1)) / 2;
+		const total = matchups * method.mazes_per_matchup * 2;
+		if (!Number.isSafeInteger(total) || total > limits.max_total_games)
+			errors.mazes_per_matchup = `Schedule limit: ${limits.max_total_games} games`;
+	}
+	return errors;
+}
+
 export default function LaunchView() {
 	const boundedColumns = useMediaQuery("(min-width: 48em)");
 	const bots = useAtomValue(discoveredBotsAtom);
@@ -84,6 +138,9 @@ export default function LaunchView() {
 	const [defaultsLoading, setDefaultsLoading] = useState(true);
 	const [defaultsError, setDefaultsError] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	const [validationErrors, setValidationErrors] = useState<
+		Record<string, string>
+	>({});
 	const openRequest = useRef(createLatestRequestGuard());
 
 	// Conditions, pre-filled from the backend defaults (ladder recipe). Null
@@ -91,8 +148,17 @@ export default function LaunchView() {
 	// there's no stale mirror to drift.
 	const [factory, setFactory] = useState<GameFactoryConfig | null>(null);
 	const [method, setMethod] = useState<Methodology | null>(null);
+	const [limits, setLimits] = useState<LaunchLimits | null>(null);
 	const [seedInput, setSeedInput] = useState("");
 	const [advanced, setAdvanced] = useState(false);
+	const clearLaunchErrors = useCallback(() => {
+		setValidationErrors({});
+		setError(null);
+	}, []);
+	const changeMethod = (patch: Partial<Methodology>) => {
+		clearLaunchErrors();
+		setMethod((current) => (current ? { ...current, ...patch } : current));
+	};
 
 	// Default-select all discovered bots once they load.
 	useEffect(() => {
@@ -122,6 +188,7 @@ export default function LaunchView() {
 			const result = await commands.getTournamentLaunchDefaults();
 			if (result.status === "ok") {
 				setFactory(result.data.factory);
+				setLimits(result.data.limits);
 				setMethod({
 					mazes_per_matchup: result.data.mazes_per_matchup,
 					move_timeout_ms: result.data.move_timeout_ms,
@@ -185,11 +252,37 @@ export default function LaunchView() {
 		[bots, selected],
 	);
 
-	const factoryErrors = useMemo(
-		() => (factory ? validate(factory) : {}),
-		[factory],
-	);
+	const factoryErrors = useMemo(() => {
+		const errors = factory ? validate(factory, limits ?? undefined) : {};
+		for (const [field, message] of Object.entries(validationErrors)) {
+			if (field.startsWith("factory.")) {
+				errors[field.slice("factory.".length)] = message;
+			}
+		}
+		return errors;
+	}, [factory, limits, validationErrors]);
 	const hasFactoryError = Object.keys(factoryErrors).length > 0;
+	const methodErrors = useMemo(
+		() =>
+			method && limits
+				? {
+						...validateMethodology(
+							method,
+							seedInput,
+							selectedBots.length,
+							target,
+							limits,
+						),
+						...Object.fromEntries(
+							Object.entries(validationErrors).filter(
+								([field]) => !field.startsWith("factory."),
+							),
+						),
+					}
+				: {},
+		[method, limits, seedInput, selectedBots.length, target, validationErrors],
+	);
+	const hasMethodError = Object.keys(methodErrors).length > 0;
 
 	const plan = useMemo(() => {
 		if (!factory || !method) return "";
@@ -209,7 +302,8 @@ export default function LaunchView() {
 		return `${shape} · ${factory.width}×${factory.height} · ${method.mazes_per_matchup * 2} games/matchup · ${games} games · ${method.move_timeout_ms} ms/move · ${method.max_parallel} concurrent · ~${mins} min`;
 	}, [selectedBots, target, factory, method]);
 
-	const toggle = (id: string) =>
+	const toggle = (id: string) => {
+		clearLaunchErrors();
 		setSelected((cur) => {
 			const next = new Set(cur);
 			if (next.has(id)) {
@@ -220,8 +314,10 @@ export default function LaunchView() {
 			}
 			return next;
 		});
+	};
 
 	const setMeasuredBot = (id: string) => {
+		clearLaunchErrors();
 		setTarget((cur) => (cur === id ? null : id));
 		setSelected((cur) => new Set(cur).add(id));
 	};
@@ -229,6 +325,7 @@ export default function LaunchView() {
 	const launch = async () => {
 		if (!factory || !method) return;
 		setError(null);
+		setValidationErrors({});
 		beginLaunch();
 		const picks = selectedBots.map((b) => ({
 			agent_id: b.agent_id,
@@ -253,7 +350,16 @@ export default function LaunchView() {
 			clearPreparing();
 			// A user-initiated Stop during preparing surfaces as this; it's not
 			// an error to alarm on.
-			if (res.error !== "tournament start was cancelled") setError(res.error);
+			if (res.error.kind === "validation") {
+				setValidationErrors(
+					Object.fromEntries(
+						res.error.errors.map(({ field, message }) => [field, message]),
+					),
+				);
+				setError(res.error.errors.map(({ message }) => message).join(" · "));
+			} else if (res.error.message !== "tournament start was cancelled") {
+				setError(res.error.message);
+			}
 		} catch (cause) {
 			clearPreparing();
 			setError(String(cause));
@@ -336,7 +442,7 @@ export default function LaunchView() {
 				onChange={(event) => setName(event.currentTarget.value)}
 			/>
 
-			{factory && method ? (
+			{factory && method && limits ? (
 				<>
 					<SettingRowInline
 						label="Mazes / matchup"
@@ -345,12 +451,12 @@ export default function LaunchView() {
 						<NumberInput
 							w={90}
 							min={1}
+							max={limits.max_mazes_per_matchup}
+							allowDecimal={false}
 							value={method.mazes_per_matchup}
+							error={methodErrors.mazes_per_matchup}
 							onChange={(value) =>
-								setMethod({
-									...method,
-									mazes_per_matchup: Number(value) || 1,
-								})
+								changeMethod({ mazes_per_matchup: Number(value) || 1 })
 							}
 						/>
 					</SettingRowInline>
@@ -358,13 +464,13 @@ export default function LaunchView() {
 						<NumberInput
 							w={110}
 							min={1}
+							max={limits.max_timeout_ms}
 							step={50}
+							allowDecimal={false}
 							value={method.move_timeout_ms}
+							error={methodErrors.move_timeout_ms}
 							onChange={(value) =>
-								setMethod({
-									...method,
-									move_timeout_ms: Number(value) || 1,
-								})
+								changeMethod({ move_timeout_ms: Number(value) || 1 })
 							}
 						/>
 					</SettingRowInline>
@@ -377,7 +483,11 @@ export default function LaunchView() {
 
 					<GameFactoryForm
 						value={factory}
-						onChange={setFactory}
+						limits={limits}
+						onChange={(next) => {
+							clearLaunchErrors();
+							setFactory(next);
+						}}
 						errors={factoryErrors}
 					/>
 
@@ -396,12 +506,12 @@ export default function LaunchView() {
 								<NumberInput
 									w={90}
 									min={1}
+									max={limits.max_parallel}
+									allowDecimal={false}
 									value={method.max_parallel}
+									error={methodErrors.max_parallel}
 									onChange={(value) =>
-										setMethod({
-											...method,
-											max_parallel: Number(value) || 1,
-										})
+										changeMethod({ max_parallel: Number(value) || 1 })
 									}
 								/>
 							</SettingRowInline>
@@ -409,11 +519,13 @@ export default function LaunchView() {
 								<NumberInput
 									w={110}
 									min={1}
+									max={limits.max_timeout_ms}
 									step={100}
+									allowDecimal={false}
 									value={method.preprocessing_timeout_ms}
+									error={methodErrors.preprocessing_timeout_ms}
 									onChange={(value) =>
-										setMethod({
-											...method,
+										changeMethod({
 											preprocessing_timeout_ms: Number(value) || 1,
 										})
 									}
@@ -423,12 +535,14 @@ export default function LaunchView() {
 								<NumberInput
 									w={160}
 									min={0}
-									max={Number.MAX_SAFE_INTEGER}
+									max={limits.max_js_safe_seed}
 									allowDecimal={false}
 									value={seedInput === "" ? "" : Number(seedInput)}
-									onChange={(value) =>
-										setSeedInput(value === "" ? "" : String(value))
-									}
+									error={methodErrors.tournament_seed}
+									onChange={(value) => {
+										clearLaunchErrors();
+										setSeedInput(value === "" ? "" : String(value));
+									}}
 								/>
 							</SettingRowInline>
 						</Stack>
@@ -516,6 +630,11 @@ export default function LaunchView() {
 						Select the field. Measure one bot for a gauntlet, or leave all
 						unmeasured for a round-robin.
 					</Text>
+					{methodErrors.bots && (
+						<Text size="xs" c="red" mb="sm">
+							{methodErrors.bots}
+						</Text>
+					)}
 					{boundedColumns ? (
 						<ScrollArea
 							offsetScrollbars
@@ -700,7 +819,9 @@ export default function LaunchView() {
 									tournamentRunning ||
 									!factory ||
 									!method ||
-									hasFactoryError
+									!limits ||
+									hasFactoryError ||
+									hasMethodError
 								}
 								loading={starting}
 								onClick={launch}

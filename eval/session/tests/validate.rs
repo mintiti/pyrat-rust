@@ -119,7 +119,8 @@ async fn rejects_planner_with_different_tournament_seed() {
         max_failures_per_pair: 3,
         seat_policy: pyrat_eval::SeatPolicy::Legacy,
         tournament_seed: 0xDEAD, // diverges from spec's 0xC0FFEE
-    });
+    })
+    .expect("valid planner fixture");
 
     expect_mismatch_containing(
         || {
@@ -247,7 +248,8 @@ async fn rejects_gauntlet_planner_for_round_robin_tournament() {
         max_failures_per_pair: 3,
         seat_policy: pyrat_eval::SeatPolicy::Legacy,
         tournament_seed: 0xC0FFEE,
-    });
+    })
+    .expect("valid planner fixture");
 
     expect_mismatch_containing(
         || {
@@ -305,7 +307,8 @@ async fn rejects_planner_with_drifted_runtime_game_config() {
         max_failures_per_pair: 3,
         seat_policy: pyrat_eval::SeatPolicy::Legacy,
         tournament_seed: 0xC0FFEE,
-    });
+    })
+    .expect("valid planner fixture");
 
     // The message must carry expected-vs-got geometry, not just two
     // opaque hashes — `max_turns=99` (resolved) and `max_turns=5`
@@ -359,7 +362,8 @@ async fn drifted_game_config_message_shows_geometry_expected_vs_got() {
         max_failures_per_pair: 3,
         seat_policy: pyrat_eval::SeatPolicy::Legacy,
         tournament_seed: 0xC0FFEE,
-    });
+    })
+    .expect("valid planner fixture");
 
     let result = EvalSession::start(
         store.clone(),
@@ -412,7 +416,8 @@ async fn rejects_planner_with_different_params() {
         max_failures_per_pair: 99, // diverges from spec's 3
         seat_policy: pyrat_eval::SeatPolicy::Legacy,
         tournament_seed: 0xC0FFEE,
-    });
+    })
+    .expect("valid planner fixture");
 
     expect_mismatch_containing(
         || {

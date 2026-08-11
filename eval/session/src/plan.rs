@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use pyrat::game::builder::GameConfig;
-use pyrat::MazeLayout;
+use pyrat::{GameConfigError, MazeLayout};
 use pyrat_eval_store::{SeatOrientation, TournamentId};
 use pyrat_orchestrator::{MatchId, Matchup, PlayerSpec, Timing};
 use serde::{Deserialize, Serialize};
@@ -275,6 +275,61 @@ pub struct RoundRobinPlannerConfig {
     pub tournament_seed: u64,
 }
 
+/// Invalid planner input rejected before any schedule slot is materialized.
+#[derive(Debug, thiserror::Error)]
+pub enum PlannerConfigError {
+    #[error("target games per matchup must be greater than zero")]
+    ZeroTarget,
+    #[error("paired schedules require an even target games per matchup, got {0}")]
+    OddPairedTarget(u32),
+    #[error("max_failures_per_pair must be greater than zero")]
+    ZeroFailureBudget,
+    #[error("{0}")]
+    InvalidPlayers(String),
+    #[error("invalid game config: {0}")]
+    InvalidGameConfig(#[from] GameConfigError),
+}
+
+fn validate_planner_config<'a>(
+    player_ids: impl IntoIterator<Item = &'a str>,
+    target: u32,
+    max_failures_per_pair: u32,
+    seat_policy: SeatPolicy,
+    game_config: &GameConfig,
+) -> Result<(), PlannerConfigError> {
+    if target == 0 {
+        return Err(PlannerConfigError::ZeroTarget);
+    }
+    if seat_policy == SeatPolicy::Paired && !target.is_multiple_of(2) {
+        return Err(PlannerConfigError::OddPairedTarget(target));
+    }
+    if max_failures_per_pair == 0 {
+        return Err(PlannerConfigError::ZeroFailureBudget);
+    }
+
+    let mut seen = HashSet::new();
+    for id in player_ids {
+        if id.trim().is_empty() {
+            return Err(PlannerConfigError::InvalidPlayers(
+                "player ids must not be empty".into(),
+            ));
+        }
+        if !seen.insert(id) {
+            return Err(PlannerConfigError::InvalidPlayers(format!(
+                "duplicate player id `{id}`"
+            )));
+        }
+    }
+    if seen.len() < 2 {
+        return Err(PlannerConfigError::InvalidPlayers(
+            "a tournament planner needs at least two distinct players".into(),
+        ));
+    }
+
+    game_config.validate()?;
+    Ok(())
+}
+
 pub struct RoundRobinPlanner {
     config: RoundRobinPlannerConfig,
     /// Computed once at construction. `n*(n-1)/2` entries, immutable for
@@ -290,7 +345,14 @@ pub struct RoundRobinPlanner {
 }
 
 impl RoundRobinPlanner {
-    pub fn new(config: RoundRobinPlannerConfig) -> Self {
+    pub fn new(config: RoundRobinPlannerConfig) -> Result<Self, PlannerConfigError> {
+        validate_planner_config(
+            config.players.iter().map(|player| player.id.as_str()),
+            config.target_per_pair,
+            config.max_failures_per_pair,
+            config.seat_policy,
+            &config.game_config,
+        )?;
         let n = config.players.len();
         let mut pair_indices = Vec::with_capacity(n * (n.saturating_sub(1)) / 2);
         for i in 0..n {
@@ -298,12 +360,12 @@ impl RoundRobinPlanner {
                 pair_indices.push((i, j));
             }
         }
-        Self {
+        Ok(Self {
             config,
             pair_indices,
             pending: HashMap::new(),
             maze_layouts: HashMap::new(),
-        }
+        })
     }
 }
 
@@ -473,12 +535,20 @@ pub struct GauntletPlanner {
 }
 
 impl GauntletPlanner {
-    pub fn new(config: GauntletPlannerConfig) -> Self {
-        Self {
+    pub fn new(config: GauntletPlannerConfig) -> Result<Self, PlannerConfigError> {
+        validate_planner_config(
+            std::iter::once(config.challenger.id.as_str())
+                .chain(config.opponents.iter().map(|player| player.id.as_str())),
+            config.target_each,
+            config.max_failures_per_pair,
+            config.seat_policy,
+            &config.game_config,
+        )?;
+        Ok(Self {
             config,
             pending: HashMap::new(),
             maze_layouts: HashMap::new(),
-        }
+        })
     }
 }
 
@@ -818,6 +888,7 @@ mod tests {
             seat_policy: SeatPolicy::Legacy,
             tournament_seed: 0xC0FFEE,
         })
+        .expect("valid round-robin fixture")
     }
 
     fn finished_obs(d: EvalMatchDescriptor) -> Observation {
@@ -1011,7 +1082,8 @@ mod tests {
             max_failures_per_pair: 2,
             seat_policy: SeatPolicy::Legacy,
             tournament_seed: 1,
-        });
+        })
+        .expect("valid round-robin fixture");
         let alloc = MatchIdAllocator::new();
         let mut state = TournamentState::empty(TournamentId(1));
         for _ in 0..2 {
@@ -1043,7 +1115,8 @@ mod tests {
             max_failures_per_pair: 2,
             seat_policy: SeatPolicy::Paired,
             tournament_seed: 0xABCD,
-        });
+        })
+        .expect("valid paired fixture");
         let alloc = MatchIdAllocator::new();
         let mut state = TournamentState::empty(TournamentId(1));
         // Force the first seating into its own scheduler batch; the second
@@ -1208,7 +1281,8 @@ mod tests {
             max_failures_per_pair: 1,
             seat_policy: SeatPolicy::Legacy,
             tournament_seed: 1,
-        });
+        })
+        .expect("valid gauntlet fixture");
         let from_order: Vec<&str> = gauntlet_slot_order(&challenger, &opponents)
             .map(|p| p.id.as_str())
             .collect();
@@ -1229,7 +1303,8 @@ mod tests {
             max_failures_per_pair: 4,
             seat_policy: SeatPolicy::Legacy,
             tournament_seed: 0xC0FFEE,
-        });
+        })
+        .expect("valid gauntlet fixture");
         assert_eq!(
             planner.expected_params(),
             TournamentParams {
@@ -1237,5 +1312,24 @@ mod tests {
                 seat_policy: SeatPolicy::Legacy,
             }
         );
+    }
+
+    #[test]
+    fn paired_planner_rejects_odd_target_at_construction() {
+        let result = RoundRobinPlanner::new(RoundRobinPlannerConfig {
+            players: vec![embedded("a"), embedded("b")],
+            game_config: GameConfig::classic(7, 5, 3),
+            game_config_id: "gc".into(),
+            timing: timing(),
+            tournament_id: TournamentId(1),
+            target_per_pair: 3,
+            max_failures_per_pair: 1,
+            seat_policy: SeatPolicy::Paired,
+            tournament_seed: 1,
+        });
+        assert!(matches!(
+            result,
+            Err(PlannerConfigError::OddPairedTarget(3))
+        ));
     }
 }

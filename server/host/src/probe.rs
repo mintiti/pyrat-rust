@@ -1,10 +1,10 @@
 //! One-shot bot probing.
 //!
 //! [`probe_bot`] stops after `Identify` and returns the declared metadata for
-//! configuration UIs. [`preflight_bot`] drives the real tournament handshake
-//! through `Identify -> Welcome -> Configure -> Ready`, including the initial
-//! engine-state hash check, without paying for preprocessing or playing a
-//! match.
+//! configuration UIs. [`preflight_bot_in_slot`] drives the real tournament
+//! handshake through `Identify -> Welcome -> Configure -> Ready`, including
+//! the initial engine-state hash check, without paying for preprocessing or
+//! playing a match.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -32,7 +32,7 @@ pub struct ProbeResult {
     pub options: Vec<OptionDef>,
 }
 
-/// The representative game and deadlines used by [`preflight_bot`].
+/// The representative game and deadlines used by [`preflight_bot_in_slot`].
 ///
 /// Constructing this from an engine [`GameState`] keeps the wire
 /// [`MatchConfig`] and expected hash coupled to the same state, avoiding a
@@ -202,17 +202,48 @@ pub async fn probe_bot(
 /// Spawn a bot and verify the complete pre-match compatibility handshake.
 ///
 /// This follows the same transport path as a real subprocess match:
-/// [`accept_players`] validates `Identify`, assigns `Player1`, and sends
-/// `Welcome`; the probe then sends `Configure` and requires a `Ready` carrying
-/// the representative engine state's exact hash. The bot process is killed
-/// when this function returns. Dropping the future is cancellation-safe via
-/// [`BotProcesses`]' RAII cleanup.
+/// Compatibility wrapper that assigns `Player1`.
 pub async fn preflight_bot(
     run_command: String,
     working_dir: String,
     agent_id: String,
     config: PreflightConfig,
 ) -> Result<(), ProbeError> {
+    preflight_bot_in_slot(
+        run_command,
+        working_dir,
+        agent_id,
+        PlayerSlot::Player1,
+        config,
+    )
+    .await
+}
+
+/// Spawn a bot and verify the complete pre-match compatibility handshake in
+/// one explicit seat.
+///
+/// [`accept_players`] validates `Identify`, assigns `assigned_slot`, and sends
+/// `Welcome`; the probe then sends `Configure` and requires a `Ready` carrying
+/// the representative engine state's exact hash. Calling this once for each
+/// seat catches bots whose setup behavior incorrectly depends on their slot.
+/// The bot process is killed when this function returns. Dropping the future
+/// is cancellation-safe via [`BotProcesses`]' RAII cleanup.
+pub async fn preflight_bot_in_slot(
+    run_command: String,
+    working_dir: String,
+    agent_id: String,
+    assigned_slot: PlayerSlot,
+    config: PreflightConfig,
+) -> Result<(), ProbeError> {
+    let player_index = match assigned_slot {
+        PlayerSlot::Player1 => 0,
+        PlayerSlot::Player2 => 1,
+        other => {
+            return Err(ProbeError::ProtocolError(format!(
+                "invalid preflight player slot: {other:?}"
+            )));
+        },
+    };
     let listener = TcpListener::bind("127.0.0.1:0").await?;
     let port = listener.local_addr()?.port();
     debug!(port, agent_id, "preflight: listening");
@@ -227,8 +258,8 @@ pub async fn preflight_bot(
     )?;
     procs.drain_stderr_to_tracing();
 
-    let expected = [(PlayerSlot::Player1, agent_id.clone())];
-    let accepted = tokio::select! {
+    let expected = [(assigned_slot, agent_id.clone())];
+    let mut accepted = tokio::select! {
         result = accept_players(
             &listener,
             &expected,
@@ -244,9 +275,10 @@ pub async fn preflight_bot(
         other => ProbeError::ProtocolError(format!("Identify -> Welcome: {other}")),
     })?;
 
-    let [player, _] = accepted;
-    let mut player = player.ok_or_else(|| {
-        ProbeError::ProtocolError("Identify -> Welcome returned no Player1 handle".into())
+    let mut player = accepted[player_index].take().ok_or_else(|| {
+        ProbeError::ProtocolError(format!(
+            "Identify -> Welcome returned no {assigned_slot:?} handle"
+        ))
     })?;
 
     verify_ready(&mut player, config).await
@@ -310,12 +342,16 @@ mod tests {
 
     impl FakePlayer {
         fn with_response(response: Result<Option<BotMsg>, PlayerError>) -> Self {
+            Self::in_slot(PlayerSlot::Player1, response)
+        }
+
+        fn in_slot(slot: PlayerSlot, response: Result<Option<BotMsg>, PlayerError>) -> Self {
             Self {
                 identity: PlayerIdentity {
                     name: "fake".into(),
                     author: "tests".into(),
                     agent_id: "fake/test".into(),
-                    slot: PlayerSlot::Player1,
+                    slot,
                 },
                 response: Some(response),
                 configured: Arc::new(Mutex::new(false)),
@@ -434,5 +470,32 @@ mod tests {
 
         assert!(matches!(error, ProbeError::ProtocolError(message)
             if message.contains("expected Ready after Configure")));
+    }
+
+    #[tokio::test]
+    async fn paired_preflight_rejects_failure_only_in_flipped_seat() {
+        let game = game();
+        let mut canonical = FakePlayer::in_slot(
+            PlayerSlot::Player1,
+            Ok(Some(BotMsg::Ready {
+                state_hash: game.state_hash(),
+            })),
+        );
+        verify_ready(&mut canonical, config(&game))
+            .await
+            .expect("canonical seat should pass");
+
+        let mut flipped = FakePlayer::in_slot(
+            PlayerSlot::Player2,
+            Ok(Some(BotMsg::Ready { state_hash: 0 })),
+        );
+        let error = verify_ready(&mut flipped, config(&game))
+            .await
+            .expect_err("a flipped-seat-only incompatibility must fail preflight");
+
+        assert!(matches!(
+            error,
+            ProbeError::ReadyHashMismatch { got: 0, .. }
+        ));
     }
 }

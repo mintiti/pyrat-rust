@@ -221,20 +221,19 @@ impl PyGameConfig {
     /// Standard game: classic maze, corner starts, symmetric random cheese.
     #[staticmethod]
     fn classic(width: u8, height: u8, cheese: u16) -> PyResult<Self> {
-        if width < 2 {
-            return Err(PyValueError::new_err(format!(
-                "width must be >= 2, got {width}"
-            )));
-        }
-        if height < 2 {
-            return Err(PyValueError::new_err(format!(
-                "height must be >= 2, got {height}"
-            )));
-        }
-        if cheese == 0 {
-            return Err(PyValueError::new_err("cheese count must be > 0"));
-        }
-        Ok(Self::from_inner(GameConfig::classic(width, height, cheese)))
+        let inner = GameConfig::try_from_parts(
+            width,
+            height,
+            300,
+            MazeStrategy::Random(MazeParams::classic()),
+            PlayerStrategy::Corners,
+            CheeseStrategy::Random {
+                count: cheese,
+                symmetric: true,
+            },
+        )
+        .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(Self::from_inner(inner))
     }
 
     /// Stamp out a new game from this config.
@@ -593,14 +592,16 @@ impl PyGameBuilder {
             )
         })?;
 
-        Ok(PyGameConfig::from_inner(GameConfig::from_parts(
+        let config = GameConfig::try_from_parts(
             self.width,
             self.height,
             self.max_turns,
             maze,
             players,
             cheese,
-        )))
+        )
+        .map_err(|error| PyValueError::new_err(error.to_string()))?;
+        Ok(PyGameConfig::from_inner(config))
     }
 }
 

@@ -31,7 +31,8 @@ use crate::game::types::MudMap;
 use crate::game::zobrist;
 use crate::{Coordinates, GameState, MazeLayout, MoveTable};
 use rand::{Rng, RngExt, SeedableRng};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::fmt;
 use std::marker::PhantomData;
 
 // ---------------------------------------------------------------------------
@@ -82,6 +83,77 @@ pub enum CheeseStrategy {
     /// Use exact positions.
     Fixed(Vec<Coordinates>),
 }
+
+/// The engine-supported configuration domain.
+///
+/// These limits are part of the public contract because state hashing and
+/// observation export use fixed, directly indexed representations. Callers
+/// that accept external input should build through
+/// [`GameConfig::try_from_parts`] or call [`GameConfig::validate`] before
+/// generating a maze.
+#[derive(Clone, Debug, PartialEq)]
+pub enum GameConfigError {
+    OutOfRange {
+        field: &'static str,
+        min: u64,
+        max: u64,
+        actual: u64,
+    },
+    NonFiniteDensity {
+        field: &'static str,
+    },
+    DensityOutOfRange {
+        field: &'static str,
+        actual: f32,
+    },
+    InvalidPlayerStart {
+        message: String,
+    },
+    InvalidCheese {
+        message: String,
+    },
+    InvalidTopology {
+        field: &'static str,
+        message: String,
+    },
+}
+
+impl GameConfigError {
+    /// Stable field path for adapters that render field-addressable errors.
+    #[must_use]
+    pub const fn field(&self) -> &'static str {
+        match self {
+            Self::OutOfRange { field, .. }
+            | Self::NonFiniteDensity { field }
+            | Self::DensityOutOfRange { field, .. }
+            | Self::InvalidTopology { field, .. } => field,
+            Self::InvalidPlayerStart { .. } => "player_start",
+            Self::InvalidCheese { .. } => "cheese_count",
+        }
+    }
+}
+
+impl fmt::Display for GameConfigError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::OutOfRange {
+                field,
+                min,
+                max,
+                actual,
+            } => write!(f, "{field} must be {min}..={max}, got {actual}"),
+            Self::NonFiniteDensity { field } => write!(f, "{field} must be finite"),
+            Self::DensityOutOfRange { field, actual } => {
+                write!(f, "{field} must be between 0.0 and 1.0, got {actual}")
+            },
+            Self::InvalidPlayerStart { message }
+            | Self::InvalidCheese { message }
+            | Self::InvalidTopology { message, .. } => f.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for GameConfigError {}
 
 // ---------------------------------------------------------------------------
 // MazeParams — the knobs for random maze generation
@@ -376,6 +448,16 @@ pub struct GameConfig {
 }
 
 impl GameConfig {
+    pub const MIN_DIMENSION: u8 = 2;
+    pub const MAX_DIMENSION: u8 = 64;
+    pub const MIN_MUD_COST: u8 = 2;
+    pub const MAX_MUD_COST: u8 = 15;
+    pub const MIN_MAX_TURNS: u16 = 1;
+    pub const MAX_MAX_TURNS: u16 = 1023;
+    /// Largest initial cheese set whose strict-majority terminal transition
+    /// cannot index score-x2 past the engine's hashing table.
+    pub const MAX_CHEESE_COUNT: u16 = 509;
+
     pub(crate) fn from_parts(
         width: u8,
         height: u8,
@@ -400,6 +482,135 @@ impl GameConfig {
             cheese,
             fixed_maze,
         }
+    }
+
+    /// Build a reusable config through the engine's authoritative validation
+    /// boundary.
+    ///
+    /// Unlike the ergonomic typestate builder's infallible `build`, this is
+    /// suitable for GUI, wire, file, and other external inputs: every value is
+    /// checked before fixed topology compilation or random generation can
+    /// index an engine representation.
+    pub fn try_from_parts(
+        width: u8,
+        height: u8,
+        max_turns: u16,
+        maze: MazeStrategy,
+        players: PlayerStrategy,
+        cheese: CheeseStrategy,
+    ) -> Result<Self, GameConfigError> {
+        Self::validate_parts(width, height, max_turns, &maze, &players, &cheese)?;
+        Ok(Self::from_parts(
+            width, height, max_turns, maze, players, cheese,
+        ))
+    }
+
+    /// Validate an existing config against the same supported domain used by
+    /// [`Self::try_from_parts`].
+    pub fn validate(&self) -> Result<(), GameConfigError> {
+        Self::validate_parts(
+            self.width,
+            self.height,
+            self.max_turns,
+            &self.maze,
+            &self.players,
+            &self.cheese,
+        )
+    }
+
+    fn validate_parts(
+        width: u8,
+        height: u8,
+        max_turns: u16,
+        maze: &MazeStrategy,
+        players: &PlayerStrategy,
+        cheese: &CheeseStrategy,
+    ) -> Result<(), GameConfigError> {
+        validate_range("width", width, Self::MIN_DIMENSION, Self::MAX_DIMENSION)?;
+        validate_range("height", height, Self::MIN_DIMENSION, Self::MAX_DIMENSION)?;
+        validate_range(
+            "max_turns",
+            max_turns,
+            Self::MIN_MAX_TURNS,
+            Self::MAX_MAX_TURNS,
+        )?;
+
+        match maze {
+            MazeStrategy::Random(params) => {
+                validate_density("wall_density", params.wall_density)?;
+                validate_density("mud_density", params.mud_density)?;
+                validate_range(
+                    "mud_range",
+                    params.mud_range,
+                    Self::MIN_MUD_COST,
+                    Self::MAX_MUD_COST,
+                )?;
+            },
+            MazeStrategy::Fixed { walls, mud } => {
+                validate_fixed_topology(width, height, walls, mud)?;
+            },
+        }
+
+        let fixed_players = match players {
+            PlayerStrategy::Corners => Some((
+                Coordinates::new(0, 0),
+                Coordinates::new(width - 1, height - 1),
+            )),
+            PlayerStrategy::Random => None,
+            PlayerStrategy::Fixed(first, second) => {
+                for (label, position) in [("player1", first), ("player2", second)] {
+                    if !in_bounds(*position, width, height) {
+                        return Err(GameConfigError::InvalidPlayerStart {
+                            message: format!(
+                                "{label} position ({}, {}) is outside board bounds ({width}x{height})",
+                                position.x, position.y
+                            ),
+                        });
+                    }
+                }
+                if first == second {
+                    return Err(GameConfigError::InvalidPlayerStart {
+                        message: "player starting positions must be distinct".into(),
+                    });
+                }
+                Some((*first, *second))
+            },
+        };
+
+        match cheese {
+            CheeseStrategy::Random { count, symmetric } => {
+                validate_random_cheese(width, height, players, fixed_players, *count, *symmetric)?
+            },
+            CheeseStrategy::Fixed(positions) => {
+                validate_range(
+                    "cheese_count",
+                    positions.len() as u64,
+                    0,
+                    u64::from(Self::MAX_CHEESE_COUNT),
+                )?;
+                let mut seen = HashSet::with_capacity(positions.len());
+                for &position in positions {
+                    if !in_bounds(position, width, height) {
+                        return Err(GameConfigError::InvalidCheese {
+                            message: format!(
+                                "cheese position ({}, {}) is outside board bounds ({width}x{height})",
+                                position.x, position.y
+                            ),
+                        });
+                    }
+                    if !seen.insert(position) {
+                        return Err(GameConfigError::InvalidCheese {
+                            message: format!(
+                                "duplicate cheese position at ({}, {})",
+                                position.x, position.y
+                            ),
+                        });
+                    }
+                }
+            },
+        }
+
+        Ok(())
     }
 
     pub fn width(&self) -> u8 {
@@ -475,6 +686,7 @@ impl GameConfig {
     /// Returns an error if cheese placement fails (e.g. too many cheese for
     /// the board, or odd symmetric cheese on an even board).
     pub fn create(&self, seed: Option<u64>) -> Result<GameState, String> {
+        self.validate().map_err(|error| error.to_string())?;
         let mut rng: rand::rngs::StdRng =
             seed.map_or_else(rand::make_rng, SeedableRng::seed_from_u64);
         let maze = self.generate_maze_with_rng(&mut rng);
@@ -496,6 +708,7 @@ impl GameConfig {
         maze: &MazeLayout,
         seed: Option<u64>,
     ) -> Result<GameState, String> {
+        self.validate().map_err(|error| error.to_string())?;
         if maze.width() != self.width() || maze.height() != self.height() {
             return Err(format!(
                 "Maze dimensions {}x{} do not match game config {}x{}",
@@ -653,6 +866,199 @@ impl GameConfig {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+fn validate_range<T>(field: &'static str, actual: T, min: T, max: T) -> Result<(), GameConfigError>
+where
+    T: Copy + Into<u64> + PartialOrd,
+{
+    if actual < min || actual > max {
+        return Err(GameConfigError::OutOfRange {
+            field,
+            min: min.into(),
+            max: max.into(),
+            actual: actual.into(),
+        });
+    }
+    Ok(())
+}
+
+fn validate_density(field: &'static str, actual: f32) -> Result<(), GameConfigError> {
+    if !actual.is_finite() {
+        return Err(GameConfigError::NonFiniteDensity { field });
+    }
+    if !(0.0..=1.0).contains(&actual) {
+        return Err(GameConfigError::DensityOutOfRange { field, actual });
+    }
+    Ok(())
+}
+
+const fn in_bounds(position: Coordinates, width: u8, height: u8) -> bool {
+    position.x < width && position.y < height
+}
+
+fn canonical_edge(first: Coordinates, second: Coordinates) -> (Coordinates, Coordinates) {
+    if first <= second {
+        (first, second)
+    } else {
+        (second, first)
+    }
+}
+
+fn validate_fixed_topology(
+    width: u8,
+    height: u8,
+    walls: &HashMap<Coordinates, Vec<Coordinates>>,
+    mud: &MudMap,
+) -> Result<(), GameConfigError> {
+    let mut wall_edges = HashSet::new();
+    for (&first, neighbors) in walls {
+        if !in_bounds(first, width, height) {
+            return Err(GameConfigError::InvalidTopology {
+                field: "walls",
+                message: format!(
+                    "wall position ({}, {}) is outside board bounds ({width}x{height})",
+                    first.x, first.y
+                ),
+            });
+        }
+        let mut local = HashSet::new();
+        for &second in neighbors {
+            if !in_bounds(second, width, height) {
+                return Err(GameConfigError::InvalidTopology {
+                    field: "walls",
+                    message: format!(
+                        "wall position ({}, {}) is outside board bounds ({width}x{height})",
+                        second.x, second.y
+                    ),
+                });
+            }
+            if crate::Direction::between(first, second).is_none() {
+                return Err(GameConfigError::InvalidTopology {
+                    field: "walls",
+                    message: format!(
+                        "wall endpoints ({}, {}) and ({}, {}) must be adjacent",
+                        first.x, first.y, second.x, second.y
+                    ),
+                });
+            }
+            if !local.insert(second) {
+                return Err(GameConfigError::InvalidTopology {
+                    field: "walls",
+                    message: format!(
+                        "duplicate wall between ({}, {}) and ({}, {})",
+                        first.x, first.y, second.x, second.y
+                    ),
+                });
+            }
+            wall_edges.insert(canonical_edge(first, second));
+        }
+    }
+
+    for ((first, second), cost) in mud.iter() {
+        if !in_bounds(first, width, height) || !in_bounds(second, width, height) {
+            return Err(GameConfigError::InvalidTopology {
+                field: "mud",
+                message: format!(
+                    "mud edge ({}, {}) -> ({}, {}) is outside board bounds ({width}x{height})",
+                    first.x, first.y, second.x, second.y
+                ),
+            });
+        }
+        if crate::Direction::between(first, second).is_none() {
+            return Err(GameConfigError::InvalidTopology {
+                field: "mud",
+                message: format!(
+                    "mud endpoints ({}, {}) and ({}, {}) must be adjacent",
+                    first.x, first.y, second.x, second.y
+                ),
+            });
+        }
+        validate_range(
+            "mud",
+            cost,
+            GameConfig::MIN_MUD_COST,
+            GameConfig::MAX_MUD_COST,
+        )?;
+        if wall_edges.contains(&canonical_edge(first, second)) {
+            return Err(GameConfigError::InvalidTopology {
+                field: "mud",
+                message: format!(
+                    "edge ({}, {}) -> ({}, {}) cannot be both wall and mud",
+                    first.x, first.y, second.x, second.y
+                ),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_random_cheese(
+    width: u8,
+    height: u8,
+    players: &PlayerStrategy,
+    fixed_players: Option<(Coordinates, Coordinates)>,
+    count: u16,
+    symmetric: bool,
+) -> Result<(), GameConfigError> {
+    validate_range("cheese_count", count, 1, GameConfig::MAX_CHEESE_COUNT)?;
+
+    let area = u16::from(width) * u16::from(height);
+    let capacity = if !symmetric {
+        area - 2
+    } else {
+        if count % 2 == 1 && (width.is_multiple_of(2) || height.is_multiple_of(2)) {
+            return Err(GameConfigError::InvalidCheese {
+                message: "Cannot place odd number of cheese in symmetric maze with even dimensions"
+                    .into(),
+            });
+        }
+
+        match players {
+            // A random draw can occupy the center or split a mirror pair, so
+            // some otherwise legal configs can still fail for a particular
+            // seed. Keep the engine's general config domain compatible here;
+            // callers that require every seed to work (such as tournaments)
+            // enforce the stricter worst-case capacity at their boundary.
+            PlayerStrategy::Random => area - 2,
+            PlayerStrategy::Corners | PlayerStrategy::Fixed(..) => {
+                let (first, second) = fixed_players.expect("fixed players resolved");
+                let rotate = |position: Coordinates| {
+                    Coordinates::new(width - 1 - position.x, height - 1 - position.y)
+                };
+                let excluded: HashSet<_> = [first, second, rotate(first), rotate(second)]
+                    .into_iter()
+                    .collect();
+                let center = Coordinates::new(width / 2, height / 2);
+                if count % 2 == 1 && excluded.contains(&center) {
+                    return Err(GameConfigError::InvalidCheese {
+                        message: "cannot place odd symmetric cheese: center occupied by a player"
+                            .into(),
+                    });
+                }
+                let mut available = area - excluded.len() as u16;
+                if count.is_multiple_of(2)
+                    && !width.is_multiple_of(2)
+                    && !height.is_multiple_of(2)
+                    && !excluded.contains(&center)
+                {
+                    available -= 1;
+                }
+                available
+            },
+        }
+    };
+
+    if count > capacity {
+        return Err(GameConfigError::InvalidCheese {
+            message: format!(
+                "cheese_count over capacity for these starts/symmetry: max {capacity}, got {count}"
+            ),
+        });
+    }
+
+    Ok(())
+}
 
 /// Pick two distinct random positions on the board.
 fn generate_random_positions(
@@ -1243,5 +1649,122 @@ mod tests {
     #[should_panic(expected = "max_turns must be > 0")]
     fn config_with_max_turns_zero_panics() {
         let _ = GameConfig::classic(11, 9, 7).with_max_turns(0);
+    }
+
+    fn try_random_config(
+        width: u8,
+        height: u8,
+        max_turns: u16,
+        maze: MazeParams,
+        cheese_count: u16,
+    ) -> Result<GameConfig, GameConfigError> {
+        GameConfig::try_from_parts(
+            width,
+            height,
+            max_turns,
+            MazeStrategy::Random(maze),
+            PlayerStrategy::Corners,
+            CheeseStrategy::Random {
+                count: cheese_count,
+                symmetric: false,
+            },
+        )
+    }
+
+    #[test]
+    fn fallible_boundary_rejects_every_fixed_hash_overflow() {
+        let classic = MazeParams::classic();
+        for (field, result) in [
+            ("width", try_random_config(65, 8, 300, classic.clone(), 1)),
+            ("height", try_random_config(8, 65, 300, classic.clone(), 1)),
+            (
+                "max_turns",
+                try_random_config(8, 8, 1024, classic.clone(), 1),
+            ),
+            (
+                "mud_range",
+                try_random_config(
+                    8,
+                    8,
+                    300,
+                    MazeParams {
+                        mud_range: 16,
+                        ..classic.clone()
+                    },
+                    1,
+                ),
+            ),
+            (
+                "cheese_count",
+                try_random_config(64, 8, 300, classic.clone(), 510),
+            ),
+        ] {
+            let error = match result {
+                Err(error) => error,
+                Ok(_) => panic!("overflowing config must be rejected"),
+            };
+            assert_eq!(error.field(), field);
+        }
+    }
+
+    #[test]
+    fn fallible_boundary_rejects_non_finite_and_out_of_range_densities() {
+        for (field, value) in [
+            ("wall_density", f32::NAN),
+            ("wall_density", f32::INFINITY),
+            ("wall_density", -0.01),
+            ("mud_density", 1.01),
+        ] {
+            let maze = if field == "wall_density" {
+                MazeParams {
+                    wall_density: value,
+                    ..MazeParams::classic()
+                }
+            } else {
+                MazeParams {
+                    mud_density: value,
+                    ..MazeParams::classic()
+                }
+            };
+            let error = match try_random_config(8, 8, 300, maze, 1) {
+                Err(error) => error,
+                Ok(_) => panic!("invalid density must be rejected"),
+            };
+            assert_eq!(error.field(), field);
+        }
+    }
+
+    #[test]
+    fn accepted_hash_boundaries_create_and_step_without_panicking() {
+        let mut mud = MudMap::new();
+        mud.insert(
+            Coordinates::new(0, 0),
+            Coordinates::new(1, 0),
+            GameConfig::MAX_MUD_COST,
+        );
+        let player1 = Coordinates::new(0, 0);
+        let player2 = Coordinates::new(63, 63);
+        let cheese = (0..GameConfig::MAX_DIMENSION)
+            .flat_map(|x| (0..GameConfig::MAX_DIMENSION).map(move |y| Coordinates::new(x, y)))
+            .filter(|position| *position != player1 && *position != player2)
+            .take(usize::from(GameConfig::MAX_CHEESE_COUNT))
+            .collect();
+        let mut game = GameConfig::try_from_parts(
+            GameConfig::MAX_DIMENSION,
+            GameConfig::MAX_DIMENSION,
+            GameConfig::MAX_MAX_TURNS,
+            MazeStrategy::Fixed {
+                walls: HashMap::new(),
+                mud,
+            },
+            PlayerStrategy::Fixed(player1, player2),
+            CheeseStrategy::Fixed(cheese),
+        )
+        .expect("inclusive limits are valid")
+        .create(Some(7))
+        .expect("boundary config creates");
+
+        game.process_turn(Direction::Right, Direction::Stay);
+        assert_eq!(game.player1_mud_turns(), GameConfig::MAX_MUD_COST);
     }
 }

@@ -522,16 +522,24 @@ class TestNewValidation:
     """Tests for validation that returns ValueError instead of panicking."""
 
     def test_classic_zero_width(self):
-        with pytest.raises(ValueError, match="width must be >= 2"):
+        with pytest.raises(ValueError, match=r"width must be 2\.\.=64"):
             GameConfig.classic(0, 15, 41)
 
     def test_classic_zero_height(self):
-        with pytest.raises(ValueError, match="height must be >= 2"):
+        with pytest.raises(ValueError, match=r"height must be 2\.\.=64"):
             GameConfig.classic(21, 0, 41)
 
     def test_classic_zero_cheese(self):
-        with pytest.raises(ValueError, match="cheese count must be > 0"):
+        with pytest.raises(ValueError, match=r"cheese_count must be 1\.\.=509"):
             GameConfig.classic(21, 15, 0)
+
+    @pytest.mark.parametrize(
+        ("width", "height", "cheese"),
+        [(65, 15, 41), (21, 65, 41), (21, 15, 510)],
+    )
+    def test_classic_rejects_packed_state_overflow(self, width, height, cheese):
+        with pytest.raises(ValueError):
+            GameConfig.classic(width, height, cheese)
 
     def test_random_cheese_zero(self):
         with pytest.raises(ValueError, match="cheese count must be > 0"):
@@ -564,29 +572,26 @@ class TestNewValidation:
         with pytest.raises(ValueError, match="outside board bounds"):
             GameBuilder(5, 5).with_custom_maze(walls=[], mud=[mud])
 
-    def test_too_many_cheese_at_create(self):
-        """Too many cheese for the board size errors at create(), not build()."""
-        config = (
-            GameBuilder(3, 3)
-            .with_open_maze()
-            .with_corner_positions()
-            .with_random_cheese(100)
-            .build()
-        )
-        with pytest.raises(ValueError, match="Too many pieces of cheese"):
-            config.create(seed=42)
+    def test_too_many_cheese_rejected_at_checked_build_boundary(self):
+        with pytest.raises(ValueError, match="over capacity"):
+            (
+                GameBuilder(3, 3)
+                .with_open_maze()
+                .with_corner_positions()
+                .with_random_cheese(100)
+                .build()
+            )
 
     def test_odd_symmetric_cheese_even_board(self):
         """Odd cheese count with symmetry on even board errors at create()."""
-        config = (
-            GameBuilder(6, 6)
-            .with_open_maze()
-            .with_corner_positions()
-            .with_random_cheese(5, symmetric=True)
-            .build()
-        )
         with pytest.raises(ValueError, match="Cannot place odd number of cheese"):
-            config.create(seed=42)
+            (
+                GameBuilder(6, 6)
+                .with_open_maze()
+                .with_corner_positions()
+                .with_random_cheese(5, symmetric=True)
+                .build()
+            )
 
     def test_step_invalid_move_shows_value(self):
         game = GameConfig.classic(5, 5, 3).create(seed=42)

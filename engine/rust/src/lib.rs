@@ -17,7 +17,7 @@ pub mod game;
 pub use bindings::game::PyRat;
 pub use game::{
     board::MoveTable,
-    builder::{GameBuilder, GameConfig, MazeParams},
+    builder::{GameBuilder, GameConfig, GameConfigError, MazeParams},
     cheese_board::CheeseBoard,
     game_logic::{GameState, MoveUndo, PlayerState},
     maze_generation::{CheeseConfig, MazeConfig},

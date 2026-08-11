@@ -116,6 +116,7 @@ pub fn round_robin(
         seat_policy: pyrat_eval::SeatPolicy::Legacy,
         tournament_seed: 0xC0FFEE,
     })
+    .expect("valid round-robin fixture")
 }
 
 pub fn round_robin_spec() -> TournamentSpec {

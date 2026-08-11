@@ -10,7 +10,11 @@ import {
 	Text,
 } from "@mantine/core";
 import { useState } from "react";
-import type { GameFactoryConfig, PlayerStart } from "../../bindings/generated";
+import type {
+	GameFactoryConfig,
+	LaunchLimits,
+	PlayerStart,
+} from "../../bindings/generated";
 import {
 	PRESET_VALUES,
 	type PresetName,
@@ -20,6 +24,7 @@ import SettingRow from "../common/SettingRow";
 
 type Props = {
 	value: GameFactoryConfig;
+	limits: LaunchLimits;
 	onChange: (next: GameFactoryConfig) => void;
 	errors: Record<string, string>;
 };
@@ -29,7 +34,12 @@ const SIZE_PRESETS = ["tiny", "small", "medium", "large", "huge"] as const;
 /** The game-instance distribution editor (board / maze / starts / cheese).
  * Presets up front; the per-field knobs behind "Advanced". Shares preset data
  * and validation with the Play config via `stores/gameConfig`. */
-export default function GameFactoryForm({ value, onChange, errors }: Props) {
+export default function GameFactoryForm({
+	value,
+	limits,
+	onChange,
+	errors,
+}: Props) {
 	const [advanced, setAdvanced] = useState(false);
 	const set = (patch: Partial<GameFactoryConfig>) =>
 		onChange({ ...value, ...patch });
@@ -93,60 +103,79 @@ export default function GameFactoryForm({ value, onChange, errors }: Props) {
 					<SettingRow label="Width">
 						<NumberInput
 							w={90}
-							min={2}
-							max={255}
+							min={limits.min_dimension}
+							max={limits.max_dimension}
+							allowDecimal={false}
 							value={value.width}
 							onChange={(v) => set({ width: Number(v) || 0 })}
-							error={!!errors.width}
+							error={errors.width}
 						/>
 					</SettingRow>
 					<SettingRow label="Height">
 						<NumberInput
 							w={90}
-							min={2}
-							max={255}
+							min={limits.min_dimension}
+							max={limits.max_dimension}
+							allowDecimal={false}
 							value={value.height}
 							onChange={(v) => set({ height: Number(v) || 0 })}
-							error={!!errors.height}
+							error={errors.height}
 						/>
 					</SettingRow>
 					<SettingRow label="Max turns">
 						<NumberInput
 							w={90}
 							min={1}
+							max={limits.max_turns}
+							allowDecimal={false}
 							value={value.max_turns}
 							onChange={(v) => set({ max_turns: Number(v) || 0 })}
-							error={!!errors.max_turns}
+							error={errors.max_turns}
 						/>
 					</SettingRow>
 					<SettingRow label="Wall density" controlTarget="slider-thumb">
-						<Slider
-							w={160}
-							min={0}
-							max={1}
-							step={0.05}
-							value={value.wall_density}
-							onChange={(v) => set({ wall_density: v })}
-						/>
+						<Stack gap={2}>
+							<Slider
+								w={160}
+								min={0}
+								max={1}
+								step={0.05}
+								value={value.wall_density}
+								onChange={(v) => set({ wall_density: v })}
+							/>
+							{errors.wall_density && (
+								<Text size="xs" c="red">
+									{errors.wall_density}
+								</Text>
+							)}
+						</Stack>
 					</SettingRow>
 					<SettingRow label="Mud density" controlTarget="slider-thumb">
-						<Slider
-							w={160}
-							min={0}
-							max={1}
-							step={0.05}
-							value={value.mud_density}
-							onChange={(v) => set({ mud_density: v })}
-						/>
+						<Stack gap={2}>
+							<Slider
+								w={160}
+								min={0}
+								max={1}
+								step={0.05}
+								value={value.mud_density}
+								onChange={(v) => set({ mud_density: v })}
+							/>
+							{errors.mud_density && (
+								<Text size="xs" c="red">
+									{errors.mud_density}
+								</Text>
+							)}
+						</Stack>
 					</SettingRow>
 					<SettingRow label="Mud range" description="max mud cost">
 						<NumberInput
 							w={90}
 							min={2}
-							max={255}
+							max={limits.max_mud_range}
+							allowDecimal={false}
 							value={value.mud_range}
 							onChange={(v) => set({ mud_range: Number(v) || 0 })}
-							error={!!errors.mud_range}
+							error={errors.mud_range}
 						/>
 					</SettingRow>
 					<SettingRow label="Connected">
@@ -179,9 +208,11 @@ export default function GameFactoryForm({ value, onChange, errors }: Props) {
 						<NumberInput
 							w={90}
 							min={1}
+							max={limits.max_cheese_count}
+							allowDecimal={false}
 							value={value.cheese_count}
 							onChange={(v) => set({ cheese_count: Number(v) || 0 })}
-							error={!!errors.cheese_count}
+							error={errors.cheese_count}
 						/>
 					</SettingRow>
 					<SettingRow label="Symmetric cheese">
@@ -192,11 +223,6 @@ export default function GameFactoryForm({ value, onChange, errors }: Props) {
 							}
 						/>
 					</SettingRow>
-					{errors.cheese_count && (
-						<Text size="xs" c="red">
-							{errors.cheese_count}
-						</Text>
-					)}
 				</Stack>
 			</Collapse>
 		</Stack>

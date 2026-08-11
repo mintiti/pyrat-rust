@@ -7,19 +7,18 @@
 //! infrequent.
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use parking_lot::Mutex;
-use pyrat::game::builder::{
-    CheeseStrategy, GameBuilder, GameConfig, MazeParams, MazeStrategy, PlayerStrategy,
-};
+use pyrat::game::builder::{CheeseStrategy, GameConfig, MazeParams, MazeStrategy, PlayerStrategy};
 use pyrat_eval::{
     EvalSession, MatchupKey, ResolvedPlayer, SeatPolicy, TournamentMethodology, TournamentParams,
     TournamentSpec, TournamentState, TournamentTimingMode,
 };
 use pyrat_eval_store::{AttemptOutcome, EvalStore, SeatOrientation, TournamentId};
-use pyrat_host::probe::{preflight_bot, PreflightConfig};
+use pyrat_host::probe::{preflight_bot_in_slot, PreflightConfig};
+use pyrat_host::wire::Player as PlayerSlot;
 use pyrat_orchestrator::{PlayerSpec, ReplayEvent, ReplayFile};
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -32,7 +31,7 @@ use crate::state::{AppState, TournamentPhase};
 use crate::tournament_config;
 use crate::tournament_events::{FailureKind, StandingRow, TimeoutPhase, TournamentPreparingEvent};
 use crate::tournament_runner::{
-    build_standings, ordered_player_ids, run_tournament, total_games, RunnerFormat, TournamentRun,
+    build_standings, ordered_player_ids, run_tournament, RunnerFormat, TournamentRun,
 };
 
 // ---------------------------------------------------------------------------
@@ -54,6 +53,102 @@ pub struct BotPick {
 /// it never crosses a JS boundary.)
 const MAX_JS_SAFE_SEED: u64 = (1 << 53) - 1;
 
+const MAX_PARTICIPANTS: u32 = 256;
+const MAX_MAZES_PER_MATCHUP: u32 = 50_000;
+const MAX_TOTAL_GAMES: u32 = 100_000;
+const MAX_TIMEOUT_MS: u32 = 3_600_000;
+const MAX_PARALLEL: u32 = 64;
+
+/// Backend-owned bounds for launch controls. The frontend uses these for
+/// affordances; the validation boundary below remains authoritative.
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct LaunchLimits {
+    pub min_dimension: u32,
+    pub max_dimension: u32,
+    pub max_turns: u32,
+    pub max_mud_range: u32,
+    pub max_cheese_count: u32,
+    pub max_participants: u32,
+    pub max_mazes_per_matchup: u32,
+    pub max_total_games: u32,
+    pub max_timeout_ms: u32,
+    pub max_parallel: u32,
+    pub max_js_safe_seed: u64,
+}
+
+impl Default for LaunchLimits {
+    fn default() -> Self {
+        Self {
+            min_dimension: u32::from(GameConfig::MIN_DIMENSION),
+            max_dimension: u32::from(GameConfig::MAX_DIMENSION),
+            max_turns: u32::from(GameConfig::MAX_MAX_TURNS),
+            max_mud_range: u32::from(GameConfig::MAX_MUD_COST),
+            max_cheese_count: u32::from(GameConfig::MAX_CHEESE_COUNT),
+            max_participants: MAX_PARTICIPANTS,
+            max_mazes_per_matchup: MAX_MAZES_PER_MATCHUP,
+            max_total_games: MAX_TOTAL_GAMES,
+            max_timeout_ms: MAX_TIMEOUT_MS,
+            max_parallel: MAX_PARALLEL,
+            max_js_safe_seed: MAX_JS_SAFE_SEED,
+        }
+    }
+}
+
+/// One field-addressable launch validation failure.
+#[derive(Serialize, Debug, Clone, PartialEq, Eq, Type)]
+pub struct LaunchFieldError {
+    pub field: String,
+    pub message: String,
+}
+
+impl LaunchFieldError {
+    fn new(field: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            field: field.into(),
+            message: message.into(),
+        }
+    }
+}
+
+impl std::fmt::Display for LaunchFieldError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+/// Start errors keep form mistakes structured while preserving ordinary
+/// runtime failures as a single message.
+#[derive(Serialize, Debug, Clone, Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum StartTournamentError {
+    Validation { errors: Vec<LaunchFieldError> },
+    Runtime { message: String },
+}
+
+impl StartTournamentError {
+    fn validation(errors: Vec<LaunchFieldError>) -> Self {
+        Self::Validation { errors }
+    }
+
+    fn runtime(message: impl Into<String>) -> Self {
+        Self::Runtime {
+            message: message.into(),
+        }
+    }
+}
+
+impl From<String> for StartTournamentError {
+    fn from(message: String) -> Self {
+        Self::runtime(message)
+    }
+}
+
+impl From<&str> for StartTournamentError {
+    fn from(message: &str) -> Self {
+        Self::runtime(message)
+    }
+}
+
 /// Player start strategy for the game-instance factory. Mirrors the engine's
 /// `PlayerStrategy` (corners | random); fixed positions are parked.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
@@ -66,76 +161,75 @@ pub enum PlayerStart {
 /// The game-instance distribution configured on the launch screen: board,
 /// maze, start strategy, cheese. This is the *distribution*; the tournament
 /// seed that selects which instances get drawn lives on `LaunchParams`.
+/// Integer-like wire fields intentionally arrive as `f64`: JavaScript has one
+/// numeric type, and accepting the raw value lets the command return a typed
+/// field error for `7.5` instead of failing in Tauri deserialization.
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct GameFactoryConfig {
-    pub width: u32,
-    pub height: u32,
-    pub max_turns: u32,
+    pub width: f64,
+    pub height: f64,
+    pub max_turns: f64,
     pub wall_density: f64,
     pub mud_density: f64,
-    pub mud_range: u32,
+    pub mud_range: f64,
     pub connected: bool,
     pub symmetric: bool,
     pub player_start: PlayerStart,
-    pub cheese_count: u32,
+    pub cheese_count: f64,
     pub cheese_symmetric: bool,
 }
 
 impl GameFactoryConfig {
-    /// Build the engine `GameConfig`, validating engine bounds (the builder
-    /// asserts on out-of-range dims / zero max_turns) and the seed-independent
-    /// random-start invariants. A single `create(seed)` smoke test (in
-    /// `build_and_spawn`) catches per-seed cheese-capacity failures; random
-    /// starts draw many seeds, so symmetric-cheese soundness is enforced here
-    /// instead — no seed can fail mid-tournament.
-    fn to_game_config(&self) -> Result<GameConfig, String> {
-        if !(2..=255).contains(&self.width) {
-            return Err(format!("width must be 2..=255, got {}", self.width));
-        }
-        if !(2..=255).contains(&self.height) {
-            return Err(format!("height must be 2..=255, got {}", self.height));
-        }
-        if !(1..=u32::from(u16::MAX)).contains(&self.max_turns) {
-            return Err(format!(
-                "max_turns must be 1..=65535, got {}",
-                self.max_turns
-            ));
-        }
-        if self.mud_range > u32::from(u8::MAX) {
-            return Err(format!("mud_range must be <= 255, got {}", self.mud_range));
-        }
-        if self.mud_density > 0.0 && self.mud_range < 2 {
-            return Err("mud_range must be >= 2 when mud is enabled".into());
-        }
-        if self.cheese_count < 1 {
-            return Err("cheese_count must be >= 1".into());
-        }
-        if self.cheese_count > u32::from(u16::MAX) {
-            return Err(format!(
-                "cheese_count must be <= 65535, got {}",
-                self.cheese_count
-            ));
-        }
+    /// Build the engine `GameConfig` through its authoritative checked
+    /// constructor. No untrusted launch value reaches a narrowing cast first.
+    fn to_game_config(&self) -> Result<GameConfig, LaunchFieldError> {
+        let width = validate_whole_number(
+            "width",
+            self.width,
+            u64::from(GameConfig::MIN_DIMENSION),
+            u64::from(GameConfig::MAX_DIMENSION),
+        )? as u8;
+        let height = validate_whole_number(
+            "height",
+            self.height,
+            u64::from(GameConfig::MIN_DIMENSION),
+            u64::from(GameConfig::MAX_DIMENSION),
+        )? as u8;
+        let max_turns = validate_whole_number(
+            "max_turns",
+            self.max_turns,
+            u64::from(GameConfig::MIN_MAX_TURNS),
+            u64::from(GameConfig::MAX_MAX_TURNS),
+        )? as u16;
+        let mud_range = validate_whole_number(
+            "mud_range",
+            self.mud_range,
+            u64::from(GameConfig::MIN_MUD_COST),
+            u64::from(GameConfig::MAX_MUD_COST),
+        )? as u8;
+        let cheese_count = validate_whole_number(
+            "cheese_count",
+            self.cheese_count,
+            1,
+            u64::from(GameConfig::MAX_CHEESE_COUNT),
+        )? as u16;
 
-        let area = self.width.saturating_mul(self.height);
-        if matches!(self.player_start, PlayerStart::Random) && self.cheese_symmetric {
-            if self.cheese_count % 2 == 1 {
-                return Err(
-                    "random starts with symmetric cheese need an even cheese count: \
-                     the unpaired (center) piece can't be placed when a random start \
-                     occupies the center"
-                        .into(),
-                );
+        if self.player_start == PlayerStart::Random && self.cheese_symmetric {
+            if cheese_count % 2 == 1 {
+                return Err(LaunchFieldError::new(
+                    "cheese_count",
+                    "random starts with symmetric cheese need an even cheese count",
+                ));
             }
-            // A random pair removes up to two mirror-pairs of cells (each player
-            // + its mirror); an odd×odd board also reserves the self-mirror
-            // center, which can't hold a paired piece.
-            let odd_board = self.width % 2 == 1 && self.height % 2 == 1;
-            let cap = area.saturating_sub(if odd_board { 5 } else { 4 });
-            if self.cheese_count > cap {
-                return Err(format!(
-                    "random + symmetric cheese over capacity: max {cap} on this board, got {}",
-                    self.cheese_count
+            let area = u16::from(width) * u16::from(height);
+            let odd_board = !width.is_multiple_of(2) && !height.is_multiple_of(2);
+            let capacity = area - if odd_board { 5 } else { 4 };
+            if cheese_count > capacity {
+                return Err(LaunchFieldError::new(
+                    "cheese_count",
+                    format!(
+                        "cheese_count over capacity for random starts with symmetric cheese: max {capacity}, got {cheese_count}"
+                    ),
                 ));
             }
         }
@@ -145,18 +239,24 @@ impl GameFactoryConfig {
             connected: self.connected,
             symmetric: self.symmetric,
             mud_density: self.mud_density as f32,
-            mud_range: self.mud_range as u8,
+            mud_range,
         };
-        let builder = GameBuilder::new(self.width as u8, self.height as u8)
-            .with_max_turns(self.max_turns as u16)
-            .with_random_maze(maze);
-        let builder = match self.player_start {
-            PlayerStart::Corners => builder.with_corner_positions(),
-            PlayerStart::Random => builder.with_random_positions(),
+        let players = match self.player_start {
+            PlayerStart::Corners => PlayerStrategy::Corners,
+            PlayerStart::Random => PlayerStrategy::Random,
         };
-        Ok(builder
-            .with_random_cheese(self.cheese_count as u16, self.cheese_symmetric)
-            .build())
+        GameConfig::try_from_parts(
+            width,
+            height,
+            max_turns,
+            MazeStrategy::Random(maze),
+            players,
+            CheeseStrategy::Random {
+                count: cheese_count,
+                symmetric: self.cheese_symmetric,
+            },
+        )
+        .map_err(|error| LaunchFieldError::new(error.field(), error.to_string()))
     }
 }
 
@@ -177,22 +277,24 @@ fn factory_from_game_config(cfg: &GameConfig) -> Result<GameFactoryConfig, Strin
         PlayerStrategy::Fixed(..) => return Err("default config uses fixed positions".into()),
     };
     Ok(GameFactoryConfig {
-        width: u32::from(cfg.width()),
-        height: u32::from(cfg.height()),
-        max_turns: u32::from(cfg.max_turns()),
+        width: f64::from(cfg.width()),
+        height: f64::from(cfg.height()),
+        max_turns: f64::from(cfg.max_turns()),
         wall_density: f64::from(p.wall_density),
         mud_density: f64::from(p.mud_density),
-        mud_range: u32::from(p.mud_range),
+        mud_range: f64::from(p.mud_range),
         connected: p.connected,
         symmetric: p.symmetric,
         player_start,
-        cheese_count: u32::from(*count),
+        cheese_count: f64::from(*count),
         cheese_symmetric: *symmetric,
     })
 }
 
 /// Launch parameters. The factory + methodology knobs are configured on the
 /// launch screen; the frontend pre-fills them from `get_tournament_launch_defaults`.
+/// Methodology numbers likewise stay raw until `validate_launch_params`
+/// proves they are finite whole values in range and narrows them to `u32`.
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct LaunchParams {
     pub bots: Vec<BotPick>,
@@ -202,13 +304,13 @@ pub struct LaunchParams {
     /// The game-instance distribution (board / maze / starts / cheese).
     pub factory: GameFactoryConfig,
     /// Mazes per matchup; the paired schedule runs 2× this many games.
-    pub mazes_per_matchup: u32,
-    pub move_timeout_ms: u32,
-    pub preprocessing_timeout_ms: u32,
-    pub max_parallel: u32,
+    pub mazes_per_matchup: f64,
+    pub move_timeout_ms: f64,
+    pub preprocessing_timeout_ms: f64,
+    pub max_parallel: f64,
     /// Tournament seed (selects which instances are drawn). `None` → random,
     /// capped to the JS-safe range so it round-trips for reproducibility.
-    pub tournament_seed: Option<u64>,
+    pub tournament_seed: Option<f64>,
 }
 
 /// Launch-form defaults: the ladder recipe as a factory config plus the
@@ -221,6 +323,251 @@ pub struct LaunchDefaults {
     pub move_timeout_ms: u32,
     pub preprocessing_timeout_ms: u32,
     pub max_parallel: u32,
+    pub limits: LaunchLimits,
+}
+
+struct ValidatedLaunch {
+    game_config: GameConfig,
+    target_games_per_matchup: u32,
+    total_games: u32,
+    move_timeout_ms: u32,
+    preprocessing_timeout_ms: u32,
+    max_parallel: u32,
+    tournament_seed: Option<u64>,
+}
+
+fn validate_whole_number(
+    field: &'static str,
+    actual: f64,
+    min: u64,
+    max: u64,
+) -> Result<u64, LaunchFieldError> {
+    if !actual.is_finite() || actual.fract() != 0.0 {
+        return Err(LaunchFieldError::new(
+            field,
+            format!("{field} must be a finite whole number"),
+        ));
+    }
+    if actual < min as f64 || actual > max as f64 {
+        return Err(LaunchFieldError::new(
+            field,
+            format!("{field} must be {min}..={max}, got {actual}"),
+        ));
+    }
+    Ok(actual as u64)
+}
+
+/// Validate every externally supplied launch value before reserving the
+/// runner slot or touching durable state. All failures are field-addressable
+/// so the frontend can put the explanation beside the responsible control.
+fn validate_launch_params(params: &LaunchParams) -> Result<ValidatedLaunch, Vec<LaunchFieldError>> {
+    let mut errors = Vec::new();
+
+    let game_config = match params.factory.to_game_config() {
+        Ok(config) => Some(config),
+        Err(error) => {
+            errors.push(LaunchFieldError::new(
+                format!("factory.{}", error.field),
+                error.message,
+            ));
+            None
+        },
+    };
+
+    if params.bots.len() < 2 {
+        errors.push(LaunchFieldError::new(
+            "bots",
+            "a tournament needs at least 2 bots",
+        ));
+    }
+    if params.bots.len() > MAX_PARTICIPANTS as usize {
+        errors.push(LaunchFieldError::new(
+            "bots",
+            format!("at most {MAX_PARTICIPANTS} bots are allowed"),
+        ));
+    }
+
+    let mut ids = HashSet::new();
+    for (index, bot) in params.bots.iter().enumerate() {
+        let id_field = format!("bots.{index}.agent_id");
+        if bot.agent_id.trim().is_empty() {
+            errors.push(LaunchFieldError::new(id_field, "bot id must not be empty"));
+        } else if bot.agent_id.trim() != bot.agent_id {
+            errors.push(LaunchFieldError::new(
+                id_field,
+                "bot id must not start or end with whitespace",
+            ));
+        } else if !ids.insert(bot.agent_id.as_str()) {
+            errors.push(LaunchFieldError::new(
+                id_field,
+                format!("duplicate bot id `{}`", bot.agent_id),
+            ));
+        }
+
+        if bot.run_command.trim().is_empty() {
+            errors.push(LaunchFieldError::new(
+                format!("bots.{index}.run_command"),
+                "run command must not be empty",
+            ));
+        }
+
+        let working_dir_field = format!("bots.{index}.working_dir");
+        if bot.working_dir.trim().is_empty() {
+            errors.push(LaunchFieldError::new(
+                working_dir_field,
+                "working directory must not be empty",
+            ));
+        } else if !Path::new(&bot.working_dir).is_dir() {
+            errors.push(LaunchFieldError::new(
+                working_dir_field,
+                "working directory does not exist or is not a directory",
+            ));
+        }
+    }
+
+    if let Some(target) = &params.target {
+        if target.trim().is_empty() {
+            errors.push(LaunchFieldError::new(
+                "target",
+                "target bot must not be empty",
+            ));
+        } else {
+            let target_count = params
+                .bots
+                .iter()
+                .filter(|bot| bot.agent_id == *target)
+                .count();
+            if target_count != 1 {
+                errors.push(LaunchFieldError::new(
+                    "target",
+                    format!("target `{target}` must identify exactly one selected bot"),
+                ));
+            }
+        }
+    }
+
+    let mazes_per_matchup = match validate_whole_number(
+        "mazes_per_matchup",
+        params.mazes_per_matchup,
+        1,
+        u64::from(MAX_MAZES_PER_MATCHUP),
+    ) {
+        Ok(value) => Some(value as u32),
+        Err(error) => {
+            errors.push(error);
+            None
+        },
+    };
+    let target_games_per_matchup = mazes_per_matchup.and_then(|mazes| match mazes.checked_mul(2) {
+        Some(value) => Some(value),
+        None => {
+            errors.push(LaunchFieldError::new(
+                "mazes_per_matchup",
+                "paired game count overflows",
+            ));
+            None
+        },
+    });
+
+    let mut checked_u32 =
+        |field: &'static str, value: f64, min: u32, max: u32| match validate_whole_number(
+            field,
+            value,
+            u64::from(min),
+            u64::from(max),
+        ) {
+            Ok(value) => Some(value as u32),
+            Err(error) => {
+                errors.push(error);
+                None
+            },
+        };
+    let move_timeout_ms = checked_u32("move_timeout_ms", params.move_timeout_ms, 1, MAX_TIMEOUT_MS);
+    let preprocessing_timeout_ms = checked_u32(
+        "preprocessing_timeout_ms",
+        params.preprocessing_timeout_ms,
+        1,
+        MAX_TIMEOUT_MS,
+    );
+    let max_parallel = checked_u32("max_parallel", params.max_parallel, 1, MAX_PARALLEL);
+
+    let tournament_seed = match params.tournament_seed {
+        Some(seed) => match validate_whole_number("tournament_seed", seed, 0, MAX_JS_SAFE_SEED) {
+            Ok(seed) => Some(Some(seed)),
+            Err(error) => {
+                errors.push(error);
+                None
+            },
+        },
+        None => Some(None),
+    };
+
+    let total_games = target_games_per_matchup.and_then(|games_per_matchup| {
+        let player_count = u32::try_from(params.bots.len()).ok()?;
+        let matchup_count = if params.target.is_some() {
+            player_count.checked_sub(1)
+        } else {
+            player_count
+                .checked_mul(player_count.checked_sub(1)?)?
+                .checked_div(2)
+        };
+        let total = matchup_count.and_then(|count| count.checked_mul(games_per_matchup));
+        match total {
+            Some(total) if total <= MAX_TOTAL_GAMES => Some(total),
+            Some(total) => {
+                errors.push(LaunchFieldError::new(
+                    "mazes_per_matchup",
+                    format!(
+                        "this schedule would run {total} games; the limit is {MAX_TOTAL_GAMES}"
+                    ),
+                ));
+                None
+            },
+            None => {
+                errors.push(LaunchFieldError::new(
+                    "mazes_per_matchup",
+                    "total game count overflows",
+                ));
+                None
+            },
+        }
+    });
+
+    if !errors.is_empty() {
+        return Err(errors);
+    }
+
+    match (
+        game_config,
+        target_games_per_matchup,
+        total_games,
+        move_timeout_ms,
+        preprocessing_timeout_ms,
+        max_parallel,
+        tournament_seed,
+    ) {
+        (
+            Some(game_config),
+            Some(target_games_per_matchup),
+            Some(total_games),
+            Some(move_timeout_ms),
+            Some(preprocessing_timeout_ms),
+            Some(max_parallel),
+            Some(tournament_seed),
+        ) => Ok(ValidatedLaunch {
+            game_config,
+            target_games_per_matchup,
+            total_games,
+            move_timeout_ms,
+            preprocessing_timeout_ms,
+            max_parallel,
+            tournament_seed,
+        }),
+        _ => Err(vec![LaunchFieldError::new(
+            "launch",
+            "launch validation could not be completed",
+        )]),
+    }
 }
 
 /// Row in the "in this store" panel.
@@ -417,15 +764,8 @@ pub async fn start_tournament(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     params: LaunchParams,
-) -> Result<i64, String> {
-    if params.bots.len() < 2 {
-        return Err("a tournament needs at least 2 bots".into());
-    }
-    if let Some(t) = &params.target {
-        if !params.bots.iter().any(|b| &b.agent_id == t) {
-            return Err(format!("target `{t}` is not in the selected bots"));
-        }
-    }
+) -> Result<i64, StartTournamentError> {
+    let validated = validate_launch_params(&params).map_err(StartTournamentError::validation)?;
 
     // Reserve the slot up front, under the lock, *before* the async
     // create/open-store/spawn work. Without this, two concurrent starts both
@@ -447,7 +787,7 @@ pub async fn start_tournament(
         cancel
     };
 
-    match build_and_spawn(&app, params, cancel.clone()).await {
+    match build_and_spawn(&app, params, validated, cancel.clone()).await {
         Ok((tournament_id, handle, startup)) => match startup.await {
             Ok(Ok(())) => {
                 let mut phase = state.tournament_phase.lock().await;
@@ -465,7 +805,9 @@ pub async fn start_tournament(
                     // rather than promoting a tournament the user asked to stop.
                     cancel.cancel();
                     let _ = handle.await;
-                    Err("tournament start was cancelled".into())
+                    Err(StartTournamentError::runtime(
+                        "tournament start was cancelled",
+                    ))
                 }
             },
             Ok(Err(error)) => {
@@ -474,7 +816,7 @@ pub async fn start_tournament(
                 if matches!(*phase, TournamentPhase::Starting { .. }) {
                     *phase = TournamentPhase::Idle;
                 }
-                Err(error)
+                Err(StartTournamentError::runtime(error))
             },
             Err(_) => {
                 let _ = handle.await;
@@ -482,7 +824,9 @@ pub async fn start_tournament(
                 if matches!(*phase, TournamentPhase::Starting { .. }) {
                     *phase = TournamentPhase::Idle;
                 }
-                Err("tournament runner exited before startup completed".into())
+                Err(StartTournamentError::runtime(
+                    "tournament runner exited before startup completed",
+                ))
             },
         },
         Err(e) => {
@@ -492,7 +836,7 @@ pub async fn start_tournament(
             if matches!(*phase, TournamentPhase::Starting { .. }) {
                 *phase = TournamentPhase::Idle;
             }
-            Err(e)
+            Err(StartTournamentError::runtime(e))
         },
     }
 }
@@ -510,6 +854,7 @@ pub async fn get_tournament_launch_defaults() -> Result<LaunchDefaults, String> 
         move_timeout_ms: tournament_config::MOVE_TIMEOUT_MS,
         preprocessing_timeout_ms: tournament_config::PREPROCESSING_TIMEOUT_MS,
         max_parallel: tournament_config::MAX_PARALLEL,
+        limits: LaunchLimits::default(),
     })
 }
 
@@ -523,6 +868,7 @@ pub async fn get_tournament_launch_defaults() -> Result<LaunchDefaults, String> 
 async fn build_and_spawn(
     app: &tauri::AppHandle,
     params: LaunchParams,
+    validated: ValidatedLaunch,
     cancel: CancellationToken,
 ) -> Result<
     (
@@ -568,17 +914,9 @@ async fn build_and_spawn(
 
     // Resolve & validate the measurement conditions once, here — the runner
     // consumes these rather than reaching back into pinned constants.
-    let game_config = params.factory.to_game_config()?;
-    let target_games_per_matchup = params.mazes_per_matchup.saturating_mul(2);
-    if target_games_per_matchup == 0 {
-        return Err("mazes_per_matchup must be >= 1".into());
-    }
-    let tournament_seed = match params.tournament_seed {
-        Some(s) if s > MAX_JS_SAFE_SEED => {
-            return Err(format!(
-                "tournament_seed must be <= {MAX_JS_SAFE_SEED} (JS-safe range)"
-            ));
-        },
+    let game_config = validated.game_config;
+    let target_games_per_matchup = validated.target_games_per_matchup;
+    let tournament_seed = match validated.tournament_seed {
         Some(s) => s,
         None => fastrand::u64(0..=MAX_JS_SAFE_SEED),
     };
@@ -592,22 +930,22 @@ async fn build_and_spawn(
 
     let seat_policy = tournament_config::SEAT_POLICY;
     let timing = tournament_config::per_match_timing(
-        params.move_timeout_ms,
-        params.preprocessing_timeout_ms,
+        validated.move_timeout_ms,
+        validated.preprocessing_timeout_ms,
     );
     let orchestrator_config = tournament_config::orchestrator_config(
-        params.move_timeout_ms,
-        params.preprocessing_timeout_ms,
-        params.max_parallel,
+        validated.move_timeout_ms,
+        validated.preprocessing_timeout_ms,
+        validated.max_parallel,
     );
 
-    let total = total_games(&format, canonical_players.len(), target_games_per_matchup);
+    let total = validated.total_games;
     let plan_summary = plan_summary(
         &params.target,
         canonical_players.len(),
         &params.factory,
         target_games_per_matchup,
-        params.move_timeout_ms,
+        validated.move_timeout_ms,
     );
 
     let spec = TournamentSpec {
@@ -626,7 +964,7 @@ async fn build_and_spawn(
             startup_timeout_ms: tournament_config::STARTUP_TIMEOUT_MS,
             configure_timeout_ms: tournament_config::CONFIGURE_TIMEOUT_MS,
             network_grace_ms: tournament_config::NETWORK_GRACE_MS,
-            max_parallel: params.max_parallel.max(1),
+            max_parallel: validated.max_parallel,
         }),
         game_config: game_config.clone(),
         tournament_seed,
@@ -686,7 +1024,8 @@ async fn build_and_spawn(
     Ok((tournament_id.0, handle, startup_rx))
 }
 
-/// Smoke-build each distinct bot once before the tournament starts.
+/// Smoke-build each distinct bot in both seat assignments before the
+/// tournament starts.
 ///
 /// Pays the one-time cold `cargo build` / `uv` dep-resolve cost up front so the
 /// first matches don't time out cold, drains build chatter before matches
@@ -714,26 +1053,37 @@ async fn warmup_bots(
     preflight: PreflightConfig,
 ) -> Result<(), String> {
     let distinct = distinct_by_agent(bots);
-    let total = distinct.len() as u32;
-    for (i, bot) in distinct.iter().enumerate() {
-        let _ = TournamentPreparingEvent {
-            done: i as u32,
-            total,
-            current: Some(bot.agent_id.clone()),
-        }
-        .emit(app);
-        let probe = preflight_bot(
-            bot.run_command.clone(),
-            bot.working_dir.clone(),
-            bot.agent_id.clone(),
-            preflight.clone(),
-        );
-        tokio::select! {
-            biased;
-            () = cancel.cancelled() => return Err("tournament start was cancelled".into()),
-            result = probe => {
-                result.map_err(|e| format!("bot `{}` failed compatibility check: {e}", bot.agent_id))?;
+    let seats = [PlayerSlot::Player1, PlayerSlot::Player2];
+    let total = u32::try_from(distinct.len().saturating_mul(seats.len())).unwrap_or(u32::MAX);
+    let mut done = 0;
+    for bot in distinct {
+        for seat in seats {
+            let _ = TournamentPreparingEvent {
+                done,
+                total,
+                current: Some(format!("{} ({seat:?})", bot.agent_id)),
             }
+            .emit(app);
+            let probe = preflight_bot_in_slot(
+                bot.run_command.clone(),
+                bot.working_dir.clone(),
+                bot.agent_id.clone(),
+                seat,
+                preflight.clone(),
+            );
+            tokio::select! {
+                biased;
+                () = cancel.cancelled() => return Err("tournament start was cancelled".into()),
+                result = probe => {
+                    result.map_err(|e| {
+                        format!(
+                            "bot `{}` failed compatibility check as {seat:?}: {e}",
+                            bot.agent_id
+                        )
+                    })?;
+                }
+            }
+            done += 1;
         }
     }
     let _ = TournamentPreparingEvent {
@@ -1519,50 +1869,75 @@ mod tests {
     /// 7×7, no walls/mud, random symmetric — the interesting validation case.
     fn random_symmetric_factory() -> GameFactoryConfig {
         GameFactoryConfig {
-            width: 7,
-            height: 7,
-            max_turns: 100,
+            width: 7.0,
+            height: 7.0,
+            max_turns: 100.0,
             wall_density: 0.0,
             mud_density: 0.0,
-            mud_range: 2,
+            mud_range: 2.0,
             connected: true,
             symmetric: true,
             player_start: PlayerStart::Random,
-            cheese_count: 4,
+            cheese_count: 4.0,
             cheese_symmetric: true,
         }
+    }
+
+    fn valid_launch() -> LaunchParams {
+        let working_dir = env!("CARGO_MANIFEST_DIR").to_string();
+        LaunchParams {
+            bots: vec![pick("a", &working_dir), pick("b", &working_dir)],
+            target: None,
+            name: None,
+            factory: random_symmetric_factory(),
+            mazes_per_matchup: 1.0,
+            move_timeout_ms: 200.0,
+            preprocessing_timeout_ms: 2_000.0,
+            max_parallel: 2.0,
+            tournament_seed: Some(42.0),
+        }
+    }
+
+    fn assert_validation_field(params: &LaunchParams, field: &str) {
+        let Err(errors) = validate_launch_params(params) else {
+            panic!("launch should be rejected");
+        };
+        assert!(
+            errors.iter().any(|error| error.field == field),
+            "missing field {field}; got {errors:?}"
+        );
     }
 
     #[test]
     fn random_symmetric_odd_cheese_rejected() {
         let f = GameFactoryConfig {
-            cheese_count: 5,
+            cheese_count: 5.0,
             ..random_symmetric_factory()
         };
         let Err(err) = f.to_game_config() else {
             panic!("odd symmetric cheese with random starts should be rejected");
         };
-        assert!(err.contains("even cheese count"), "{err}");
+        assert!(err.to_string().contains("even cheese count"), "{err}");
     }
 
     #[test]
     fn random_symmetric_even_cheese_over_capacity_rejected() {
         // 7×7 odd board → cap = 49 - 5 = 44; 46 is over.
         let f = GameFactoryConfig {
-            cheese_count: 46,
+            cheese_count: 46.0,
             ..random_symmetric_factory()
         };
         let Err(err) = f.to_game_config() else {
             panic!("over-capacity random symmetric cheese should be rejected");
         };
-        assert!(err.contains("over capacity"), "{err}");
+        assert!(err.to_string().contains("over capacity"), "{err}");
     }
 
     #[test]
     fn random_symmetric_even_within_capacity_builds_every_seed() {
         // The capacity cap exists so no *seed* can fail mid-tournament: sweep.
         let f = GameFactoryConfig {
-            cheese_count: 10,
+            cheese_count: 10.0,
             ..random_symmetric_factory()
         };
         let cfg = f.to_game_config().expect("should build");
@@ -1574,7 +1949,13 @@ mod tests {
 
     #[test]
     fn out_of_range_dims_rejected() {
-        for (w, h) in [(1, 7), (300, 7), (7, 1)] {
+        for (w, h) in [
+            (1.0, 7.0),
+            (65.0, 7.0),
+            (300.0, 7.0),
+            (7.0, 1.0),
+            (7.0, 65.0),
+        ] {
             let f = GameFactoryConfig {
                 width: w,
                 height: h,
@@ -1582,6 +1963,98 @@ mod tests {
             };
             assert!(f.to_game_config().is_err(), "{w}x{h} should be rejected");
         }
+    }
+
+    #[test]
+    fn launch_validation_addresses_hostile_engine_and_methodology_fields() {
+        let mut params = valid_launch();
+        params.factory.width = 65.0;
+        assert_validation_field(&params, "factory.width");
+
+        let mut params = valid_launch();
+        params.factory.width = 7.5;
+        assert_validation_field(&params, "factory.width");
+
+        let mut params = valid_launch();
+        params.factory.mud_range = 16.0;
+        assert_validation_field(&params, "factory.mud_range");
+
+        let mut params = valid_launch();
+        params.factory.max_turns = 1_024.0;
+        assert_validation_field(&params, "factory.max_turns");
+
+        let mut params = valid_launch();
+        params.factory.cheese_count = 510.0;
+        assert_validation_field(&params, "factory.cheese_count");
+
+        let mut params = valid_launch();
+        params.factory.wall_density = f64::NAN;
+        assert_validation_field(&params, "factory.wall_density");
+
+        let mut params = valid_launch();
+        params.move_timeout_ms = 0.0;
+        assert_validation_field(&params, "move_timeout_ms");
+
+        let mut params = valid_launch();
+        params.move_timeout_ms = f64::INFINITY;
+        assert_validation_field(&params, "move_timeout_ms");
+
+        let mut params = valid_launch();
+        params.preprocessing_timeout_ms = f64::from(MAX_TIMEOUT_MS + 1);
+        assert_validation_field(&params, "preprocessing_timeout_ms");
+
+        let mut params = valid_launch();
+        params.max_parallel = 0.0;
+        assert_validation_field(&params, "max_parallel");
+
+        let mut params = valid_launch();
+        params.mazes_per_matchup = 1.5;
+        assert_validation_field(&params, "mazes_per_matchup");
+
+        let mut params = valid_launch();
+        params.tournament_seed = Some((MAX_JS_SAFE_SEED + 1) as f64);
+        assert_validation_field(&params, "tournament_seed");
+    }
+
+    #[test]
+    fn launch_validation_rejects_invalid_bot_identity_command_and_directory() {
+        let mut params = valid_launch();
+        params.bots[1].agent_id = params.bots[0].agent_id.clone();
+        params.bots[0].run_command = "  ".into();
+        params.bots[0].working_dir = "/definitely/not/a/pyrat/directory".into();
+        params.target = Some("missing".into());
+
+        let Err(errors) = validate_launch_params(&params) else {
+            panic!("launch should be rejected");
+        };
+        for field in [
+            "bots.1.agent_id",
+            "bots.0.run_command",
+            "bots.0.working_dir",
+            "target",
+        ] {
+            assert!(
+                errors.iter().any(|error| error.field == field),
+                "missing field {field}; got {errors:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn launch_validation_checks_total_game_arithmetic_and_cap() {
+        let mut params = valid_launch();
+        let working_dir = env!("CARGO_MANIFEST_DIR").to_string();
+        params.bots.push(pick("c", &working_dir));
+        params.mazes_per_matchup = 20_000.0;
+
+        assert_validation_field(&params, "mazes_per_matchup");
+    }
+
+    #[test]
+    fn valid_launch_resolves_checked_schedule() {
+        let validated = validate_launch_params(&valid_launch()).expect("valid launch");
+        assert_eq!(validated.target_games_per_matchup, 2);
+        assert_eq!(validated.total_games, 2);
     }
 
     #[test]

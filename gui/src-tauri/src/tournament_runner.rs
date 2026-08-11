@@ -130,8 +130,8 @@ pub async fn run_tournament(
 
     // Build the planner for the chosen format from the resolved conditions.
     let elo_options = tournament_config::elo_options(&anchor_id);
-    let planner: Box<dyn Planner> = match &format {
-        RunnerFormat::RoundRobin => Box::new(RoundRobinPlanner::new(RoundRobinPlannerConfig {
+    let planner_result: Result<Box<dyn Planner>, String> = match &format {
+        RunnerFormat::RoundRobin => RoundRobinPlanner::new(RoundRobinPlannerConfig {
             players: players.clone(),
             game_config: game_config.clone(),
             game_config_id: game_config_id.clone(),
@@ -141,23 +141,14 @@ pub async fn run_tournament(
             max_failures_per_pair: tournament_config::MAX_FAILURES_PER_PAIR,
             seat_policy,
             tournament_seed,
-        })),
+        })
+        .map(|planner| Box::new(planner) as Box<dyn Planner>)
+        .map_err(|error| error.to_string()),
         RunnerFormat::Gauntlet {
             challenger,
             opponents,
-        } => {
-            let (challenger_p, opponent_ps) =
-                match split_gauntlet_players(&players, challenger, opponents) {
-                    Ok(players) => players,
-                    Err(error) => {
-                        let reason = error.to_string();
-                        if let Some(signal) = startup.take() {
-                            let _ = signal.send(Err(reason.clone()));
-                        }
-                        return Err(reason);
-                    },
-                };
-            Box::new(GauntletPlanner::new(GauntletPlannerConfig {
+        } => match split_gauntlet_players(&players, challenger, opponents) {
+            Ok((challenger_p, opponent_ps)) => GauntletPlanner::new(GauntletPlannerConfig {
                 challenger: challenger_p,
                 opponents: opponent_ps,
                 game_config: game_config.clone(),
@@ -168,7 +159,19 @@ pub async fn run_tournament(
                 max_failures_per_pair: tournament_config::MAX_FAILURES_PER_PAIR,
                 seat_policy,
                 tournament_seed,
-            }))
+            })
+            .map(|planner| Box::new(planner) as Box<dyn Planner>)
+            .map_err(|error| error.to_string()),
+            Err(error) => Err(error.to_string()),
+        },
+    };
+    let planner = match planner_result {
+        Ok(planner) => planner,
+        Err(reason) => {
+            if let Some(signal) = startup.take() {
+                let _ = signal.send(Err(reason.clone()));
+            }
+            return Err(reason);
         },
     };
 
@@ -574,17 +577,6 @@ fn games_for(state: &TournamentState, player_id: &str) -> u32 {
         }
     }
     n
-}
-
-/// Number of games a complete tournament will produce, for the progress bar.
-/// `target_per_matchup` is the resolved games-per-matchup (2 × mazes for the
-/// paired schedule), no longer a pinned constant.
-pub fn total_games(format: &RunnerFormat, player_count: usize, target_per_matchup: u32) -> u32 {
-    let matchups = match format {
-        RunnerFormat::RoundRobin => player_count * player_count.saturating_sub(1) / 2,
-        RunnerFormat::Gauntlet { opponents, .. } => opponents.len(),
-    };
-    matchups as u32 * target_per_matchup
 }
 
 /// Order players canonically for a gauntlet (challenger first), matching the

@@ -614,6 +614,12 @@ impl Mud {
         if value < 2 {
             return Err(PyValueError::new_err("Mud value must be at least 2"));
         }
+        if value > crate::GameConfig::MAX_MUD_COST {
+            return Err(PyValueError::new_err(format!(
+                "Mud value must be at most {}",
+                crate::GameConfig::MAX_MUD_COST
+            )));
+        }
 
         // Normalize order
         let (p1, p2) = if coord1 < coord2 {

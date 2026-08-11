@@ -37,8 +37,8 @@ pub use mapping::{
 pub use observation::Observation;
 pub use plan::{
     gauntlet_slot_order, matchup_seed, split_gauntlet_players, GauntletPlanner,
-    GauntletPlannerConfig, Planner, PlayerNotInList, ResolvedPlayer, RoundRobinPlanner,
-    RoundRobinPlannerConfig, SeatPolicy, TournamentParams,
+    GauntletPlannerConfig, Planner, PlannerConfigError, PlayerNotInList, ResolvedPlayer,
+    RoundRobinPlanner, RoundRobinPlannerConfig, SeatPolicy, TournamentParams,
 };
 // Re-export store-native tournament records so consumers (CLI, GUI) name one
 // type at the session boundary.

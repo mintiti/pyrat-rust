@@ -142,11 +142,11 @@ class TestMudValidation:
             )
 
     def test_mud_value_too_large(self):
-        """Test that mud value > 255 gives clear error message."""
+        """Test that mud value above the packed-state limit is rejected."""
         with pytest.raises(ValueError, match="too large"):
             (
                 GameBuilder(10, 10)
-                .with_custom_maze(walls=[], mud=[((0, 0), (0, 1), 256)])
+                .with_custom_maze(walls=[], mud=[((0, 0), (0, 1), 16)])
                 .with_corner_positions()
                 .with_custom_cheese([(5, 5)])
                 .build()
@@ -230,14 +230,14 @@ class TestValidInputs:
         assert len(game.cheese_positions()) == 4  # noqa: PLR2004
 
     def test_maximum_mud_value(self):
-        """Test that maximum mud value (255) works."""
+        """Test that maximum packed-state mud value (15) works."""
         config = (
             GameBuilder(10, 10)
-            .with_custom_maze(walls=[], mud=[((0, 0), (0, 1), 255)])
+            .with_custom_maze(walls=[], mud=[((0, 0), (0, 1), 15)])
             .with_corner_positions()
             .with_custom_cheese([(5, 5)])
             .build()
         )
         game = config.create()
         mud_entries = game.mud_entries()
-        assert any(m.value == 255 for m in mud_entries)  # noqa: PLR2004
+        assert any(m.value == 15 for m in mud_entries)  # noqa: PLR2004

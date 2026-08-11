@@ -164,7 +164,8 @@ async fn end_to_end_round_robin_with_replay_sink() {
         max_failures_per_pair: 1,
         seat_policy: pyrat_eval::SeatPolicy::Legacy,
         tournament_seed,
-    });
+    })
+    .expect("valid round-robin fixture");
 
     // Extras: ReplaySink + OutcomeCounter. The StoreSink is prepended by
     // start_with_extra_sinks; we don't list it here.

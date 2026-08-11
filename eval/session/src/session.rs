@@ -1342,7 +1342,8 @@ mod tests {
             max_failures_per_pair: 999,
             seat_policy: crate::plan::SeatPolicy::Legacy,
             tournament_seed: 0xC0FFEE,
-        });
+        })
+        .expect("valid planner fixture");
 
         let initial_state = TournamentState::empty(created.tournament_id);
         let failing_sink: Arc<dyn MatchSink<EvalMatchDescriptor>> = Arc::new(AlwaysFailingSink);
@@ -1459,7 +1460,8 @@ mod tests {
             max_failures_per_pair: 999,
             seat_policy: crate::plan::SeatPolicy::Legacy,
             tournament_seed: 0xC0FFEE,
-        });
+        })
+        .expect("valid planner fixture");
 
         let initial_state = TournamentState::empty(TournamentId(1));
         let noop_sink: Arc<dyn MatchSink<EvalMatchDescriptor>> =

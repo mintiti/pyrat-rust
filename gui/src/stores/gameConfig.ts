@@ -32,6 +32,15 @@ export interface GameShape {
 	cheese_symmetric: boolean;
 }
 
+/** Engine-owned limits supplied by the backend launch-defaults command. */
+export interface GameShapeLimits {
+	min_dimension: number;
+	max_dimension: number;
+	max_turns: number;
+	max_mud_range: number;
+	max_cheese_count: number;
+}
+
 export const CLASSIC_MAZE = {
 	wall_density: 0.7,
 	mud_density: 0.1,
@@ -136,15 +145,43 @@ export function detectMazeType(d: GameShape): "classic" | "open" | null {
  * needs the board center, which a random start can occupy. Enforcing them here
  * means such a config can't be launched — and a Play game can't silently fail
  * to generate either (Play already exposes random starts). */
-export function validate(c: GameShape): Record<string, string> {
+export function validate(
+	c: GameShape,
+	limits?: GameShapeLimits,
+): Record<string, string> {
 	const errors: Record<string, string> = {};
-	if (c.width < 2) errors.width = "Min 2";
-	if (c.height < 2) errors.height = "Min 2";
-	if (c.max_turns < 1) errors.max_turns = "Min 1";
-	if (c.cheese_count < 1) errors.cheese_count = "Min 1";
+	const minDimension = limits?.min_dimension ?? 2;
+	if (!Number.isSafeInteger(c.width)) errors.width = "Whole number required";
+	else if (c.width < minDimension) errors.width = `Min ${minDimension}`;
+	else if (limits && c.width > limits.max_dimension)
+		errors.width = `Max ${limits.max_dimension}`;
+	if (!Number.isSafeInteger(c.height)) errors.height = "Whole number required";
+	else if (c.height < minDimension) errors.height = `Min ${minDimension}`;
+	else if (limits && c.height > limits.max_dimension)
+		errors.height = `Max ${limits.max_dimension}`;
+	if (!Number.isSafeInteger(c.max_turns))
+		errors.max_turns = "Whole number required";
+	else if (c.max_turns < 1) errors.max_turns = "Min 1";
+	else if (limits && c.max_turns > limits.max_turns)
+		errors.max_turns = `Max ${limits.max_turns}`;
+	if (!Number.isSafeInteger(c.cheese_count))
+		errors.cheese_count = "Whole number required";
+	else if (c.cheese_count < 1) errors.cheese_count = "Min 1";
 
-	const maxCheese = c.width * c.height - 2;
+	const maxCheese = Math.min(
+		c.width * c.height - 2,
+		limits?.max_cheese_count ?? Number.POSITIVE_INFINITY,
+	);
 	if (c.cheese_count > maxCheese) errors.cheese_count = `Max ${maxCheese}`;
+
+	if (
+		!Number.isFinite(c.wall_density) ||
+		c.wall_density < 0 ||
+		c.wall_density > 1
+	)
+		errors.wall_density = "Must be between 0 and 1";
+	if (!Number.isFinite(c.mud_density) || c.mud_density < 0 || c.mud_density > 1)
+		errors.mud_density = "Must be between 0 and 1";
 
 	if (
 		c.cheese_symmetric &&
@@ -165,7 +202,10 @@ export function validate(c: GameShape): Record<string, string> {
 		}
 	}
 
-	if (c.mud_density > 0 && c.mud_range < 2)
-		errors.mud_range = "Min 2 when mud > 0";
+	if (!Number.isSafeInteger(c.mud_range))
+		errors.mud_range = "Whole number required";
+	else if (c.mud_range < 2) errors.mud_range = "Min 2";
+	else if (limits && c.mud_range > limits.max_mud_range)
+		errors.mud_range = `Max ${limits.max_mud_range}`;
 	return errors;
 }

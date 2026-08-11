@@ -1,6 +1,6 @@
 use std::sync::atomic::Ordering;
 
-use pyrat::game::builder::{GameBuilder, GameConfig, MazeParams};
+use pyrat::game::builder::{CheeseStrategy, GameConfig, MazeParams, MazeStrategy, PlayerStrategy};
 use pyrat::game::game_logic::GameState;
 use serde::{Deserialize, Serialize};
 use specta::Type;
@@ -110,20 +110,23 @@ impl MatchConfigParams {
             mud_range: self.mud_range,
         };
 
-        let builder = GameBuilder::new(self.width, self.height)
-            .with_max_turns(self.max_turns)
-            .with_random_maze(maze_params);
-
-        let builder = match self.player_start.as_str() {
-            "random" => builder.with_random_positions(),
-            _ => builder.with_corner_positions(),
+        let players = match self.player_start.as_str() {
+            "corners" => PlayerStrategy::Corners,
+            "random" => PlayerStrategy::Random,
+            other => return Err(format!("Unknown player start strategy: {other}")),
         };
-
-        let config = builder
-            .with_random_cheese(self.cheese_count, self.cheese_symmetric)
-            .build();
-
-        Ok(config)
+        GameConfig::try_from_parts(
+            self.width,
+            self.height,
+            self.max_turns,
+            MazeStrategy::Random(maze_params),
+            players,
+            CheeseStrategy::Random {
+                count: self.cheese_count,
+                symmetric: self.cheese_symmetric,
+            },
+        )
+        .map_err(|error| error.to_string())
     }
 }
 

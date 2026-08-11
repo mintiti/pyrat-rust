@@ -78,5 +78,8 @@ jobs:
     - name: Run interface tests
       run: cargo test -p pyrat-engine-interface --verbose
 
+    - name: Run GUI backend tests
+      run: cargo test -p pyrat-gui --verbose
+
     - name: Build release
       run: cargo build -p pyrat-rust --release --no-default-features --verbose

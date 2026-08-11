@@ -105,9 +105,10 @@ pub fn validate_mud(mud: PyMudEntry, width: u8, height: u8) -> PyResult<Validate
         ));
     }
 
-    if value > 255 {
+    if value > i32::from(crate::GameConfig::MAX_MUD_COST) {
         return Err(PyValueError::new_err(format!(
-            "Mud value {value} is too large (maximum is 255)"
+            "Mud value {value} is too large (maximum is {})",
+            crate::GameConfig::MAX_MUD_COST
         )));
     }
 
@@ -143,6 +144,13 @@ pub fn validate_mud_object(mud: &crate::Mud, width: u8, height: u8) -> PyResult<
         return Err(PyValueError::new_err(format!(
             "Mud position ({}, {}) is outside board bounds ({width}x{height})",
             mud.pos2.x, mud.pos2.y
+        )));
+    }
+    if mud.value > crate::GameConfig::MAX_MUD_COST {
+        return Err(PyValueError::new_err(format!(
+            "Mud value {} is too large (maximum is {})",
+            mud.value,
+            crate::GameConfig::MAX_MUD_COST
         )));
     }
     Ok(())

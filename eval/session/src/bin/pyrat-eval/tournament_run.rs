@@ -145,7 +145,7 @@ pub async fn run_tournament_main(
             max_failures_per_pair: resolved.max_failures_per_pair,
             seat_policy: planner_seat_policy,
             tournament_seed,
-        })),
+        })?),
         FormatChoice::Gauntlet {
             challenger,
             opponents,
@@ -163,7 +163,7 @@ pub async fn run_tournament_main(
                 max_failures_per_pair: resolved.max_failures_per_pair,
                 seat_policy: planner_seat_policy,
                 tournament_seed,
-            }))
+            })?)
         },
     };
     let session = match EvalSession::start_with_extra_sinks(

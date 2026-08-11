@@ -101,7 +101,7 @@ async probeBot(runCommand: string, workingDir: string, agentId: string) : Promis
  * new tournament id only after the runner acknowledges that its session is
  * live. Rejects if one is already running.
  */
-async startTournament(params: LaunchParams) : Promise<Result<number, string>> {
+async startTournament(params: LaunchParams) : Promise<Result<number, StartTournamentError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("start_tournament", { params }) };
 } catch (e) {
@@ -307,7 +307,16 @@ export type GameReplayState = { kind: "available"; final_state: MazeState; winne
  * methodology knobs. The frontend pre-fills from this, so the Rust constants
  * stay the single source of truth (no stale TS mirror to drift).
  */
-export type LaunchDefaults = { factory: GameFactoryConfig; mazes_per_matchup: number; move_timeout_ms: number; preprocessing_timeout_ms: number; max_parallel: number }
+export type LaunchDefaults = { factory: GameFactoryConfig; mazes_per_matchup: number; move_timeout_ms: number; preprocessing_timeout_ms: number; max_parallel: number; limits: LaunchLimits }
+/**
+ * One field-addressable launch validation failure.
+ */
+export type LaunchFieldError = { field: string; message: string }
+/**
+ * Backend-owned bounds for launch controls. The frontend uses these for
+ * affordances; the validation boundary below remains authoritative.
+ */
+export type LaunchLimits = { min_dimension: number; max_dimension: number; max_turns: number; max_mud_range: number; max_cheese_count: number; max_participants: number; max_mazes_per_matchup: number; max_total_games: number; max_timeout_ms: number; max_parallel: number; max_js_safe_seed: number }
 /**
  * Launch parameters. The factory + methodology knobs are configured on the
  * launch screen; the frontend pre-fills them from `get_tournament_launch_defaults`.
@@ -415,6 +424,11 @@ export type StandingsSnapshot = { tournament_id: number; name: string | null; fo
  * all read this.
  */
 export type StandingsUpdatedEvent = { tournament_id: number; done: number; total: number; success: number; failure: number; standings: StandingRow[] }
+/**
+ * Start errors keep form mistakes structured while preserving ordinary
+ * runtime failures as a single message.
+ */
+export type StartTournamentError = { kind: "validation"; errors: LaunchFieldError[] } | { kind: "runtime"; message: string }
 export type StopAnalysisTurnResult = { player1_action: Direction; player2_action: Direction }
 /**
  * One durable successful attempt. Canonical player ids/scores stay stable
