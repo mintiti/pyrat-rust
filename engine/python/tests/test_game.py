@@ -46,6 +46,23 @@ def _movement_matrix_from_public_state(game):
     return matrix
 
 
+def _assert_observations_equal(actual, expected):
+    """Compare the public player-relative observation contract."""
+    for field in (
+        "player_position",
+        "player_mud_turns",
+        "player_score",
+        "opponent_position",
+        "opponent_mud_turns",
+        "opponent_score",
+        "current_turn",
+        "max_turns",
+    ):
+        assert getattr(actual, field) == getattr(expected, field)
+    np.testing.assert_array_equal(actual.cheese_matrix, expected.cheese_matrix)
+    np.testing.assert_array_equal(actual.movement_matrix, expected.movement_matrix)
+
+
 class TestGameCreation:
     """Test game creation via GameConfig and GameBuilder."""
 
@@ -364,6 +381,101 @@ class TestResetSymmetry:
 
 class TestObservationCoherence:
     """Observation matrices stay synchronized with every game mutation path."""
+
+    def test_step_with_observations_matches_the_composed_transition(self):
+        """The fused crossing preserves movement, mud, scoring, and snapshots."""
+        config = (
+            GameBuilder(7, 2)
+            .with_max_turns(10)
+            .with_custom_maze(
+                walls=[],
+                mud=[
+                    ((1, 0), (2, 0), 2),
+                    ((4, 0), (5, 0), 2),
+                ],
+            )
+            .with_custom_positions((0, 0), (6, 0))
+            .with_custom_cheese([(1, 0), (3, 0), (5, 0)])
+            .build()
+        )
+        composed = config.create()
+        fused = config.create()
+        actions = (
+            (Direction.RIGHT, Direction.LEFT),
+            (Direction.RIGHT, Direction.LEFT),
+            (Direction.STAY, Direction.STAY),
+            (Direction.STAY, Direction.STAY),
+            (Direction.RIGHT, Direction.LEFT),
+        )
+
+        first_fused_snapshot = None
+        first_fused_cheese = None
+        latest_fused_observations = None
+        for turn, (player_one_action, player_two_action) in enumerate(actions, start=1):
+            previous_p1_score = composed.player1_score
+            previous_p2_score = composed.player2_score
+            expected_game_over, _ = composed.step(
+                player_one_action,
+                player_two_action,
+            )
+            expected_observations = composed.get_observations()
+
+            (
+                actual_game_over,
+                actual_p1_score_change,
+                actual_p2_score_change,
+                actual_player_one,
+                actual_player_two,
+            ) = fused.step_with_observations(
+                player_one_action,
+                player_two_action,
+            )
+            latest_fused_observations = (actual_player_one, actual_player_two)
+
+            assert actual_game_over == expected_game_over
+            assert actual_p1_score_change == composed.player1_score - previous_p1_score
+            assert actual_p2_score_change == composed.player2_score - previous_p2_score
+            assert fused.state_hash == composed.state_hash
+            assert fused.player1_position == composed.player1_position
+            assert fused.player2_position == composed.player2_position
+            assert fused.player1_mud_turns == composed.player1_mud_turns
+            assert fused.player2_mud_turns == composed.player2_mud_turns
+            assert fused.cheese_positions() == composed.cheese_positions()
+            _assert_observations_equal(actual_player_one, expected_observations[0])
+            _assert_observations_equal(actual_player_two, expected_observations[1])
+            assert actual_player_one.cheese_matrix is actual_player_two.cheese_matrix
+
+            if turn == 1:
+                first_fused_snapshot = actual_player_one
+                first_fused_cheese = actual_player_one.cheese_matrix.copy()
+
+        assert latest_fused_observations is not None
+        assert latest_fused_observations[0].player_score == 1.5
+        assert latest_fused_observations[1].player_score == 1.5
+        assert actual_p1_score_change == 0.5
+        assert actual_p2_score_change == 0.5
+        assert actual_game_over
+
+        assert first_fused_snapshot is not None
+        assert first_fused_cheese is not None
+        np.testing.assert_array_equal(
+            first_fused_snapshot.cheese_matrix,
+            first_fused_cheese,
+        )
+        assert (
+            first_fused_snapshot.movement_matrix
+            is latest_fused_observations[0].movement_matrix
+        )
+
+    def test_step_with_observations_rejects_invalid_actions_before_mutation(self):
+        game = GameConfig.classic(5, 5, 3).create(seed=42)
+        initial_hash = game.state_hash
+
+        with pytest.raises(ValueError, match="got 99"):
+            game.step_with_observations(99, Direction.STAY)
+
+        assert game.turn == 0
+        assert game.state_hash == initial_hash
 
     def test_paired_observations_share_one_snapshot(self):
         config = (

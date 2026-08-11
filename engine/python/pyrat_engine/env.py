@@ -128,19 +128,16 @@ class PyRatEnv(ParallelEnv):  # type: ignore[misc]
         dict[str, Any],
     ]:
         """Execute one step in the environment."""
-        # Store previous scores to calculate rewards
-        prev_p1_score = self.game.player1_score
-        prev_p2_score = self.game.player2_score
-
-        # Process moves
-        game_over, _ = self.game.step(
+        (
+            game_over,
+            p1_score_change,
+            p2_score_change,
+            player_one,
+            player_two,
+        ) = self.game.step_with_observations(
             actions["player_1"],
             actions["player_2"],
         )
-
-        # Calculate score changes
-        p1_score_change = self.game.player1_score - prev_p1_score
-        p2_score_change = self.game.player2_score - prev_p2_score
 
         # Zero-sum rewards: each player's reward is their score change minus the opponent's
         rewards = {
@@ -148,8 +145,6 @@ class PyRatEnv(ParallelEnv):  # type: ignore[misc]
             "player_2": p2_score_change - p1_score_change,
         }
 
-        # Update observations
-        player_one, player_two = self.game.get_observations()
         observations = {"player_1": player_one, "player_2": player_two}
 
         terminations = {

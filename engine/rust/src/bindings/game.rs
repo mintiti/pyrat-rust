@@ -1,6 +1,6 @@
 //! Python bindings for the `PyRat` game engine
 use crate::game::builder::{CheeseStrategy, GameConfig, MazeParams, MazeStrategy, PlayerStrategy};
-use crate::game::game_logic::MoveUndo;
+use crate::game::game_logic::{MoveUndo, TurnResult};
 use crate::game::observations::{GameObservation, MovementMatrixCache, ObservationHandler};
 use crate::game::types::CoordinatesInput;
 use crate::game::types::MudMap;
@@ -799,24 +799,37 @@ impl PyRat {
     ///
     /// Returns (game_over: bool, collected_cheese: List[Coordinates])
     fn step(&mut self, p1_move: u8, p2_move: u8) -> PyResult<(bool, Vec<Coordinates>)> {
-        let p1_dir = Direction::try_from(p1_move).map_err(|_| {
-            PyValueError::new_err(format!(
-                "Invalid move for player 1: got {p1_move}, expected 0-4 (UP, RIGHT, DOWN, LEFT, STAY)"
-            ))
-        })?;
-        let p2_dir = Direction::try_from(p2_move).map_err(|_| {
-            PyValueError::new_err(format!(
-                "Invalid move for player 2: got {p2_move}, expected 0-4 (UP, RIGHT, DOWN, LEFT, STAY)"
-            ))
-        })?;
-
-        let result = self.game.process_turn(p1_dir, p2_dir);
-
-        // Update only the collected cheese positions
-        self.observation_handler
-            .update_collected_cheese(&result.collected_cheese);
+        let result = self.process_step(p1_move, p2_move)?;
 
         Ok((result.game_over, result.collected_cheese))
+    }
+
+    /// Process one turn and return its score changes and paired observations.
+    ///
+    /// This keeps the transition and both player-relative snapshots inside one
+    /// Rust/Python crossing. Framework-specific reward policy and result
+    /// containers remain the caller's responsibility.
+    ///
+    /// Returns (game_over, p1_score_change, p2_score_change,
+    ///          p1_observation, p2_observation).
+    fn step_with_observations(
+        &mut self,
+        py: Python<'_>,
+        p1_move: u8,
+        p2_move: u8,
+    ) -> PyResult<(bool, f32, f32, PyGameObservation, PyGameObservation)> {
+        let previous_p1_score = self.game.player1_score();
+        let previous_p2_score = self.game.player2_score();
+        let result = self.process_step(p1_move, p2_move)?;
+        let [player_one, player_two] = self.observation_handler.get_observations(py, &self.game);
+
+        Ok((
+            result.game_over,
+            result.p1_score - previous_p1_score,
+            result.p2_score - previous_p2_score,
+            player_one.into(),
+            player_two.into(),
+        ))
     }
 
     /// Execute a move and return undo information for backtracking.
@@ -925,8 +938,26 @@ impl PyRat {
     }
 }
 
-/// Rust-only accessors for cross-crate use (not exposed to Python)
+/// Binding-internal helpers and Rust-only accessors for cross-crate use.
 impl PyRat {
+    fn process_step(&mut self, p1_move: u8, p2_move: u8) -> PyResult<TurnResult> {
+        let p1_dir = Direction::try_from(p1_move).map_err(|_| {
+            PyValueError::new_err(format!(
+                "Invalid move for player 1: got {p1_move}, expected 0-4 (UP, RIGHT, DOWN, LEFT, STAY)"
+            ))
+        })?;
+        let p2_dir = Direction::try_from(p2_move).map_err(|_| {
+            PyValueError::new_err(format!(
+                "Invalid move for player 2: got {p2_move}, expected 0-4 (UP, RIGHT, DOWN, LEFT, STAY)"
+            ))
+        })?;
+
+        let result = self.game.process_turn(p1_dir, p2_dir);
+        self.observation_handler
+            .update_collected_cheese(&result.collected_cheese);
+        Ok(result)
+    }
+
     /// Borrow the inner `GameState`.
     pub fn game_state(&self) -> &GameState {
         &self.game
