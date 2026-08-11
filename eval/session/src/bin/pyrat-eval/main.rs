@@ -333,6 +333,7 @@ fn build_matchup(
     Ok(Matchup {
         descriptor,
         game_config,
+        maze_layout: None,
         players: [
             PlayerSpec::Subprocess {
                 agent_id: "player1".into(),

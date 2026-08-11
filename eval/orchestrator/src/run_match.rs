@@ -178,7 +178,13 @@ pub(crate) async fn run_match<D: Descriptor>(
     }
 
     // ── 6. Build engine state + protocol-level config.
-    let game = match matchup.game_config.create(Some(matchup.seed())) {
+    let game_result = match &matchup.maze_layout {
+        Some(maze) => matchup
+            .game_config
+            .create_with_maze(maze, Some(matchup.seed())),
+        None => matchup.game_config.create(Some(matchup.seed())),
+    };
+    let game = match game_result {
         Ok(g) => g,
         Err(s) => {
             record_pre_started_failure(

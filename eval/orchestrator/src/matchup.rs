@@ -3,13 +3,15 @@
 //! `Matchup<D>` carries identity (`descriptor`) plus the concrete runtime
 //! values to invoke `pyrat_host::match_host::Match::new`. The descriptor
 //! is the durable identity passed to sinks; the matchup adds engine inputs
-//! (game_config, players, timing). The seed is the descriptor's, accessed
-//! via `descriptor.seed()` so engine and sinks can never disagree.
+//! (game config, optional reusable maze layout, players, timing). The seed is
+//! the descriptor's, accessed via `descriptor.seed()` so engine and sinks can
+//! never disagree.
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use pyrat::game::builder::GameConfig;
+use pyrat::MazeLayout;
 use pyrat_host::player::EmbeddedBot;
 use pyrat_host::wire::TimingMode;
 
@@ -103,6 +105,9 @@ impl std::fmt::Debug for PlayerSpec {
 pub struct Matchup<D: Descriptor> {
     pub descriptor: D,
     pub game_config: GameConfig,
+    /// Pre-generated topology shared by games that intentionally use the same
+    /// maze. `None` keeps the ordinary one-shot `GameConfig::create` path.
+    pub maze_layout: Option<Arc<MazeLayout>>,
     pub players: [PlayerSpec; 2],
     pub timing: Timing,
 }

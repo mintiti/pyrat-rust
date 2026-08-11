@@ -9,9 +9,11 @@
 //! the exact same seeded match.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::SystemTime;
 
 use pyrat::game::builder::GameConfig;
+use pyrat::MazeLayout;
 use pyrat_eval_store::{SeatOrientation, TournamentId};
 use pyrat_orchestrator::{MatchId, Matchup, PlayerSpec, Timing};
 use serde::{Deserialize, Serialize};
@@ -86,8 +88,8 @@ pub enum SeatPolicy {
     Legacy,
     /// Chess-style paired games: each maze is played twice with flipped
     /// seats. Composite slot `2k` seats lex-min as Rat, slot `2k+1` flips
-    /// it; both share maze `k`'s seed. De-biases seat per maze and cuts
-    /// maze-luck variance (the SPRT reversed-colors move).
+    /// it; both share one generated `MazeLayout` for maze `k`. De-biases seat
+    /// per maze and cuts maze-luck variance (the SPRT reversed-colors move).
     Paired,
 }
 
@@ -281,6 +283,10 @@ pub struct RoundRobinPlanner {
     /// `(matchup_key, attempt_index)` of every matchup we've submitted but
     /// haven't seen a terminal observation for yet.
     pending: HashMap<MatchupKey, HashSet<u32>>,
+    /// One compiled topology per paired-maze seed. Retained for the planner's
+    /// lifetime so opposite seatings and retries reuse the same layout even
+    /// when scheduler capacity makes them run in separate batches.
+    maze_layouts: HashMap<u64, Arc<MazeLayout>>,
 }
 
 impl RoundRobinPlanner {
@@ -296,6 +302,7 @@ impl RoundRobinPlanner {
             config,
             pair_indices,
             pending: HashMap::new(),
+            maze_layouts: HashMap::new(),
         }
     }
 }
@@ -319,9 +326,18 @@ impl Planner for RoundRobinPlanner {
                 }
                 let a = &self.config.players[i];
                 let b = &self.config.players[j];
-                if let Some(matchup) =
-                    build_slot(a, b, rep, &ctx, state, &mut self.pending, allocate_match_id)
-                {
+                if let Some(matchup) = build_slot(
+                    a,
+                    b,
+                    rep,
+                    &ctx,
+                    state,
+                    SlotRuntime {
+                        pending: &mut self.pending,
+                        maze_layouts: &mut self.maze_layouts,
+                    },
+                    allocate_match_id,
+                ) {
                     out.push(matchup);
                 }
             }
@@ -453,6 +469,7 @@ pub fn split_gauntlet_players(
 pub struct GauntletPlanner {
     config: GauntletPlannerConfig,
     pending: HashMap<MatchupKey, HashSet<u32>>,
+    maze_layouts: HashMap<u64, Arc<MazeLayout>>,
 }
 
 impl GauntletPlanner {
@@ -460,6 +477,7 @@ impl GauntletPlanner {
         Self {
             config,
             pending: HashMap::new(),
+            maze_layouts: HashMap::new(),
         }
     }
 }
@@ -487,7 +505,10 @@ impl Planner for GauntletPlanner {
                     rep,
                     &ctx,
                     state,
-                    &mut self.pending,
+                    SlotRuntime {
+                        pending: &mut self.pending,
+                        maze_layouts: &mut self.maze_layouts,
+                    },
                     allocate_match_id,
                 ) {
                     out.push(matchup);
@@ -605,6 +626,14 @@ struct SlotContext<'a> {
     seat_policy: SeatPolicy,
 }
 
+/// Mutable planner-owned state consulted while materializing one slot.
+/// Keeping these cursors together prevents the shared-layout concern from
+/// widening `build_slot`'s already domain-heavy call surface.
+struct SlotRuntime<'a> {
+    pending: &'a mut HashMap<MatchupKey, HashSet<u32>>,
+    maze_layouts: &'a mut HashMap<u64, Arc<MazeLayout>>,
+}
+
 impl<'a> SlotContext<'a> {
     fn for_round_robin(config: &'a RoundRobinPlannerConfig) -> Self {
         Self {
@@ -636,8 +665,9 @@ impl<'a> SlotContext<'a> {
 /// the lex-min player is always Rat. Under `Paired`, slots `2k`/`2k+1`
 /// share maze `k`; the even slot seats lex-min as Rat, the odd one flips.
 ///
-/// The maze index (not the composite slot) feeds `matchup_seed`, so a pair's
-/// two seatings replay the *same* maze — the de-biasing move.
+/// The maze index (not the composite slot) feeds `matchup_seed`; `build_slot`
+/// then resolves that seed through the planner's layout cache so both seatings
+/// use the same compiled maze rather than regenerating equivalent topology.
 fn slot_maze_and_orientation(seat_policy: SeatPolicy, slot: u32) -> (u32, SeatOrientation) {
     match seat_policy {
         SeatPolicy::Legacy => (slot, SeatOrientation::Canonical),
@@ -658,7 +688,7 @@ fn build_slot(
     repetition_index: u32,
     ctx: &SlotContext<'_>,
     state: &TournamentState,
-    pending: &mut HashMap<MatchupKey, HashSet<u32>>,
+    runtime: SlotRuntime<'_>,
     allocate_match_id: &mut dyn FnMut() -> MatchId,
 ) -> Option<Matchup<EvalMatchDescriptor>> {
     // Lex-sort the pair so `player1`/`player2` are the canonical (lex-min,
@@ -675,7 +705,7 @@ fn build_slot(
     if slot_done(&key, state, ctx.max_failures) {
         return None;
     }
-    let pending_set = pending.entry(key.clone()).or_default();
+    let pending_set = runtime.pending.entry(key.clone()).or_default();
     if !pending_set.is_empty() {
         // Already issued one for this slot; wait for terminal before retrying.
         return None;
@@ -694,6 +724,13 @@ fn build_slot(
         ctx.game_config_id,
         maze,
     );
+    let maze_layout = if ctx.seat_policy == SeatPolicy::Paired {
+        Some(Arc::clone(runtime.maze_layouts.entry(seed).or_insert_with(
+            || Arc::new(ctx.game_config.generate_maze(Some(seed))),
+        )))
+    } else {
+        None
+    };
     let descriptor = EvalMatchDescriptor {
         match_id: allocate_match_id(),
         tournament_id: ctx.tournament_id,
@@ -718,6 +755,7 @@ fn build_slot(
     Some(Matchup {
         descriptor,
         game_config: ctx.game_config.clone(),
+        maze_layout,
         players,
         timing: ctx.timing,
     })
@@ -847,6 +885,10 @@ mod tests {
         let state = TournamentState::empty(TournamentId(1));
         let batch = p.next_batch(&state, 100, &mut || alloc.allocate());
         assert_eq!(batch.len(), 3);
+        assert!(
+            batch.iter().all(|matchup| matchup.maze_layout.is_none()),
+            "legacy slots keep the one-shot game creation path"
+        );
         // Distinct (player1, player2) lex-canonical pairs.
         let mut pairs: Vec<_> = batch
             .iter()
@@ -998,13 +1040,16 @@ mod tests {
             timing: timing(),
             tournament_id: TournamentId(1),
             target_per_pair: 4,
-            max_failures_per_pair: 1,
+            max_failures_per_pair: 2,
             seat_policy: SeatPolicy::Paired,
             tournament_seed: 0xABCD,
         });
         let alloc = MatchIdAllocator::new();
-        let state = TournamentState::empty(TournamentId(1));
-        let batch = p.next_batch(&state, 100, &mut || alloc.allocate());
+        let mut state = TournamentState::empty(TournamentId(1));
+        // Force the first seating into its own scheduler batch; the second
+        // call must still reuse the planner-held layout for the flipped leg.
+        let mut batch = p.next_batch(&state, 1, &mut || alloc.allocate());
+        batch.extend(p.next_batch(&state, 100, &mut || alloc.allocate()));
         assert_eq!(batch.len(), 4, "one pair × 2 mazes × 2 seatings = 4 slots");
 
         // Index by composite slot (repetition_index).
@@ -1032,6 +1077,17 @@ mod tests {
         // Flipped slot seats lex-max ("b") as Rat (slot 0 spec).
         let canonical = by_slot[&0];
         let flipped = by_slot[&1];
+        let first_maze = canonical.maze_layout.as_ref().expect("paired layout");
+        let flipped_maze = flipped.maze_layout.as_ref().expect("paired layout");
+        let second_maze = by_slot[&2].maze_layout.as_ref().expect("paired layout");
+        assert!(
+            Arc::ptr_eq(first_maze, flipped_maze),
+            "opposite seatings must reuse one MazeLayout"
+        );
+        assert!(
+            !Arc::ptr_eq(first_maze, second_maze),
+            "different maze repetitions need independent layouts"
+        );
         let agent = |m: &Matchup<EvalMatchDescriptor>, slot: usize| match &m.players[slot] {
             PlayerSpec::Embedded { agent_id, .. } => agent_id.clone(),
             PlayerSpec::Subprocess { agent_id, .. } => agent_id.clone(),
@@ -1039,6 +1095,21 @@ mod tests {
         };
         assert_eq!(agent(canonical, 0), "a", "canonical seats a as Rat");
         assert_eq!(agent(flipped, 0), "b", "flipped seats b as Rat");
+
+        // A retry can be planned after the other leg was already issued; it
+        // must still point at the original compiled topology.
+        let failed = canonical.descriptor.clone();
+        fold_failure(&mut state, failed.clone(), true);
+        p.on_observation(&failed_obs(failed, true));
+        let retry = p
+            .next_batch(&state, 100, &mut || alloc.allocate())
+            .into_iter()
+            .find(|matchup| matchup.descriptor.repetition_index == 0)
+            .expect("failed paired slot is retried");
+        assert!(Arc::ptr_eq(
+            first_maze,
+            retry.maze_layout.as_ref().expect("retry layout")
+        ));
     }
 
     /// Same matchup key always yields the same seed, regardless of caller

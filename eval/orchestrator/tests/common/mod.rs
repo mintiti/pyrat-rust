@@ -86,6 +86,7 @@ pub fn embedded_matchup(
     Matchup {
         descriptor: descriptor(id),
         game_config: small_game_config(),
+        maze_layout: None,
         players: [
             PlayerSpec::Embedded {
                 agent_id: "test/p1".into(),
@@ -130,6 +131,7 @@ pub fn subprocess_matchup_with_bad_workdir(id: u64) -> Matchup<AdHocDescriptor> 
     Matchup {
         descriptor: descriptor(id),
         game_config: small_game_config(),
+        maze_layout: None,
         players: [
             PlayerSpec::Subprocess {
                 agent_id: "test/bad-spawn".into(),
