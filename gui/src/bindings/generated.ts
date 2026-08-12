@@ -185,8 +185,9 @@ async getTournamentSnapshot(tournamentId: number) : Promise<Result<TournamentSna
 },
 /**
  * Final-position board + verdict for one game, read from its `ReplayFile`.
- * Returns `Missing` (not an error) when the file is absent — a failed match
- * or a draw with no replay leaves no board, and the card shows that state.
+ * Returns `Missing` (not an error) only when the file is absent. Permission,
+ * read, and parse failures stay errors so the UI can distinguish lost
+ * evidence from evidence it currently cannot read.
  */
 async getGameReplay(tournamentId: number, matchId: number) : Promise<Result<GameReplayState, string>> {
     try {
@@ -633,7 +634,15 @@ methodology?: StoredTournamentMethodology | null;
  * Complete recipe for current rows. Absent on legacy rows rather than
  * synthesizing today's anchor, estimator, launch command, or defaults.
  */
-provenance?: TournamentProvenance | null; created_at: string; started_at: string | null; terminal_at: string | null; last_finished_at: string | null; plan_summary: string; players: string[]; games_per_matchup: number; progress: TournamentProgress; standings: StandingRow[]; games: StoredFinishedGame[]; failures: StoredMatchFailure[]; slots: StoredTournamentSlot[] }
+provenance?: TournamentProvenance | null; created_at: string; started_at: string | null; terminal_at: string | null; last_finished_at: string | null; plan_summary: string; players: string[]; games_per_matchup: number; progress: TournamentProgress; standings: StandingRow[]; games: StoredFinishedGame[]; failures: StoredMatchFailure[]; slots: StoredTournamentSlot[];
+/**
+ * Run-level warning when successful attempts cannot be joined to their
+ * saved final-position evidence. This is derived from the durable
+ * attempts plus the replay directory on every snapshot, so write-time
+ * failures remain visible after navigation or app restart without
+ * changing the scored tournament outcome.
+ */
+inspection_warning: string | null }
 /**
  * Emitted once, right after the tournament row is created. Scaffolds the
  * header, hero, and axis before any game finishes.

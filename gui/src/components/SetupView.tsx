@@ -20,6 +20,7 @@ import {
 	IconDice,
 	IconPlayerPlay,
 } from "@tabler/icons-react";
+import { confirm } from "@tauri-apps/plugin-dialog";
 import { useAtom, useAtomValue } from "jotai";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { MatchConfigParams } from "../bindings/generated";
@@ -42,9 +43,11 @@ import {
 	useDisplayState,
 	useMatchStore,
 } from "../stores/matchStore";
+import { useTournamentStore } from "../stores/tournamentStore";
 import BotOptionsPopover from "./BotOptionsPopover";
 import MazeRenderer from "./MazeRenderer";
 import SettingRow from "./common/SettingRow";
+import { TOURNAMENT_CONTENTION_WARNING } from "./tournament/tournamentActions";
 
 type Props = {
 	onBack: () => void;
@@ -76,6 +79,7 @@ export default function SetupView({ onBack, onStartMatch }: Props) {
 	const player2BotId = useMatchStore((s) => s.player2BotId);
 	const previewSeed = useMatchStore((s) => s.previewSeed);
 	const previewError = useMatchStore((s) => s.previewError);
+	const tournamentRuntimePhase = useTournamentStore((s) => s.runtimePhase);
 	const {
 		setPlayer1BotId,
 		setPlayer2BotId,
@@ -176,7 +180,16 @@ export default function SetupView({ onBack, onStartMatch }: Props) {
 		}
 	};
 
-	const handleStart = () => {
+	const handleStart = async () => {
+		if (
+			tournamentRuntimePhase !== "idle" &&
+			!(await confirm(TOURNAMENT_CONTENTION_WARNING, {
+				title: "Tournament shares this machine",
+				kind: "warning",
+			}))
+		) {
+			return;
+		}
 		// Flush draft immediately before navigating
 		if (debounceRef.current) {
 			clearTimeout(debounceRef.current);
@@ -248,7 +261,7 @@ export default function SetupView({ onBack, onStartMatch }: Props) {
 				<Button
 					size="xs"
 					leftSection={<IconPlayerPlay size={14} />}
-					onClick={handleStart}
+					onClick={() => void handleStart()}
 					disabled={!canStart}
 				>
 					Start

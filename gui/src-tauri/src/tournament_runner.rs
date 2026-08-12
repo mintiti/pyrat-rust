@@ -352,6 +352,26 @@ pub async fn run_tournament(
                         now_playing.remove(&descriptor.match_id.0);
                         orientation_by_match.remove(&descriptor.match_id.0);
                         let report = failure_report(&descriptor, &reason);
+                        let exhausted = durable_record
+                            && tournament_config::MAX_FAILURES_PER_PAIR > 0
+                            && descriptor.attempt_index.saturating_add(1)
+                                >= tournament_config::MAX_FAILURES_PER_PAIR;
+                        warn!(
+                            target: "tournament_failure",
+                            tournament_id = tournament_id.0,
+                            match_id = descriptor.match_id.0,
+                            player1_id = %descriptor.player1_id,
+                            player2_id = %descriptor.player2_id,
+                            repetition_index = descriptor.repetition_index,
+                            attempt_index = descriptor.attempt_index,
+                            rat_id = %rat_id(&descriptor),
+                            failing_player_id = ?report.failing_player_id,
+                            kind = ?report.kind,
+                            phase = ?report.phase,
+                            exhausted,
+                            reason = %report.message,
+                            "tournament match attempt failed"
+                        );
                         // Tell the frontend to drop the now-playing row (a failed
                         // match emits no scored event, so its live row would
                         // otherwise freeze) and accumulate per-bot health.
@@ -367,10 +387,7 @@ pub async fn run_tournament(
                             kind: report.kind.into(),
                             timeout_phase: report.phase.map(TimeoutPhase::from),
                             reason: report.message,
-                            exhausted: durable_record
-                                && tournament_config::MAX_FAILURES_PER_PAIR > 0
-                                && descriptor.attempt_index.saturating_add(1)
-                                    >= tournament_config::MAX_FAILURES_PER_PAIR,
+                            exhausted,
                         }
                         .emit(&app);
                         let state = state_rx.borrow().clone();

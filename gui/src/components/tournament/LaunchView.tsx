@@ -31,38 +31,46 @@ import {
 	useState,
 } from "react";
 import { commands } from "../../bindings";
-import type {
-	GameFactoryConfig,
-	LaunchLimits,
-	TournamentSummary,
-} from "../../bindings/generated";
+import type { LaunchLimits, TournamentSummary } from "../../bindings/generated";
 import { discoveredBotsAtom } from "../../stores/botConfigAtom";
 import { validate } from "../../stores/gameConfig";
-import { useTournamentStore } from "../../stores/tournamentStore";
+import {
+	type TournamentMethodologyDraft,
+	useTournamentStore,
+} from "../../stores/tournamentStore";
 import GameFactoryForm from "./GameFactoryForm";
 import { PulseDot } from "./LiveView";
 import PressableSurface from "./PressableSurface";
 import { T, shortId } from "./theme";
+import { confirmTournamentStop } from "./tournamentActions";
 import { createLatestRequestGuard } from "./tournamentAsync";
 
-// Rough wall-time estimate for the plan line. Not load-bearing — the planner
-// drives real timing; this just sets expectations.
-const EST_SECONDS_PER_GAME = 6.5;
+// Launch can only set a rough expectation: actual throughput depends on bot
+// speed, retries, and machine contention. The live view replaces this range
+// with observed terminal-slot throughput once enough work has completed.
+const ROUGH_SECONDS_PER_GAME = 6.5;
 
 // Below this move budget, search-style bots routinely overrun. We keep the
 // default ladder-comparable (200 ms) but flag a tight choice so a wall of
 // timeouts reads as "I set this low", not "the tool is broken".
 const TIGHT_MOVE_BUDGET_MS = 300;
 
-interface Methodology {
-	mazes_per_matchup: number;
-	move_timeout_ms: number;
-	preprocessing_timeout_ms: number;
-	max_parallel: number;
+function formatHistoryDate(value: string): string {
+	const normalized = value.includes("T")
+		? value
+		: `${value.replace(" ", "T")}Z`;
+	const parsed = new Date(normalized);
+	return Number.isNaN(parsed.getTime())
+		? value
+		: parsed.toLocaleDateString(undefined, {
+				month: "short",
+				day: "numeric",
+				year: "numeric",
+			});
 }
 
 function validateMethodology(
-	method: Methodology,
+	method: TournamentMethodologyDraft,
 	seedInput: string,
 	selectedBotCount: number,
 	target: string | null,
@@ -129,11 +137,20 @@ export default function LaunchView() {
 	const clearPreparing = useTournamentStore((s) => s.clearPreparing);
 	const onStarted = useTournamentStore((s) => s.onStarted);
 	const reconcileSnapshot = useTournamentStore((s) => s.reconcileSnapshot);
+	const setReconcileFailure = useTournamentStore((s) => s.setReconcileFailure);
 	const requestStop = useTournamentStore((s) => s.requestStop);
-
-	const [selected, setSelected] = useState<Set<string>>(new Set());
-	const [target, setTarget] = useState<string | null>(null);
-	const [name, setName] = useState("");
+	const launchDraft = useTournamentStore((s) => s.launchDraft);
+	const updateLaunchDraft = useTournamentStore((s) => s.updateLaunchDraft);
+	const initializeLaunchDefaults = useTournamentStore(
+		(s) => s.initializeLaunchDefaults,
+	);
+	const reconcileLaunchBots = useTournamentStore((s) => s.reconcileLaunchBots);
+	const selected = useMemo(
+		() => new Set(launchDraft.selectedBotIds),
+		[launchDraft.selectedBotIds],
+	);
+	const target = launchDraft.target;
+	const name = launchDraft.name;
 	const [store, setStore] = useState<TournamentSummary[]>([]);
 	const [recentExpanded, setRecentExpanded] = useState(false);
 	const [storeLoading, setStoreLoading] = useState(true);
@@ -151,26 +168,26 @@ export default function LaunchView() {
 	// Conditions, pre-filled from the backend defaults (ladder recipe). Null
 	// until they load — the Rust constants are the single source of truth, so
 	// there's no stale mirror to drift.
-	const [factory, setFactory] = useState<GameFactoryConfig | null>(null);
-	const [method, setMethod] = useState<Methodology | null>(null);
+	const factory = launchDraft.factory;
+	const method = launchDraft.methodology;
 	const [limits, setLimits] = useState<LaunchLimits | null>(null);
-	const [seedInput, setSeedInput] = useState("");
-	const [advanced, setAdvanced] = useState(false);
+	const seedInput = launchDraft.seedInput;
+	const advanced = launchDraft.advanced;
 	const clearLaunchErrors = useCallback(() => {
 		setValidationErrors({});
 		setLaunchFailure(null);
 	}, [setLaunchFailure]);
-	const changeMethod = (patch: Partial<Methodology>) => {
+	const changeMethod = (patch: Partial<TournamentMethodologyDraft>) => {
 		clearLaunchErrors();
-		setMethod((current) => (current ? { ...current, ...patch } : current));
+		if (!method) return;
+		updateLaunchDraft({ methodology: { ...method, ...patch } });
 	};
 
-	// Default-select all discovered bots once they load.
+	// Initialize once, preserve an intentional empty selection, and remove bots
+	// that disappeared after a rescan (including a vanished target).
 	useEffect(() => {
-		setSelected((cur) =>
-			cur.size === 0 ? new Set(bots.map((b) => b.agent_id)) : cur,
-		);
-	}, [bots]);
+		reconcileLaunchBots(bots.map((bot) => bot.agent_id));
+	}, [bots, reconcileLaunchBots]);
 
 	const loadStore = useCallback(async () => {
 		setStoreLoading(true);
@@ -192,9 +209,8 @@ export default function LaunchView() {
 		try {
 			const result = await commands.getTournamentLaunchDefaults();
 			if (result.status === "ok") {
-				setFactory(result.data.factory);
 				setLimits(result.data.limits);
-				setMethod({
+				initializeLaunchDefaults(result.data.factory, {
 					mazes_per_matchup: result.data.mazes_per_matchup,
 					move_timeout_ms: result.data.move_timeout_ms,
 					preprocessing_timeout_ms: result.data.preprocessing_timeout_ms,
@@ -208,7 +224,7 @@ export default function LaunchView() {
 		} finally {
 			setDefaultsLoading(false);
 		}
-	}, []);
+	}, [initializeLaunchDefaults]);
 
 	const returnToLive = useCallback(() => {
 		openRequest.current.invalidate();
@@ -295,37 +311,38 @@ export default function LaunchView() {
 		if (n < 2) return "";
 		const pairs = target ? n - 1 : (n * (n - 1)) / 2;
 		const games = Math.max(0, pairs) * method.mazes_per_matchup * 2;
-		const mins = Math.max(
-			1,
-			Math.round(
-				(games * EST_SECONDS_PER_GAME) / Math.max(1, method.max_parallel) / 60,
-			),
+		const centerMinutes =
+			(games * ROUGH_SECONDS_PER_GAME) / Math.max(1, method.max_parallel) / 60;
+		const lowMinutes = Math.max(1, Math.floor(centerMinutes * 0.6));
+		const highMinutes = Math.max(
+			lowMinutes + 1,
+			Math.ceil(centerMinutes * 1.8),
 		);
 		const participantIds = selectedBots.map((bot) => bot.agent_id);
 		const shape = target
 			? `${shortId(target, participantIds)} vs ${n - 1} (gauntlet)`
 			: `all pairs of ${n} (round-robin)`;
-		return `${shape} · ${factory.width}×${factory.height} · ${method.mazes_per_matchup * 2} games/matchup · ${games} games · ${method.move_timeout_ms} ms/move · ${method.max_parallel} concurrent · ~${mins} min`;
+		return `${shape} · ${factory.width}×${factory.height} · ${method.mazes_per_matchup * 2} games/matchup · ${games} games · ${method.move_timeout_ms} ms/move · ${method.max_parallel} concurrent · roughly ${lowMinutes}–${highMinutes} min before retries`;
 	}, [selectedBots, target, factory, method]);
 
 	const toggle = (id: string) => {
 		clearLaunchErrors();
-		setSelected((cur) => {
-			const next = new Set(cur);
-			if (next.has(id)) {
-				next.delete(id);
-				if (target === id) setTarget(null);
-			} else {
-				next.add(id);
-			}
-			return next;
+		const next = new Set(launchDraft.selectedBotIds);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		updateLaunchDraft({
+			selectedBotIds: [...next],
+			target: target === id && !next.has(id) ? null : target,
 		});
 	};
 
 	const setMeasuredBot = (id: string) => {
 		clearLaunchErrors();
-		setTarget((cur) => (cur === id ? null : id));
-		setSelected((cur) => new Set(cur).add(id));
+		const next = new Set(launchDraft.selectedBotIds).add(id);
+		updateLaunchDraft({
+			target: target === id ? null : id,
+			selectedBotIds: [...next],
+		});
 	};
 
 	const launch = async () => {
@@ -356,10 +373,15 @@ export default function LaunchView() {
 			});
 			if (res.status === "ok") {
 				onStarted(res.data, Date.now());
-				const snapshot = await commands.getTournamentSnapshot(
-					res.data.tournament_id,
-				);
-				if (snapshot.status === "ok") reconcileSnapshot(snapshot.data);
+				try {
+					const snapshot = await commands.getTournamentSnapshot(
+						res.data.tournament_id,
+					);
+					if (snapshot.status === "ok") reconcileSnapshot(snapshot.data);
+					else setReconcileFailure(res.data.tournament_id, snapshot.error);
+				} catch (cause) {
+					setReconcileFailure(res.data.tournament_id, String(cause));
+				}
 				return;
 			}
 
@@ -387,6 +409,9 @@ export default function LaunchView() {
 	};
 
 	const tournamentRunning = live?.status === "running";
+	const stopRunningTournament = async () => {
+		if (await confirmTournamentStop()) await requestStop();
+	};
 
 	const roster = (
 		<Stack gap={6} pr={boundedColumns ? "xs" : 0}>
@@ -457,7 +482,9 @@ export default function LaunchView() {
 				label="Tournament name"
 				placeholder="ckpt-1200, after-mud-fix…"
 				value={name}
-				onChange={(event) => setName(event.currentTarget.value)}
+				onChange={(event) =>
+					updateLaunchDraft({ name: event.currentTarget.value })
+				}
 			/>
 
 			{factory && method && limits ? (
@@ -494,8 +521,9 @@ export default function LaunchView() {
 					</SettingRowInline>
 					{method.move_timeout_ms < TIGHT_MOVE_BUDGET_MS && (
 						<Text size="xs" c="dimmed" mt={-6}>
-							Tight budget — search-style bots may exceed it; any failures show
-							as bot health, not lost results.
+							The shared ladder uses this tight budget for comparability.
+							Search-style bots may need more time; failures remain visible and
+							attributed.
 						</Text>
 					)}
 
@@ -504,7 +532,7 @@ export default function LaunchView() {
 						limits={limits}
 						onChange={(next) => {
 							clearLaunchErrors();
-							setFactory(next);
+							updateLaunchDraft({ factory: next });
 						}}
 						errors={factoryErrors}
 					/>
@@ -512,7 +540,7 @@ export default function LaunchView() {
 					<Button
 						variant="subtle"
 						size="compact-xs"
-						onClick={() => setAdvanced((current) => !current)}
+						onClick={() => updateLaunchDraft({ advanced: !advanced })}
 						aria-expanded={advanced}
 						style={{ alignSelf: "flex-start" }}
 					>
@@ -559,7 +587,9 @@ export default function LaunchView() {
 									error={methodErrors.tournament_seed}
 									onChange={(value) => {
 										clearLaunchErrors();
-										setSeedInput(value === "" ? "" : String(value));
+										updateLaunchDraft({
+											seedInput: value === "" ? "" : String(value),
+										});
 									}}
 								/>
 							</SettingRowInline>
@@ -613,11 +643,11 @@ export default function LaunchView() {
 								size="compact-sm"
 								variant="subtle"
 								color="red"
-								onClick={() => void requestStop()}
+								onClick={() => void stopRunningTournament()}
 								disabled={stopping}
 								loading={stopping}
 							>
-								Stop
+								Stop and keep completed results
 							</Button>
 						</Group>
 					</Group>
@@ -724,11 +754,13 @@ export default function LaunchView() {
 											const complete = activeRow
 												? live.status === "finished" && done >= total
 												: tournament.lifecycle === "completed" && done >= total;
+											const terminalOutcome = activeRow
+												? live.terminalOutcome
+												: tournament.terminal?.outcome;
 											const status = running
 												? `running ${done}/${total}`
 												: complete
-													? tournament.terminal?.outcome ===
-														"completed_with_failures"
+													? terminalOutcome === "completed_with_failures"
 														? "finished with failures"
 														: "finished"
 													: tournament.lifecycle === "stopped"
@@ -736,6 +768,7 @@ export default function LaunchView() {
 														: tournament.lifecycle === "failed"
 															? `failed ${done}/${total}`
 															: `status unknown ${done}/${total}`;
+											const created = formatHistoryDate(tournament.created_at);
 											return (
 												<PressableSurface
 													key={tournament.id}
@@ -752,7 +785,7 @@ export default function LaunchView() {
 															c="dimmed"
 															style={{ flexShrink: 0 }}
 														>
-															{status} · {tournament.format}
+															{status} · {created} · {tournament.format}
 														</Text>
 														<IconChevronRight
 															size={14}

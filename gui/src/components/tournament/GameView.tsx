@@ -1,11 +1,11 @@
-import { Box, Button, Group, Stack, Text, Title } from "@mantine/core";
+import { Box, Group, Stack, Text, Title } from "@mantine/core";
 import { toDisplayState } from "../../stores/matchStore";
 import MazeRenderer from "../MazeRenderer";
 import { T, shortId } from "./theme";
 import { useGameReplay } from "./useGameReplay";
 
-/** Depth 3: one game. The final position large, the verdict, and a (stubbed)
- * entry to the full replay — which is the parked gui-next replay-loading item. */
+/** Depth 3: one game's saved final position. Full replay playback remains a
+ * separate gui-next feature and is not promised by this surface. */
 export default function GameView({
 	tournamentId,
 	matchId,
@@ -59,8 +59,7 @@ export default function GameView({
 	return (
 		<Box mt="sm">
 			<Title order={4} mb="md">
-				{shortId(replay.player1_id, players)} vs{" "}
-				{shortId(replay.player2_id, players)}
+				Final position
 			</Title>
 			<Group align="flex-start" gap="xl">
 				<Box w={320} h={300}>
@@ -71,6 +70,10 @@ export default function GameView({
 					/>
 				</Box>
 				<Stack gap="sm" pt={4}>
+					<Text size="sm">
+						{shortId(replay.player1_id, players)} as Rat ·{" "}
+						{shortId(replay.player2_id, players)} as Python
+					</Text>
 					<Text fw={700} size="lg" c={verdictColor}>
 						{winner === null ? "draw" : `${shortId(winner, players)} wins`}
 					</Text>
@@ -80,10 +83,9 @@ export default function GameView({
 					<Text size="sm" c="dimmed">
 						{replay.turns} turns · final position
 					</Text>
-					{/* Full replay is the parked gui-next replay-loading item. */}
-					<Button color="yellow" size="sm" variant="light" disabled>
-						Open replay (coming soon)
-					</Button>
+					<Text size="xs" c="dimmed">
+						Saved inspection view; no playback controls.
+					</Text>
 				</Stack>
 			</Group>
 		</Box>

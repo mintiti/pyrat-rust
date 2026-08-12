@@ -26,6 +26,9 @@ export function tournamentChromeProjection({
 		const finalVerdict = noticeLive
 			? hasFinalTournamentVerdict(noticeLive)
 			: false;
+		const completedWithFailures =
+			noticeLive?.terminalOutcome === "completed_with_failures" &&
+			noticeLive.done >= noticeLive.total;
 		return {
 			name: noticeLive?.name ?? `#${terminalNotice.tournamentId}`,
 			status:
@@ -33,14 +36,18 @@ export function tournamentChromeProjection({
 					? noticeLive?.lifecycle === "failed"
 						? "failed"
 						: "stopped"
-					: finalVerdict
-						? "finished"
-						: "partial results",
-			progress: finalVerdict
-				? "view result"
-				: terminalNotice.status === "finished"
-					? "view partial results"
-					: "view details",
+					: completedWithFailures
+						? "finished with failures"
+						: finalVerdict
+							? "finished"
+							: "partial results",
+			progress: completedWithFailures
+				? "view failures"
+				: finalVerdict
+					? "view result"
+					: terminalNotice.status === "finished"
+						? "view partial results"
+						: "view details",
 			color:
 				terminalNotice.status === "aborted"
 					? T.loss
@@ -91,9 +98,8 @@ export function tournamentChromeProjection({
 }
 
 /** App-level activity handoff. Running/preparing state remains glanceable from
- * other pages; terminal state appears only as a short-lived invitation to see
- * the result. The surrounding flow lane is intentional: this never overlays a
- * page's own controls. */
+ * other pages; a terminal state remains as an unread invitation until opened.
+ * The surrounding flow lane is intentional: this never overlays page controls. */
 export default function LiveChip({
 	onOpenTournament,
 }: {

@@ -910,6 +910,12 @@ pub struct TournamentSnapshot {
     pub games: Vec<StoredFinishedGame>,
     pub failures: Vec<StoredMatchFailure>,
     pub slots: Vec<StoredTournamentSlot>,
+    /// Run-level warning when successful attempts cannot be joined to their
+    /// saved final-position evidence. This is derived from the durable
+    /// attempts plus the replay directory on every snapshot, so write-time
+    /// failures remain visible after navigation or app restart without
+    /// changing the scored tournament outcome.
+    pub inspection_warning: Option<String>,
 }
 
 /// Final-position board + verdict for one finished game, or a reason it's
@@ -1048,6 +1054,12 @@ async fn supervise_tournament(
         {
             Ok(prepared) => prepared,
             Err(reason) => {
+                warn!(
+                    target: "tournament_failure",
+                    generation,
+                    error = %reason,
+                    "tournament launch failed before the runner became live"
+                );
                 let _ = startup.send(Err(reason.clone()));
                 return Err(reason);
             },
@@ -1794,6 +1806,7 @@ pub async fn get_tournament_snapshot(
     );
     let methodology = rec.methodology.map(StoredTournamentMethodology::from);
     let provenance = stored_provenance(&rec, &stored_participants, &game_config, &params)?;
+    let inspection_warning = replay_inspection_warning(&app, tournament_id, &games);
 
     Ok(TournamentSnapshot {
         tournament_id,
@@ -1821,12 +1834,14 @@ pub async fn get_tournament_snapshot(
         games,
         failures,
         slots,
+        inspection_warning,
     })
 }
 
 /// Final-position board + verdict for one game, read from its `ReplayFile`.
-/// Returns `Missing` (not an error) when the file is absent — a failed match
-/// or a draw with no replay leaves no board, and the card shows that state.
+/// Returns `Missing` (not an error) only when the file is absent. Permission,
+/// read, and parse failures stay errors so the UI can distinguish lost
+/// evidence from evidence it currently cannot read.
 #[tauri::command]
 #[specta::specta]
 pub async fn get_game_replay(
@@ -1838,15 +1853,61 @@ pub async fn get_game_replay(
     let path = dir.join(format!("match-{match_id}.json"));
     let json = match std::fs::read_to_string(&path) {
         Ok(s) => s,
-        Err(_) => {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return Ok(GameReplayState::Missing {
-                reason: "no replay for this match".into(),
+                reason: "no saved final-position evidence for this match".into(),
             })
+        },
+        Err(error) => {
+            return Err(format!(
+                "read final-position evidence {}: {error}",
+                path.display()
+            ))
         },
     };
     let replay: ReplayFile =
         serde_json::from_str(&json).map_err(|e| format!("parse replay {}: {e}", path.display()))?;
     Ok(project_final_state(&replay))
+}
+
+/// Compare successful durable attempts with their GUI replay files. The
+/// replay sink is intentionally optional, so missing evidence must not mutate
+/// scores or lifecycle; it does need one durable, reopenable warning rather
+/// than N quiet "unavailable" cards.
+fn replay_inspection_warning(
+    app: &tauri::AppHandle,
+    tournament_id: i64,
+    games: &[StoredFinishedGame],
+) -> Option<String> {
+    let replay_dir = match crate::tournament_paths::tournament_replay_dir(app, tournament_id) {
+        Ok(path) => path,
+        Err(error) => {
+            return Some(format!(
+                "Final-position evidence location is unavailable: {error}"
+            ))
+        },
+    };
+    let mut missing = 0usize;
+    for match_id in games.iter().filter_map(|game| game.match_id) {
+        let path = replay_dir.join(format!("match-{match_id}.json"));
+        match std::fs::metadata(&path) {
+            Ok(metadata) if metadata.is_file() => {},
+            Ok(_) => missing += 1,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => missing += 1,
+            Err(error) => {
+                return Some(format!(
+                    "Final-position evidence could not be checked at {}: {error}",
+                    path.display()
+                ))
+            },
+        }
+    }
+    (missing > 0).then(|| {
+        format!(
+            "Final-position evidence is unavailable for {missing} successful {}. Scores remain durable, but those games cannot be inspected.",
+            if missing == 1 { "game" } else { "games" }
+        )
+    })
 }
 
 // ---------------------------------------------------------------------------

@@ -1,5 +1,5 @@
 import { Box, Group, Text } from "@mantine/core";
-import { IconPlayerPlayFilled } from "@tabler/icons-react";
+import { IconZoomScan } from "@tabler/icons-react";
 import { toDisplayState } from "../../stores/matchStore";
 import type { FinishedGame } from "../../stores/tournamentStore";
 import { resultFor } from "../../stores/tournamentStore";
@@ -19,7 +19,7 @@ type Props = {
 const resColor = (r: "W" | "L" | "D") =>
 	r === "W" ? T.win : r === "L" ? T.loss : T.draw;
 
-/** A finished game as a card: final-position thumbnail, score, turns, ▶ on
+/** A finished game as a card: final-position thumbnail, score, turns, inspect on
  * hover. Lazy-loads the replay; a failed/missing match shows an indicator
  * instead of a board. */
 export default function GameCard({
@@ -32,7 +32,7 @@ export default function GameCard({
 
 	const res = resultFor(game, perspectiveId ?? game.player1Id);
 	const available = replay.kind === "available";
-	const inspectable = game.matchId !== null && onOpen !== null;
+	const inspectable = onOpen !== null && (available || replay.kind === "error");
 
 	return (
 		<PressableSurface
@@ -41,12 +41,14 @@ export default function GameCard({
 			motion="card"
 			aria-label={
 				inspectable
-					? `Open replay: ${game.player1Id} versus ${game.player2Id}, ${game.player1Score} to ${game.player2Score}`
-					: `Saved result: ${game.player1Id} versus ${game.player2Id}, ${game.player1Score} to ${game.player2Score}; replay unavailable`
+					? replay.kind === "error"
+						? `Retry final-position inspection: ${game.player1Id} versus ${game.player2Id}`
+						: `Inspect final position: ${game.player1Id} versus ${game.player2Id}, ${game.player1Score} to ${game.player2Score}`
+					: `Saved result: ${game.player1Id} versus ${game.player2Id}, ${game.player1Score} to ${game.player2Score}; final position unavailable`
 			}
 			style={{ padding: 6, borderRadius: "var(--mantine-radius-sm)" }}
 			disabled={!inspectable}
-			onClick={onOpen ?? undefined}
+			onClick={inspectable ? (onOpen ?? undefined) : undefined}
 		>
 			<Box pos="relative">
 				{available ? (
@@ -91,7 +93,7 @@ export default function GameCard({
 							borderRadius: 4,
 						}}
 					>
-						<IconPlayerPlayFilled size={20} color="#fff" />
+						<IconZoomScan size={20} color="#fff" />
 					</Box>
 				)}
 			</Box>

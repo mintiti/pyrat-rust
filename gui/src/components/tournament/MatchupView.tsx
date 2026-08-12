@@ -114,7 +114,7 @@ export default function MatchupView({ live, a, b, fromBot }: Props) {
 				</Group>
 			))}
 
-			{games.length === 0 && exhaustedLegs === 0 ? (
+			{games.length === 0 && failures.length === 0 ? (
 				<Text size="sm" c="dimmed">
 					no terminal schedule legs yet
 				</Text>
@@ -126,6 +126,7 @@ export default function MatchupView({ live, a, b, fromBot }: Props) {
 					perspectiveId={persp}
 					paired={live.paired}
 					players={live.players}
+					provenance={live.provenance}
 					onOpenGame={(matchId) =>
 						navigate({ kind: "game", a, b, matchId, fromBot })
 					}

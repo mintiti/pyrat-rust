@@ -1,9 +1,11 @@
 import { Group, Paper, SimpleGrid, Stack, Text } from "@mantine/core";
+import type { TournamentProvenance } from "../../bindings/generated";
 import type {
 	FinishedGame,
 	MatchFailureRecord,
 } from "../../stores/tournamentStore";
 import { resultFor } from "../../stores/tournamentStore";
+import FailureCard from "./FailureCard";
 import GameCard from "./GameCard";
 import { T, shortId } from "./theme";
 
@@ -84,6 +86,7 @@ export default function PairedGames({
 	perspectiveId,
 	paired,
 	players = [],
+	provenance = null,
 	onOpenGame,
 }: {
 	tournamentId: number;
@@ -92,18 +95,19 @@ export default function PairedGames({
 	perspectiveId: string;
 	paired: boolean;
 	players?: string[];
+	provenance?: TournamentProvenance | null;
 	onOpenGame: (matchId: number) => void;
 }) {
 	const pairsByIndex = new Map(
 		groupFinishedGames(games, paired).map((pair) => [pair.pairIndex, pair]),
 	);
-	const exhaustedByPair = new Map<number, MatchFailureRecord[]>();
-	for (const failure of failures.filter((item) => item.exhausted)) {
+	const failuresByPair = new Map<number, MatchFailureRecord[]>();
+	for (const failure of failures) {
 		const pairIndex = paired
 			? Math.floor(failure.repetitionIndex / 2)
 			: failure.repetitionIndex;
-		exhaustedByPair.set(pairIndex, [
-			...(exhaustedByPair.get(pairIndex) ?? []),
+		failuresByPair.set(pairIndex, [
+			...(failuresByPair.get(pairIndex) ?? []),
 			failure,
 		]);
 		if (!pairsByIndex.has(pairIndex)) {
@@ -116,7 +120,13 @@ export default function PairedGames({
 	return (
 		<Stack gap="sm">
 			{pairs.map((pair) => {
-				const exhaustedFailures = exhaustedByPair.get(pair.pairIndex) ?? [];
+				const pairFailures = failuresByPair.get(pair.pairIndex) ?? [];
+				const exhaustedFailures = pairFailures.filter(
+					(failure) => failure.exhausted,
+				);
+				const retryFailures = pairFailures.filter(
+					(failure) => !failure.exhausted,
+				);
 				return (
 					<Paper
 						key={pair.pairIndex}
@@ -168,20 +178,35 @@ export default function PairedGames({
 								);
 							})}
 							{exhaustedFailures.map((failure) => (
-								<Paper
+								<FailureCard
 									key={failure.failureKey}
-									withBorder
-									p="xs"
-									radius="sm"
-									style={{ borderColor: T.loss }}
-								>
-									<Text size="xs" c="dimmed" mb={4}>
-										{shortId(failure.ratId, players)} as Rat · exhausted leg
-									</Text>
-									<Text size="xs">{failure.reason}</Text>
-								</Paper>
+									tournamentId={tournamentId}
+									failure={failure}
+									players={players}
+									provenance={provenance}
+								/>
 							))}
 						</SimpleGrid>
+						{retryFailures.length > 0 && (
+							<details style={{ marginTop: 8 }}>
+								<summary
+									style={{ cursor: "pointer", fontSize: 12, color: T.muted }}
+								>
+									Earlier failed attempts ({retryFailures.length})
+								</summary>
+								<Stack gap="xs" mt="xs">
+									{retryFailures.map((failure) => (
+										<FailureCard
+											key={failure.failureKey}
+											tournamentId={tournamentId}
+											failure={failure}
+											players={players}
+											provenance={provenance}
+										/>
+									))}
+								</Stack>
+							</details>
+						)}
 					</Paper>
 				);
 			})}

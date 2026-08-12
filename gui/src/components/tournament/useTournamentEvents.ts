@@ -24,14 +24,22 @@ export function useTournamentEvents() {
 			onFinished,
 			onAborted,
 			reconcileSnapshot,
+			setReconcileFailure,
 		} = useTournamentStore.getState();
 		let mounted = true;
 
 		const reconcileQueue = createTournamentReconcileQueue(
 			async (tournamentId) => {
-				const result = await commands.getTournamentSnapshot(tournamentId);
-				if (mounted && result.status === "ok") {
-					reconcileSnapshot(result.data);
+				try {
+					const result = await commands.getTournamentSnapshot(tournamentId);
+					if (!mounted) return;
+					if (result.status === "ok") {
+						reconcileSnapshot(result.data);
+					} else {
+						setReconcileFailure(tournamentId, result.error);
+					}
+				} catch (cause) {
+					if (mounted) setReconcileFailure(tournamentId, String(cause));
 				}
 			},
 			() => mounted,

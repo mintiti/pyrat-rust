@@ -26,6 +26,13 @@ export default function BotView({
 			<div>
 				{opponents.map((opp) => {
 					const games = live.gamesByPair[pairKey(botId, opp)] ?? [];
+					const failures = live.failuresByPair[pairKey(botId, opp)] ?? [];
+					const exhausted = new Set(
+						failures
+							.filter((failure) => failure.exhausted)
+							.map((failure) => failure.repetitionIndex),
+					).size;
+					const terminal = games.length + exhausted;
 					let w = 0;
 					let l = 0;
 					let d = 0;
@@ -38,7 +45,7 @@ export default function BotView({
 					return (
 						<PressableSurface
 							key={opp}
-							aria-label={`View ${shortId(botId, live.players)} versus ${shortId(opp, live.players)}. Record: ${w} wins, ${l} losses, ${d} draws. ${games.length} of ${live.gamesPerMatchup} games completed.`}
+							aria-label={`View ${shortId(botId, live.players)} versus ${shortId(opp, live.players)}. Record: ${w} wins, ${l} losses, ${d} draws. ${terminal} of ${live.gamesPerMatchup} schedule slots terminal.${failures.length > 0 ? ` ${failures.length} failed attempts.` : ""}`}
 							style={{ marginBottom: 6 }}
 							onClick={() =>
 								navigate({ kind: "matchup", a: botId, b: opp, fromBot: botId })
@@ -64,7 +71,8 @@ export default function BotView({
 									})}
 								</Group>
 								<Text size="xs" c="dimmed" ff="monospace">
-									{w}–{l}–{d} · {games.length}/{live.gamesPerMatchup}
+									{w}–{l}–{d} · {terminal}/{live.gamesPerMatchup}
+									{failures.length > 0 ? ` · ⚠${failures.length}` : ""}
 								</Text>
 								<IconChevronRight
 									size={15}

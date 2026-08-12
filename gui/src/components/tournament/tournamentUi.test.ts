@@ -80,6 +80,7 @@ function savedSnapshot(
 		games: [],
 		failures: [],
 		slots: [],
+		inspection_warning: null,
 		...overrides,
 	};
 }
@@ -232,6 +233,20 @@ describe("tournament UI truth", () => {
 		expect(html).not.toContain("Tournament stopped.");
 	});
 
+	it("keeps the last confirmed view when durable reconciliation fails", () => {
+		const store = useTournamentStore.getState();
+		store.onStarted(started(), Date.now() - 10_000);
+		store.setReconcileFailure(1, "database is temporarily busy");
+		const live = useTournamentStore.getState().live;
+		expect(live).not.toBeNull();
+		if (!live) return;
+
+		expect(useTournamentStore.getState().reconcileFailure).toEqual({
+			tournamentId: 1,
+			reason: "database is temporarily busy",
+		});
+	});
+
 	it("does not infer partial completion for a legacy-unknown row", () => {
 		useTournamentStore.getState().openSnapshot(
 			savedSnapshot({
@@ -280,6 +295,9 @@ describe("tournament UI truth", () => {
 
 		const html = render(createElement(LiveView, { live: saved }));
 		expect(html).toContain("finished with failures");
+		expect(html).toContain("1 failed attempt");
+		expect(html).toContain("1 exhausted schedule slot");
+		expect(html).toContain("Failure details are refreshing");
 		expect(html).toContain("schedule complete");
 		expect(html).toContain(
 			"not rated: each player needs four successful games",
@@ -375,7 +393,10 @@ describe("tournament UI truth", () => {
 			}),
 		);
 		expect(html).toContain("1 scored · 1 exhausted");
-		expect(html).toContain("b as Rat · exhausted leg");
+		expect(html).toContain("b as Rat");
+		expect(html).toContain("a as Python");
+		expect(html).toContain("attempt 1 exhausted this leg");
+		expect(html).toContain("Copy failure evidence");
 		expect(html).not.toContain("1/2 legs terminal");
 	});
 
@@ -405,7 +426,7 @@ describe("tournament UI truth", () => {
 		expect(groupFinishedGames(games, false)).toHaveLength(2);
 	});
 
-	it("uses the configured concurrency in the live ETA", () => {
+	it("starts the live ETA in an honest estimating state", () => {
 		useTournamentStore
 			.getState()
 			.onStarted(started({ total_games: 80, max_parallel: 8 }), Date.now());
@@ -414,7 +435,25 @@ describe("tournament UI truth", () => {
 		if (!live) return;
 
 		const html = render(createElement(LiveView, { live }));
-		expect(html).toContain("~2 min left");
+		expect(html).toContain("Estimating…");
+		expect(html).not.toContain("min left");
+	});
+
+	it("makes the consequential stop action explicit and immediately non-repeatable", () => {
+		const store = useTournamentStore.getState();
+		store.onStarted(started(), Date.now());
+		const liveBeforeStop = useTournamentStore.getState().live;
+		expect(liveBeforeStop).not.toBeNull();
+		if (!liveBeforeStop) return;
+		const html = render(createElement(LiveView, { live: liveBeforeStop }));
+		expect(html).toContain("Stop and keep completed results");
+
+		store.onStopping({ tournament_id: 1 });
+		expect(useTournamentStore.getState()).toMatchObject({
+			stopping: true,
+			runtimePhase: "stopping",
+			runtimeTournamentId: 1,
+		});
 	});
 
 	it("uses the configured matchup denominator in a bot drill-down", () => {
@@ -703,5 +742,23 @@ describe("tournament UI truth", () => {
 		expect(html).toContain("cargo run --release");
 		expect(html).toContain("95% normal interval for player − anchor");
 		expect(html).toContain("mutable files were not frozen");
+	});
+
+	it("keeps a run-level final-position evidence warning after reopen", () => {
+		useTournamentStore.getState().openSnapshot(
+			savedSnapshot({
+				inspection_warning:
+					"Final-position evidence is unavailable for 2 successful games.",
+			}),
+		);
+		const live = useTournamentStore.getState().viewing;
+		expect(live).not.toBeNull();
+		if (!live) return;
+
+		const html = render(createElement(LiveView, { live }));
+		expect(html).toContain("Some final positions cannot be inspected");
+		expect(html).toContain(
+			"Final-position evidence is unavailable for 2 successful games.",
+		);
 	});
 });

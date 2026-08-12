@@ -13,18 +13,19 @@ import { IconArrowLeft } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
 import type { LiveMatch, TournamentLive } from "../../stores/tournamentStore";
 import {
+	estimateTournamentEta,
 	hasFinalTournamentVerdict,
 	useTournamentStore,
 } from "../../stores/tournamentStore";
 import BotView from "./BotView";
+import FailureSummary from "./FailureSummary";
 import GameView from "./GameView";
 import Hero from "./Hero";
 import MatchupView from "./MatchupView";
 import ProvenancePanel from "./ProvenancePanel";
 import Standings from "./Standings";
 import { T, shortId } from "./theme";
-
-const EST_SECONDS_PER_GAME = 6.5;
+import { confirmTournamentStop } from "./tournamentActions";
 
 export default function LiveView({ live }: { live: TournamentLive }) {
 	const nav = useTournamentStore((s) => s.nav);
@@ -32,7 +33,12 @@ export default function LiveView({ live }: { live: TournamentLive }) {
 	const showLaunch = useTournamentStore((s) => s.showLaunch);
 	const stopping = useTournamentStore((s) => s.stopping);
 	const requestStop = useTournamentStore((s) => s.requestStop);
+	const reconcileFailure = useTournamentStore((s) => s.reconcileFailure);
+	const retryReconcile = useTournamentStore((s) => s.retryReconcile);
 	const active = live.origin === "active";
+	const stop = async () => {
+		if (await confirmTournamentStop()) await requestStop();
+	};
 
 	// Ticking elapsed clock.
 	const [now, setNow] = useState(() => Date.now());
@@ -54,18 +60,21 @@ export default function LiveView({ live }: { live: TournamentLive }) {
 	const finalVerdict = hasFinalTournamentVerdict(live);
 	const interrupted =
 		live.lifecycle === "stopped" || live.lifecycle === "failed";
-	const remaining = Math.max(0, live.total - live.done);
-	const etaMin =
-		live.maxParallel === null
-			? null
-			: Math.max(
-					1,
-					Math.ceil(
-						(remaining * EST_SECONDS_PER_GAME) /
-							Math.max(1, live.maxParallel) /
-							60,
-					),
-				);
+	const eta = estimateTournamentEta(live, now);
+	const etaText =
+		eta?.kind === "estimating"
+			? "Estimating…"
+			: eta?.kind === "waiting"
+				? "Waiting for terminal work…"
+				: eta?.kind === "ready"
+					? eta.seconds < 60
+						? "Under 1 min left"
+						: `About ${Math.ceil(eta.seconds / 60)} min left`
+					: null;
+	const staleProjection =
+		reconcileFailure?.tournamentId === live.tournamentId
+			? reconcileFailure
+			: null;
 
 	const inFlight = Object.values(live.liveByMatch);
 	const statusBadge =
@@ -128,14 +137,14 @@ export default function LiveView({ live }: { live: TournamentLive }) {
 				<Group gap="xs" ml="auto">
 					{active && live.status === "running" && (
 						<Button
-							size="compact-xs"
+							size="compact-sm"
 							variant="subtle"
 							color="red"
-							onClick={() => void requestStop()}
+							onClick={() => void stop()}
 							disabled={stopping}
 							loading={stopping}
 						>
-							{stopping ? "Stopping…" : "Stop"}
+							{stopping ? "Stopping…" : "Stop and keep completed results"}
 						</Button>
 					)}
 				</Group>
@@ -158,9 +167,7 @@ export default function LiveView({ live }: { live: TournamentLive }) {
 				{live.exhausted > 0 ? ` · ${live.exhausted} exhausted` : ""} ·{" "}
 				{live.planSummary}
 				{!terminal
-					? etaMin === null
-						? " · running"
-						: ` · ~${etaMin} min left`
+					? ` · ${etaText ?? "Running"}`
 					: live.lifecycle === "completed"
 						? finalVerdict
 							? " · complete · final ranking"
@@ -201,10 +208,50 @@ export default function LiveView({ live }: { live: TournamentLive }) {
 					</Text>
 				</Paper>
 			)}
+			{staleProjection && (
+				<Paper withBorder p="sm" radius="md" mb="md" bg={T.panel2}>
+					<Group justify="space-between" gap="sm" wrap="nowrap">
+						<div>
+							<Text size="sm" fw={700}>
+								Tournament details may need attention
+							</Text>
+							<Text size="xs" c="dimmed" mt={2}>
+								A refresh or control request failed; the last confirmed state
+								remains visible: {staleProjection.reason}
+							</Text>
+						</div>
+						<Button
+							size="compact-xs"
+							variant="light"
+							onClick={() => void retryReconcile(live.tournamentId)}
+						>
+							Retry
+						</Button>
+					</Group>
+				</Paper>
+			)}
+			{live.inspectionWarning && (
+				<Paper
+					withBorder
+					p="sm"
+					radius="md"
+					mb="md"
+					bg={T.panel2}
+					style={{ borderColor: T.cheeseDim }}
+				>
+					<Text size="sm" fw={700}>
+						Some final positions cannot be inspected
+					</Text>
+					<Text size="xs" c="dimmed" mt={2}>
+						{live.inspectionWarning}
+					</Text>
+				</Paper>
+			)}
 
 			{nav.kind === "overview" && (
 				<>
 					<Hero live={live} />
+					<FailureSummary live={live} />
 					{active && (
 						<NowPlaying
 							matches={inFlight}

@@ -34,6 +34,7 @@ export default function App() {
 	const stopping = useTournamentStore((s) => s.stopping);
 	const preparing = useTournamentStore((s) => s.preparing);
 	const onRuntimeStatus = useTournamentStore((s) => s.onRuntimeStatus);
+	const setReconcileFailure = useTournamentStore((s) => s.setReconcileFailure);
 	const terminalNotice = useTournamentStore((s) => s.terminalNotice);
 	const dismissTerminalNotice = useTournamentStore(
 		(s) => s.dismissTerminalNotice,
@@ -48,11 +49,13 @@ export default function App() {
 	useEffect(() => {
 		let mounted = true;
 		void (async () => {
+			let tournamentId: number | null = null;
 			try {
 				const status = await commands.tournamentStatus();
 				if (!mounted || status.status !== "ok") return;
 				onRuntimeStatus(status.data);
 				if (status.data.tournament_id === null) return;
+				tournamentId = status.data.tournament_id;
 				if (
 					useTournamentStore.getState().live?.tournamentId ===
 					status.data.tournament_id
@@ -63,16 +66,18 @@ export default function App() {
 					status.data.tournament_id,
 				);
 				if (mounted && snapshot.status === "ok") restoreActive(snapshot.data);
-			} catch {
-				// Reattachment is best effort. A normally mounted webview receives
-				// lifecycle events directly; a later page visit can still open the
-				// durable tournament from Recent tournaments.
+				else if (mounted && snapshot.status === "error")
+					setReconcileFailure(tournamentId, snapshot.error);
+			} catch (cause) {
+				if (mounted && tournamentId !== null) {
+					setReconcileFailure(tournamentId, String(cause));
+				}
 			}
 		})();
 		return () => {
 			mounted = false;
 		};
-	}, [onRuntimeStatus, restoreActive]);
+	}, [onRuntimeStatus, restoreActive, setReconcileFailure]);
 
 	// Closing a non-resumable run is a real product action, not an incidental
 	// window event. Confirm it in the webview, then let the backend supervisor
@@ -124,11 +129,14 @@ export default function App() {
 	// explicit.
 	let tournamentAnnouncement = "";
 	if (live?.status === "finished") {
-		tournamentAnnouncement = hasFinalTournamentVerdict(live)
-			? `Tournament ${live.name ?? `#${live.tournamentId}`} finished. ${live.done} of ${live.total} games completed.`
-			: `Tournament ${live.name ?? `#${live.tournamentId}`} finished with partial results. ${live.done} of ${live.total} games completed.`;
+		tournamentAnnouncement =
+			live.terminalOutcome === "completed_with_failures"
+				? `Tournament ${live.name ?? `#${live.tournamentId}`} finished with failures. ${live.success} games succeeded and ${live.exhausted} schedule slots exhausted their retries.`
+				: hasFinalTournamentVerdict(live)
+					? `Tournament ${live.name ?? `#${live.tournamentId}`} finished. ${live.done} of ${live.total} schedule slots completed.`
+					: `Tournament ${live.name ?? `#${live.tournamentId}`} finished without a final rating. ${live.done} of ${live.total} schedule slots completed.`;
 	} else if (live?.status === "aborted") {
-		tournamentAnnouncement = `Tournament ${live.name ?? `#${live.tournamentId}`} stopped after ${live.done} of ${live.total} games.${live.abortReason ? ` ${live.abortReason}` : ""}`;
+		tournamentAnnouncement = `Tournament ${live.name ?? `#${live.tournamentId}`} ${live.lifecycle === "failed" ? "failed" : "stopped"} after ${live.done} of ${live.total} schedule slots.${live.abortReason ? ` ${live.abortReason}` : ""}`;
 	} else if (stopping) {
 		tournamentAnnouncement =
 			"Stopping tournament and preserving completed results.";
@@ -143,17 +151,15 @@ export default function App() {
 		tournamentAnnouncement = `Tournament ${live.name ?? `#${live.tournamentId}`} running. ${percent}% complete.`;
 	}
 
-	// Completion is a handoff, not permanent app chrome. If the user is already
-	// looking at the tournament, there is nothing to hand off; elsewhere the
-	// notice gets a short window to invite them back to the result.
+	// A background terminal outcome remains unread until the user opens it. If
+	// they are already looking at the active tournament, there is nothing left
+	// to hand off. Do not time it out: an eight-second notice is not durable
+	// completion communication.
 	useEffect(() => {
 		if (!terminalNotice) return;
 		if (page === "tournaments" && screen === "live" && viewing === null) {
 			dismissTerminalNotice();
-			return;
 		}
-		const timeout = window.setTimeout(dismissTerminalNotice, 8_000);
-		return () => window.clearTimeout(timeout);
 	}, [dismissTerminalNotice, page, screen, terminalNotice, viewing]);
 
 	const handlePageNav = (p: Page) => {

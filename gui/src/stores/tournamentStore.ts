@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { commands } from "../bindings";
 import type {
 	FailureKind,
+	GameFactoryConfig,
 	NowPlayingEvent,
 	RatingReadiness,
 	StandingRow,
@@ -30,6 +31,28 @@ export interface TournamentTerminalNotice {
 	tournamentId: number;
 	status: Extract<TournamentStatus, "finished" | "aborted">;
 	reason: string | null;
+}
+
+export interface TournamentMethodologyDraft {
+	mazes_per_matchup: number;
+	move_timeout_ms: number;
+	preprocessing_timeout_ms: number;
+	max_parallel: number;
+}
+
+/** App-owned launch draft. It intentionally outlives LaunchView so looking at
+ * another page or a stored tournament does not reset a configured run. The
+ * roster initialization bit distinguishes "bots have not loaded yet" from an
+ * intentional empty selection. */
+export interface TournamentLaunchDraft {
+	selectedBotIds: string[];
+	target: string | null;
+	name: string;
+	factory: GameFactoryConfig | null;
+	methodology: TournamentMethodologyDraft | null;
+	seedInput: string;
+	advanced: boolean;
+	rosterInitialized: boolean;
 }
 
 /** One finished game, canonical orientation (player1Id is lex-min, and so
@@ -135,8 +158,14 @@ export interface TournamentLive {
 	/** Captured when the terminal event arrives so a remounted finished view
 	 * keeps the real run duration instead of ticking until it is reopened. */
 	endedAt: number | null;
+	/** Wall-clock time of the latest increase in terminal schedule slots. The
+	 * observed-throughput ETA uses this to stop counting down when no work is
+	 * making progress. */
+	lastProgressAt: number | null;
 	/** Durable creation time for reopened tournaments. */
 	createdAt: string | null;
+	/** Run-level loss of final-position evidence. Scores remain valid. */
+	inspectionWarning: string | null;
 }
 
 interface TournamentStore {
@@ -159,6 +188,10 @@ interface TournamentStore {
 	 * launch view. It therefore survives navigation until the user edits or
 	 * retries the launch. */
 	launchFailure: string | null;
+	/** A durable snapshot repair failed. Keep the last good projection visible
+	 * and say that it may be stale until the user retries. */
+	reconcileFailure: { tournamentId: number; reason: string } | null;
+	launchDraft: TournamentLaunchDraft;
 	/** Transient pre-tournament warmup progress (no tournament id yet). Set by
 	 * `onPreparing`, cleared when the tournament starts. Drives the launch
 	 * screen's "Preparing bots…" line. `current` is the bot being warmed. */
@@ -178,6 +211,14 @@ interface TournamentStore {
 	back: () => void;
 	beginLaunch: () => void;
 	setLaunchFailure: (failure: string | null) => void;
+	setReconcileFailure: (tournamentId: number, reason: string) => void;
+	retryReconcile: (tournamentId: number) => Promise<void>;
+	updateLaunchDraft: (patch: Partial<TournamentLaunchDraft>) => void;
+	initializeLaunchDefaults: (
+		factory: GameFactoryConfig,
+		methodology: TournamentMethodologyDraft,
+	) => void;
+	reconcileLaunchBots: (botIds: string[]) => void;
 	dismissTerminalNotice: () => void;
 	// event handlers
 	onPreparing: (e: TournamentPreparingEvent) => void;
@@ -205,6 +246,17 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 	runtimePhase: "idle",
 	runtimeTournamentId: null,
 	launchFailure: null,
+	reconcileFailure: null,
+	launchDraft: {
+		selectedBotIds: [],
+		target: null,
+		name: "",
+		factory: null,
+		methodology: null,
+		seedInput: "",
+		advanced: false,
+		rosterInitialized: false,
+	},
 	preparing: null,
 	terminalNotice: null,
 	nav: { kind: "overview" },
@@ -276,6 +328,10 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 				state.viewing?.tournamentId === snapshot.tournament_id
 					? tournamentFromSnapshot(snapshot, "stored")
 					: state.viewing,
+			reconcileFailure:
+				state.reconcileFailure?.tournamentId === snapshot.tournament_id
+					? null
+					: state.reconcileFailure,
 		})),
 
 	navigate: (nav) => set({ nav }),
@@ -320,6 +376,77 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 
 	setLaunchFailure: (launchFailure) => set({ launchFailure }),
 
+	setReconcileFailure: (tournamentId, reason) =>
+		set({ reconcileFailure: { tournamentId, reason } }),
+
+	retryReconcile: async (tournamentId) => {
+		try {
+			const result = await commands.getTournamentSnapshot(tournamentId);
+			if (result.status === "ok") {
+				get().reconcileSnapshot(result.data);
+				return;
+			}
+			set({ reconcileFailure: { tournamentId, reason: result.error } });
+		} catch (cause) {
+			set({
+				reconcileFailure: { tournamentId, reason: String(cause) },
+			});
+		}
+	},
+
+	updateLaunchDraft: (patch) =>
+		set((state) => ({
+			launchDraft: { ...state.launchDraft, ...patch },
+		})),
+
+	initializeLaunchDefaults: (factory, methodology) =>
+		set((state) =>
+			state.launchDraft.factory !== null &&
+			state.launchDraft.methodology !== null
+				? {}
+				: {
+						launchDraft: {
+							...state.launchDraft,
+							factory,
+							methodology,
+						},
+					},
+		),
+
+	reconcileLaunchBots: (botIds) =>
+		set((state) => {
+			const available = new Set(botIds);
+			const draft = state.launchDraft;
+			if (!draft.rosterInitialized) {
+				if (botIds.length === 0) return {};
+				return {
+					launchDraft: {
+						...draft,
+						selectedBotIds: [...botIds],
+						rosterInitialized: true,
+					},
+				};
+			}
+			const selectedBotIds = draft.selectedBotIds.filter((id) =>
+				available.has(id),
+			);
+			const target =
+				draft.target !== null &&
+				available.has(draft.target) &&
+				selectedBotIds.includes(draft.target)
+					? draft.target
+					: null;
+			if (
+				selectedBotIds.length === draft.selectedBotIds.length &&
+				target === draft.target
+			) {
+				return {};
+			}
+			return {
+				launchDraft: { ...draft, selectedBotIds, target },
+			};
+		}),
+
 	dismissTerminalNotice: () => set({ terminalNotice: null }),
 
 	onPreparing: (e) =>
@@ -349,14 +476,37 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 
 	requestStop: async () => {
 		if (get().stopping) return;
-		get().onStopping({ tournament_id: get().live?.tournamentId ?? null });
-		const result = await commands.stopTournament();
+		const tournamentId = get().live?.tournamentId ?? null;
+		get().onStopping({ tournament_id: tournamentId });
+		let result: Awaited<ReturnType<typeof commands.stopTournament>>;
+		try {
+			result = await commands.stopTournament();
+		} catch (cause) {
+			set({ stopping: false });
+			if (tournamentId !== null) {
+				set({
+					reconcileFailure: {
+						tournamentId,
+						reason: `Stop request failed: ${String(cause)}`,
+					},
+				});
+			}
+			return;
+		}
 		if (result.status === "ok") {
 			get().onRuntimeStatus(result.data);
 		} else {
 			const status = await commands.tournamentStatus();
 			if (status.status === "ok") get().onRuntimeStatus(status.data);
 			else set({ stopping: false });
+			if (tournamentId !== null) {
+				set({
+					reconcileFailure: {
+						tournamentId,
+						reason: `Stop request failed: ${result.error}`,
+					},
+				});
+			}
 		}
 	},
 
@@ -420,7 +570,9 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 				terminalMatchIds: {},
 				startedAt,
 				endedAt: null,
+				lastProgressAt: null,
 				createdAt: null,
+				inspectionWarning: null,
 			},
 		});
 	},
@@ -453,6 +605,10 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 				? {
 						live: {
 							...s.live,
+							lastProgressAt:
+								e.progress.terminal_slots > s.live.done
+									? Date.now()
+									: s.live.lastProgressAt,
 							done: e.progress.terminal_slots,
 							total: e.progress.planned_slots,
 							success: e.progress.successful_games,
@@ -652,7 +808,7 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 						terminalNotice: {
 							tournamentId,
 							status: "finished",
-							reason: null,
+							reason: event.terminal.reason,
 						},
 						starting: false,
 						stopping: false,
@@ -822,7 +978,9 @@ function tournamentFromSnapshot(
 		terminalMatchIds,
 		startedAt,
 		endedAt,
+		lastProgressAt: timestampMs(snapshot.last_finished_at),
 		createdAt: snapshot.created_at,
+		inspectionWarning: snapshot.inspection_warning,
 	};
 }
 
@@ -837,6 +995,12 @@ function mergeTournamentSnapshot(
 		liveByMatch: current.liveByMatch,
 		startedAt: current.startedAt,
 		endedAt: current.endedAt ?? durable.endedAt,
+		lastProgressAt:
+			current.lastProgressAt === null
+				? durable.lastProgressAt
+				: durable.lastProgressAt === null
+					? current.lastProgressAt
+					: Math.max(current.lastProgressAt, durable.lastProgressAt),
 		status: current.status === "running" ? durable.status : current.status,
 		abortReason: current.abortReason ?? durable.abortReason,
 		runningMatches: snapshot.running
@@ -940,4 +1104,53 @@ export function failureBreakdown(
 	return [...byLabel.entries()]
 		.map(([label, count]) => ({ label, count }))
 		.sort((a, b) => b.count - a.count);
+}
+
+export type TournamentEta =
+	| { kind: "estimating" }
+	| { kind: "waiting" }
+	| { kind: "ready"; seconds: number };
+
+/** Estimate remaining wall time from observed terminal schedule-slot
+ * throughput. Successes and exhausted slots both count as completed work;
+ * retries affect the elapsed time naturally. The estimate waits for enough
+ * terminal evidence and stops counting down when no match is running and no
+ * terminal work has landed for a meaningful interval. */
+export function estimateTournamentEta(
+	live: TournamentLive,
+	now: number,
+): TournamentEta | null {
+	if (live.status !== "running") return null;
+	const remaining = Math.max(0, live.total - live.done);
+	if (remaining === 0) return null;
+	const elapsedSeconds = Math.max(0, (now - live.startedAt) / 1_000);
+	const parallel = Math.max(1, live.maxParallel ?? 1);
+	const minimumSamples = Math.min(
+		live.total,
+		Math.max(2, Math.min(6, parallel)),
+	);
+	const lastProgressAt = live.lastProgressAt ?? live.startedAt;
+	const quietSeconds = Math.max(0, (now - lastProgressAt) / 1_000);
+
+	if (live.done < minimumSamples || elapsedSeconds < 2) {
+		if (live.runningMatches === 0 && quietSeconds >= 20) {
+			return { kind: "waiting" };
+		}
+		return { kind: "estimating" };
+	}
+
+	const observationEnd = live.lastProgressAt ?? now;
+	const observedSeconds = Math.max(
+		1,
+		(observationEnd - live.startedAt) / 1_000,
+	);
+	const secondsPerTerminalSlot = observedSeconds / live.done;
+	const stallThreshold = Math.max(20, secondsPerTerminalSlot * 2.5);
+	if (live.runningMatches === 0 && quietSeconds >= stallThreshold) {
+		return { kind: "waiting" };
+	}
+	return {
+		kind: "ready",
+		seconds: Math.max(1, Math.ceil(remaining * secondsPerTerminalSlot)),
+	};
 }

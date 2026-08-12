@@ -11,6 +11,7 @@ import type {
 } from "../bindings/generated";
 import {
 	botFailures,
+	estimateTournamentEta,
 	failureBreakdown,
 	hasFinalTournamentVerdict,
 	useTournamentStore,
@@ -124,6 +125,7 @@ function snapshot(
 		games: [],
 		failures: [],
 		slots: [],
+		inspection_warning: null,
 		...overrides,
 	};
 }
@@ -269,6 +271,80 @@ describe("tournamentStore live-row guards", () => {
 });
 
 describe("tournamentStore launch ↔ live navigation", () => {
+	it("initializes the bot roster once, preserves empty, and sanitizes rescans", () => {
+		const store = useTournamentStore.getState();
+		store.reconcileLaunchBots(["a", "b"]);
+		expect(useTournamentStore.getState().launchDraft).toMatchObject({
+			selectedBotIds: ["a", "b"],
+			rosterInitialized: true,
+		});
+
+		store.updateLaunchDraft({ selectedBotIds: [], target: null });
+		store.reconcileLaunchBots(["a", "b"]);
+		expect(useTournamentStore.getState().launchDraft.selectedBotIds).toEqual(
+			[],
+		);
+
+		store.updateLaunchDraft({ selectedBotIds: ["a"], target: "a" });
+		store.reconcileLaunchBots(["b"]);
+		expect(useTournamentStore.getState().launchDraft).toMatchObject({
+			selectedBotIds: [],
+			target: null,
+		});
+	});
+
+	it("keeps edited launch conditions when the launch surface remounts", () => {
+		const store = useTournamentStore.getState();
+		const recipe = provenance();
+		store.initializeLaunchDefaults(recipe.factory, {
+			mazes_per_matchup: 2,
+			move_timeout_ms: 200,
+			preprocessing_timeout_ms: 2_000,
+			max_parallel: 3,
+		});
+		store.updateLaunchDraft({
+			name: "after-mud-fix",
+			methodology: {
+				mazes_per_matchup: 5,
+				move_timeout_ms: 450,
+				preprocessing_timeout_ms: 2_000,
+				max_parallel: 2,
+			},
+		});
+		store.initializeLaunchDefaults(recipe.factory, {
+			mazes_per_matchup: 2,
+			move_timeout_ms: 200,
+			preprocessing_timeout_ms: 2_000,
+			max_parallel: 3,
+		});
+
+		expect(useTournamentStore.getState().launchDraft).toMatchObject({
+			name: "after-mud-fix",
+			methodology: { mazes_per_matchup: 5, move_timeout_ms: 450 },
+		});
+	});
+
+	it("estimates from observed terminal-slot throughput and admits a stall", () => {
+		useTournamentStore.getState().onStarted(started({ total_games: 12 }), 0);
+		const live = useTournamentStore.getState().live;
+		expect(live).not.toBeNull();
+		if (!live) return;
+		const observed = {
+			...live,
+			done: 4,
+			startedAt: 0,
+			lastProgressAt: 40_000,
+			runningMatches: 2,
+		};
+		expect(estimateTournamentEta(observed, 40_000)).toEqual({
+			kind: "ready",
+			seconds: 80,
+		});
+		expect(
+			estimateTournamentEta({ ...observed, runningMatches: 0 }, 100_000),
+		).toEqual({ kind: "waiting" });
+	});
+
 	it("onStarted shows the live screen; showLaunch / showLive toggle it", () => {
 		const s = useTournamentStore.getState();
 		s.onStarted(started(), 0);
