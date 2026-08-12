@@ -9,9 +9,11 @@ import { useGameReplay } from "./useGameReplay";
 export default function GameView({
 	tournamentId,
 	matchId,
+	players,
 }: {
 	tournamentId: number;
 	matchId: number;
+	players: string[];
 }) {
 	const replay = useGameReplay(tournamentId, matchId);
 
@@ -57,7 +59,8 @@ export default function GameView({
 	return (
 		<Box mt="sm">
 			<Title order={4} mb="md">
-				{shortId(replay.player1_id)} vs {shortId(replay.player2_id)}
+				{shortId(replay.player1_id, players)} vs{" "}
+				{shortId(replay.player2_id, players)}
 			</Title>
 			<Group align="flex-start" gap="xl">
 				<Box w={320} h={300}>
@@ -69,7 +72,7 @@ export default function GameView({
 				</Box>
 				<Stack gap="sm" pt={4}>
 					<Text fw={700} size="lg" c={verdictColor}>
-						{winner === null ? "draw" : `${shortId(winner)} wins`}
+						{winner === null ? "draw" : `${shortId(winner, players)} wins`}
 					</Text>
 					<Text size="xl" ff="monospace">
 						{replay.player1_score} – {replay.player2_score}

@@ -43,6 +43,8 @@ async fn shutdown_returns_promptly_with_pending_matchups() {
         }
         .to_json(),
         methodology: None,
+        interpretation: None,
+        participant_launch_specs: Vec::new(),
         game_config: small_game_config(),
         tournament_seed: 0xC0FFEE,
     };

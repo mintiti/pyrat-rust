@@ -198,6 +198,8 @@ pub struct TournamentStartedEvent {
 pub struct StandingsUpdatedEvent {
     pub tournament_id: i64,
     pub progress: TournamentProgress,
+    pub rating_readiness: RatingReadiness,
+    pub rating_reason: Option<String>,
     pub standings: Vec<StandingRow>,
 }
 

@@ -61,6 +61,21 @@ async fn round_robin_two_mockbots_finishes_with_durable_rows() {
         attempts[0].outcome,
         AttemptOutcome::Success { .. }
     ));
+    let participants = store
+        .lock()
+        .get_tournament_players(created.tournament_id)
+        .unwrap();
+    assert_eq!(participants.len(), 2);
+    for participant in participants {
+        let launch = participant
+            .launch_spec
+            .expect("session bootstrap freezes a participant launch recipe");
+        assert_eq!(launch.player_id, participant.player_id);
+        assert_eq!(launch.agent_id, participant.player_id);
+        assert_eq!(launch.display_name, participant.player_id);
+        assert_eq!(launch.command, None);
+        assert_eq!(launch.working_dir, None);
+    }
 }
 
 #[tokio::test]

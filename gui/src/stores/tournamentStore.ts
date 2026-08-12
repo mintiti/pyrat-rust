@@ -14,6 +14,7 @@ import type {
 	TournamentMatchFinishedEvent,
 	TournamentMatchStartedEvent,
 	TournamentPreparingEvent,
+	TournamentProvenance,
 	TournamentRuntimeStatus,
 	TournamentSnapshot,
 	TournamentStartedEvent,
@@ -22,9 +23,6 @@ import type {
 import { pairKey } from "../components/tournament/theme";
 
 // ── Types ────────────────────────────────────────────────────────
-
-/** The GUI runner marks non-anchor ratings pending below this sample count. */
-export const MIN_GAMES_FOR_RATING = 4;
 
 export type TournamentStatus = "running" | "finished" | "aborted" | "partial";
 
@@ -92,7 +90,10 @@ export interface TournamentLive {
 	name: string | null;
 	format: string;
 	target: string | null;
-	anchorId: string;
+	anchorId: string | null;
+	/** Durable execution and interpretation recipe. Null only before the first
+	 * post-start reconciliation, or for a legacy row that never recorded it. */
+	provenance: TournamentProvenance | null;
 	planSummary: string;
 	players: string[];
 	status: TournamentStatus;
@@ -228,6 +229,7 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 			set({
 				screen: "live",
 				viewing: null,
+				live: mergeTournamentSnapshot(live, snapshot),
 				nav: { kind: "overview" },
 				terminalNotice: null,
 			});
@@ -393,6 +395,7 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 				format: e.format,
 				target: e.target,
 				anchorId: e.anchor_id,
+				provenance: null,
 				planSummary: e.plan_summary,
 				players: e.players.map((p) => p.player_id),
 				status: "running",
@@ -429,6 +432,22 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 	onStandings: (e) => {
 		const live = get().live;
 		if (!live || live.tournamentId !== e.tournament_id) return;
+		const standings =
+			live.provenance === null
+				? e.standings.map((row) => ({
+						...row,
+						elo: null,
+						elo_ci_low: null,
+						elo_ci_high: null,
+						pending: true,
+					}))
+				: e.standings;
+		const ratingReadiness =
+			live.provenance === null ? "legacy_unknown" : e.rating_readiness;
+		const ratingReason =
+			live.provenance === null
+				? "waiting for durable rating interpretation"
+				: e.rating_reason;
 		set((s) =>
 			s.live
 				? {
@@ -440,7 +459,9 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 							failure: e.progress.failed_attempts,
 							exhausted: e.progress.exhausted_slots,
 							runningMatches: e.progress.running_matches,
-							standings: e.standings,
+							standings,
+							ratingReadiness,
+							ratingReason,
 						},
 					}
 				: {},
@@ -770,6 +791,7 @@ function tournamentFromSnapshot(
 		format: snapshot.format,
 		target: snapshot.target,
 		anchorId: snapshot.anchor_id,
+		provenance: snapshot.provenance ?? null,
 		planSummary: snapshot.plan_summary,
 		players: snapshot.players,
 		status: snapshot.running
@@ -788,7 +810,7 @@ function tournamentFromSnapshot(
 		total: snapshot.progress.planned_slots,
 		gamesPerMatchup: snapshot.games_per_matchup,
 		paired: snapshot.paired,
-		maxParallel: null,
+		maxParallel: snapshot.provenance?.methodology.max_parallel ?? null,
 		success: snapshot.progress.successful_games,
 		failure: snapshot.progress.failed_attempts,
 		exhausted: snapshot.progress.exhausted_slots,

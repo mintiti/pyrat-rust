@@ -20,7 +20,9 @@ use pyrat_eval::{
 };
 use pyrat_eval_store::{
     AttemptFailureReport, AttemptOutcome, AttemptRecord, EvalStore, SeatOrientation, TournamentId,
-    TournamentLifecycle, TournamentRecord, TournamentTerminalKind,
+    TournamentInstancePolicy, TournamentLifecycle, TournamentOptionAssignment,
+    TournamentParticipantFingerprint, TournamentParticipantLaunchSpec, TournamentRecord,
+    TournamentTerminalKind,
 };
 use pyrat_host::probe::{preflight_bot_in_slot, PreflightConfig};
 use pyrat_host::wire::Player as PlayerSlot;
@@ -43,8 +45,9 @@ use crate::tournament_events::{
     TournamentStoppingEvent, TournamentTerminalState,
 };
 use crate::tournament_runner::{
-    build_standings, cancellation_outcome, failed_outcome, ordered_player_ids,
-    persist_outcome_once, run_tournament, RunnerFormat, TournamentRun, TournamentRunOutcome,
+    build_standings, build_unavailable_standings, cancellation_outcome, failed_outcome,
+    ordered_player_ids, persist_outcome_once, rating_readiness, run_tournament, RunnerFormat,
+    TournamentRun, TournamentRunOutcome,
 };
 
 // ---------------------------------------------------------------------------
@@ -56,8 +59,13 @@ use crate::tournament_runner::{
 #[derive(Serialize, Deserialize, Debug, Clone, Type)]
 pub struct BotPick {
     pub agent_id: String,
+    pub display_name: String,
     pub run_command: String,
     pub working_dir: String,
+    pub declared_version: Option<String>,
+    /// SHA-256 of the discovery-time `bot.toml`; identifies the launch
+    /// manifest only, not mutable files or a compiled executable.
+    pub manifest_sha256: Option<String>,
 }
 
 /// Tournament seeds round-trip through the frontend as a JS `number`, exact
@@ -302,6 +310,25 @@ fn factory_from_game_config(cfg: &GameConfig) -> Result<GameFactoryConfig, Strin
         cheese_count: f64::from(*count),
         cheese_symmetric: *symmetric,
     })
+}
+
+fn factory_from_record(record: &pyrat_eval_store::GameConfigRecord) -> GameFactoryConfig {
+    GameFactoryConfig {
+        width: f64::from(record.width),
+        height: f64::from(record.height),
+        max_turns: f64::from(record.max_turns),
+        wall_density: record.wall_density,
+        mud_density: record.mud_density,
+        mud_range: f64::from(record.mud_range),
+        connected: record.connected,
+        symmetric: record.symmetric,
+        player_start: match record.player_start {
+            pyrat_eval_store::PlayerStartRecord::Corners => PlayerStart::Corners,
+            pyrat_eval_store::PlayerStartRecord::Random => PlayerStart::Random,
+        },
+        cheese_count: f64::from(record.cheese_count),
+        cheese_symmetric: record.cheese_symmetric,
+    }
 }
 
 /// Launch parameters. The factory + methodology knobs are configured on the
@@ -606,7 +633,7 @@ pub struct StandingsSnapshot {
     pub tournament_id: i64,
     pub name: Option<String>,
     pub format: String,
-    pub anchor_id: String,
+    pub anchor_id: Option<String>,
     pub lifecycle: TournamentLifecycleStatus,
     pub terminal: Option<TournamentTerminalState>,
     pub rating_readiness: RatingReadiness,
@@ -703,6 +730,132 @@ pub struct StoredTournamentMethodology {
     pub max_parallel: u32,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum StoredInstancePolicy {
+    IndependentPerSlot,
+    SharedMazePerSeatPair,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct StoredTournamentInterpretation {
+    pub methodology_version: u32,
+    pub anchor_id: String,
+    pub anchor_elo: f64,
+    pub estimator: String,
+    pub estimator_version: u32,
+    pub draw_weight: f64,
+    pub prior_games: f64,
+    pub max_iterations: u32,
+    pub tolerance: f64,
+    pub min_games_per_player: u32,
+    pub uncertainty: String,
+    pub instance_policy: StoredInstancePolicy,
+}
+
+impl From<pyrat_eval_store::TournamentInterpretation> for StoredTournamentInterpretation {
+    fn from(value: pyrat_eval_store::TournamentInterpretation) -> Self {
+        Self {
+            methodology_version: value.methodology_version,
+            anchor_id: value.anchor_id,
+            anchor_elo: value.anchor_elo,
+            estimator: value.estimator,
+            estimator_version: value.estimator_version,
+            draw_weight: value.draw_weight,
+            prior_games: value.prior_games,
+            max_iterations: value.max_iterations,
+            tolerance: value.tolerance,
+            min_games_per_player: value.min_games_per_player,
+            uncertainty: value.uncertainty,
+            instance_policy: match value.instance_policy {
+                TournamentInstancePolicy::IndependentPerSlot => {
+                    StoredInstancePolicy::IndependentPerSlot
+                },
+                TournamentInstancePolicy::SharedMazePerSeatPair => {
+                    StoredInstancePolicy::SharedMazePerSeatPair
+                },
+            },
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum StoredOptionAssignment {
+    Defaults,
+    Explicit { values: Vec<(String, String)> },
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct StoredParticipantFingerprint {
+    pub kind: String,
+    pub value: String,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct StoredParticipantLaunchSpec {
+    pub player_id: String,
+    pub agent_id: String,
+    pub display_name: String,
+    pub command: Option<String>,
+    pub working_dir: Option<String>,
+    pub options: StoredOptionAssignment,
+    pub declared_version: Option<String>,
+    pub fingerprint: Option<StoredParticipantFingerprint>,
+}
+
+impl From<TournamentParticipantLaunchSpec> for StoredParticipantLaunchSpec {
+    fn from(value: TournamentParticipantLaunchSpec) -> Self {
+        Self {
+            player_id: value.player_id,
+            agent_id: value.agent_id,
+            display_name: value.display_name,
+            command: value.command,
+            working_dir: value.working_dir,
+            options: match value.options {
+                TournamentOptionAssignment::Defaults => StoredOptionAssignment::Defaults,
+                TournamentOptionAssignment::Explicit { values } => {
+                    StoredOptionAssignment::Explicit { values }
+                },
+            },
+            declared_version: value.declared_version,
+            fingerprint: value
+                .fingerprint
+                .map(|fingerprint| StoredParticipantFingerprint {
+                    kind: fingerprint.kind,
+                    value: fingerprint.value,
+                }),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum StoredSeatPolicy {
+    Legacy,
+    Paired,
+}
+
+/// Complete reproducibility recipe for current rows. `None` on a snapshot
+/// means the row predates durable provenance; readers must not fill it from
+/// current defaults.
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct TournamentProvenance {
+    /// Decimal string so CLI-created i64-range seeds remain exact across the
+    /// JavaScript boundary (which cannot represent every u64 as a number).
+    pub tournament_seed: String,
+    pub game_config_id: String,
+    pub factory: GameFactoryConfig,
+    pub games_per_matchup: u32,
+    pub mazes_per_matchup: Option<u32>,
+    pub max_failures_per_pair: u32,
+    pub seat_policy: StoredSeatPolicy,
+    pub methodology: StoredTournamentMethodology,
+    pub interpretation: StoredTournamentInterpretation,
+    pub participants: Vec<StoredParticipantLaunchSpec>,
+    pub mutable_files_warning: String,
+}
+
 impl From<TournamentMethodology> for StoredTournamentMethodology {
     fn from(value: TournamentMethodology) -> Self {
         Self {
@@ -729,7 +882,7 @@ pub struct TournamentSnapshot {
     pub name: Option<String>,
     pub format: String,
     pub target: Option<String>,
-    pub anchor_id: String,
+    pub anchor_id: Option<String>,
     pub running: bool,
     pub lifecycle: TournamentLifecycleStatus,
     pub terminal: Option<TournamentTerminalState>,
@@ -741,6 +894,10 @@ pub struct TournamentSnapshot {
     /// compatible; current rows always include it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub methodology: Option<StoredTournamentMethodology>,
+    /// Complete recipe for current rows. Absent on legacy rows rather than
+    /// synthesizing today's anchor, estimator, launch command, or defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<TournamentProvenance>,
     pub created_at: String,
     pub started_at: Option<String>,
     pub terminal_at: Option<String>,
@@ -1088,6 +1245,22 @@ async fn prepare_tournament(
         target_games_per_matchup,
         validated.move_timeout_ms,
     );
+    let elo_options = tournament_config::elo_options(&anchor_id);
+    let interpretation = elo_options.tournament_interpretation(
+        crate::tournament_runner::MIN_GAMES_FOR_ESTIMATE,
+        TournamentInstancePolicy::SharedMazePerSeatPair,
+    );
+    let participant_launch_specs = canonical_players
+        .iter()
+        .map(|player| {
+            let bot = params
+                .bots
+                .iter()
+                .find(|bot| bot.agent_id == player.id)
+                .expect("canonical players are resolved from the validated bot picks");
+            gui_participant_launch_spec(bot)
+        })
+        .collect();
 
     let spec = TournamentSpec {
         name: params.name.clone(),
@@ -1107,6 +1280,8 @@ async fn prepare_tournament(
             network_grace_ms: tournament_config::NETWORK_GRACE_MS,
             max_parallel: validated.max_parallel,
         }),
+        interpretation: Some(interpretation),
+        participant_launch_specs,
         game_config: game_config.clone(),
         tournament_seed,
     };
@@ -1412,11 +1587,12 @@ pub async fn get_tournament_standings(
         .get_tournament(tid)
         .map_err(|e| format!("get tournament: {e}"))?
         .ok_or_else(|| format!("tournament {tournament_id} not found"))?;
-    let players: Vec<String> = g
+    let stored_participants = g
         .get_tournament_players(tid)
-        .map_err(|e| format!("tournament players: {e}"))?
-        .into_iter()
-        .map(|p| p.player_id)
+        .map_err(|e| format!("tournament players: {e}"))?;
+    let players: Vec<String> = stored_participants
+        .iter()
+        .map(|participant| participant.player_id.clone())
         .collect();
     let attempts = g
         .get_attempts(tid, None)
@@ -1428,25 +1604,18 @@ pub async fn get_tournament_standings(
         st.fold_attempt(a);
     }
 
-    // Reopen anchor: same derivation as launch. Gauntlet challenger is slot 0,
-    // so excluding it as the "target" reproduces the live anchor choice.
-    let target = (rec.format == "gauntlet")
-        .then(|| players.first().cloned())
-        .flatten();
-    // No derivable anchor means no non-target player exists — a degenerate /
-    // corrupt tournament shape. The live path errors at launch; surface the
-    // same here instead of falling back to a non-participant `greedy`, which
-    // `build_standings` would swallow as `AnchorNotFound` and blank every row
-    // with no diagnostic.
-    let anchor_id =
-        tournament_config::derive_anchor(&players, target.as_deref()).ok_or_else(|| {
-            format!(
-                "tournament {tournament_id} has no derivable Elo anchor \
-                 (need at least one non-target player); stored shape looks corrupt"
-            )
-        })?;
-    let elo_options = tournament_config::elo_options(&anchor_id);
-    let standings = build_standings(&st, &elo_options, &players, &anchor_id);
+    let mut rating = stored_rating_projection(&rec, &players)?;
+    let min_games = rec
+        .interpretation
+        .as_ref()
+        .map(|interpretation| interpretation.min_games_per_player);
+    refresh_running_rating_projection(&rec, &st, &players, min_games, &mut rating);
+    let standings = match (&rating.elo_options, &rating.anchor_id, min_games) {
+        (Some(options), Some(anchor), Some(min_games)) => {
+            build_standings(&st, options, &players, anchor, min_games)
+        },
+        _ => build_unavailable_standings(&st, &players),
+    };
 
     let target_games = rec.target_games_per_matchup.unwrap_or(0);
     let max_failures = stored_tournament_params(&rec)?.max_failures_per_pair;
@@ -1459,11 +1628,11 @@ pub async fn get_tournament_standings(
         tournament_id,
         name: rec.name,
         format: rec.format,
-        anchor_id,
+        anchor_id: rating.anchor_id,
         lifecycle: rec.lifecycle.into(),
         terminal,
-        rating_readiness: rec.rating_status.into(),
-        rating_reason: rec.rating_reason,
+        rating_readiness: rating.readiness,
+        rating_reason: rating.reason,
         progress,
         standings,
     })
@@ -1488,11 +1657,12 @@ pub async fn get_tournament_snapshot(
         .get_tournament(tid)
         .map_err(|e| format!("get tournament: {e}"))?
         .ok_or_else(|| format!("tournament {tournament_id} not found"))?;
-    let players: Vec<String> = g
+    let stored_participants = g
         .get_tournament_players(tid)
-        .map_err(|e| format!("tournament players: {e}"))?
-        .into_iter()
-        .map(|p| p.player_id)
+        .map_err(|e| format!("tournament players: {e}"))?;
+    let players: Vec<String> = stored_participants
+        .iter()
+        .map(|participant| participant.player_id.clone())
         .collect();
     let attempts = g
         .get_attempts(tid, None)
@@ -1516,15 +1686,18 @@ pub async fn get_tournament_snapshot(
     let target = (rec.format == "gauntlet")
         .then(|| players.first().cloned())
         .flatten();
-    let anchor_id =
-        tournament_config::derive_anchor(&players, target.as_deref()).ok_or_else(|| {
-            format!(
-                "tournament {tournament_id} has no derivable Elo anchor \
-             (need at least one non-target player); stored shape looks corrupt"
-            )
-        })?;
-    let elo_options = tournament_config::elo_options(&anchor_id);
-    let standings = build_standings(&tournament_state, &elo_options, &players, &anchor_id);
+    let mut rating = stored_rating_projection(&rec, &players)?;
+    let min_games = rec
+        .interpretation
+        .as_ref()
+        .map(|interpretation| interpretation.min_games_per_player);
+    refresh_running_rating_projection(&rec, &tournament_state, &players, min_games, &mut rating);
+    let standings = match (&rating.elo_options, &rating.anchor_id, min_games) {
+        (Some(options), Some(anchor), Some(min_games)) => {
+            build_standings(&tournament_state, options, &players, anchor, min_games)
+        },
+        _ => build_unavailable_standings(&tournament_state, &players),
+    };
 
     let params = stored_tournament_params(&rec)?;
     let games_per_matchup = rec.target_games_per_matchup.unwrap_or(0);
@@ -1620,20 +1793,22 @@ pub async fn get_tournament_snapshot(
         rec.methodology,
     );
     let methodology = rec.methodology.map(StoredTournamentMethodology::from);
+    let provenance = stored_provenance(&rec, &stored_participants, &game_config, &params)?;
 
     Ok(TournamentSnapshot {
         tournament_id,
         name: rec.name,
         format: rec.format,
         target,
-        anchor_id,
+        anchor_id: rating.anchor_id,
         running,
         lifecycle: rec.lifecycle.into(),
         terminal,
-        rating_readiness: rec.rating_status.into(),
-        rating_reason: rec.rating_reason,
+        rating_readiness: rating.readiness,
+        rating_reason: rating.reason,
         paired: matches!(params.seat_policy, SeatPolicy::Paired),
         methodology,
+        provenance,
         created_at: rec.created_at,
         started_at: rec.started_at,
         terminal_at: rec.terminal_at,
@@ -1898,6 +2073,25 @@ fn resolve_players(bots: &[BotPick]) -> Vec<ResolvedPlayer> {
         .collect()
 }
 
+fn gui_participant_launch_spec(bot: &BotPick) -> TournamentParticipantLaunchSpec {
+    TournamentParticipantLaunchSpec {
+        player_id: bot.agent_id.clone(),
+        agent_id: bot.agent_id.clone(),
+        display_name: bot.display_name.clone(),
+        command: Some(bot.run_command.clone()),
+        working_dir: Some(bot.working_dir.clone()),
+        options: TournamentOptionAssignment::Defaults,
+        declared_version: bot.declared_version.clone(),
+        fingerprint: bot
+            .manifest_sha256
+            .as_ref()
+            .map(|value| TournamentParticipantFingerprint {
+                kind: "bot_manifest_sha256".into(),
+                value: value.clone(),
+            }),
+    }
+}
+
 /// "my-bot vs 5 (gauntlet) · 11×9 · 16 games/matchup · 200 ms/move" — the
 /// provenance string, derived from the *configured* conditions (not pinned
 /// constants), so it can never drift from what actually runs. Target namespace
@@ -1942,6 +2136,160 @@ fn stored_plan_summary(
         ),
         None => format!("{base} · timing/concurrency not recorded"),
     }
+}
+
+#[derive(Debug)]
+struct StoredRatingProjection {
+    anchor_id: Option<String>,
+    elo_options: Option<pyrat_eval_store::EloOptions>,
+    readiness: RatingReadiness,
+    reason: Option<String>,
+}
+
+fn stored_rating_projection(
+    rec: &TournamentRecord,
+    players: &[String],
+) -> Result<StoredRatingProjection, String> {
+    let Some(interpretation) = rec.interpretation.as_ref() else {
+        return Ok(StoredRatingProjection {
+            anchor_id: None,
+            elo_options: None,
+            readiness: RatingReadiness::LegacyUnknown,
+            reason: Some("rating interpretation was not recorded for this tournament".into()),
+        });
+    };
+    if !players.contains(&interpretation.anchor_id) {
+        return Err(format!(
+            "tournament {} saved Elo anchor {:?}, which is not a participant",
+            rec.id.0, interpretation.anchor_id
+        ));
+    }
+    let supported = interpretation.methodology_version
+        == pyrat_eval_store::TOURNAMENT_METHODOLOGY_VERSION
+        && interpretation.estimator == pyrat_eval_store::ELO_ESTIMATOR_ID
+        && interpretation.estimator_version == pyrat_eval_store::ELO_ESTIMATOR_VERSION
+        && interpretation.uncertainty == pyrat_eval_store::ANCHOR_RELATIVE_95_INTERVAL;
+    if !supported {
+        return Ok(StoredRatingProjection {
+            anchor_id: Some(interpretation.anchor_id.clone()),
+            elo_options: None,
+            readiness: RatingReadiness::EstimatorFailed,
+            reason: Some(format!(
+                "unsupported saved tournament methodology v{} / rating interpretation {} v{} ({})",
+                interpretation.methodology_version,
+                interpretation.estimator,
+                interpretation.estimator_version,
+                interpretation.uncertainty
+            )),
+        });
+    }
+    let valid_options = interpretation.anchor_elo.is_finite()
+        && interpretation.draw_weight.is_finite()
+        && (0.0..=1.0).contains(&interpretation.draw_weight)
+        && interpretation.prior_games.is_finite()
+        && interpretation.prior_games >= 0.0
+        && interpretation.max_iterations > 0
+        && interpretation.tolerance.is_finite()
+        && interpretation.tolerance > 0.0;
+    if !valid_options {
+        return Ok(StoredRatingProjection {
+            anchor_id: Some(interpretation.anchor_id.clone()),
+            elo_options: None,
+            readiness: RatingReadiness::EstimatorFailed,
+            reason: Some("saved rating interpretation contains invalid solver options".into()),
+        });
+    }
+    let options = pyrat_eval_store::EloOptions::new(interpretation.anchor_id.clone())
+        .anchor_elo(interpretation.anchor_elo)
+        .draw_weight(interpretation.draw_weight)
+        .prior_games(interpretation.prior_games)
+        .max_iterations(interpretation.max_iterations)
+        .tolerance(interpretation.tolerance);
+    Ok(StoredRatingProjection {
+        anchor_id: Some(interpretation.anchor_id.clone()),
+        elo_options: Some(options),
+        readiness: rec.rating_status.into(),
+        reason: rec.rating_reason.clone(),
+    })
+}
+
+fn refresh_running_rating_projection(
+    rec: &TournamentRecord,
+    state: &TournamentState,
+    players: &[String],
+    min_games_per_player: Option<u32>,
+    projection: &mut StoredRatingProjection,
+) {
+    if !matches!(
+        rec.lifecycle,
+        TournamentLifecycle::Preparing | TournamentLifecycle::Running
+    ) {
+        return;
+    }
+    let (Some(options), Some(min_games_per_player)) =
+        (projection.elo_options.as_ref(), min_games_per_player)
+    else {
+        return;
+    };
+    let (status, reason) = rating_readiness(state, options, players, min_games_per_player);
+    projection.readiness = status.into();
+    projection.reason = reason;
+}
+
+fn stored_provenance(
+    rec: &TournamentRecord,
+    participants: &[pyrat_eval_store::TournamentParticipant],
+    game_config: &pyrat_eval_store::GameConfigRecord,
+    params: &TournamentParams,
+) -> Result<Option<TournamentProvenance>, String> {
+    let (methodology, interpretation) = match (rec.methodology, rec.interpretation.clone()) {
+        (Some(methodology), Some(interpretation)) => (methodology, interpretation),
+        (None, Some(_)) => {
+            return Err(format!(
+                "tournament {} records interpretation without execution methodology",
+                rec.id.0
+            ));
+        },
+        (_, None) => return Ok(None),
+    };
+    let launch_specs: Option<Vec<_>> = participants
+        .iter()
+        .map(|participant| participant.launch_spec.clone().map(Into::into))
+        .collect();
+    let Some(participants) = launch_specs else {
+        return Err(format!(
+            "tournament {} has an interpretation but incomplete participant launch provenance",
+            rec.id.0
+        ));
+    };
+    let games_per_matchup = rec.target_games_per_matchup.unwrap_or(0);
+    let seat_policy = match params.seat_policy {
+        SeatPolicy::Legacy => StoredSeatPolicy::Legacy,
+        SeatPolicy::Paired => StoredSeatPolicy::Paired,
+    };
+    let mazes_per_matchup = match params.seat_policy {
+        SeatPolicy::Legacy => None,
+        SeatPolicy::Paired if games_per_matchup.is_multiple_of(2) => Some(games_per_matchup / 2),
+        SeatPolicy::Paired => {
+            return Err(format!(
+                "tournament {} records paired seats but an odd games-per-matchup value {}",
+                rec.id.0, games_per_matchup
+            ));
+        },
+    };
+    Ok(Some(TournamentProvenance {
+        tournament_seed: rec.tournament_seed.to_string(),
+        game_config_id: rec.game_config_id.clone(),
+        factory: factory_from_record(game_config),
+        games_per_matchup,
+        mazes_per_matchup,
+        max_failures_per_pair: params.max_failures_per_pair,
+        seat_policy,
+        methodology: methodology.into(),
+        interpretation: interpretation.into(),
+        participants,
+        mutable_files_warning: "This records the launch recipe and manifest identity; mutable source files and built executables were not frozen.".into(),
+    }))
 }
 
 fn planned_slots(format: &str, players: usize, target: u32) -> Result<u32, String> {
@@ -2171,11 +2519,41 @@ mod tests {
         }
     }
 
+    fn record_with_interpretation(
+        interpretation: Option<pyrat_eval_store::TournamentInterpretation>,
+    ) -> TournamentRecord {
+        TournamentRecord {
+            id: TournamentId(77),
+            name: Some("saved truth".into()),
+            format: "round_robin".into(),
+            target_games_per_matchup: Some(12),
+            params_json: TournamentParams {
+                max_failures_per_pair: 3,
+                seat_policy: SeatPolicy::Paired,
+            }
+            .to_json(),
+            game_config_id: "cfg-saved".into(),
+            tournament_seed: 4242,
+            methodology: Some(recorded_methodology()),
+            interpretation,
+            lifecycle: TournamentLifecycle::Completed,
+            started_at: Some("2026-08-12 10:00:00".into()),
+            terminal_at: Some("2026-08-12 10:01:00".into()),
+            terminal: None,
+            rating_status: pyrat_eval_store::TournamentRatingStatus::Rateable,
+            rating_reason: None,
+            created_at: "2026-08-12 09:59:00".into(),
+        }
+    }
+
     fn pick(agent_id: &str, working_dir: &str) -> BotPick {
         BotPick {
             agent_id: agent_id.to_string(),
+            display_name: agent_id.to_string(),
             run_command: "cargo run".to_string(),
             working_dir: working_dir.to_string(),
+            declared_version: None,
+            manifest_sha256: None,
         }
     }
 
@@ -2492,6 +2870,167 @@ mod tests {
     }
 
     #[test]
+    fn stored_rating_projection_uses_the_saved_anchor_and_solver_options() {
+        let saved = pyrat_eval_store::EloOptions::new("team/anchor")
+            .anchor_elo(1_337.0)
+            .draw_weight(0.4)
+            .prior_games(7.0)
+            .max_iterations(321)
+            .tolerance(1e-9)
+            .tournament_interpretation(9, TournamentInstancePolicy::SharedMazePerSeatPair);
+        let record = record_with_interpretation(Some(saved));
+        let players = vec!["team/anchor".into(), "team/challenger".into()];
+
+        let projection = stored_rating_projection(&record, &players).unwrap();
+        let options = projection
+            .elo_options
+            .expect("saved estimator is supported");
+        assert_eq!(projection.anchor_id.as_deref(), Some("team/anchor"));
+        assert_eq!(options.anchor(), "team/anchor");
+        assert_eq!(options.anchor_elo_value(), 1_337.0);
+        assert_eq!(options.draw_weight_value(), 0.4);
+        assert_eq!(options.prior_games_value(), 7.0);
+        assert_eq!(options.max_iterations_value(), 321);
+        assert_eq!(options.tolerance_value(), 1e-9);
+        assert!(matches!(projection.readiness, RatingReadiness::Rateable));
+        assert_eq!(projection.reason, None);
+    }
+
+    #[test]
+    fn stored_rating_projection_rejects_a_missing_saved_anchor() {
+        let saved = tournament_config::elo_options("missing")
+            .tournament_interpretation(4, TournamentInstancePolicy::IndependentPerSlot);
+        let record = record_with_interpretation(Some(saved));
+        let error = stored_rating_projection(&record, &["alice".into(), "bob".into()])
+            .expect_err("a saved anchor outside the field is corrupt provenance");
+        assert!(error.contains("not a participant"));
+    }
+
+    #[test]
+    fn stored_rating_projection_refuses_an_unknown_methodology_version() {
+        let mut saved = tournament_config::elo_options("alice")
+            .tournament_interpretation(4, TournamentInstancePolicy::IndependentPerSlot);
+        saved.methodology_version += 1;
+        let record = record_with_interpretation(Some(saved));
+        let projection =
+            stored_rating_projection(&record, &["alice".into(), "bob".into()]).unwrap();
+        assert!(projection.elo_options.is_none());
+        assert!(matches!(
+            projection.readiness,
+            RatingReadiness::EstimatorFailed
+        ));
+        assert!(projection
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("unsupported saved tournament methodology")));
+    }
+
+    #[test]
+    fn running_snapshot_refreshes_disconnected_readiness_from_saved_options() {
+        let interpretation = tournament_config::elo_options("alice")
+            .tournament_interpretation(4, TournamentInstancePolicy::IndependentPerSlot);
+        let mut record = record_with_interpretation(Some(interpretation));
+        record.lifecycle = TournamentLifecycle::Running;
+        let players = vec!["alice".into(), "bob".into(), "carol".into(), "dave".into()];
+        let mut state = TournamentState::empty(record.id);
+        for repetition in 0..4 {
+            for (offset, a, b) in [(0, "alice", "bob"), (10, "carol", "dave")] {
+                state.history.insert(
+                    MatchupKey::from_pair(a, b, "cfg-saved", repetition + offset),
+                    vec![pyrat_eval::MatchupAttempt {
+                        attempt_index: 0,
+                        outcome: pyrat_eval::MatchupOutcome::Success {
+                            player1_score: 5.0,
+                            player2_score: 3.0,
+                        },
+                    }],
+                );
+            }
+        }
+        let mut projection = stored_rating_projection(&record, &players).unwrap();
+
+        refresh_running_rating_projection(&record, &state, &players, Some(4), &mut projection);
+
+        assert!(matches!(
+            projection.readiness,
+            RatingReadiness::DisconnectedGraph
+        ));
+        assert!(projection
+            .reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("do not connect every participant")));
+    }
+
+    #[test]
+    fn stored_provenance_preserves_the_full_tournament_recipe() {
+        let interpretation = tournament_config::elo_options("alice")
+            .tournament_interpretation(6, TournamentInstancePolicy::SharedMazePerSeatPair);
+        let mut record = record_with_interpretation(Some(interpretation));
+        record.tournament_seed = i64::MAX as u64;
+        let launch_spec = TournamentParticipantLaunchSpec {
+            player_id: "alice".into(),
+            agent_id: "team/alice".into(),
+            display_name: "Alice candidate".into(),
+            command: Some("uv run python bot.py".into()),
+            working_dir: Some("/bots/alice".into()),
+            options: TournamentOptionAssignment::Explicit {
+                values: vec![("depth".into(), "5".into())],
+            },
+            declared_version: Some("2026.08".into()),
+            fingerprint: Some(TournamentParticipantFingerprint {
+                kind: "bot_manifest_sha256".into(),
+                value: "abc123".into(),
+            }),
+        };
+        let participants = vec![pyrat_eval_store::TournamentParticipant {
+            tournament_id: record.id,
+            player_id: "alice".into(),
+            slot: 0,
+            launch_spec: Some(launch_spec),
+        }];
+        let config = pyrat_eval_store::GameConfigRecord {
+            width: 13,
+            height: 11,
+            max_turns: 444,
+            wall_density: 0.63,
+            mud_density: 0.17,
+            mud_range: 7,
+            connected: true,
+            symmetric: false,
+            cheese_count: 21,
+            cheese_symmetric: false,
+            player_start: pyrat_eval_store::PlayerStartRecord::Random,
+        };
+        let params = stored_tournament_params(&record).unwrap();
+
+        let recipe = stored_provenance(&record, &participants, &config, &params)
+            .unwrap()
+            .expect("current row has full provenance");
+        assert_eq!(recipe.tournament_seed, i64::MAX.to_string());
+        assert_eq!(recipe.game_config_id, "cfg-saved");
+        assert_eq!(recipe.factory.width, 13.0);
+        assert_eq!(recipe.factory.height, 11.0);
+        assert!(matches!(recipe.factory.player_start, PlayerStart::Random));
+        assert_eq!(recipe.games_per_matchup, 12);
+        assert_eq!(recipe.mazes_per_matchup, Some(6));
+        assert_eq!(recipe.max_failures_per_pair, 3);
+        assert!(matches!(recipe.seat_policy, StoredSeatPolicy::Paired));
+        assert_eq!(recipe.interpretation.min_games_per_player, 6);
+        assert_eq!(recipe.participants[0].display_name, "Alice candidate");
+        assert_eq!(
+            recipe.participants[0].command.as_deref(),
+            Some("uv run python bot.py")
+        );
+        assert_eq!(
+            recipe.participants[0]
+                .fingerprint
+                .as_ref()
+                .map(|fingerprint| fingerprint.value.as_str()),
+            Some("abc123")
+        );
+    }
+
+    #[test]
     fn stored_plan_summary_distinguishes_recorded_from_legacy_unknown() {
         let recorded =
             stored_plan_summary("all pairs of 3", 11, 9, 16, Some(recorded_methodology()));
@@ -2630,6 +3169,7 @@ mod tests {
             game_config_id: "cfg".into(),
             tournament_seed: 42,
             methodology: None,
+            interpretation: None,
             lifecycle: TournamentLifecycle::Completed,
             started_at: Some("2026-08-12 10:00:00".into()),
             terminal_at: Some("2026-08-12 10:01:00".into()),

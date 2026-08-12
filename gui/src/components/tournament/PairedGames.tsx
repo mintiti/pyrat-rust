@@ -45,6 +45,7 @@ function pairVerdict(
 	exhaustedFailures: MatchFailureRecord[],
 	perspectiveId: string,
 	paired: boolean,
+	players: string[] = [],
 ): string {
 	const expectedLegs = paired ? 2 : 1;
 	const exhaustedLegs = new Set(
@@ -73,7 +74,7 @@ function pairVerdict(
 	if (!opponent) return "pair complete";
 	const score = `${pointsLabel(mine)}–${pointsLabel(theirs)}`;
 	if (mine === theirs) return `pair drawn ${score}`;
-	return `${shortId(mine > theirs ? perspectiveId : opponent)} won pair ${score}`;
+	return `${shortId(mine > theirs ? perspectiveId : opponent, players)} won pair ${score}`;
 }
 
 export default function PairedGames({
@@ -82,6 +83,7 @@ export default function PairedGames({
 	failures,
 	perspectiveId,
 	paired,
+	players = [],
 	onOpenGame,
 }: {
 	tournamentId: number;
@@ -89,6 +91,7 @@ export default function PairedGames({
 	failures: MatchFailureRecord[];
 	perspectiveId: string;
 	paired: boolean;
+	players?: string[];
 	onOpenGame: (matchId: number) => void;
 }) {
 	const pairsByIndex = new Map(
@@ -129,7 +132,13 @@ export default function PairedGames({
 									: `Game ${pair.pairIndex + 1}`}
 							</Text>
 							<Text size="xs" ff="monospace">
-								{pairVerdict(pair, exhaustedFailures, perspectiveId, paired)}
+								{pairVerdict(
+									pair,
+									exhaustedFailures,
+									perspectiveId,
+									paired,
+									players,
+								)}
 							</Text>
 						</Group>
 						<SimpleGrid cols={paired ? { base: 1, xs: 2 } : 1} spacing="xs">
@@ -138,11 +147,12 @@ export default function PairedGames({
 								return (
 									<div key={game.gameKey}>
 										<Text size="xs" c="dimmed" mb={4}>
-											{shortId(game.ratId)} as Rat ·{" "}
+											{shortId(game.ratId, players)} as Rat ·{" "}
 											{shortId(
 												game.ratId === game.player1Id
 													? game.player2Id
 													: game.player1Id,
+												players,
 											)}{" "}
 											as Python
 										</Text>
@@ -166,7 +176,7 @@ export default function PairedGames({
 									style={{ borderColor: T.loss }}
 								>
 									<Text size="xs" c="dimmed" mb={4}>
-										{shortId(failure.ratId)} as Rat · exhausted leg
+										{shortId(failure.ratId, players)} as Rat · exhausted leg
 									</Text>
 									<Text size="xs">{failure.reason}</Text>
 								</Paper>

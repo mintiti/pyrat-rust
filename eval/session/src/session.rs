@@ -21,8 +21,9 @@ use parking_lot::Mutex;
 use pyrat::game::builder::GameConfig;
 use pyrat_eval_store::{
     AddTournamentPlayerError, CreateTournamentError, EloOptions, EvalError, EvalStore,
-    GameConfigRecord, NewTournament, RegisterPlayerError, TournamentId, TournamentMethodology,
-    TournamentParticipant, TournamentRecord,
+    GameConfigRecord, NewTournament, RegisterPlayerError, TournamentId, TournamentInterpretation,
+    TournamentMethodology, TournamentOptionAssignment, TournamentParticipant,
+    TournamentParticipantLaunchSpec, TournamentRecord,
 };
 use pyrat_orchestrator::{
     CompositeSink, DriverEvent, FailureReason, MatchSink, Orchestrator, OrchestratorConfig,
@@ -66,6 +67,13 @@ pub struct TournamentSpec {
     /// is only for compatibility callers that genuinely do not know them;
     /// current CLI and GUI creation paths always supply the resolved values.
     pub methodology: Option<TournamentMethodology>,
+    /// Exact rating and instance interpretation. `None` is reserved for
+    /// legacy/compatibility callers that genuinely cannot state it.
+    pub interpretation: Option<TournamentInterpretation>,
+    /// Tournament-scoped participant launch recipes. Missing entries fall
+    /// back to an exact command/working-dir projection from `ResolvedPlayer`
+    /// with the player id as display name.
+    pub participant_launch_specs: Vec<TournamentParticipantLaunchSpec>,
     /// Runtime config — caller hands one source of truth. The bootstrap
     /// derives the `GameConfigRecord`, ensures the row, and returns the id.
     pub game_config: GameConfig,
@@ -725,6 +733,13 @@ async fn bootstrap_new_tournament(
     let params_json = spec.params_json.clone();
     let tournament_seed = spec.tournament_seed;
     let methodology = spec.methodology;
+    let interpretation = spec.interpretation.clone();
+    let launch_specs: HashMap<_, _> = spec
+        .participant_launch_specs
+        .iter()
+        .cloned()
+        .map(|launch_spec| (launch_spec.player_id.clone(), launch_spec))
+        .collect();
     let players_to_register: Vec<_> = players
         .iter()
         .map(|p| pyrat_eval_store::NewPlayer {
@@ -736,6 +751,7 @@ async fn bootstrap_new_tournament(
             metadata_json: None,
         })
         .collect();
+    let resolved_players = players.to_vec();
 
     tokio::task::spawn_blocking(move || {
         let mut store = store.lock();
@@ -756,10 +772,19 @@ async fn bootstrap_new_tournament(
                 game_config_id: game_config_id.clone(),
                 tournament_seed,
                 methodology,
+                interpretation,
             };
             let tid = tx.create_tournament(&new_tournament)?;
             for (slot, p) in players_to_register.iter().enumerate() {
-                tx.add_tournament_player(tid, &p.id, slot as i64)?;
+                let launch_spec = launch_specs.get(&p.id).cloned().unwrap_or_else(|| {
+                    default_participant_launch_spec(
+                        resolved_players
+                            .iter()
+                            .find(|resolved| resolved.id == p.id)
+                            .expect("players_to_register and resolved players are built together"),
+                    )
+                });
+                tx.add_tournament_player_with_spec(tid, &p.id, slot as i64, &launch_spec)?;
             }
             Ok(CreatedTournament {
                 tournament_id: tid,
@@ -936,6 +961,37 @@ fn player_agent_id(spec: &pyrat_orchestrator::PlayerSpec) -> Option<&str> {
         // variants so the row registers with `agent_id = NULL`; the
         // `register_player` NULL-fill path then applies on later updates.
         _ => None,
+    }
+}
+
+fn default_participant_launch_spec(player: &ResolvedPlayer) -> TournamentParticipantLaunchSpec {
+    let (agent_id, command, working_dir, display_name) = match &player.spec {
+        pyrat_orchestrator::PlayerSpec::Subprocess {
+            agent_id,
+            command,
+            working_dir,
+        } => (
+            agent_id.clone(),
+            Some(command.clone()),
+            working_dir
+                .as_ref()
+                .map(|path| path.to_string_lossy().into_owned()),
+            player.id.clone(),
+        ),
+        pyrat_orchestrator::PlayerSpec::Embedded { agent_id, name, .. } => {
+            (agent_id.clone(), None, None, name.clone())
+        },
+        _ => (player.id.clone(), None, None, player.id.clone()),
+    };
+    TournamentParticipantLaunchSpec {
+        player_id: player.id.clone(),
+        agent_id,
+        display_name,
+        command,
+        working_dir,
+        options: TournamentOptionAssignment::Defaults,
+        declared_version: None,
+        fingerprint: None,
     }
 }
 
@@ -1387,6 +1443,8 @@ mod tests {
             target_games_per_matchup: Some(10),
             params_json: "{}".into(),
             methodology: None,
+            interpretation: None,
+            participant_launch_specs: Vec::new(),
             game_config: game_config.clone(),
             tournament_seed: 0xC0FFEE,
         };

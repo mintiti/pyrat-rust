@@ -42,6 +42,8 @@ async fn tournament_row_not_orphaned_on_mid_bootstrap_failure() {
         target_games_per_matchup: Some(1),
         params_json: "{}".into(),
         methodology: None,
+        interpretation: None,
+        participant_launch_specs: Vec::new(),
         game_config: small_game_config(),
         tournament_seed: 0xC0FFEE,
     };

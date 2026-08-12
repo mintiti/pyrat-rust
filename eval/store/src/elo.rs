@@ -9,8 +9,18 @@ use std::collections::HashMap;
 use serde::Serialize;
 use statrs::distribution::{ContinuousCDF, StudentsT};
 
+use crate::{TournamentInstancePolicy, TournamentInterpretation};
+
 /// 400 * log10(e) — converts strength units to Elo points.
 const ELO_PER_STRENGTH: f64 = 173.717_792_761_245_88;
+
+/// Stable identifiers persisted with tournament interpretation. Changing the
+/// estimator or the meaning of the displayed interval requires a version
+/// bump rather than silently reinterpreting historical rows.
+pub const ELO_ESTIMATOR_ID: &str = "bradley_terry_newton";
+pub const ELO_ESTIMATOR_VERSION: u32 = 1;
+pub const TOURNAMENT_METHODOLOGY_VERSION: u32 = 1;
+pub const ANCHOR_RELATIVE_95_INTERVAL: &str = "player_minus_anchor_95_percent_normal";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -216,6 +226,54 @@ impl EloOptions {
     pub fn tolerance(mut self, v: f64) -> Self {
         self.tolerance = v;
         self
+    }
+
+    pub fn anchor(&self) -> &str {
+        &self.anchor
+    }
+
+    pub fn anchor_elo_value(&self) -> f64 {
+        self.anchor_elo
+    }
+
+    pub fn draw_weight_value(&self) -> f64 {
+        self.draw_weight
+    }
+
+    pub fn prior_games_value(&self) -> f64 {
+        self.prior_games
+    }
+
+    pub fn max_iterations_value(&self) -> u32 {
+        self.max_iterations
+    }
+
+    pub fn tolerance_value(&self) -> f64 {
+        self.tolerance
+    }
+
+    /// Freeze the exact interpretation used by this option set on a
+    /// tournament row. Callers supply the product readiness threshold and
+    /// planner instance policy because neither belongs to the estimator.
+    pub fn tournament_interpretation(
+        &self,
+        min_games_per_player: u32,
+        instance_policy: TournamentInstancePolicy,
+    ) -> TournamentInterpretation {
+        TournamentInterpretation {
+            methodology_version: TOURNAMENT_METHODOLOGY_VERSION,
+            anchor_id: self.anchor.clone(),
+            anchor_elo: self.anchor_elo,
+            estimator: ELO_ESTIMATOR_ID.into(),
+            estimator_version: ELO_ESTIMATOR_VERSION,
+            draw_weight: self.draw_weight,
+            prior_games: self.prior_games,
+            max_iterations: self.max_iterations,
+            tolerance: self.tolerance,
+            min_games_per_player,
+            uncertainty: ANCHOR_RELATIVE_95_INTERVAL.into(),
+            instance_policy,
+        }
     }
 }
 

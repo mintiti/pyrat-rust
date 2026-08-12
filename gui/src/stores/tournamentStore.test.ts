@@ -5,6 +5,7 @@ import type {
 	TournamentMatchFailedEvent,
 	TournamentMatchFinishedEvent,
 	TournamentMatchStartedEvent,
+	TournamentProvenance,
 	TournamentSnapshot,
 	TournamentStartedEvent,
 } from "../bindings/generated";
@@ -124,6 +125,55 @@ function snapshot(
 		failures: [],
 		slots: [],
 		...overrides,
+	};
+}
+
+function provenance(): TournamentProvenance {
+	return {
+		tournament_seed: "42",
+		game_config_id: "cfg",
+		factory: {
+			width: 7,
+			height: 7,
+			max_turns: 100,
+			wall_density: 0.7,
+			mud_density: 0.1,
+			mud_range: 5,
+			connected: true,
+			symmetric: true,
+			player_start: "corners",
+			cheese_count: 12,
+			cheese_symmetric: true,
+		},
+		games_per_matchup: 4,
+		mazes_per_matchup: 2,
+		max_failures_per_pair: 3,
+		seat_policy: "paired",
+		methodology: {
+			timing_mode: "wait",
+			move_timeout_ms: 200,
+			preprocessing_timeout_ms: 2_000,
+			startup_timeout_ms: 120_000,
+			configure_timeout_ms: 5_000,
+			network_grace_ms: 50,
+			max_parallel: 3,
+		},
+		interpretation: {
+			methodology_version: 1,
+			anchor_id: "a",
+			anchor_elo: 1_000,
+			estimator: "bradley_terry_newton",
+			estimator_version: 1,
+			draw_weight: 0.5,
+			prior_games: 2,
+			max_iterations: 1_000,
+			tolerance: 0.001,
+			min_games_per_player: 4,
+			uncertainty: "player_minus_anchor_95_percent_normal",
+			instance_policy: "shared_maze_per_seat_pair",
+		},
+		participants: [],
+		mutable_files_warning: "mutable files were not frozen",
 	};
 }
 
@@ -258,6 +308,8 @@ describe("tournamentStore launch ↔ live navigation", () => {
 				failed_attempts: 0,
 				running_matches: 0,
 			},
+			rating_readiness: "insufficient_games",
+			rating_reason: "not enough successful games",
 			standings: [],
 		});
 
@@ -265,6 +317,68 @@ describe("tournamentStore launch ↔ live navigation", () => {
 		expect(state.viewing).toMatchObject({ tournamentId: 2, done: 2 });
 		expect(state.live).toMatchObject({ tournamentId: 1, done: 1 });
 		expect(state.live?.gamesByPair["a|b"]).toHaveLength(1);
+	});
+
+	it("keeps event ratings unavailable until durable interpretation is attached", () => {
+		const s = useTournamentStore.getState();
+		s.onStarted(started(), 0);
+		s.onStandings({
+			tournament_id: 1,
+			progress: {
+				planned_slots: 4,
+				terminal_slots: 1,
+				successful_games: 1,
+				exhausted_slots: 0,
+				failed_attempts: 0,
+				running_matches: 0,
+			},
+			rating_readiness: "rateable",
+			rating_reason: null,
+			standings: [
+				{
+					player_id: "a",
+					elo: 1_000,
+					elo_ci_low: 1_000,
+					elo_ci_high: 1_000,
+					games: 1,
+					pending: false,
+				},
+			],
+		});
+
+		expect(useTournamentStore.getState().live?.standings[0]).toMatchObject({
+			elo: null,
+			elo_ci_low: null,
+			elo_ci_high: null,
+			pending: true,
+		});
+	});
+
+	it("applies live disconnected readiness once durable interpretation is attached", () => {
+		const s = useTournamentStore.getState();
+		s.onStarted(started(), 0);
+		s.restoreActive(
+			snapshot({ tournament_id: 1, running: true, provenance: provenance() }),
+		);
+		s.onStandings({
+			tournament_id: 1,
+			progress: {
+				planned_slots: 4,
+				terminal_slots: 4,
+				successful_games: 4,
+				exhausted_slots: 0,
+				failed_attempts: 0,
+				running_matches: 0,
+			},
+			rating_readiness: "disconnected_graph",
+			rating_reason: "successful games do not connect every participant",
+			standings: [],
+		});
+
+		expect(useTournamentStore.getState().live).toMatchObject({
+			ratingReadiness: "disconnected_graph",
+			ratingReason: "successful games do not connect every participant",
+		});
 	});
 
 	it("opens the active row without replacing its event-fed model", () => {

@@ -54,6 +54,7 @@ async fn resume_skips_completed_matchups() {
                 game_config_id: game_config_id.clone(),
                 tournament_seed: 0xC0FFEE,
                 methodology: None,
+                interpretation: None,
             })
             .unwrap();
         for (slot, p) in [&p1, &p2, &p3].iter().enumerate() {
@@ -181,6 +182,7 @@ async fn resume_retries_durably_failed_matchup_at_next_attempt_index() {
                 game_config_id: game_config_id.clone(),
                 tournament_seed: 0xC0FFEE,
                 methodology: None,
+                interpretation: None,
             })
             .unwrap();
         s.add_tournament_player(tid, &p1.id, 0).unwrap();
@@ -279,6 +281,7 @@ async fn resume_re_issues_kill9_matchup_at_attempt_zero_with_canonical_seed() {
                 game_config_id: game_config_id.clone(),
                 tournament_seed: 0xC0FFEE,
                 methodology: None,
+                interpretation: None,
             })
             .unwrap();
         for (slot, p) in [&p1, &p2, &p3].iter().enumerate() {
@@ -374,6 +377,8 @@ async fn subscribe_immediately_after_resume_sees_standings() {
         }
         .to_json(),
         methodology: None,
+        interpretation: None,
+        participant_launch_specs: Vec::new(),
         game_config: small_game_config(),
         tournament_seed: 0xC0FFEE,
     };

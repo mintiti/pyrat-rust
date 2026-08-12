@@ -24,7 +24,10 @@ use pyrat_eval::{
     SessionConfig, SessionError, SessionMode, TournamentMethodology, TournamentMismatch,
     TournamentParams, TournamentSpec, TournamentState, TournamentTimingMode,
 };
-use pyrat_eval_store::{compute_elo_with_uncertainty, EloOptions, EvalStore, TournamentId};
+use pyrat_eval_store::{
+    compute_elo_with_uncertainty, EloOptions, EvalStore, TournamentId, TournamentInstancePolicy,
+    TournamentOptionAssignment, TournamentParticipantLaunchSpec,
+};
 use pyrat_host::wire::TimingMode;
 use pyrat_orchestrator::{DirectoryWriter, MatchSink, ReplaySink, SinkRole, Timing};
 use serde::Serialize;
@@ -272,6 +275,15 @@ async fn bootstrap_new(
         max_failures_per_pair: resolved.max_failures_per_pair,
         seat_policy: resolved.seat_policy,
     };
+    let instance_policy = match resolved.seat_policy {
+        pyrat_eval::SeatPolicy::Paired => TournamentInstancePolicy::SharedMazePerSeatPair,
+        pyrat_eval::SeatPolicy::Legacy => TournamentInstancePolicy::IndependentPerSlot,
+    };
+    let interpretation = build_elo_options(resolved).tournament_interpretation(0, instance_policy);
+    let participant_launch_specs = canonical_players
+        .iter()
+        .map(cli_participant_launch_spec)
+        .collect();
     let spec = TournamentSpec {
         // The CLI has no name flag; tournaments identify by id + created_at.
         name: None,
@@ -287,11 +299,41 @@ async fn bootstrap_new(
             network_grace_ms: resolved.timing.network_grace_ms,
             max_parallel: resolved.max_parallel,
         }),
+        interpretation: Some(interpretation),
+        participant_launch_specs,
         game_config: game_config.clone(),
         tournament_seed: seed,
     };
     let created = EvalSession::create_tournament(store.clone(), spec, canonical_players).await?;
     Ok((created.tournament_id, created.game_config_id, seed))
+}
+
+fn cli_participant_launch_spec(player: &ResolvedPlayer) -> TournamentParticipantLaunchSpec {
+    let (agent_id, command, working_dir) = match &player.spec {
+        pyrat_orchestrator::PlayerSpec::Subprocess {
+            agent_id,
+            command,
+            working_dir,
+        } => (
+            agent_id.clone(),
+            Some(command.clone()),
+            working_dir
+                .as_ref()
+                .map(|path| path.to_string_lossy().into_owned()),
+        ),
+        pyrat_orchestrator::PlayerSpec::Embedded { agent_id, .. } => (agent_id.clone(), None, None),
+        _ => (player.id.clone(), None, None),
+    };
+    TournamentParticipantLaunchSpec {
+        player_id: player.id.clone(),
+        agent_id,
+        display_name: player.id.clone(),
+        command,
+        working_dir,
+        options: TournamentOptionAssignment::Defaults,
+        declared_version: None,
+        fingerprint: None,
+    }
 }
 
 /// What a resume realizes from the store: the identity to validate against
@@ -399,8 +441,8 @@ pub(crate) struct AttemptsCount {
     pub(crate) failure: u64,
 }
 
-/// One final-standings row: Elo with its standard error (conditional on
-/// the anchor, whose own stderr is near-zero) and games played.
+/// One final-standings row: Elo with the standard error of this player's
+/// difference from the saved anchor, plus games played.
 #[derive(Serialize)]
 struct StandingsEntry {
     player_id: String,
@@ -431,7 +473,9 @@ fn compute_final_standings(state: &TournamentState, options: &EloOptions) -> Vec
         .map(|r| StandingsEntry {
             player_id: r.player_id.clone(),
             elo: r.elo,
-            elo_stderr: uncertainty.stderr(&r.player_id).unwrap_or(0.0),
+            elo_stderr: uncertainty
+                .elo_difference_stderr(&r.player_id, options.anchor())
+                .unwrap_or(0.0),
             games: games.get(r.player_id.as_str()).copied().unwrap_or(0),
         })
         .collect();

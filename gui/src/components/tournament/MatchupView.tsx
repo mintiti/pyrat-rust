@@ -58,7 +58,7 @@ export default function MatchupView({ live, a, b, fromBot }: Props) {
 	return (
 		<Box>
 			<Title order={4} mt="sm">
-				{shortId(a)} vs {shortId(b)}
+				{shortId(a, live.players)} vs {shortId(b, live.players)}
 			</Title>
 			<Group gap="sm" mb="md" mt={4}>
 				<Text size="sm" c="dimmed" ff="monospace">
@@ -85,7 +85,9 @@ export default function MatchupView({ live, a, b, fromBot }: Props) {
 				</Group>
 			</Group>
 
-			{failures.length > 0 && <MatchupFailures failures={failures} />}
+			{failures.length > 0 && (
+				<MatchupFailures failures={failures} players={live.players} />
+			)}
 
 			{liveMatches.map((liveMatch) => (
 				<Group
@@ -123,6 +125,7 @@ export default function MatchupView({ live, a, b, fromBot }: Props) {
 					failures={failures}
 					perspectiveId={persp}
 					paired={live.paired}
+					players={live.players}
 					onOpenGame={(matchId) =>
 						navigate({ kind: "game", a, b, matchId, fromBot })
 					}
@@ -135,7 +138,10 @@ export default function MatchupView({ live, a, b, fromBot }: Props) {
 /** Per-pair failure breakdown, attributed to the implicated bot where known
  * (a null `failingPlayerId` is shown unattributed). Calm by design — only
  * renders when there are failures. */
-function MatchupFailures({ failures }: { failures: MatchFailureRecord[] }) {
+function MatchupFailures({
+	failures,
+	players,
+}: { failures: MatchFailureRecord[]; players: string[] }) {
 	const byBot = new Map<string | null, MatchFailureRecord[]>();
 	for (const f of failures) {
 		byBot.set(f.failingPlayerId, [...(byBot.get(f.failingPlayerId) ?? []), f]);
@@ -145,7 +151,7 @@ function MatchupFailures({ failures }: { failures: MatchFailureRecord[] }) {
 			const br = failureBreakdown(fs)
 				.map((b) => `${b.count} ${b.label}`)
 				.join(", ");
-			return bot ? `${shortId(bot)}: ${br}` : br;
+			return bot ? `${shortId(bot, players)}: ${br}` : br;
 		})
 		.join(" · ");
 	return (

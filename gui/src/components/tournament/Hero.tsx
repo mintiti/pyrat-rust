@@ -1,7 +1,6 @@
 import { Group, Paper, Text } from "@mantine/core";
 import type { TournamentLive } from "../../stores/tournamentStore";
 import {
-	MIN_GAMES_FOR_RATING,
 	hasFinalTournamentVerdict,
 	sortedStandings,
 } from "../../stores/tournamentStore";
@@ -17,6 +16,8 @@ const ord = (n: number) =>
 export default function Hero({ live }: { live: TournamentLive }) {
 	const terminal = live.status !== "running";
 	const finalVerdict = hasFinalTournamentVerdict(live);
+	const minimumGames =
+		live.provenance?.interpretation.min_games_per_player ?? null;
 
 	if (!live.target) {
 		if (!terminal) return null;
@@ -82,13 +83,15 @@ export default function Hero({ live }: { live: TournamentLive }) {
 		>
 			<Group gap="lg" align="baseline">
 				<Text fw={700} c="yellow">
-					{shortId(live.target)}
+					{shortId(live.target, live.players)}
 				</Text>
 				{rating === null ? (
 					<Text size="sm" c="dimmed">
-						{terminal
-							? `not rated — ${mine?.games ?? 0}/${MIN_GAMES_FOR_RATING} completed games; ${MIN_GAMES_FOR_RATING} required`
-							: `${mine?.games ?? 0}/${MIN_GAMES_FOR_RATING} games — rating appears at ${MIN_GAMES_FOR_RATING}`}
+						{minimumGames === null
+							? `not rated — ${live.ratingReason ?? "saved rating interpretation unavailable"}`
+							: terminal
+								? `not rated — ${mine?.games ?? 0}/${minimumGames} completed games; ${minimumGames} required`
+								: `${mine?.games ?? 0}/${minimumGames} games — rating appears at ${minimumGames}`}
 					</Text>
 				) : (
 					<>

@@ -143,6 +143,8 @@ async fn end_to_end_round_robin_with_replay_sink() {
         }
         .to_json(),
         methodology: None,
+        interpretation: None,
+        participant_launch_specs: Vec::new(),
         game_config: game_config.clone(),
         tournament_seed,
     };

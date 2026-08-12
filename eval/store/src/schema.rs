@@ -269,6 +269,17 @@ ALTER TABLE match_attempts ADD COLUMN failure_phase TEXT
 ALTER TABLE match_attempts ADD COLUMN failing_player_id TEXT;
 ";
 
+// Migration 9 freezes the statistical interpretation and participant launch
+// recipe at tournament scope. Both columns remain NULL for existing rows:
+// attempts alone cannot recover the old anchor/default policy or the exact
+// command and working directory that produced them.
+const MIGRATION_9: &str = "
+ALTER TABLE tournaments ADD COLUMN interpretation_json TEXT
+    CHECK (interpretation_json IS NULL OR json_valid(interpretation_json));
+ALTER TABLE tournament_players ADD COLUMN launch_spec_json TEXT
+    CHECK (launch_spec_json IS NULL OR json_valid(launch_spec_json));
+";
+
 const MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_1),
     (2, MIGRATION_2),
@@ -278,6 +289,7 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (6, MIGRATION_6),
     (7, MIGRATION_7),
     (8, MIGRATION_8),
+    (9, MIGRATION_9),
 ];
 
 pub fn initialize(conn: &mut Connection) -> Result<(), EvalError> {
@@ -335,7 +347,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn migration_8_preserves_v7_rows_as_explicitly_unknown() {
+    fn migrations_preserve_v7_rows_as_explicitly_unknown_without_provenance() {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
         for &(version, sql) in MIGRATIONS.iter().filter(|(version, _)| *version <= 7) {
@@ -365,19 +377,48 @@ mod tests {
         let version: u32 = conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(version, 8);
-        let tournament: (String, Option<String>, Option<String>, String) = conn
+        assert_eq!(version, 9);
+        let tournament: (
+            String,
+            Option<String>,
+            Option<String>,
+            String,
+            Option<String>,
+        ) = conn
             .query_row(
-                "SELECT lifecycle_status, terminal_kind, terminal_at, rating_status
+                "SELECT lifecycle_status, terminal_kind, terminal_at, rating_status,
+                        interpretation_json
                    FROM tournaments WHERE id = 1",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
             )
             .unwrap();
         assert_eq!(
             tournament,
-            ("legacy_unknown".into(), None, None, "legacy_unknown".into())
+            (
+                "legacy_unknown".into(),
+                None,
+                None,
+                "legacy_unknown".into(),
+                None
+            )
         );
+        let launch_specs: Vec<Option<String>> = conn
+            .prepare("SELECT launch_spec_json FROM tournament_players ORDER BY slot")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert_eq!(launch_specs, vec![None, None]);
         let failure: (String, Option<String>, Option<String>, Option<String>) = conn
             .query_row(
                 "SELECT failure_reason, failure_kind, failure_phase, failing_player_id

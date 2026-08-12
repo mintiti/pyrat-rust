@@ -3,6 +3,7 @@ import { type ComponentType, type ReactNode, createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it } from "vitest";
 import type {
+	TournamentProvenance,
 	TournamentSnapshot,
 	TournamentStartedEvent,
 } from "../../bindings/generated";
@@ -12,9 +13,11 @@ import SettingRow from "../common/SettingRow";
 import BotView from "./BotView";
 import { tournamentChromeProjection } from "./LiveChip";
 import LiveView from "./LiveView";
+import MatchupView from "./MatchupView";
 import PairedGames, { groupFinishedGames } from "./PairedGames";
 import PressableSurface from "./PressableSurface";
 import Standings from "./Standings";
+import { shortId } from "./theme";
 
 function render(node: ReactNode): string {
 	return renderToStaticMarkup(createElement(MantineProvider, null, node));
@@ -81,6 +84,72 @@ function savedSnapshot(
 	};
 }
 
+function provenance(
+	overrides: Partial<TournamentProvenance> = {},
+): TournamentProvenance {
+	return {
+		tournament_seed: "42",
+		game_config_id: "cfg-42",
+		factory: {
+			width: 7,
+			height: 7,
+			max_turns: 100,
+			wall_density: 0.7,
+			mud_density: 0.1,
+			mud_range: 5,
+			connected: true,
+			symmetric: true,
+			player_start: "corners",
+			cheese_count: 12,
+			cheese_symmetric: true,
+		},
+		games_per_matchup: 8,
+		mazes_per_matchup: 4,
+		max_failures_per_pair: 2,
+		seat_policy: "paired",
+		methodology: {
+			timing_mode: "wait",
+			move_timeout_ms: 200,
+			preprocessing_timeout_ms: 2_000,
+			startup_timeout_ms: 120_000,
+			configure_timeout_ms: 5_000,
+			network_grace_ms: 50,
+			max_parallel: 8,
+		},
+		interpretation: {
+			methodology_version: 1,
+			anchor_id: "a",
+			anchor_elo: 1_000,
+			estimator: "bradley_terry_newton",
+			estimator_version: 1,
+			draw_weight: 0.5,
+			prior_games: 2,
+			max_iterations: 100,
+			tolerance: 1e-7,
+			min_games_per_player: 4,
+			uncertainty: "player_minus_anchor_95_percent_normal",
+			instance_policy: "shared_maze_per_seat_pair",
+		},
+		participants: [
+			{
+				player_id: "a",
+				agent_id: "a",
+				display_name: "A",
+				command: "cargo run --release",
+				working_dir: "/bots/a",
+				options: { kind: "defaults" },
+				declared_version: "1.0",
+				fingerprint: {
+					kind: "bot_manifest_sha256",
+					value: "abc123",
+				},
+			},
+		],
+		mutable_files_warning: "mutable files were not frozen",
+		...overrides,
+	};
+}
+
 beforeEach(() => {
 	useTournamentStore.setState(useTournamentStore.getInitialState(), true);
 });
@@ -99,6 +168,8 @@ describe("tournament UI truth", () => {
 				failed_attempts: 1,
 				running_matches: 0,
 			},
+			rating_readiness: "rateable",
+			rating_reason: null,
 			standings: [],
 		});
 		store.onAborted({
@@ -461,6 +532,8 @@ describe("tournament UI truth", () => {
 				failed_attempts: 1,
 				running_matches: 0,
 			},
+			rating_readiness: "insufficient_games",
+			rating_reason: "not enough successful games",
 			standings: [],
 		});
 		store.onFinished({
@@ -493,6 +566,8 @@ describe("tournament UI truth", () => {
 				failed_attempts: 0,
 				running_matches: 0,
 			},
+			rating_readiness: "insufficient_games",
+			rating_reason: "not enough successful games",
 			standings: [
 				{
 					player_id: "a",
@@ -547,6 +622,8 @@ describe("tournament UI truth", () => {
 				failed_attempts: 0,
 				running_matches: 0,
 			},
+			rating_readiness: "insufficient_games",
+			rating_reason: "not enough successful games",
 			standings: [
 				{
 					player_id: "a",
@@ -566,6 +643,11 @@ describe("tournament UI truth", () => {
 				},
 			],
 		});
+		const afterStandings = useTournamentStore.getState().live;
+		if (!afterStandings) return;
+		useTournamentStore.setState({
+			live: { ...afterStandings, provenance: provenance() },
+		});
 		const live = useTournamentStore.getState().live;
 		expect(live).not.toBeNull();
 		if (!live) return;
@@ -574,5 +656,52 @@ describe("tournament UI truth", () => {
 		expect(html).toContain("2/4 games — rating appears at 4");
 		expect(html).toContain("2/4 to rating");
 		expect(html).not.toContain("warming up");
+	});
+
+	it("keeps namespace-colliding participant ids visibly distinct", () => {
+		const players = ["team-one/greedy", "team-two/greedy", "plain/random"];
+		expect(shortId(players[0], players)).toBe("team-one/greedy");
+		expect(shortId(players[1], players)).toBe("team-two/greedy");
+		expect(shortId(players[2], players)).toBe("random");
+
+		const store = useTournamentStore.getState();
+		store.onStarted(
+			started({
+				players: players.map((player_id) => ({ player_id })),
+				anchor_id: players[0],
+			}),
+			Date.now(),
+		);
+		const live = useTournamentStore.getState().live;
+		expect(live).not.toBeNull();
+		if (!live) return;
+		const html = render(
+			createElement(MatchupView, {
+				live,
+				a: players[0],
+				b: players[1],
+			}),
+		);
+		expect(html).toContain("team-one/greedy");
+		expect(html).toContain("team-two/greedy");
+	});
+
+	it("renders the durable launch and rating recipe without inventing it", () => {
+		const store = useTournamentStore.getState();
+		store.openSnapshot(
+			savedSnapshot({
+				provenance: provenance(),
+				anchor_id: "a",
+			}),
+		);
+		const live = useTournamentStore.getState().viewing;
+		expect(live).not.toBeNull();
+		if (!live) return;
+		const html = render(createElement(LiveView, { live }));
+		expect(html).toContain("Conditions &amp; methodology");
+		expect(html).toContain("cfg-42");
+		expect(html).toContain("cargo run --release");
+		expect(html).toContain("95% normal interval for player − anchor");
+		expect(html).toContain("mutable files were not frozen");
 	});
 });

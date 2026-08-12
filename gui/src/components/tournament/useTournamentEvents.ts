@@ -56,9 +56,12 @@ export function useTournamentEvents() {
 
 		const unlisteners = [
 			events.tournamentPreparingEvent.listen((e) => onPreparing(e.payload)),
-			events.tournamentStartedEvent.listen((e) =>
-				onStarted(e.payload, Date.now()),
-			),
+			events.tournamentStartedEvent.listen((e) => {
+				onStarted(e.payload, Date.now());
+				// Started is intentionally compact. Reconcile immediately so the
+				// active view gets the same durable recipe as a reopened view.
+				void reconcile(e.payload.tournament_id);
+			}),
 			events.tournamentStoppingEvent.listen((e) => onStopping(e.payload)),
 			events.standingsUpdatedEvent.listen((e) => {
 				onStandings(e.payload);

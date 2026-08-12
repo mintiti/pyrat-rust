@@ -20,6 +20,7 @@ import BotView from "./BotView";
 import GameView from "./GameView";
 import Hero from "./Hero";
 import MatchupView from "./MatchupView";
+import ProvenancePanel from "./ProvenancePanel";
 import Standings from "./Standings";
 import { T, shortId } from "./theme";
 
@@ -100,7 +101,7 @@ export default function LiveView({ live }: { live: TournamentLive }) {
 		nav.kind === "game"
 			? "back to matchup"
 			: nav.kind === "matchup" && nav.fromBot
-				? `back to ${shortId(nav.fromBot)}`
+				? `back to ${shortId(nav.fromBot, live.players)}`
 				: nav.kind === "matchup" || nav.kind === "bot"
 					? "back to standings"
 					: "back to tournament setup";
@@ -208,11 +209,13 @@ export default function LiveView({ live }: { live: TournamentLive }) {
 						<NowPlaying
 							matches={inFlight}
 							running={live.status === "running"}
+							players={live.players}
 						/>
 					)}
 					<Box mt="md">
 						<Standings live={live} />
 					</Box>
+					<ProvenancePanel live={live} />
 				</>
 			)}
 			{nav.kind === "bot" && <BotView live={live} botId={nav.botId} />}
@@ -220,7 +223,11 @@ export default function LiveView({ live }: { live: TournamentLive }) {
 				<MatchupView live={live} a={nav.a} b={nav.b} fromBot={nav.fromBot} />
 			)}
 			{nav.kind === "game" && (
-				<GameView tournamentId={live.tournamentId} matchId={nav.matchId} />
+				<GameView
+					tournamentId={live.tournamentId}
+					matchId={nav.matchId}
+					players={live.players}
+				/>
 			)}
 		</Box>
 	);
@@ -267,9 +274,11 @@ export function PulseDot({ color = T.cheese }: { color?: string }) {
 function NowPlaying({
 	matches,
 	running,
+	players = [],
 }: {
 	matches: LiveMatch[];
 	running: boolean;
+	players?: string[];
 }) {
 	if (!running && matches.length === 0) return null;
 	return (
@@ -298,7 +307,8 @@ function NowPlaying({
 						>
 							<PulseDot />
 							<Text size="sm" style={{ flex: 1 }}>
-								{shortId(m.player1Id)} vs {shortId(m.player2Id)}
+								{shortId(m.player1Id, players)} vs{" "}
+								{shortId(m.player2Id, players)}
 							</Text>
 							<Text size="sm" c="dimmed" ff="monospace">
 								turn {m.turn}

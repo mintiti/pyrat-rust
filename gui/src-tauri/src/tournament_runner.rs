@@ -45,7 +45,7 @@ use crate::tournament_events::{
 };
 
 /// Below this many games a non-anchor player's Elo is too noisy to show.
-const MIN_GAMES_FOR_ESTIMATE: u32 = 4;
+pub(crate) const MIN_GAMES_FOR_ESTIMATE: u32 = 4;
 
 const APP_SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
@@ -659,7 +659,13 @@ fn emit_standings(
     anchor_id: &str,
     total: u32,
 ) {
-    let standings = build_standings(state, elo_options, player_ids, anchor_id);
+    let standings = build_standings(
+        state,
+        elo_options,
+        player_ids,
+        anchor_id,
+        MIN_GAMES_FOR_ESTIMATE,
+    );
     let progress = match state.execution_summary(total, tournament_config::MAX_FAILURES_PER_PAIR) {
         Ok(progress) => TournamentProgress::from(progress),
         Err(error) => {
@@ -667,9 +673,13 @@ fn emit_standings(
             return;
         },
     };
+    let (rating_status, rating_reason) =
+        rating_readiness(state, elo_options, player_ids, MIN_GAMES_FOR_ESTIMATE);
     let _ = StandingsUpdatedEvent {
         tournament_id: tid,
         progress,
+        rating_readiness: rating_status.into(),
+        rating_reason,
         standings,
     }
     .emit(app);
@@ -685,6 +695,7 @@ pub(crate) fn build_standings(
     elo_options: &EloOptions,
     player_ids: &[String],
     anchor_id: &str,
+    min_games_for_estimate: u32,
 ) -> Vec<StandingRow> {
     let h2h = state.head_to_head();
     let computed = compute_elo_with_uncertainty(&h2h, elo_options).ok();
@@ -694,10 +705,10 @@ pub(crate) fn build_standings(
         .map(|id| {
             let games = games_for(state, id);
             let is_anchor = id == anchor_id;
-            match computed
-                .as_ref()
-                .and_then(|(res, unc)| res.get_elo(id).map(|elo| (elo, unc.stderr(id))))
-            {
+            match computed.as_ref().and_then(|(res, unc)| {
+                res.get_elo(id)
+                    .map(|elo| (elo, unc.elo_difference_stderr(id, anchor_id)))
+            }) {
                 Some((elo, stderr)) => {
                     let half = 1.96 * stderr.unwrap_or(0.0);
                     StandingRow {
@@ -706,7 +717,7 @@ pub(crate) fn build_standings(
                         elo_ci_low: stderr.map(|_| elo - half),
                         elo_ci_high: stderr.map(|_| elo + half),
                         games,
-                        pending: !is_anchor && games < MIN_GAMES_FOR_ESTIMATE,
+                        pending: !is_anchor && games < min_games_for_estimate,
                     }
                 },
                 None => StandingRow {
@@ -718,6 +729,25 @@ pub(crate) fn build_standings(
                     pending: true,
                 },
             }
+        })
+        .collect()
+}
+
+/// Preserve participant/game counts when a historical row lacks a saved
+/// estimator interpretation. Every numeric rating stays unavailable.
+pub(crate) fn build_unavailable_standings(
+    state: &TournamentState,
+    player_ids: &[String],
+) -> Vec<StandingRow> {
+    player_ids
+        .iter()
+        .map(|id| StandingRow {
+            player_id: id.clone(),
+            elo: None,
+            elo_ci_low: None,
+            elo_ci_high: None,
+            games: games_for(state, id),
+            pending: true,
         })
         .collect()
 }
@@ -781,19 +811,20 @@ pub(crate) fn persist_outcome_once(
     }
 }
 
-fn rating_readiness(
+pub(crate) fn rating_readiness(
     state: &TournamentState,
     elo_options: &EloOptions,
     player_ids: &[String],
+    min_games_per_player: u32,
 ) -> (TournamentRatingStatus, Option<String>) {
     if player_ids
         .iter()
-        .any(|player| games_for(state, player) < MIN_GAMES_FOR_ESTIMATE)
+        .any(|player| games_for(state, player) < min_games_per_player)
     {
         return (
             TournamentRatingStatus::InsufficientGames,
             Some(format!(
-                "each player needs at least {MIN_GAMES_FOR_ESTIMATE} successful games"
+                "each player needs at least {min_games_per_player} successful games"
             )),
         );
     }
@@ -832,7 +863,8 @@ fn completion_truth(
             progress.exhausted_slots, progress.planned_slots
         )
     });
-    let (rating_status, rating_reason) = rating_readiness(state, elo_options, player_ids);
+    let (rating_status, rating_reason) =
+        rating_readiness(state, elo_options, player_ids, MIN_GAMES_FOR_ESTIMATE);
     (terminal_kind, terminal_reason, rating_status, rating_reason)
 }
 
@@ -899,6 +931,7 @@ mod tests {
                 game_config_id,
                 tournament_seed: 1,
                 methodology: None,
+                interpretation: None,
             })
             .expect("tournament row");
         assert!(store
@@ -1101,14 +1134,20 @@ mod tests {
         }
 
         let elo_options = tournament_config::elo_options("greedy");
-        let rows = build_standings(&state, &elo_options, &players, "greedy");
+        let rows = build_standings(
+            &state,
+            &elo_options,
+            &players,
+            "greedy",
+            MIN_GAMES_FOR_ESTIMATE,
+        );
 
         let h2h = state.head_to_head();
         let (result, unc) = compute_elo_with_uncertainty(&h2h, &elo_options).unwrap();
 
         for row in &rows {
             let elo = result.get_elo(&row.player_id).unwrap();
-            let stderr = unc.stderr(&row.player_id).unwrap();
+            let stderr = unc.elo_difference_stderr(&row.player_id, "greedy").unwrap();
             let projected_elo = row.elo.expect("rated row has Elo");
             assert!(
                 (projected_elo - elo).abs() < 1e-9,
@@ -1136,12 +1175,50 @@ mod tests {
         let progress = state.execution_summary(2, 1).unwrap();
         assert_eq!(progress.terminal_slots, 2);
         assert_eq!(progress.successful_games, 2);
-        let (status, reason) =
-            rating_readiness(&state, &tournament_config::elo_options("alice"), &players);
+        let (status, reason) = rating_readiness(
+            &state,
+            &tournament_config::elo_options("alice"),
+            &players,
+            MIN_GAMES_FOR_ESTIMATE,
+        );
         assert_eq!(status, TournamentRatingStatus::InsufficientGames);
         assert!(reason
             .as_deref()
             .is_some_and(|text| text.contains("at least 4 successful games")));
+    }
+
+    #[test]
+    fn completed_disconnected_pool_is_not_called_rateable() {
+        let players = vec![
+            "alice".to_string(),
+            "bob".to_string(),
+            "carol".to_string(),
+            "dave".to_string(),
+        ];
+        let mut state = TournamentState::empty(TournamentId(1));
+        for repetition in 0..4 {
+            push_game(&mut state, "alice", "bob", "cfg", repetition, 5.0, 3.0);
+            push_game(
+                &mut state,
+                "carol",
+                "dave",
+                "cfg",
+                repetition + 10,
+                5.0,
+                3.0,
+            );
+        }
+
+        let (status, reason) = rating_readiness(
+            &state,
+            &tournament_config::elo_options("alice"),
+            &players,
+            MIN_GAMES_FOR_ESTIMATE,
+        );
+        assert_eq!(status, TournamentRatingStatus::DisconnectedGraph);
+        assert!(reason
+            .as_deref()
+            .is_some_and(|text| text.contains("do not connect every participant")));
     }
 
     #[test]
@@ -1153,10 +1230,59 @@ mod tests {
             &tournament_config::elo_options("alice"),
             &players,
             "alice",
+            MIN_GAMES_FOR_ESTIMATE,
         );
         assert_eq!(rows.len(), 2);
         assert!(rows.iter().all(|row| {
             row.elo.is_none()
+                && row.elo_ci_low.is_none()
+                && row.elo_ci_high.is_none()
+                && row.pending
+        }));
+    }
+
+    #[test]
+    fn standings_use_the_saved_readiness_threshold() {
+        let players = vec!["alice".to_string(), "bob".to_string()];
+        let mut state = TournamentState::empty(TournamentId(1));
+        for repetition in 0..4 {
+            push_game(&mut state, "alice", "bob", "cfg", repetition, 5.0, 3.0);
+        }
+        let options = tournament_config::elo_options("alice");
+
+        let saved_six = build_standings(&state, &options, &players, "alice", 6);
+        assert!(
+            !saved_six[0].pending,
+            "the anchor remains the fixed baseline"
+        );
+        assert!(saved_six[1].pending, "four games do not satisfy saved six");
+
+        let saved_four = build_standings(&state, &options, &players, "alice", 4);
+        assert!(saved_four.iter().all(|row| !row.pending));
+    }
+
+    #[test]
+    fn a_failed_first_attempt_never_creates_zero_elo_placeholders() {
+        let players = vec!["alice".to_string(), "bob".to_string()];
+        let mut state = TournamentState::empty(TournamentId(1));
+        state.history.insert(
+            MatchupKey::from_pair("alice", "bob", "cfg", 0),
+            vec![MatchupAttempt {
+                attempt_index: 0,
+                outcome: MatchupOutcome::Failure,
+            }],
+        );
+
+        let rows = build_standings(
+            &state,
+            &tournament_config::elo_options("alice"),
+            &players,
+            "alice",
+            MIN_GAMES_FOR_ESTIMATE,
+        );
+        assert!(rows.iter().all(|row| {
+            row.games == 0
+                && row.elo.is_none()
                 && row.elo_ci_low.is_none()
                 && row.elo_ci_high.is_none()
                 && row.pending

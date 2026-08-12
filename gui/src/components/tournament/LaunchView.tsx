@@ -128,6 +128,7 @@ export default function LaunchView() {
 	const setLaunchFailure = useTournamentStore((s) => s.setLaunchFailure);
 	const clearPreparing = useTournamentStore((s) => s.clearPreparing);
 	const onStarted = useTournamentStore((s) => s.onStarted);
+	const reconcileSnapshot = useTournamentStore((s) => s.reconcileSnapshot);
 	const requestStop = useTournamentStore((s) => s.requestStop);
 
 	const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -300,8 +301,9 @@ export default function LaunchView() {
 				(games * EST_SECONDS_PER_GAME) / Math.max(1, method.max_parallel) / 60,
 			),
 		);
+		const participantIds = selectedBots.map((bot) => bot.agent_id);
 		const shape = target
-			? `${shortId(target)} vs ${n - 1} (gauntlet)`
+			? `${shortId(target, participantIds)} vs ${n - 1} (gauntlet)`
 			: `all pairs of ${n} (round-robin)`;
 		return `${shape} · ${factory.width}×${factory.height} · ${method.mazes_per_matchup * 2} games/matchup · ${games} games · ${method.move_timeout_ms} ms/move · ${method.max_parallel} concurrent · ~${mins} min`;
 	}, [selectedBots, target, factory, method]);
@@ -333,8 +335,11 @@ export default function LaunchView() {
 		beginLaunch();
 		const picks = selectedBots.map((b) => ({
 			agent_id: b.agent_id,
+			display_name: b.name,
 			run_command: b.run_command,
 			working_dir: b.working_dir,
+			declared_version: b.declared_version,
+			manifest_sha256: b.manifest_sha256,
 		}));
 		const trimmedSeed = seedInput.trim();
 		try {
@@ -351,6 +356,10 @@ export default function LaunchView() {
 			});
 			if (res.status === "ok") {
 				onStarted(res.data, Date.now());
+				const snapshot = await commands.getTournamentSnapshot(
+					res.data.tournament_id,
+				);
+				if (snapshot.status === "ok") reconcileSnapshot(snapshot.data);
 				return;
 			}
 
@@ -823,7 +832,10 @@ export default function LaunchView() {
 								<PulseDot />
 								<Text size="xs" c="dimmed" lineClamp={2}>
 									{preparing?.current
-										? `Checking ${shortId(preparing.current)}… (${preparing.done}/${preparing.total})`
+										? `Checking ${shortId(
+												preparing.current,
+												bots.map((bot) => bot.agent_id),
+											)}… (${preparing.done}/${preparing.total})`
 										: preparing
 											? `Checking bot compatibility… (${preparing.done}/${preparing.total})`
 											: "Starting tournament…"}

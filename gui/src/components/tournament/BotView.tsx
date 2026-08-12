@@ -18,7 +18,7 @@ export default function BotView({
 	return (
 		<Box>
 			<Group justify="space-between" align="baseline" mt="sm" mb="md">
-				<Title order={4}>{shortId(botId)}</Title>
+				<Title order={4}>{shortId(botId, live.players)}</Title>
 				<Text size="xs" c="dimmed">
 					W–L–D · completed/target
 				</Text>
@@ -38,7 +38,7 @@ export default function BotView({
 					return (
 						<PressableSurface
 							key={opp}
-							aria-label={`View ${shortId(botId)} versus ${shortId(opp)}. Record: ${w} wins, ${l} losses, ${d} draws. ${games.length} of ${live.gamesPerMatchup} games completed.`}
+							aria-label={`View ${shortId(botId, live.players)} versus ${shortId(opp, live.players)}. Record: ${w} wins, ${l} losses, ${d} draws. ${games.length} of ${live.gamesPerMatchup} games completed.`}
 							style={{ marginBottom: 6 }}
 							onClick={() =>
 								navigate({ kind: "matchup", a: botId, b: opp, fromBot: botId })
@@ -46,7 +46,7 @@ export default function BotView({
 						>
 							<Group wrap="nowrap" gap="sm" px="sm" py={8}>
 								<Text size="sm" style={{ flex: 1 }}>
-									vs {shortId(opp)}
+									vs {shortId(opp, live.players)}
 								</Text>
 								<Group gap={3}>
 									{games.slice(-5).map((g) => {

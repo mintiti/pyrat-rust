@@ -10,9 +10,10 @@ use crate::types::{
     AttemptKey, AttemptOutcome, AttemptRecord, AttemptStatus, CreateTournamentError,
     DeletePlayerError, EvalError, GameConfigRecord, GameResultRecord, NewAttempt,
     NewAttemptOutcome, NewGameResult, NewPlayer, NewTournament, PlayerRecord, RecordAttemptError,
-    RegisterPlayerError, ResultFilter, SeatOrientation, TournamentId, TournamentLifecycle,
-    TournamentMethodology, TournamentParticipant, TournamentRatingStatus, TournamentRecord,
-    TournamentTerminal, TournamentTerminalKind, TournamentTimingMode,
+    RegisterPlayerError, ResultFilter, SeatOrientation, TournamentId, TournamentInterpretation,
+    TournamentLifecycle, TournamentMethodology, TournamentParticipant,
+    TournamentParticipantLaunchSpec, TournamentRatingStatus, TournamentRecord, TournamentTerminal,
+    TournamentTerminalKind, TournamentTimingMode,
 };
 
 /// SQLite-backed store for game results, players, tournaments, and match
@@ -254,7 +255,8 @@ impl EvalStore {
                         timing_mode, move_timeout_ms, preprocessing_timeout_ms,
                         startup_timeout_ms, configure_timeout_ms, network_grace_ms,
                         max_parallel, lifecycle_status, started_at, terminal_at,
-                        terminal_kind, terminal_reason, rating_status, rating_reason
+                        terminal_kind, terminal_reason, rating_status, rating_reason,
+                        interpretation_json
                    FROM tournaments WHERE id = ?1",
                 params![id.0],
                 read_tournament_row,
@@ -270,7 +272,8 @@ impl EvalStore {
                     timing_mode, move_timeout_ms, preprocessing_timeout_ms,
                     startup_timeout_ms, configure_timeout_ms, network_grace_ms,
                     max_parallel, lifecycle_status, started_at, terminal_at,
-                    terminal_kind, terminal_reason, rating_status, rating_reason
+                    terminal_kind, terminal_reason, rating_status, rating_reason,
+                    interpretation_json
                FROM tournaments ORDER BY id",
         )?;
         let rows = stmt.query_map([], read_tournament_row)?;
@@ -382,7 +385,26 @@ impl EvalStore {
         player_id: &str,
         slot: i64,
     ) -> Result<(), AddTournamentPlayerError> {
-        add_tournament_player_on(&self.conn, tournament_id, player_id, slot)
+        add_tournament_player_on(&self.conn, tournament_id, player_id, slot, None)
+    }
+
+    /// Attach one participant together with the exact launch recipe used by
+    /// this tournament. The spec is tournament-scoped and never inferred from
+    /// the mutable global player row on read.
+    pub fn add_tournament_player_with_spec(
+        &self,
+        tournament_id: TournamentId,
+        player_id: &str,
+        slot: i64,
+        launch_spec: &TournamentParticipantLaunchSpec,
+    ) -> Result<(), AddTournamentPlayerError> {
+        add_tournament_player_on(
+            &self.conn,
+            tournament_id,
+            player_id,
+            slot,
+            Some(launch_spec),
+        )
     }
 
     pub fn get_tournament_players(
@@ -390,15 +412,28 @@ impl EvalStore {
         tournament_id: TournamentId,
     ) -> Result<Vec<TournamentParticipant>, EvalError> {
         let mut stmt = self.conn.prepare(
-            "SELECT tournament_id, player_id, slot
+            "SELECT tournament_id, player_id, slot, launch_spec_json
                FROM tournament_players WHERE tournament_id = ?1
               ORDER BY slot",
         )?;
         let rows = stmt.query_map(params![tournament_id.0], |row| {
+            let launch_spec_json: Option<String> = row.get(3)?;
+            let launch_spec = launch_spec_json
+                .map(|json| {
+                    serde_json::from_str(&json).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            3,
+                            rusqlite::types::Type::Text,
+                            error.into(),
+                        )
+                    })
+                })
+                .transpose()?;
             Ok(TournamentParticipant {
                 tournament_id: TournamentId(row.get(0)?),
                 player_id: row.get(1)?,
                 slot: row.get(2)?,
+                launch_spec,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(EvalError::from)
@@ -681,13 +716,20 @@ fn create_tournament_on(
         ),
         None => (None, None, None, None, None, None, None),
     };
+    let interpretation_json = t
+        .interpretation
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(EvalError::from)?;
     conn.execute(
         "INSERT INTO tournaments
            (format, target_games_per_matchup, params_json,
             game_config_id, tournament_seed, name, timing_mode,
             move_timeout_ms, preprocessing_timeout_ms, startup_timeout_ms,
-            configure_timeout_ms, network_grace_ms, max_parallel)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+            configure_timeout_ms, network_grace_ms, max_parallel,
+            interpretation_json)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             t.format,
             t.target_games_per_matchup,
@@ -702,6 +744,7 @@ fn create_tournament_on(
             configure_timeout_ms,
             network_grace_ms,
             max_parallel,
+            interpretation_json,
         ],
     )
     .map_err(EvalError::from)?;
@@ -713,7 +756,16 @@ fn add_tournament_player_on(
     tournament_id: TournamentId,
     player_id: &str,
     slot: i64,
+    launch_spec: Option<&TournamentParticipantLaunchSpec>,
 ) -> Result<(), AddTournamentPlayerError> {
+    if let Some(launch_spec) = launch_spec {
+        if launch_spec.player_id != player_id {
+            return Err(AddTournamentPlayerError::LaunchSpecPlayerMismatch {
+                player_id: player_id.into(),
+                launch_spec_player_id: launch_spec.player_id.clone(),
+            });
+        }
+    }
     let already_in: bool = conn.query_row(
         "SELECT EXISTS(SELECT 1 FROM tournament_players
                         WHERE tournament_id = ?1 AND player_id = ?2)",
@@ -738,10 +790,14 @@ fn add_tournament_player_on(
             slot,
         });
     }
+    let launch_spec_json = launch_spec
+        .map(serde_json::to_string)
+        .transpose()
+        .map_err(EvalError::from)?;
     conn.execute(
-        "INSERT INTO tournament_players (tournament_id, player_id, slot)
-         VALUES (?1, ?2, ?3)",
-        params![tournament_id.0, player_id, slot],
+        "INSERT INTO tournament_players (tournament_id, player_id, slot, launch_spec_json)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![tournament_id.0, player_id, slot, launch_spec_json],
     )?;
     Ok(())
 }
@@ -781,7 +837,17 @@ impl<'tx, 'conn> TxStore<'tx, 'conn> {
         player_id: &str,
         slot: i64,
     ) -> Result<(), AddTournamentPlayerError> {
-        add_tournament_player_on(self.tx, tournament_id, player_id, slot)
+        add_tournament_player_on(self.tx, tournament_id, player_id, slot, None)
+    }
+
+    pub fn add_tournament_player_with_spec(
+        &self,
+        tournament_id: TournamentId,
+        player_id: &str,
+        slot: i64,
+        launch_spec: &TournamentParticipantLaunchSpec,
+    ) -> Result<(), AddTournamentPlayerError> {
+        add_tournament_player_on(self.tx, tournament_id, player_id, slot, Some(launch_spec))
     }
 }
 
@@ -900,6 +966,18 @@ fn read_tournament_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TournamentRe
             format!("invalid tournament rating status: {rating_raw}").into(),
         )
     })?;
+    let interpretation_json: Option<String> = row.get(22)?;
+    let interpretation: Option<TournamentInterpretation> = interpretation_json
+        .map(|json| {
+            serde_json::from_str(&json).map_err(|error| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    22,
+                    rusqlite::types::Type::Text,
+                    error.into(),
+                )
+            })
+        })
+        .transpose()?;
     let terminal_at: Option<String> = row.get(17)?;
     let lifecycle_matches_terminal = match lifecycle {
         TournamentLifecycle::LegacyUnknown
@@ -955,6 +1033,7 @@ fn read_tournament_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TournamentRe
         game_config_id: row.get(4)?,
         tournament_seed: seed_i64 as u64,
         methodology,
+        interpretation,
         lifecycle,
         started_at: row.get(16)?,
         terminal_at,
@@ -1166,6 +1245,9 @@ where
 mod tests {
     use super::*;
     use crate::elo::compute_elo;
+    use crate::types::{
+        TournamentInstancePolicy, TournamentOptionAssignment, TournamentParticipantFingerprint,
+    };
 
     fn sample_config() -> GameConfigRecord {
         GameConfigRecord {
@@ -1200,6 +1282,23 @@ mod tests {
         }
     }
 
+    fn interpretation(anchor_id: &str) -> TournamentInterpretation {
+        TournamentInterpretation {
+            methodology_version: crate::elo::TOURNAMENT_METHODOLOGY_VERSION,
+            anchor_id: anchor_id.into(),
+            anchor_elo: 1_237.5,
+            estimator: crate::elo::ELO_ESTIMATOR_ID.into(),
+            estimator_version: crate::elo::ELO_ESTIMATOR_VERSION,
+            draw_weight: 0.45,
+            prior_games: 3.5,
+            max_iterations: 777,
+            tolerance: 1e-8,
+            min_games_per_player: 6,
+            uncertainty: crate::elo::ANCHOR_RELATIVE_95_INTERVAL.into(),
+            instance_policy: TournamentInstancePolicy::SharedMazePerSeatPair,
+        }
+    }
+
     fn setup_tournament(store: &EvalStore) -> (TournamentId, String) {
         setup_players(store);
         let config_id = store.ensure_game_config(&sample_config()).unwrap();
@@ -1212,6 +1311,7 @@ mod tests {
                 game_config_id: config_id.clone(),
                 tournament_seed: 0xC0FFEE,
                 methodology: None,
+                interpretation: None,
             })
             .unwrap();
         store.add_tournament_player(tid, "alice", 0).unwrap();
@@ -1581,7 +1681,7 @@ mod tests {
     #[test]
     fn migration_fresh_db_ends_at_latest_user_version() {
         let store = EvalStore::open_in_memory().unwrap();
-        assert_eq!(user_version(&store), 8);
+        assert_eq!(user_version(&store), 9);
 
         let tables: Vec<String> = store
             .conn
@@ -1655,7 +1755,7 @@ mod tests {
         assert_eq!(v, 0);
 
         let store = EvalStore::from_connection(conn).unwrap();
-        assert_eq!(user_version(&store), 8);
+        assert_eq!(user_version(&store), 9);
 
         // Migration 2 added these columns to players. Confirm they exist.
         let cols: Vec<String> = store
@@ -1681,14 +1781,14 @@ mod tests {
         let v: u32 = conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(v, 8);
+        assert_eq!(v, 9);
         // Second run on the same connection: each migration's `version > current`
         // guard makes the loop a no-op. Must not error.
         schema::initialize(&mut conn).unwrap();
         let v: u32 = conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(v, 8);
+        assert_eq!(v, 9);
     }
 
     /// Migration 3 refuses to run if `tournaments` has pre-migration rows,
@@ -1829,7 +1929,7 @@ mod tests {
         .unwrap();
 
         let store = EvalStore::from_connection(conn).unwrap();
-        assert_eq!(user_version(&store), 8);
+        assert_eq!(user_version(&store), 9);
 
         // Tournament row survived with name defaulting to NULL (migration 4).
         let t = store
@@ -2070,6 +2170,7 @@ mod tests {
             game_config_id: "nonexistent".into(),
             tournament_seed: 0,
             methodology: None,
+            interpretation: None,
         }) {
             Err(CreateTournamentError::GameConfigNotFound(id)) => {
                 assert_eq!(id, "nonexistent");
@@ -2093,6 +2194,7 @@ mod tests {
                 game_config_id: cid.clone(),
                 tournament_seed: i64::MAX as u64,
                 methodology: Some(methodology()),
+                interpretation: None,
             })
             .unwrap();
         let t = store.get_tournament(tid).unwrap().unwrap();
@@ -2102,6 +2204,78 @@ mod tests {
         assert_eq!(t.methodology, Some(methodology()));
         // No name supplied → column is NULL (the CLI path).
         assert_eq!(t.name, None);
+    }
+
+    #[test]
+    fn tournament_interpretation_and_launch_recipe_round_trip_exactly() {
+        let store = EvalStore::open_in_memory().unwrap();
+        setup_players(&store);
+        let cid = store.ensure_game_config(&sample_config()).unwrap();
+        let saved_interpretation = interpretation("alice");
+        let tid = store
+            .create_tournament(&NewTournament {
+                name: Some("frozen recipe".into()),
+                format: "round_robin".into(),
+                target_games_per_matchup: Some(12),
+                params_json: r#"{"seat_policy":"paired"}"#.into(),
+                game_config_id: cid,
+                tournament_seed: 42,
+                methodology: Some(methodology()),
+                interpretation: Some(saved_interpretation.clone()),
+            })
+            .unwrap();
+        let launch_spec = TournamentParticipantLaunchSpec {
+            player_id: "alice".into(),
+            agent_id: "team/alice".into(),
+            display_name: "Alice candidate".into(),
+            command: Some("uv run python bot.py --mode=tournament".into()),
+            working_dir: Some("/tmp/bots/alice".into()),
+            options: TournamentOptionAssignment::Explicit {
+                values: vec![("depth".into(), "7".into()), ("book".into(), "off".into())],
+            },
+            declared_version: Some("2026.08".into()),
+            fingerprint: Some(TournamentParticipantFingerprint {
+                kind: "bot_manifest_sha256".into(),
+                value: "abc123".into(),
+            }),
+        };
+        store
+            .add_tournament_player_with_spec(tid, "alice", 0, &launch_spec)
+            .unwrap();
+
+        let tournament = store.get_tournament(tid).unwrap().unwrap();
+        assert_eq!(tournament.interpretation, Some(saved_interpretation));
+        let participants = store.get_tournament_players(tid).unwrap();
+        assert_eq!(participants.len(), 1);
+        assert_eq!(participants[0].launch_spec.as_ref(), Some(&launch_spec));
+    }
+
+    #[test]
+    fn launch_recipe_cannot_claim_a_different_participant_id() {
+        let store = EvalStore::open_in_memory().unwrap();
+        let (tid, _) = setup_tournament(&store);
+        store.ensure_player("carol", "Carol").unwrap();
+        let launch_spec = TournamentParticipantLaunchSpec {
+            player_id: "alice".into(),
+            agent_id: "alice".into(),
+            display_name: "Alice".into(),
+            command: None,
+            working_dir: None,
+            options: TournamentOptionAssignment::Defaults,
+            declared_version: None,
+            fingerprint: None,
+        };
+
+        let error = store
+            .add_tournament_player_with_spec(tid, "carol", 2, &launch_spec)
+            .expect_err("recipe identity must match its participant row");
+        assert!(matches!(
+            error,
+            AddTournamentPlayerError::LaunchSpecPlayerMismatch {
+                ref player_id,
+                ref launch_spec_player_id,
+            } if player_id == "carol" && launch_spec_player_id == "alice"
+        ));
     }
 
     #[test]
@@ -2139,6 +2313,7 @@ mod tests {
                 game_config_id: cid,
                 tournament_seed: 7,
                 methodology: None,
+                interpretation: None,
             })
             .unwrap();
         // The named row round-trips through get_tournament and list_tournaments.
@@ -2166,6 +2341,7 @@ mod tests {
             game_config_id: cid,
             tournament_seed: seed,
             methodology: None,
+            interpretation: None,
         }) {
             Err(CreateTournamentError::SeedOutOfRange { seed: got }) => {
                 assert_eq!(got, seed);
@@ -2521,6 +2697,7 @@ mod tests {
                 game_config_id: cid,
                 tournament_seed: 0,
                 methodology: None,
+                interpretation: None,
             })
             .unwrap();
         store.add_tournament_player(tid, "alice", 0).unwrap();
@@ -2597,6 +2774,7 @@ mod tests {
                 game_config_id: cid.clone(),
                 tournament_seed: 0xDEAD_BEEF,
                 methodology: None,
+                interpretation: None,
             })
             .unwrap();
         store.add_tournament_player(other, "alice", 0).unwrap();

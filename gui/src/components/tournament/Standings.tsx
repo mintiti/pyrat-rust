@@ -3,7 +3,6 @@ import { IconAlertTriangle, IconChevronRight } from "@tabler/icons-react";
 import type { StandingRow } from "../../bindings/generated";
 import type { TournamentLive } from "../../stores/tournamentStore";
 import {
-	MIN_GAMES_FOR_RATING,
 	botFailures,
 	failureBreakdown,
 	resultFor,
@@ -12,8 +11,6 @@ import {
 } from "../../stores/tournamentStore";
 import PressableSurface from "./PressableSurface";
 import { T, pairKey, shortId } from "./theme";
-
-const ANCHOR_ELO = 1000;
 
 type RatedStanding = StandingRow & {
 	elo: number;
@@ -37,11 +34,15 @@ function hasRating(row: StandingRow): row is RatedStanding {
 export default function Standings({ live }: { live: TournamentLive }) {
 	const navigate = useTournamentStore((s) => s.navigate);
 	const rows = sortedStandings(live.standings);
+	const anchorElo = live.provenance?.interpretation.anchor_elo ?? null;
+	const minimumGames =
+		live.provenance?.interpretation.min_games_per_player ?? null;
+	const axisCenter = anchorElo ?? rows.find(hasRating)?.elo ?? 0;
 
 	// Shared axis from the rated rows' CI range, always including the anchor.
 	const rated = rows.filter(hasRating);
-	let min = ANCHOR_ELO - 80;
-	let max = ANCHOR_ELO + 80;
+	let min = axisCenter - 80;
+	let max = axisCenter + 80;
 	for (const r of rated) {
 		min = Math.min(min, r.elo_ci_low);
 		max = Math.max(max, r.elo_ci_high);
@@ -73,16 +74,18 @@ export default function Standings({ live }: { live: TournamentLive }) {
 					const clickable = !isTarget;
 					const health = healthSummary(live, r.player_id);
 					const standingEvidence = !rated
-						? live.status === "running"
-							? `${r.games} of ${MIN_GAMES_FOR_RATING} games completed; rating appears at ${MIN_GAMES_FOR_RATING}`
-							: `not rated; ${r.games} of ${MIN_GAMES_FOR_RATING} games completed; ${MIN_GAMES_FOR_RATING} required`
+						? minimumGames === null
+							? `not rated; ${live.ratingReason ?? "rating interpretation was not recorded"}`
+							: live.status === "running"
+								? `${r.games} of ${minimumGames} games completed; rating appears at ${minimumGames}`
+								: `not rated; ${r.games} of ${minimumGames} games completed; ${minimumGames} required`
 						: `rank ${i + 1}, Elo ${Math.round(r.elo)} plus or minus ${Math.round((r.elo_ci_high - r.elo_ci_low) / 2)}`;
 					const form = live.target
 						? gauntletForm(live, r.player_id)
 								.map(({ result }) => result)
 								.join(", ")
 						: "";
-					const accessibleEvidence = `${shortId(r.player_id)}, ${standingEvidence}${form ? `. Recent form: ${form}` : ""}${health ? `. ${health}` : ""}`;
+					const accessibleEvidence = `${shortId(r.player_id, live.players)}, ${standingEvidence}${form ? `. Recent form: ${form}` : ""}${health ? `. ${health}` : ""}`;
 					const row = (
 						<Group wrap="nowrap" gap="sm" px="sm" py={7}>
 							<Text size="xs" c="dimmed" w={20} ta="right" ff="monospace">
@@ -95,7 +98,7 @@ export default function Standings({ live }: { live: TournamentLive }) {
 								w={150}
 								truncate
 							>
-								{shortId(r.player_id)}
+								{shortId(r.player_id, live.players)}
 							</Text>
 
 							{/* Fixed-width health slot — kept constant so the bars
@@ -106,15 +109,17 @@ export default function Standings({ live }: { live: TournamentLive }) {
 
 							{/* bar + whisker track */}
 							<Box pos="relative" style={{ flex: 1, height: 18 }}>
-								<Box
-									pos="absolute"
-									top={0}
-									bottom={0}
-									style={{
-										left: `${pct(ANCHOR_ELO)}%`,
-										borderLeft: "1px dashed #4a4e5c",
-									}}
-								/>
+								{anchorElo !== null && (
+									<Box
+										pos="absolute"
+										top={0}
+										bottom={0}
+										style={{
+											left: `${pct(anchorElo)}%`,
+											borderLeft: "1px dashed #4a4e5c",
+										}}
+									/>
+								)}
 								{rated && (
 									<>
 										<Box
@@ -135,9 +140,11 @@ export default function Standings({ live }: { live: TournamentLive }) {
 
 							<Text size="xs" ff="monospace" w={104} ta="right">
 								{!rated
-									? live.status === "running"
-										? `${r.games}/${MIN_GAMES_FOR_RATING} to rating`
-										: `${r.games}/${MIN_GAMES_FOR_RATING} · not rated`
+									? minimumGames === null
+										? "not rated"
+										: live.status === "running"
+											? `${r.games}/${minimumGames} to rating`
+											: `${r.games}/${minimumGames} · not rated`
 									: `${Math.round(r.elo)} ±${Math.round((r.elo_ci_high - r.elo_ci_low) / 2)}`}
 							</Text>
 							<Box w={72} style={{ textAlign: "right" }}>
@@ -170,8 +177,8 @@ export default function Standings({ live }: { live: TournamentLive }) {
 						);
 					}
 					const destination = live.target
-						? `View ${shortId(live.target)} versus ${shortId(r.player_id)}`
-						: `View ${shortId(r.player_id)} matchups`;
+						? `View ${shortId(live.target, live.players)} versus ${shortId(r.player_id, live.players)}`
+						: `View ${shortId(r.player_id, live.players)} matchups`;
 					return (
 						<PressableSurface
 							key={r.player_id}
@@ -186,8 +193,9 @@ export default function Standings({ live }: { live: TournamentLive }) {
 				})}
 			</div>
 			<Text size="xs" c="dimmed" mt="xs">
-				Elo estimate · uncertainty range · anchor: {shortId(live.anchorId)} =
-				1000 (dashed)
+				{live.anchorId !== null && anchorElo !== null
+					? `Elo estimate · 95% range for player − anchor · anchor: ${shortId(live.anchorId, live.players)} = ${anchorElo} (dashed)`
+					: "Elo unavailable · saved rating interpretation was not recorded"}
 			</Text>
 		</Box>
 	);

@@ -197,6 +197,7 @@ mod tests {
                 game_config_id: game_config_id.clone(),
                 tournament_seed: 0,
                 methodology: None,
+                interpretation: None,
             })
             .unwrap();
         store.add_tournament_player(tid, "a", 0).unwrap();

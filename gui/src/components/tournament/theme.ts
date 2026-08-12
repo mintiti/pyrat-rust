@@ -21,7 +21,16 @@ export function pairKey(a: string, b: string): string {
 	return a <= b ? `${a}|${b}` : `${b}|${a}`;
 }
 
-/** Strip a namespace from an agent id for compact display ("pyrat/greedy" → "greedy"). */
-export function shortId(id: string): string {
-	return id.split("/").pop() ?? id;
+/**
+ * Strip a namespace when the suffix still identifies exactly one participant.
+ * Namespace-colliding ids stay fully qualified so the GUI never merges two
+ * competitors into the same visible label.
+ */
+export function shortId(id: string, peers: readonly string[] = []): string {
+	const suffix = id.split("/").pop() ?? id;
+	return peers.some(
+		(peer) => peer !== id && (peer.split("/").pop() ?? peer) === suffix,
+	)
+		? id
+		: suffix;
 }

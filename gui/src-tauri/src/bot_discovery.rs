@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use specta::Type;
 use tracing::warn;
 use walkdir::WalkDir;
@@ -23,6 +24,11 @@ pub struct DiscoveredBot {
     pub developer: String,
     pub language: String,
     pub tags: Vec<String>,
+    /// Optional version declared by the manifest author.
+    pub declared_version: Option<String>,
+    /// SHA-256 of the exact `bot.toml` bytes. This identifies the manifest,
+    /// not the mutable source tree or compiled executable.
+    pub manifest_sha256: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -41,6 +47,8 @@ struct Settings {
     name: String,
     agent_id: String,
     run_command: String,
+    #[serde(default)]
+    version: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -102,6 +110,7 @@ fn parse_bot_toml(path: &Path) -> Option<DiscoveredBot> {
         .parent()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default();
+    let declared_version = s.version.clone();
 
     Some(DiscoveredBot {
         agent_id: s.agent_id.clone(),
@@ -112,6 +121,8 @@ fn parse_bot_toml(path: &Path) -> Option<DiscoveredBot> {
         developer: manifest.details.developer,
         language: manifest.details.language,
         tags: manifest.details.tags,
+        declared_version,
+        manifest_sha256: format!("{:x}", Sha256::digest(contents.as_bytes())),
     })
 }
 

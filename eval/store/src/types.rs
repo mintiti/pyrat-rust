@@ -227,6 +227,79 @@ pub struct TournamentMethodology {
     pub max_parallel: u32,
 }
 
+/// Which game instances repeated schedule legs share.
+///
+/// This interpretation matters independently of the seat policy: a paired
+/// schedule can either replay the same maze with swapped seats or draw two
+/// unrelated mazes. Persisting the policy prevents a later planner default
+/// from silently changing what a historical row means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TournamentInstancePolicy {
+    IndependentPerSlot,
+    SharedMazePerSeatPair,
+}
+
+/// Statistical interpretation fixed when a tournament is created.
+///
+/// Ratings can always be recomputed from attempts, but the choices that give
+/// those numbers meaning (anchor, prior, draw policy, estimator version, and
+/// uncertainty contract) must not be re-derived from current defaults.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TournamentInterpretation {
+    /// Version of the complete tournament interpretation contract encoded by
+    /// this structure, independent of the estimator's algorithm version.
+    pub methodology_version: u32,
+    pub anchor_id: String,
+    pub anchor_elo: f64,
+    pub estimator: String,
+    pub estimator_version: u32,
+    pub draw_weight: f64,
+    pub prior_games: f64,
+    pub max_iterations: u32,
+    pub tolerance: f64,
+    /// Successful games required for every participant before the GUI calls
+    /// the pool rateable.
+    pub min_games_per_player: u32,
+    /// Human- and machine-readable contract for the displayed interval.
+    pub uncertainty: String,
+    pub instance_policy: TournamentInstancePolicy,
+}
+
+/// How participant options were selected for this tournament.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum TournamentOptionAssignment {
+    Defaults,
+    Explicit { values: Vec<(String, String)> },
+}
+
+/// A useful identity signal with an honest scope. For example, a hash of
+/// `bot.toml` identifies the launch manifest, not the compiled executable or
+/// every mutable source file under the working directory.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TournamentParticipantFingerprint {
+    pub kind: String,
+    pub value: String,
+}
+
+/// Tournament-scoped participant identity and launch recipe.
+///
+/// This deliberately lives on `tournament_players`, not the global player
+/// row: a command, working directory, version, or manifest can change between
+/// tournaments while the stable player id stays the same.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TournamentParticipantLaunchSpec {
+    pub player_id: String,
+    pub agent_id: String,
+    pub display_name: String,
+    pub command: Option<String>,
+    pub working_dir: Option<String>,
+    pub options: TournamentOptionAssignment,
+    pub declared_version: Option<String>,
+    pub fingerprint: Option<TournamentParticipantFingerprint>,
+}
+
 /// Durable lifecycle of one tournament row. `LegacyUnknown` is an honest
 /// migration state, not an inferred partial run: pre-migration attempts do
 /// not reveal whether the process completed, was stopped, or crashed.
@@ -363,6 +436,10 @@ pub struct TournamentRecord {
     /// Exact execution conditions for current rows. `None` means the row
     /// predates durable methodology; callers must present that as unknown.
     pub methodology: Option<TournamentMethodology>,
+    /// Statistical/methodological interpretation for current rows. `None`
+    /// means the row predates durable provenance; readers must not substitute
+    /// today's defaults.
+    pub interpretation: Option<TournamentInterpretation>,
     pub lifecycle: TournamentLifecycle,
     pub started_at: Option<String>,
     pub terminal_at: Option<String>,
@@ -394,6 +471,9 @@ pub struct NewTournament {
     /// Exact execution conditions. `None` is retained only for compatibility
     /// callers and legacy fixtures that genuinely do not know them.
     pub methodology: Option<TournamentMethodology>,
+    /// Exact rating and instance interpretation. `None` is retained only for
+    /// legacy/compatibility writers that genuinely do not know it.
+    pub interpretation: Option<TournamentInterpretation>,
 }
 
 #[derive(Debug, Clone)]
@@ -401,6 +481,9 @@ pub struct TournamentParticipant {
     pub tournament_id: TournamentId,
     pub player_id: String,
     pub slot: i64,
+    /// Exact tournament-scoped launch recipe. `None` for pre-provenance rows
+    /// and compatibility callers.
+    pub launch_spec: Option<TournamentParticipantLaunchSpec>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -671,6 +754,14 @@ pub enum AddTournamentPlayerError {
     SlotTaken {
         tournament_id: TournamentId,
         slot: i64,
+    },
+
+    /// The tournament-scoped recipe must identify the same player as the row
+    /// it is attached to; otherwise readers would get two competing ids.
+    #[error("launch recipe player {launch_spec_player_id} does not match participant {player_id}")]
+    LaunchSpecPlayerMismatch {
+        player_id: String,
+        launch_spec_player_id: String,
     },
 }
 
