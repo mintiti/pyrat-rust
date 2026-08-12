@@ -227,6 +227,121 @@ pub struct TournamentMethodology {
     pub max_parallel: u32,
 }
 
+/// Durable lifecycle of one tournament row. `LegacyUnknown` is an honest
+/// migration state, not an inferred partial run: pre-migration attempts do
+/// not reveal whether the process completed, was stopped, or crashed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TournamentLifecycle {
+    LegacyUnknown,
+    Preparing,
+    Running,
+    Completed,
+    Stopped,
+    Failed,
+}
+
+impl TournamentLifecycle {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::LegacyUnknown => "legacy_unknown",
+            Self::Preparing => "preparing",
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::Stopped => "stopped",
+            Self::Failed => "failed",
+        }
+    }
+
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "legacy_unknown" => Some(Self::LegacyUnknown),
+            "preparing" => Some(Self::Preparing),
+            "running" => Some(Self::Running),
+            "completed" => Some(Self::Completed),
+            "stopped" => Some(Self::Stopped),
+            "failed" => Some(Self::Failed),
+            _ => None,
+        }
+    }
+}
+
+/// Why a terminal tournament stopped changing. Completion quality is kept
+/// separate from rating readiness: a schedule may finish with exhausted
+/// slots and may still be statistically unusable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TournamentTerminalKind {
+    Completed,
+    CompletedWithFailures,
+    UserStopped,
+    InfrastructureFailure,
+}
+
+impl TournamentTerminalKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Completed => "completed",
+            Self::CompletedWithFailures => "completed_with_failures",
+            Self::UserStopped => "user_stopped",
+            Self::InfrastructureFailure => "infrastructure_failure",
+        }
+    }
+
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "completed" => Some(Self::Completed),
+            "completed_with_failures" => Some(Self::CompletedWithFailures),
+            "user_stopped" => Some(Self::UserStopped),
+            "infrastructure_failure" => Some(Self::InfrastructureFailure),
+            _ => None,
+        }
+    }
+}
+
+/// Whether the stored evidence can support the rating surface. This is
+/// orthogonal to lifecycle and schedule completion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TournamentRatingStatus {
+    LegacyUnknown,
+    Provisional,
+    Rateable,
+    InsufficientGames,
+    DisconnectedGraph,
+    EstimatorFailed,
+}
+
+impl TournamentRatingStatus {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::LegacyUnknown => "legacy_unknown",
+            Self::Provisional => "provisional",
+            Self::Rateable => "rateable",
+            Self::InsufficientGames => "insufficient_games",
+            Self::DisconnectedGraph => "disconnected_graph",
+            Self::EstimatorFailed => "estimator_failed",
+        }
+    }
+
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "legacy_unknown" => Some(Self::LegacyUnknown),
+            "provisional" => Some(Self::Provisional),
+            "rateable" => Some(Self::Rateable),
+            "insufficient_games" => Some(Self::InsufficientGames),
+            "disconnected_graph" => Some(Self::DisconnectedGraph),
+            "estimator_failed" => Some(Self::EstimatorFailed),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TournamentTerminal {
+    pub kind: TournamentTerminalKind,
+    /// Exact human-actionable detail. Completion without failures normally
+    /// has no reason; stopped/failed rows always carry one.
+    pub reason: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct TournamentRecord {
     pub id: TournamentId,
@@ -248,6 +363,12 @@ pub struct TournamentRecord {
     /// Exact execution conditions for current rows. `None` means the row
     /// predates durable methodology; callers must present that as unknown.
     pub methodology: Option<TournamentMethodology>,
+    pub lifecycle: TournamentLifecycle,
+    pub started_at: Option<String>,
+    pub terminal_at: Option<String>,
+    pub terminal: Option<TournamentTerminal>,
+    pub rating_status: TournamentRatingStatus,
+    pub rating_reason: Option<String>,
     pub created_at: String,
 }
 
@@ -286,6 +407,88 @@ pub struct TournamentParticipant {
 pub enum AttemptStatus {
     Success,
     Failure,
+}
+
+/// Stable typed category for a failed attempt. Store-native so the durable
+/// schema does not depend on orchestrator/host crates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttemptFailureKind {
+    Timeout,
+    Disconnected,
+    SpawnFailed,
+    HandshakeTimeout,
+    ProtocolError,
+    Cancelled,
+    Infrastructure,
+    Other,
+}
+
+impl AttemptFailureKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Timeout => "timeout",
+            Self::Disconnected => "disconnected",
+            Self::SpawnFailed => "spawn_failed",
+            Self::HandshakeTimeout => "handshake_timeout",
+            Self::ProtocolError => "protocol_error",
+            Self::Cancelled => "cancelled",
+            Self::Infrastructure => "infrastructure",
+            Self::Other => "other",
+        }
+    }
+
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "timeout" => Some(Self::Timeout),
+            "disconnected" => Some(Self::Disconnected),
+            "spawn_failed" => Some(Self::SpawnFailed),
+            "handshake_timeout" => Some(Self::HandshakeTimeout),
+            "protocol_error" => Some(Self::ProtocolError),
+            "cancelled" => Some(Self::Cancelled),
+            "infrastructure" => Some(Self::Infrastructure),
+            "other" => Some(Self::Other),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AttemptFailurePhase {
+    Setup,
+    Preprocessing,
+    Sync,
+    Move,
+}
+
+impl AttemptFailurePhase {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Setup => "setup",
+            Self::Preprocessing => "preprocessing",
+            Self::Sync => "sync",
+            Self::Move => "move",
+        }
+    }
+
+    pub(crate) fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "setup" => Some(Self::Setup),
+            "preprocessing" => Some(Self::Preprocessing),
+            "sync" => Some(Self::Sync),
+            "move" => Some(Self::Move),
+            _ => None,
+        }
+    }
+}
+
+/// Canonical durable failure report. Slot/repetition/seat live on
+/// [`AttemptKey`]; this carries classification, attribution, and exact text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AttemptFailureReport {
+    pub kind: AttemptFailureKind,
+    pub phase: Option<AttemptFailurePhase>,
+    pub failing_player_id: Option<String>,
+    pub message: String,
 }
 
 impl AttemptStatus {
@@ -351,7 +554,7 @@ pub enum NewAttemptOutcome {
         started_at: String,
     },
     Failure {
-        failure_reason: String,
+        report: AttemptFailureReport,
         /// `None` for spawn-failures (the bot never started). `Some` for
         /// post-start failures (timeout, crash, etc.).
         started_at: Option<String>,
@@ -380,6 +583,10 @@ pub enum AttemptOutcome {
     },
     Failure {
         failure_reason: String,
+        /// `None` only for rows written before migration 8. Current writers
+        /// always persist this report; compatibility readers may parse the
+        /// legacy reason string as a last resort.
+        report: Option<AttemptFailureReport>,
         /// `None` for spawn-failures (the bot never started). `Some` for
         /// post-start failures (timeout, crash, etc.).
         started_at: Option<String>,

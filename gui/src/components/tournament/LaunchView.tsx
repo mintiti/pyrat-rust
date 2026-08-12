@@ -695,22 +695,33 @@ export default function LaunchView() {
 											const running = activeRow
 												? live.status === "running"
 												: tournament.running;
-											const done = activeRow ? live.done : tournament.done;
-											const total = activeRow ? live.total : tournament.total;
+											const done = activeRow
+												? live.done
+												: tournament.progress.terminal_slots;
+											const total = activeRow
+												? live.total
+												: tournament.progress.planned_slots;
 											const complete = activeRow
 												? live.status === "finished" && done >= total
-												: tournament.finished && done >= total;
+												: tournament.lifecycle === "completed" && done >= total;
 											const status = running
 												? `running ${done}/${total}`
 												: complete
-													? "finished"
-													: `partial ${done}/${total}`;
+													? tournament.terminal?.outcome ===
+														"completed_with_failures"
+														? "finished with failures"
+														: "finished"
+													: tournament.lifecycle === "stopped"
+														? `stopped ${done}/${total}`
+														: tournament.lifecycle === "failed"
+															? `failed ${done}/${total}`
+															: `status unknown ${done}/${total}`;
 											return (
 												<PressableSurface
 													key={tournament.id}
 													disabled={openingTournamentId === tournament.id}
 													onClick={() => void openTournament(tournament)}
-													aria-label={`Open ${tournament.name ?? `tournament ${tournament.id}`}, ${status}, ${done} of ${total} games`}
+													aria-label={`Open ${tournament.name ?? `tournament ${tournament.id}`}, ${status}, ${done} of ${total} schedule slots`}
 												>
 													<Group gap="xs" wrap="nowrap" px="xs" py={7}>
 														<Text size="sm" truncate>

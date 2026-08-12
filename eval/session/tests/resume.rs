@@ -10,7 +10,10 @@ use pyrat_eval::{
     mapping::synthetic_attempt, matchup_seed, EvalSession, MatchupKey, MatchupOutcome, Planner,
     SessionConfig, SessionMode, TournamentParams, TournamentSpec, TournamentState,
 };
-use pyrat_eval_store::{EloOptions, EvalStore, NewAttemptOutcome, NewPlayer, NewTournament};
+use pyrat_eval_store::{
+    AttemptFailureKind, AttemptFailureReport, EloOptions, EvalStore, NewAttemptOutcome, NewPlayer,
+    NewTournament,
+};
 use pyrat_orchestrator::MatchIdAllocator;
 
 use crate::common::{
@@ -197,7 +200,12 @@ async fn resume_retries_durably_failed_matchup_at_next_attempt_index() {
         0,
         "1970-01-01 00:01:00",
         NewAttemptOutcome::Failure {
-            failure_reason: "spawn_failed".into(),
+            report: AttemptFailureReport {
+                kind: AttemptFailureKind::SpawnFailed,
+                phase: None,
+                failing_player_id: None,
+                message: "spawn_failed".into(),
+            },
             started_at: None,
         },
     );

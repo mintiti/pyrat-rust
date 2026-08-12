@@ -62,7 +62,8 @@ export function useTournamentEvents() {
 				onStandings(e.payload);
 				if (
 					detailCount(e.payload.tournament_id) <
-					e.payload.success + e.payload.failure
+					e.payload.progress.successful_games +
+						e.payload.progress.failed_attempts
 				) {
 					void reconcile(e.payload.tournament_id);
 				}
@@ -76,11 +77,11 @@ export function useTournamentEvents() {
 			),
 			events.nowPlayingEvent.listen((e) => onNowPlaying(e.payload)),
 			events.tournamentFinishedEvent.listen((e) => {
-				onFinished(e.payload.tournament_id);
+				onFinished(e.payload);
 				void reconcile(e.payload.tournament_id);
 			}),
 			events.tournamentAbortedEvent.listen((e) => {
-				onAborted(e.payload.tournament_id, e.payload.reason);
+				onAborted(e.payload);
 				void reconcile(e.payload.tournament_id);
 			}),
 		];

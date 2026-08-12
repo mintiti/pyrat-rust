@@ -13,22 +13,23 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use parking_lot::Mutex;
 use pyrat::game::builder::GameConfig;
 use pyrat_eval::{
-    failure_reason_string, gauntlet_slot_order, split_gauntlet_players, EvalMatchDescriptor,
-    EvalSession, GauntletPlanner, GauntletPlannerConfig, MatchupKey, MatchupOutcome, Planner,
-    ResolvedPlayer, RoundRobinPlanner, RoundRobinPlannerConfig, SeatPolicy, SessionConfig,
-    SessionEvent, SessionMode, TournamentState,
+    failure_report, format_sqlite_datetime, gauntlet_slot_order, split_gauntlet_players,
+    EvalMatchDescriptor, EvalSession, GauntletPlanner, GauntletPlannerConfig, MatchupKey,
+    MatchupOutcome, Planner, ResolvedPlayer, RoundRobinPlanner, RoundRobinPlannerConfig,
+    SeatPolicy, SessionConfig, SessionEvent, SessionMode, TournamentState,
 };
-use pyrat_eval_store::{compute_elo_with_uncertainty, EloOptions, EvalStore, TournamentId};
+use pyrat_eval_store::{
+    compute_elo_with_uncertainty, EloError, EloOptions, EvalStore, TournamentId,
+    TournamentLifecycle, TournamentRatingStatus, TournamentTerminal, TournamentTerminalKind,
+};
 use pyrat_host::match_host::MatchEvent;
-use pyrat_host::wire::Player as PlayerSlot;
 use pyrat_orchestrator::{
-    DirectoryWriter, FailureReason, MatchSink, OrchestratorConfig, OrchestratorEvent, ReplaySink,
-    SinkRole, TimeoutPhase as CoreTimeoutPhase, Timing,
+    DirectoryWriter, MatchSink, OrchestratorConfig, OrchestratorEvent, ReplaySink, SinkRole, Timing,
 };
 use tauri::AppHandle;
 use tauri_specta::Event;
@@ -38,9 +39,10 @@ use tracing::warn;
 
 use crate::tournament_config;
 use crate::tournament_events::{
-    FailureKind, NowPlayingEvent, StandingRow, StandingsUpdatedEvent, TimeoutPhase,
-    TournamentAbortedEvent, TournamentFinishedEvent, TournamentMatchFailedEvent,
-    TournamentMatchFinishedEvent, TournamentMatchStartedEvent, TournamentStartedEvent,
+    NowPlayingEvent, RatingReadiness, StandingRow, StandingsUpdatedEvent, TimeoutPhase,
+    TournamentAbortedEvent, TournamentFinishedEvent, TournamentLifecycleStatus,
+    TournamentMatchFailedEvent, TournamentMatchFinishedEvent, TournamentMatchStartedEvent,
+    TournamentProgress, TournamentStartedEvent, TournamentTerminalState,
 };
 
 /// Below this many games a non-anchor player's Elo is too noisy to show.
@@ -168,6 +170,7 @@ pub async fn run_tournament(
     let planner = match planner_result {
         Ok(planner) => planner,
         Err(reason) => {
+            let _ = persist_failed(&store, tournament_id, &reason);
             if let Some(signal) = startup.take() {
                 let _ = signal.send(Err(reason.clone()));
             }
@@ -193,7 +196,7 @@ pub async fn run_tournament(
 
     // 4. Start the session.
     let session = match EvalSession::start_with_extra_sinks(
-        store,
+        store.clone(),
         SessionMode { tournament_id },
         planner,
         orchestrator_config,
@@ -206,12 +209,17 @@ pub async fn run_tournament(
         Ok(session) => session,
         Err(error) => {
             let reason = format!("start session: {error}");
+            let _ = persist_failed(&store, tournament_id, &reason);
             if let Some(signal) = startup.take() {
                 let _ = signal.send(Err(reason.clone()));
             }
             return Err(reason);
         },
     };
+
+    persist_running(&store, tournament_id).inspect_err(|reason| {
+        let _ = persist_failed(&store, tournament_id, reason);
+    })?;
 
     // 5. Subscribe: lossless lifecycle (snapshot + tail), the state watch, and
     //    the lossy per-turn stream for now-playing.
@@ -263,10 +271,68 @@ pub async fn run_tournament(
         tokio::select! {
             biased;
             _ = cancel.cancelled() => {
-                let _ = session.shutdown().await;
+                let shutdown = session.shutdown().await;
+                if shutdown.is_ok() {
+                    let state = state_rx.borrow().clone();
+                    let progress = state
+                        .execution_summary(
+                            total_games,
+                            tournament_config::MAX_FAILURES_PER_PAIR,
+                        )
+                        .map_err(|error| format!("terminal progress: {error}"))?;
+                    if progress.terminal_slots == progress.planned_slots {
+                        let (terminal_kind, terminal_reason, rating_status, rating_reason) =
+                            completion_truth(&state, &progress, &elo_options, &player_ids);
+                        let terminal = persist_terminal(
+                            &store,
+                            tournament_id,
+                            TournamentLifecycle::Completed,
+                            terminal_kind,
+                            terminal_reason,
+                            rating_status,
+                            rating_reason,
+                        )?;
+                        let _ = TournamentFinishedEvent {
+                            tournament_id: tournament_id.0,
+                            terminal,
+                            rating_readiness: rating_status.into(),
+                        }
+                        .emit(&app);
+                        return Ok(());
+                    }
+                }
+                let (lifecycle, lifecycle_event, terminal_kind, reason, rating_reason) =
+                    match shutdown {
+                        Ok(()) => (
+                            TournamentLifecycle::Stopped,
+                            TournamentLifecycleStatus::Stopped,
+                            TournamentTerminalKind::UserStopped,
+                            "stopped by user".to_string(),
+                            "schedule stopped before completion".to_string(),
+                        ),
+                        Err(error) => (
+                            TournamentLifecycle::Failed,
+                            TournamentLifecycleStatus::Failed,
+                            TournamentTerminalKind::InfrastructureFailure,
+                            format!("tournament shutdown failed: {error}"),
+                            "schedule ended during a failed shutdown".to_string(),
+                        ),
+                    };
+                let terminal = persist_terminal(
+                    &store,
+                    tournament_id,
+                    lifecycle,
+                    terminal_kind,
+                    Some(reason.clone()),
+                    TournamentRatingStatus::Provisional,
+                    Some(rating_reason),
+                )?;
                 let _ = TournamentAbortedEvent {
                     tournament_id: tournament_id.0,
-                    reason: "stopped".into(),
+                    lifecycle: lifecycle_event,
+                    reason,
+                    terminal,
+                    rating_readiness: RatingReadiness::Provisional,
                 }
                 .emit(&app);
                 return Ok(());
@@ -281,11 +347,10 @@ pub async fn run_tournament(
                         emit_standings(&app, tournament_id.0, &state, &elo_options, &player_ids,
                                        &anchor_id, total_games);
                     }
-                    Ok(SessionEvent::MatchFailed { descriptor, reason, .. }) => {
+                    Ok(SessionEvent::MatchFailed { descriptor, durable_record, reason }) => {
                         now_playing.remove(&descriptor.match_id.0);
                         orientation_by_match.remove(&descriptor.match_id.0);
-                        let failing_player_id = implicated_player_id(&descriptor, &reason);
-                        let (kind, timeout_phase) = failure_kind_for_wire(&reason);
+                        let report = failure_report(&descriptor, &reason);
                         // Tell the frontend to drop the now-playing row (a failed
                         // match emits no scored event, so its live row would
                         // otherwise freeze) and accumulate per-bot health.
@@ -295,11 +360,16 @@ pub async fn run_tournament(
                             player1_id: descriptor.player1_id.clone(),
                             player2_id: descriptor.player2_id.clone(),
                             repetition_index: descriptor.repetition_index,
+                            attempt_index: descriptor.attempt_index,
                             rat_id: rat_id(&descriptor),
-                            failing_player_id,
-                            kind,
-                            timeout_phase,
-                            reason: failure_reason_string(&reason),
+                            failing_player_id: report.failing_player_id,
+                            kind: report.kind.into(),
+                            timeout_phase: report.phase.map(TimeoutPhase::from),
+                            reason: report.message,
+                            exhausted: durable_record
+                                && tournament_config::MAX_FAILURES_PER_PAIR > 0
+                                && descriptor.attempt_index.saturating_add(1)
+                                    >= tournament_config::MAX_FAILURES_PER_PAIR,
                         }
                         .emit(&app);
                         let state = state_rx.borrow().clone();
@@ -307,19 +377,106 @@ pub async fn run_tournament(
                                        &anchor_id, total_games);
                     }
                     Ok(SessionEvent::TournamentFinished) => {
-                        let _ = TournamentFinishedEvent { tournament_id: tournament_id.0 }.emit(&app);
-                        break;
+                        let state = state_rx.borrow().clone();
+                        let progress = state
+                            .execution_summary(
+                                total_games,
+                                tournament_config::MAX_FAILURES_PER_PAIR,
+                            )
+                            .map_err(|error| format!("terminal progress: {error}"))?;
+                        if progress.terminal_slots != progress.planned_slots {
+                            let reason = format!(
+                                "session reported completion with {}/{} terminal schedule slots",
+                                progress.terminal_slots, progress.planned_slots
+                            );
+                            let terminal = persist_failed(&store, tournament_id, &reason)?;
+                            let _ = TournamentAbortedEvent {
+                                tournament_id: tournament_id.0,
+                                lifecycle: TournamentLifecycleStatus::Failed,
+                                reason: reason.clone(),
+                                terminal,
+                                rating_readiness: RatingReadiness::Provisional,
+                            }
+                            .emit(&app);
+                            return Err(reason);
+                        }
+                        let (terminal_kind, terminal_reason, rating_status, rating_reason) =
+                            completion_truth(&state, &progress, &elo_options, &player_ids);
+                        if let Err(error) = session.join().await {
+                            let reason = format!("session failed after reporting completion: {error}");
+                            let terminal = persist_failed(&store, tournament_id, &reason)?;
+                            let _ = TournamentAbortedEvent {
+                                tournament_id: tournament_id.0,
+                                lifecycle: TournamentLifecycleStatus::Failed,
+                                reason: reason.clone(),
+                                terminal,
+                                rating_readiness: RatingReadiness::Provisional,
+                            }
+                            .emit(&app);
+                            return Err(reason);
+                        }
+                        let terminal = persist_terminal(
+                            &store,
+                            tournament_id,
+                            TournamentLifecycle::Completed,
+                            terminal_kind,
+                            terminal_reason,
+                            rating_status,
+                            rating_reason,
+                        )?;
+                        let _ = TournamentFinishedEvent {
+                            tournament_id: tournament_id.0,
+                            terminal,
+                            rating_readiness: rating_status.into(),
+                        }
+                        .emit(&app);
+                        return Ok(());
                     }
                     Ok(SessionEvent::TournamentAborted { reason }) => {
-                        let _ = TournamentAbortedEvent { tournament_id: tournament_id.0, reason }
-                            .emit(&app);
-                        break;
+                        let terminal = persist_terminal(
+                            &store,
+                            tournament_id,
+                            TournamentLifecycle::Failed,
+                            TournamentTerminalKind::InfrastructureFailure,
+                            Some(reason.clone()),
+                            TournamentRatingStatus::Provisional,
+                            Some("schedule ended before completion".into()),
+                        )?;
+                        let _ = TournamentAbortedEvent {
+                            tournament_id: tournament_id.0,
+                            lifecycle: TournamentLifecycleStatus::Failed,
+                            reason,
+                            terminal,
+                            rating_readiness: RatingReadiness::Provisional,
+                        }
+                        .emit(&app);
+                        return session.join().await.map_err(|e| format!("session join: {e}"));
                     }
                     Ok(_) => {}
                     Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                         warn!(skipped = n, "tournament session events lagged");
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                        let reason = "tournament session event channel closed before a terminal event".to_string();
+                        let terminal = persist_terminal(
+                            &store,
+                            tournament_id,
+                            TournamentLifecycle::Failed,
+                            TournamentTerminalKind::InfrastructureFailure,
+                            Some(reason.clone()),
+                            TournamentRatingStatus::Provisional,
+                            Some("schedule ended before completion".into()),
+                        )?;
+                        let _ = TournamentAbortedEvent {
+                            tournament_id: tournament_id.0,
+                            lifecycle: TournamentLifecycleStatus::Failed,
+                            reason: reason.clone(),
+                            terminal,
+                            rating_readiness: RatingReadiness::Provisional,
+                        }
+                        .emit(&app);
+                        return Err(reason);
+                    },
                 }
             }
             live_recv = live.recv(), if live_open => {
@@ -373,66 +530,10 @@ pub async fn run_tournament(
             }
         }
     }
-
-    session
-        .join()
-        .await
-        .map_err(|e| format!("session join: {e}"))
 }
 
-/// Resolve the bot a failure points at (a timeout or clean disconnect) from the
-/// engine seat. The `MatchError` slot is an *engine seat*;
-/// `descriptor.orientation` records which canonical id sat there, and
-/// `SeatOrientation::canonicalize` is its own inverse (identity or a 2-swap), so
-/// applying it to the canonical ids yields the seat assignment to index by slot.
-/// `None` for failures with no single seat (spawn, sink, internal). This is the
-/// load-bearing attribution step behind the per-bot health marker — get it wrong
-/// and a flipped-seat timeout accuses the wrong bot, hence the table test.
-fn implicated_player_id(
-    descriptor: &EvalMatchDescriptor,
-    reason: &FailureReason,
-) -> Option<String> {
-    let slot = reason.implicated_slot()?;
-    let (seat0_id, seat1_id) = descriptor
-        .orientation
-        .canonicalize(descriptor.player1_id.clone(), descriptor.player2_id.clone());
-    Some(if slot == PlayerSlot::Player1 {
-        seat0_id
-    } else {
-        seat1_id
-    })
-}
-
-/// Map a `FailureReason` to the wire failure kind and, for timeouts, the
-/// phase. Payload strings are dropped (the implicated bot rides
-/// `failing_player_id`); `FailureReason` is `#[non_exhaustive]`, so the
-/// catch-all also covers panic / sink / internal failures as `Other`.
-fn failure_kind_for_wire(reason: &FailureReason) -> (FailureKind, Option<TimeoutPhase>) {
-    match reason {
-        FailureReason::Timeout { phase, .. } => {
-            let phase = match phase {
-                CoreTimeoutPhase::Setup => TimeoutPhase::Setup,
-                CoreTimeoutPhase::Preprocessing => TimeoutPhase::Preprocessing,
-                CoreTimeoutPhase::Sync => TimeoutPhase::Sync,
-                CoreTimeoutPhase::Move => TimeoutPhase::Move,
-            };
-            (FailureKind::Timeout, Some(phase))
-        },
-        FailureReason::Disconnected(_) => (FailureKind::Disconnected, None),
-        FailureReason::SpawnFailed => (FailureKind::SpawnFailed, None),
-        FailureReason::HandshakeTimeout => (FailureKind::HandshakeTimeout, None),
-        FailureReason::ProtocolError(_) => (FailureKind::ProtocolError, None),
-        FailureReason::Cancelled => (FailureKind::Cancelled, None),
-        // Infra failures — not the bot's fault; surface as a distinct kind.
-        FailureReason::Panic | FailureReason::SinkFlushError(_) | FailureReason::Internal(_) => {
-            (FailureKind::Internal, None)
-        },
-        // `FailureReason` is `#[non_exhaustive]`; only genuinely-future variants
-        // land here.
-        _ => (FailureKind::Other, None),
-    }
-}
-
+/// Emit the successful scored attempt from canonical state. Failure
+/// classification and seat attribution are handled by `failure_report`.
 fn emit_match_finished(
     app: &AppHandle,
     tid: i64,
@@ -497,23 +598,17 @@ fn emit_standings(
     anchor_id: &str,
     total: u32,
 ) {
-    let (mut success, mut failure) = (0u32, 0u32);
-    for attempts in state.history.values() {
-        for a in attempts {
-            match a.outcome {
-                MatchupOutcome::Success { .. } => success += 1,
-                MatchupOutcome::Failure => failure += 1,
-            }
-        }
-    }
-
     let standings = build_standings(state, elo_options, player_ids, anchor_id);
+    let progress = match state.execution_summary(total, tournament_config::MAX_FAILURES_PER_PAIR) {
+        Ok(progress) => TournamentProgress::from(progress),
+        Err(error) => {
+            warn!(error = %error, "could not project tournament progress");
+            return;
+        },
+    };
     let _ = StandingsUpdatedEvent {
         tournament_id: tid,
-        done: success,
-        total,
-        success,
-        failure,
+        progress,
         standings,
     }
     .emit(app);
@@ -522,7 +617,8 @@ fn emit_standings(
 /// Build standings rows for every player. Elo + CI come from
 /// `compute_elo_with_uncertainty` (the same math as the CLI); players with too
 /// few games, or absent from the Elo result (disconnected early), are
-/// `pending`. The anchor is never pending.
+/// `pending`. Even the anchor stays pending when no estimate exists; there is
+/// no numeric placeholder path.
 pub(crate) fn build_standings(
     state: &TournamentState,
     elo_options: &EloOptions,
@@ -545,24 +641,145 @@ pub(crate) fn build_standings(
                     let half = 1.96 * stderr.unwrap_or(0.0);
                     StandingRow {
                         player_id: id.clone(),
-                        elo,
-                        elo_ci_low: elo - half,
-                        elo_ci_high: elo + half,
+                        elo: Some(elo),
+                        elo_ci_low: stderr.map(|_| elo - half),
+                        elo_ci_high: stderr.map(|_| elo + half),
                         games,
                         pending: !is_anchor && games < MIN_GAMES_FOR_ESTIMATE,
                     }
                 },
                 None => StandingRow {
                     player_id: id.clone(),
-                    elo: 0.0,
-                    elo_ci_low: 0.0,
-                    elo_ci_high: 0.0,
+                    elo: None,
+                    elo_ci_low: None,
+                    elo_ci_high: None,
                     games,
-                    pending: !is_anchor,
+                    pending: true,
                 },
             }
         })
         .collect()
+}
+
+fn persist_running(
+    store: &Arc<Mutex<EvalStore>>,
+    tournament_id: TournamentId,
+) -> Result<(), String> {
+    let started_at = format_sqlite_datetime(SystemTime::now());
+    let changed = store
+        .lock()
+        .mark_tournament_running(tournament_id, &started_at)
+        .map_err(|error| format!("mark tournament running: {error}"))?;
+    if changed {
+        Ok(())
+    } else {
+        Err(format!(
+            "tournament {} could not enter running state",
+            tournament_id.0
+        ))
+    }
+}
+
+pub(crate) fn persist_failed(
+    store: &Arc<Mutex<EvalStore>>,
+    tournament_id: TournamentId,
+    reason: &str,
+) -> Result<TournamentTerminalState, String> {
+    persist_terminal(
+        store,
+        tournament_id,
+        TournamentLifecycle::Failed,
+        TournamentTerminalKind::InfrastructureFailure,
+        Some(reason.to_string()),
+        TournamentRatingStatus::Provisional,
+        Some("schedule did not start or complete".into()),
+    )
+}
+
+fn persist_terminal(
+    store: &Arc<Mutex<EvalStore>>,
+    tournament_id: TournamentId,
+    lifecycle: TournamentLifecycle,
+    kind: TournamentTerminalKind,
+    reason: Option<String>,
+    rating_status: TournamentRatingStatus,
+    rating_reason: Option<String>,
+) -> Result<TournamentTerminalState, String> {
+    let at = format_sqlite_datetime(SystemTime::now());
+    let terminal = TournamentTerminal { kind, reason };
+    let changed = store
+        .lock()
+        .mark_tournament_terminal(
+            tournament_id,
+            &at,
+            lifecycle,
+            &terminal,
+            rating_status,
+            rating_reason.as_deref(),
+        )
+        .map_err(|error| format!("persist tournament terminal state: {error}"))?;
+    if !changed {
+        return Err(format!(
+            "tournament {} rejected terminal transition",
+            tournament_id.0
+        ));
+    }
+    Ok(TournamentTerminalState::from_store(&terminal, at))
+}
+
+fn rating_readiness(
+    state: &TournamentState,
+    elo_options: &EloOptions,
+    player_ids: &[String],
+) -> (TournamentRatingStatus, Option<String>) {
+    if player_ids
+        .iter()
+        .any(|player| games_for(state, player) < MIN_GAMES_FOR_ESTIMATE)
+    {
+        return (
+            TournamentRatingStatus::InsufficientGames,
+            Some(format!(
+                "each player needs at least {MIN_GAMES_FOR_ESTIMATE} successful games"
+            )),
+        );
+    }
+    match compute_elo_with_uncertainty(&state.head_to_head(), elo_options) {
+        Ok(_) => (TournamentRatingStatus::Rateable, None),
+        Err(EloError::DisconnectedGraph) => (
+            TournamentRatingStatus::DisconnectedGraph,
+            Some("successful games do not connect every participant".into()),
+        ),
+        Err(error) => (
+            TournamentRatingStatus::EstimatorFailed,
+            Some(error.to_string()),
+        ),
+    }
+}
+
+fn completion_truth(
+    state: &TournamentState,
+    progress: &pyrat_eval::TournamentExecutionSummary,
+    elo_options: &EloOptions,
+    player_ids: &[String],
+) -> (
+    TournamentTerminalKind,
+    Option<String>,
+    TournamentRatingStatus,
+    Option<String>,
+) {
+    let terminal_kind = if progress.exhausted_slots > 0 {
+        TournamentTerminalKind::CompletedWithFailures
+    } else {
+        TournamentTerminalKind::Completed
+    };
+    let terminal_reason = (progress.exhausted_slots > 0).then(|| {
+        format!(
+            "{} of {} schedule slots exhausted their retry budget",
+            progress.exhausted_slots, progress.planned_slots
+        )
+    });
+    let (rating_status, rating_reason) = rating_readiness(state, elo_options, player_ids);
+    (terminal_kind, terminal_reason, rating_status, rating_reason)
 }
 
 /// Count completed (successful) games involving `player_id`.
@@ -717,7 +934,7 @@ mod tests {
             slot,
             phase: TimeoutPhase::Move,
         };
-        let id = |o, slot| implicated_player_id(&desc(o), &timeout(slot));
+        let id = |o, slot| failure_report(&desc(o), &timeout(slot)).failing_player_id;
 
         // Canonical: engine seat0 = a, seat1 = b.
         assert_eq!(
@@ -739,10 +956,11 @@ mod tests {
         );
         // No implicated slot → no attribution.
         assert_eq!(
-            implicated_player_id(
+            failure_report(
                 &desc(SeatOrientation::Canonical),
-                &FailureReason::SpawnFailed
-            ),
+                &FailureReason::SpawnFailed,
+            )
+            .failing_player_id,
             None
         );
     }
@@ -777,19 +995,57 @@ mod tests {
         for row in &rows {
             let elo = result.get_elo(&row.player_id).unwrap();
             let stderr = unc.stderr(&row.player_id).unwrap();
+            let projected_elo = row.elo.expect("rated row has Elo");
             assert!(
-                (row.elo - elo).abs() < 1e-9,
+                (projected_elo - elo).abs() < 1e-9,
                 "{} elo {} != direct {elo}",
                 row.player_id,
-                row.elo,
+                projected_elo,
             );
             let half = 1.96 * stderr;
-            assert!((row.elo_ci_low - (elo - half)).abs() < 1e-9);
-            assert!((row.elo_ci_high - (elo + half)).abs() < 1e-9);
+            assert!((row.elo_ci_low.expect("rated row has low CI") - (elo - half)).abs() < 1e-9);
+            assert!((row.elo_ci_high.expect("rated row has high CI") - (elo + half)).abs() < 1e-9);
             assert!(!row.pending, "{} should be rated", row.player_id);
         }
         // Anchor pinned at 1000; ordering preserved.
         let greedy = rows.iter().find(|r| r.player_id == "greedy").unwrap();
-        assert!((greedy.elo - 1000.0).abs() < 1e-9);
+        assert!((greedy.elo.expect("anchor has Elo") - 1000.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn completed_two_game_schedule_is_explicitly_insufficient_for_rating() {
+        let players = vec!["alice".to_string(), "bob".to_string()];
+        let mut state = TournamentState::empty(TournamentId(1));
+        push_game(&mut state, "alice", "bob", "cfg", 0, 5.0, 3.0);
+        push_game(&mut state, "alice", "bob", "cfg", 1, 3.0, 5.0);
+
+        let progress = state.execution_summary(2, 1).unwrap();
+        assert_eq!(progress.terminal_slots, 2);
+        assert_eq!(progress.successful_games, 2);
+        let (status, reason) =
+            rating_readiness(&state, &tournament_config::elo_options("alice"), &players);
+        assert_eq!(status, TournamentRatingStatus::InsufficientGames);
+        assert!(reason
+            .as_deref()
+            .is_some_and(|text| text.contains("at least 4 successful games")));
+    }
+
+    #[test]
+    fn unavailable_estimate_projects_nulls_not_zero_placeholders() {
+        let players = vec!["alice".to_string(), "bob".to_string()];
+        let state = TournamentState::empty(TournamentId(1));
+        let rows = build_standings(
+            &state,
+            &tournament_config::elo_options("alice"),
+            &players,
+            "alice",
+        );
+        assert_eq!(rows.len(), 2);
+        assert!(rows.iter().all(|row| {
+            row.elo.is_none()
+                && row.elo_ci_low.is_none()
+                && row.elo_ci_high.is_none()
+                && row.pending
+        }));
     }
 }

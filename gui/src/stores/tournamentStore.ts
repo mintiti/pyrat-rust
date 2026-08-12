@@ -2,9 +2,13 @@ import { create } from "zustand";
 import type {
 	FailureKind,
 	NowPlayingEvent,
+	RatingReadiness,
 	StandingRow,
 	StandingsUpdatedEvent,
 	TimeoutPhase,
+	TournamentAbortedEvent,
+	TournamentFinishedEvent,
+	TournamentLifecycleStatus,
 	TournamentMatchFailedEvent,
 	TournamentMatchFinishedEvent,
 	TournamentMatchStartedEvent,
@@ -52,11 +56,13 @@ export interface MatchFailureRecord {
 	player1Id: string;
 	player2Id: string;
 	repetitionIndex: number;
+	attemptIndex: number;
 	ratId: string;
 	failingPlayerId: string | null;
 	kind: FailureKind;
 	timeoutPhase: TimeoutPhase | null;
 	reason: string;
+	exhausted: boolean;
 }
 
 /** A match currently in flight (for the now-playing line + live row). */
@@ -87,6 +93,10 @@ export interface TournamentLive {
 	planSummary: string;
 	players: string[];
 	status: TournamentStatus;
+	lifecycle: TournamentLifecycleStatus;
+	terminalOutcome: TournamentFinishedEvent["terminal"]["outcome"] | null;
+	ratingReadiness: RatingReadiness;
+	ratingReason: string | null;
 	abortReason: string | null;
 	done: number;
 	total: number;
@@ -100,6 +110,8 @@ export interface TournamentLive {
 	maxParallel: number | null;
 	success: number;
 	failure: number;
+	exhausted: number;
+	runningMatches: number;
 	standings: StandingRow[];
 	/** Finished games keyed by canonical pair key. */
 	gamesByPair: Record<string, FinishedGame[]>;
@@ -161,8 +173,8 @@ interface TournamentStore {
 	onMatchFailed: (e: TournamentMatchFailedEvent) => void;
 	onMatchStarted: (e: TournamentMatchStartedEvent) => void;
 	onNowPlaying: (e: NowPlayingEvent) => void;
-	onFinished: (tournamentId: number) => void;
-	onAborted: (tournamentId: number, reason: string) => void;
+	onFinished: (event: TournamentFinishedEvent) => void;
+	onAborted: (event: TournamentAbortedEvent) => void;
 }
 
 export const useTournamentStore = create<TournamentStore>((set, get) => ({
@@ -292,6 +304,10 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 				planSummary: e.plan_summary,
 				players: e.players.map((p) => p.player_id),
 				status: "running",
+				lifecycle: "running",
+				terminalOutcome: null,
+				ratingReadiness: "provisional",
+				ratingReason: null,
 				abortReason: null,
 				done: 0,
 				total: e.total_games,
@@ -300,6 +316,8 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 				maxParallel: e.max_parallel,
 				success: 0,
 				failure: 0,
+				exhausted: 0,
+				runningMatches: 0,
 				standings: [],
 				gamesByPair: {},
 				failuresByPair: {},
@@ -323,10 +341,12 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 				? {
 						live: {
 							...s.live,
-							done: e.done,
-							total: e.total,
-							success: e.success,
-							failure: e.failure,
+							done: e.progress.terminal_slots,
+							total: e.progress.planned_slots,
+							success: e.progress.successful_games,
+							failure: e.progress.failed_attempts,
+							exhausted: e.progress.exhausted_slots,
+							runningMatches: e.progress.running_matches,
 							standings: e.standings,
 						},
 					}
@@ -360,6 +380,7 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 					...s.live,
 					gamesByPair: { ...s.live.gamesByPair, [key]: games },
 					liveByMatch,
+					runningMatches: Object.keys(liveByMatch).length,
 					terminalMatchIds: { ...s.live.terminalMatchIds, [e.match_id]: true },
 				},
 			};
@@ -381,11 +402,13 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 			player1Id: e.player1_id,
 			player2Id: e.player2_id,
 			repetitionIndex: e.repetition_index,
+			attemptIndex: e.attempt_index,
 			ratId: e.rat_id,
 			failingPlayerId: e.failing_player_id,
 			kind: e.kind,
 			timeoutPhase: e.timeout_phase,
 			reason: e.reason,
+			exhausted: e.exhausted,
 		};
 		set((s) => {
 			if (!s.live) return {};
@@ -398,6 +421,7 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 				live: {
 					...s.live,
 					liveByMatch,
+					runningMatches: Object.keys(liveByMatch).length,
 					failuresByPair: {
 						...s.live.failuresByPair,
 						[key]: failures,
@@ -423,23 +447,27 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 		if (live.terminalMatchIds[e.match_id]) return;
 		set((s) =>
 			s.live
-				? {
-						live: {
-							...s.live,
-							liveByMatch: {
-								...s.live.liveByMatch,
-								[e.match_id]: {
-									matchId: e.match_id,
-									player1Id: e.player1_id,
-									player2Id: e.player2_id,
-									repetitionIndex: e.repetition_index,
-									turn: 0,
-									player1Score: 0,
-									player2Score: 0,
-								},
+				? (() => {
+						const liveByMatch = {
+							...s.live.liveByMatch,
+							[e.match_id]: {
+								matchId: e.match_id,
+								player1Id: e.player1_id,
+								player2Id: e.player2_id,
+								repetitionIndex: e.repetition_index,
+								turn: 0,
+								player1Score: 0,
+								player2Score: 0,
 							},
-						},
-					}
+						};
+						return {
+							live: {
+								...s.live,
+								liveByMatch,
+								runningMatches: Object.keys(liveByMatch).length,
+							},
+						};
+					})()
 				: {},
 		);
 	},
@@ -474,7 +502,8 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 		);
 	},
 
-	onFinished: (tournamentId) => {
+	onFinished: (event) => {
+		const tournamentId = event.tournament_id;
 		const live = get().live;
 		if (
 			!live ||
@@ -490,7 +519,11 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 						live: {
 							...s.live,
 							status: "finished",
+							lifecycle: "completed",
+							terminalOutcome: event.terminal.outcome,
+							ratingReadiness: event.rating_readiness,
 							liveByMatch: {},
+							runningMatches: 0,
 							endedAt,
 						},
 						terminalNotice: {
@@ -503,7 +536,9 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 		);
 	},
 
-	onAborted: (tournamentId, reason) => {
+	onAborted: (event) => {
+		const tournamentId = event.tournament_id;
+		const reason = event.reason;
 		const live = get().live;
 		if (
 			!live ||
@@ -519,8 +554,12 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 						live: {
 							...s.live,
 							status: "aborted",
+							lifecycle: event.lifecycle,
+							terminalOutcome: event.terminal.outcome,
+							ratingReadiness: event.rating_readiness,
 							abortReason: reason,
 							liveByMatch: {},
+							runningMatches: 0,
 							endedAt,
 						},
 						terminalNotice: {
@@ -577,11 +616,13 @@ function tournamentFromSnapshot(
 			player1Id: failure.player1_id,
 			player2Id: failure.player2_id,
 			repetitionIndex: failure.repetition_index,
+			attemptIndex: failure.attempt_index,
 			ratId: failure.rat_id,
 			failingPlayerId: failure.failing_player_id,
 			kind: failure.kind,
 			timeoutPhase: failure.timeout_phase,
 			reason: failure.reason,
+			exhausted: failure.exhausted,
 		});
 		failuresByPair[key] = pairFailures;
 	}
@@ -594,10 +635,15 @@ function tournamentFromSnapshot(
 		if (failure.match_id !== null) terminalMatchIds[failure.match_id] = true;
 	}
 
-	const startedAt = timestampMs(snapshot.created_at) ?? Date.now();
+	const startedAt =
+		timestampMs(snapshot.started_at) ??
+		timestampMs(snapshot.created_at) ??
+		Date.now();
 	const endedAt = snapshot.running
 		? null
-		: (timestampMs(snapshot.last_finished_at) ?? startedAt);
+		: (timestampMs(snapshot.terminal_at) ??
+			timestampMs(snapshot.last_finished_at) ??
+			startedAt);
 	return {
 		origin,
 		tournamentId: snapshot.tournament_id,
@@ -609,17 +655,25 @@ function tournamentFromSnapshot(
 		players: snapshot.players,
 		status: snapshot.running
 			? "running"
-			: snapshot.finished
+			: snapshot.lifecycle === "completed"
 				? "finished"
-				: "partial",
-		abortReason: null,
-		done: snapshot.done,
-		total: snapshot.total,
+				: snapshot.lifecycle === "stopped" || snapshot.lifecycle === "failed"
+					? "aborted"
+					: "partial",
+		lifecycle: snapshot.lifecycle,
+		terminalOutcome: snapshot.terminal?.outcome ?? null,
+		ratingReadiness: snapshot.rating_readiness,
+		ratingReason: snapshot.rating_reason,
+		abortReason: snapshot.terminal?.reason ?? null,
+		done: snapshot.progress.terminal_slots,
+		total: snapshot.progress.planned_slots,
 		gamesPerMatchup: snapshot.games_per_matchup,
 		paired: snapshot.paired,
 		maxParallel: null,
-		success: snapshot.success,
-		failure: snapshot.failure,
+		success: snapshot.progress.successful_games,
+		failure: snapshot.progress.failed_attempts,
+		exhausted: snapshot.progress.exhausted_slots,
+		runningMatches: snapshot.progress.running_matches,
 		standings: snapshot.standings,
 		gamesByPair,
 		failuresByPair,
@@ -643,7 +697,10 @@ function mergeTournamentSnapshot(
 		startedAt: current.startedAt,
 		endedAt: current.endedAt ?? durable.endedAt,
 		status: current.status === "running" ? durable.status : current.status,
-		abortReason: current.abortReason,
+		abortReason: current.abortReason ?? durable.abortReason,
+		runningMatches: snapshot.running
+			? current.runningMatches
+			: durable.runningMatches,
 		maxParallel: current.maxParallel,
 		createdAt: current.createdAt ?? durable.createdAt,
 	};
@@ -655,7 +712,9 @@ function mergeTournamentSnapshot(
 export function sortedStandings(rows: StandingRow[]): StandingRow[] {
 	return [...rows].sort((a, b) => {
 		if (a.pending !== b.pending) return a.pending ? 1 : -1;
-		return b.elo - a.elo;
+		return (
+			(b.elo ?? Number.NEGATIVE_INFINITY) - (a.elo ?? Number.NEGATIVE_INFINITY)
+		);
 	});
 }
 
@@ -664,10 +723,17 @@ export function sortedStandings(rows: StandingRow[]): StandingRow[] {
  * progress rather than a completed ranking. */
 export function hasFinalTournamentVerdict(live: TournamentLive): boolean {
 	return (
-		live.status === "finished" &&
+		live.lifecycle === "completed" &&
 		live.done >= live.total &&
+		live.ratingReadiness === "rateable" &&
 		live.standings.length === live.players.length &&
-		live.standings.every((row) => !row.pending)
+		live.standings.every(
+			(row) =>
+				!row.pending &&
+				row.elo !== null &&
+				row.elo_ci_low !== null &&
+				row.elo_ci_high !== null,
+		)
 	);
 }
 

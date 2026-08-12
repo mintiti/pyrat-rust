@@ -29,7 +29,9 @@ export function tournamentChromeProjection({
 			name: noticeLive?.name ?? `#${terminalNotice.tournamentId}`,
 			status:
 				terminalNotice.status === "aborted"
-					? "stopped"
+					? noticeLive?.lifecycle === "failed"
+						? "failed"
+						: "stopped"
 					: finalVerdict
 						? "finished"
 						: "partial results",

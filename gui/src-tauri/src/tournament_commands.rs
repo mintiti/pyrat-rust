@@ -6,7 +6,7 @@
 //! connection each call — WAL allows concurrent readers, and they're
 //! infrequent.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -16,7 +16,10 @@ use pyrat_eval::{
     EvalSession, MatchupKey, ResolvedPlayer, SeatPolicy, TournamentMethodology, TournamentParams,
     TournamentSpec, TournamentState, TournamentTimingMode,
 };
-use pyrat_eval_store::{AttemptOutcome, EvalStore, SeatOrientation, TournamentId};
+use pyrat_eval_store::{
+    AttemptFailureReport, AttemptOutcome, AttemptRecord, EvalStore, SeatOrientation, TournamentId,
+    TournamentLifecycle, TournamentRecord, TournamentTerminalKind,
+};
 use pyrat_host::probe::{preflight_bot_in_slot, PreflightConfig};
 use pyrat_host::wire::Player as PlayerSlot;
 use pyrat_orchestrator::{PlayerSpec, ReplayEvent, ReplayFile};
@@ -29,7 +32,10 @@ use tracing::warn;
 use crate::commands::{MazeState, MudEntry, PlayerState, WallEntry};
 use crate::state::{AppState, TournamentPhase};
 use crate::tournament_config;
-use crate::tournament_events::{FailureKind, StandingRow, TimeoutPhase, TournamentPreparingEvent};
+use crate::tournament_events::{
+    FailureKind, RatingReadiness, StandingRow, TimeoutPhase, TournamentLifecycleStatus,
+    TournamentPreparingEvent, TournamentProgress, TournamentTerminalState,
+};
 use crate::tournament_runner::{
     build_standings, ordered_player_ids, run_tournament, RunnerFormat, TournamentRun,
 };
@@ -578,13 +584,13 @@ pub struct TournamentSummary {
     pub format: String,
     pub created_at: String,
     /// The app-owned runner is currently executing this tournament. Separate
-    /// from `finished`: navigation never owns runner lifetime.
+    /// from durable lifecycle: navigation never owns runner lifetime.
     pub running: bool,
-    /// All expected (pair, repetition) slots are done (success or
-    /// failure-exhausted) — `slot_done` semantics, not raw count-vs-target.
-    pub finished: bool,
-    pub done: u32,
-    pub total: u32,
+    pub lifecycle: TournamentLifecycleStatus,
+    pub terminal: Option<TournamentTerminalState>,
+    pub rating_readiness: RatingReadiness,
+    pub rating_reason: Option<String>,
+    pub progress: TournamentProgress,
 }
 
 /// Standings for a finished/partial tournament, reopened from the store.
@@ -594,9 +600,11 @@ pub struct StandingsSnapshot {
     pub name: Option<String>,
     pub format: String,
     pub anchor_id: String,
-    pub finished: bool,
-    pub done: u32,
-    pub total: u32,
+    pub lifecycle: TournamentLifecycleStatus,
+    pub terminal: Option<TournamentTerminalState>,
+    pub rating_readiness: RatingReadiness,
+    pub rating_reason: Option<String>,
+    pub progress: TournamentProgress,
     pub standings: Vec<StandingRow>,
 }
 
@@ -624,11 +632,46 @@ pub struct StoredMatchFailure {
     pub player1_id: String,
     pub player2_id: String,
     pub repetition_index: u32,
+    pub attempt_index: u32,
     pub rat_id: String,
     pub failing_player_id: Option<String>,
     pub kind: FailureKind,
     pub timeout_phase: Option<TimeoutPhase>,
     pub reason: String,
+    /// This failure spent the slot's final retry budget. Earlier failures on
+    /// the same slot remain inspectable but are not terminal legs.
+    pub exhausted: bool,
+}
+
+/// Durable state of one expected schedule leg. `Running` is expressible for
+/// live projections; store-only snapshots normally return `Pending` until a
+/// terminal attempt lands. Old rows never have missing legs relabeled as
+/// pending because their lifecycle is unknowable.
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum StoredSlotState {
+    Successful {
+        attempt_id: i64,
+        match_id: Option<u64>,
+    },
+    Exhausted {
+        last_failure_attempt_id: i64,
+        failed_attempts: u32,
+    },
+    Pending,
+    Running {
+        match_id: u64,
+    },
+    LegacyUnknown,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Type)]
+pub struct StoredTournamentSlot {
+    pub player1_id: String,
+    pub player2_id: String,
+    pub repetition_index: u32,
+    pub rat_id: String,
+    pub state: StoredSlotState,
 }
 
 /// Wire-safe projection of the store-native timing mode.
@@ -681,7 +724,10 @@ pub struct TournamentSnapshot {
     pub target: Option<String>,
     pub anchor_id: String,
     pub running: bool,
-    pub finished: bool,
+    pub lifecycle: TournamentLifecycleStatus,
+    pub terminal: Option<TournamentTerminalState>,
+    pub rating_readiness: RatingReadiness,
+    pub rating_reason: Option<String>,
     pub paired: bool,
     /// Absent only when an older tournament row did not record its execution
     /// conditions. Optional in TypeScript so existing fixture consumers remain
@@ -689,17 +735,17 @@ pub struct TournamentSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub methodology: Option<StoredTournamentMethodology>,
     pub created_at: String,
+    pub started_at: Option<String>,
+    pub terminal_at: Option<String>,
     pub last_finished_at: Option<String>,
     pub plan_summary: String,
     pub players: Vec<String>,
     pub games_per_matchup: u32,
-    pub done: u32,
-    pub total: u32,
-    pub success: u32,
-    pub failure: u32,
+    pub progress: TournamentProgress,
     pub standings: Vec<StandingRow>,
     pub games: Vec<StoredFinishedGame>,
     pub failures: Vec<StoredMatchFailure>,
+    pub slots: Vec<StoredTournamentSlot>,
 }
 
 /// Final-position board + verdict for one finished game, or a reason it's
@@ -990,8 +1036,24 @@ async fn build_and_spawn(
             .await
             .map_err(|e| format!("create tournament: {e}"))?;
     let tournament_id = created.tournament_id;
+    let adopted = store
+        .lock()
+        .mark_tournament_preparing(tournament_id)
+        .map_err(|error| format!("mark tournament preparing: {error}"))?;
+    if !adopted {
+        return Err(format!(
+            "tournament {} could not enter preparing state",
+            tournament_id.0
+        ));
+    }
 
-    let replay_dir = crate::tournament_paths::tournament_replay_dir(app, tournament_id.0)?;
+    let replay_dir = match crate::tournament_paths::tournament_replay_dir(app, tournament_id.0) {
+        Ok(path) => path,
+        Err(reason) => {
+            let _ = crate::tournament_runner::persist_failed(&store, tournament_id, &reason);
+            return Err(reason);
+        },
+    };
     let run = TournamentRun {
         tournament_id,
         game_config_id: created.game_config_id,
@@ -1130,7 +1192,8 @@ pub async fn tournament_status(state: tauri::State<'_, AppState>) -> Result<Opti
     Ok(current_running_tournament(&state).await)
 }
 
-/// List tournaments in the store, newest first, with finished-inference.
+/// List tournaments in the store, newest first, projected from durable
+/// lifecycle plus the shared execution counters.
 #[tauri::command]
 #[specta::specta]
 pub async fn list_tournaments(
@@ -1160,28 +1223,22 @@ pub async fn list_tournaments(
             st.fold_attempt(a);
         }
         let target = rec.target_games_per_matchup.unwrap_or(0);
-        let max_failures = TournamentParams::from_json(&rec.params_json)
-            .map(|p| p.max_failures_per_pair)
-            .unwrap_or(0);
-        let total = matchup_count(&rec.format, players.len()) as u32 * target;
-        let done = success_count(&st);
-        let finished = tournament_finished(
-            &st,
-            &rec.format,
-            &players,
-            &rec.game_config_id,
-            target,
-            max_failures,
-        );
+        let max_failures = stored_tournament_params(&rec)?.max_failures_per_pair;
+        let total = planned_slots(&rec.format, players.len(), target)?;
+        let progress = execution_progress(&st, total, max_failures)?;
+        validate_projection_truth(&rec, &progress)?;
+        let terminal = terminal_projection(&rec)?;
         out.push(TournamentSummary {
             id: rec.id.0,
             name: rec.name,
             format: rec.format,
             created_at: rec.created_at,
             running: running_id == Some(rec.id.0),
-            finished,
-            done,
-            total,
+            lifecycle: rec.lifecycle.into(),
+            terminal,
+            rating_readiness: rec.rating_status.into(),
+            rating_reason: rec.rating_reason,
+            progress,
         });
     }
     out.reverse(); // list_tournaments returns ascending id; show newest first.
@@ -1240,28 +1297,22 @@ pub async fn get_tournament_standings(
     let standings = build_standings(&st, &elo_options, &players, &anchor_id);
 
     let target_games = rec.target_games_per_matchup.unwrap_or(0);
-    let max_failures = TournamentParams::from_json(&rec.params_json)
-        .map(|p| p.max_failures_per_pair)
-        .unwrap_or(0);
-    let total = matchup_count(&rec.format, players.len()) as u32 * target_games;
-    let done = success_count(&st);
-    let finished = tournament_finished(
-        &st,
-        &rec.format,
-        &players,
-        &rec.game_config_id,
-        target_games,
-        max_failures,
-    );
+    let max_failures = stored_tournament_params(&rec)?.max_failures_per_pair;
+    let total = planned_slots(&rec.format, players.len(), target_games)?;
+    let progress = execution_progress(&st, total, max_failures)?;
+    validate_projection_truth(&rec, &progress)?;
+    let terminal = terminal_projection(&rec)?;
 
     Ok(StandingsSnapshot {
         tournament_id,
         name: rec.name,
         format: rec.format,
         anchor_id,
-        finished,
-        done,
-        total,
+        lifecycle: rec.lifecycle.into(),
+        terminal,
+        rating_readiness: rec.rating_status.into(),
+        rating_reason: rec.rating_reason,
+        progress,
         standings,
     })
 }
@@ -1323,28 +1374,16 @@ pub async fn get_tournament_snapshot(
     let elo_options = tournament_config::elo_options(&anchor_id);
     let standings = build_standings(&tournament_state, &elo_options, &players, &anchor_id);
 
-    let params = TournamentParams::from_json(&rec.params_json).unwrap_or(TournamentParams {
-        max_failures_per_pair: 0,
-        seat_policy: SeatPolicy::Legacy,
-    });
+    let params = stored_tournament_params(&rec)?;
     let games_per_matchup = rec.target_games_per_matchup.unwrap_or(0);
-    let total = matchup_count(&rec.format, players.len()) as u32 * games_per_matchup;
-    let success = success_count(&tournament_state);
-    let failure = attempts
-        .iter()
-        .filter(|attempt| matches!(attempt.outcome, AttemptOutcome::Failure { .. }))
-        .count() as u32;
-    let finished = tournament_finished(
-        &tournament_state,
-        &rec.format,
-        &players,
-        &rec.game_config_id,
-        games_per_matchup,
-        params.max_failures_per_pair,
-    );
+    let total = planned_slots(&rec.format, players.len(), games_per_matchup)?;
+    let progress = execution_progress(&tournament_state, total, params.max_failures_per_pair)?;
+    validate_projection_truth(&rec, &progress)?;
+    let terminal = terminal_projection(&rec)?;
+    let exhausted_failures = exhausted_failure_ids(&attempts, params.max_failures_per_pair)?;
 
-    let mut games = Vec::with_capacity(success as usize);
-    let mut failures = Vec::with_capacity(failure as usize);
+    let mut games = Vec::with_capacity(progress.successful_games as usize);
+    let mut failures = Vec::with_capacity(progress.failed_attempts as usize);
     for attempt in &attempts {
         let rat_id = stored_rat_id(
             attempt.key.orientation,
@@ -1366,28 +1405,48 @@ pub async fn get_tournament_snapshot(
                 player1_score: *player1_score,
                 player2_score: *player2_score,
             }),
-            AttemptOutcome::Failure { failure_reason, .. } => {
-                let (kind, timeout_phase, failing_player_id) = stored_failure_projection(
-                    failure_reason,
-                    attempt.key.orientation,
-                    &attempt.key.player1_id,
-                    &attempt.key.player2_id,
-                );
+            AttemptOutcome::Failure {
+                failure_reason,
+                report,
+                ..
+            } => {
+                let (kind, timeout_phase, failing_player_id, reason) = match report {
+                    Some(report) => typed_failure_projection(report),
+                    None => {
+                        let (kind, phase, player) = stored_failure_projection(
+                            failure_reason,
+                            attempt.key.orientation,
+                            &attempt.key.player1_id,
+                            &attempt.key.player2_id,
+                        );
+                        (kind, phase, player, failure_reason.clone())
+                    },
+                };
                 failures.push(StoredMatchFailure {
                     attempt_id: attempt.id,
                     match_id: attempt.key.match_id,
                     player1_id: attempt.key.player1_id.clone(),
                     player2_id: attempt.key.player2_id.clone(),
                     repetition_index: attempt.key.repetition_index,
+                    attempt_index: attempt.key.attempt_index,
                     rat_id,
                     failing_player_id,
                     kind,
                     timeout_phase,
-                    reason: failure_reason.clone(),
+                    reason,
+                    exhausted: exhausted_failures.contains(&attempt.id),
                 });
             },
         }
     }
+    let slots = stored_slot_projection(
+        &rec,
+        &players,
+        &attempts,
+        games_per_matchup,
+        params.max_failures_per_pair,
+        params.seat_policy,
+    )?;
 
     let last_finished_at = attempts
         .iter()
@@ -1417,21 +1476,24 @@ pub async fn get_tournament_snapshot(
         target,
         anchor_id,
         running,
-        finished,
+        lifecycle: rec.lifecycle.into(),
+        terminal,
+        rating_readiness: rec.rating_status.into(),
+        rating_reason: rec.rating_reason,
         paired: matches!(params.seat_policy, SeatPolicy::Paired),
         methodology,
         created_at: rec.created_at,
+        started_at: rec.started_at,
+        terminal_at: rec.terminal_at,
         last_finished_at,
         plan_summary,
         players,
         games_per_matchup,
-        done: success,
-        total,
-        success,
-        failure,
+        progress,
         standings,
         games,
         failures,
+        slots,
     })
 }
 
@@ -1653,6 +1715,17 @@ fn stored_failure_projection(
     (kind, timeout_phase, failing_player_id)
 }
 
+fn typed_failure_projection(
+    report: &AttemptFailureReport,
+) -> (FailureKind, Option<TimeoutPhase>, Option<String>, String) {
+    (
+        report.kind.into(),
+        report.phase.map(TimeoutPhase::from),
+        report.failing_player_id.clone(),
+        report.message.clone(),
+    )
+}
+
 fn open_store(app: &tauri::AppHandle) -> Result<Arc<Mutex<EvalStore>>, String> {
     let path = crate::tournament_paths::store_path(app)?;
     let store =
@@ -1719,70 +1792,204 @@ fn stored_plan_summary(
     }
 }
 
-fn matchup_count(format: &str, n: usize) -> usize {
-    match format {
-        "gauntlet" => n.saturating_sub(1),
-        _ => n * n.saturating_sub(1) / 2,
-    }
-}
-
-fn success_count(state: &TournamentState) -> u32 {
-    state
-        .history
-        .values()
-        .flat_map(|v| v.iter())
-        .filter(|a| matches!(a.outcome, pyrat_eval::MatchupOutcome::Success { .. }))
-        .count() as u32
-}
-
-/// True when every expected (pair, repetition) slot is done — a slot is done
-/// if it has any success OR has hit `max_failures` failures (the planner's
-/// `slot_done`). Counting successes-vs-target alone would mark a
-/// failure-exhausted matchup as forever-unfinished.
-fn tournament_finished(
-    state: &TournamentState,
-    format: &str,
-    players: &[String],
-    game_config_id: &str,
-    target: u32,
-    max_failures: u32,
-) -> bool {
-    if players.len() < 2 || target == 0 {
-        return false;
-    }
-    let pairs = expected_pairs(format, players);
-    pairs.iter().all(|(a, b)| {
-        (0..target).all(|rep| {
-            let key = MatchupKey::from_pair(a, b, game_config_id, rep);
-            slot_done(state, &key, max_failures)
-        })
-    })
-}
-
-fn slot_done(state: &TournamentState, key: &MatchupKey, max_failures: u32) -> bool {
-    let attempts = state.history.get(key);
-    let Some(attempts) = attempts else {
-        return false;
+fn planned_slots(format: &str, players: usize, target: u32) -> Result<u32, String> {
+    let players = u32::try_from(players).map_err(|_| "participant count exceeds u32")?;
+    let matchups = match format {
+        "gauntlet" => players.saturating_sub(1),
+        _ => players
+            .checked_mul(players.saturating_sub(1))
+            .and_then(|value| value.checked_div(2))
+            .ok_or_else(|| "tournament matchup count overflow".to_string())?,
     };
-    let mut failures = 0u32;
-    for a in attempts {
-        match a.outcome {
-            pyrat_eval::MatchupOutcome::Success { .. } => return true,
-            pyrat_eval::MatchupOutcome::Failure => failures += 1,
+    matchups
+        .checked_mul(target)
+        .ok_or_else(|| "tournament planned-slot count overflow".to_string())
+}
+
+fn execution_progress(
+    state: &TournamentState,
+    planned_slots: u32,
+    max_failures: u32,
+) -> Result<TournamentProgress, String> {
+    state
+        .execution_summary(planned_slots, max_failures)
+        .map(TournamentProgress::from)
+        .map_err(|error| format!("tournament progress: {error}"))
+}
+
+fn stored_tournament_params(rec: &TournamentRecord) -> Result<TournamentParams, String> {
+    match TournamentParams::from_json(&rec.params_json) {
+        Ok(params) => Ok(params),
+        Err(_) if rec.lifecycle == TournamentLifecycle::LegacyUnknown => Ok(TournamentParams {
+            max_failures_per_pair: 0,
+            seat_policy: SeatPolicy::Legacy,
+        }),
+        Err(error) => Err(format!(
+            "tournament {} has invalid durable planner parameters: {error}",
+            rec.id.0
+        )),
+    }
+}
+
+fn validate_projection_truth(
+    rec: &TournamentRecord,
+    progress: &TournamentProgress,
+) -> Result<(), String> {
+    if rec.lifecycle == TournamentLifecycle::Completed
+        && progress.terminal_slots != progress.planned_slots
+    {
+        return Err(format!(
+            "completed tournament {} has {}/{} terminal schedule slots",
+            rec.id.0, progress.terminal_slots, progress.planned_slots
+        ));
+    }
+    match rec.terminal.as_ref().map(|terminal| terminal.kind) {
+        Some(TournamentTerminalKind::Completed) if progress.exhausted_slots > 0 => Err(format!(
+            "tournament {} is marked completed but has {} exhausted slots",
+            rec.id.0, progress.exhausted_slots
+        )),
+        Some(TournamentTerminalKind::CompletedWithFailures) if progress.exhausted_slots == 0 => {
+            Err(format!(
+                "tournament {} is marked completed-with-failures but has no exhausted slots",
+                rec.id.0
+            ))
+        },
+        _ => Ok(()),
+    }
+}
+
+fn terminal_projection(rec: &TournamentRecord) -> Result<Option<TournamentTerminalState>, String> {
+    match (&rec.terminal, &rec.terminal_at) {
+        (None, None) => Ok(None),
+        (Some(terminal), Some(at)) => Ok(Some(TournamentTerminalState::from_store(
+            terminal,
+            at.clone(),
+        ))),
+        _ => Err(format!(
+            "tournament {} has a partial terminal record",
+            rec.id.0
+        )),
+    }
+}
+
+fn exhausted_failure_ids(
+    attempts: &[AttemptRecord],
+    max_failures: u32,
+) -> Result<HashSet<i64>, String> {
+    if max_failures == 0 {
+        return Ok(HashSet::new());
+    }
+    let mut by_slot: HashMap<MatchupKey, Vec<(u32, i64)>> = HashMap::new();
+    for attempt in attempts {
+        if matches!(attempt.outcome, AttemptOutcome::Failure { .. }) {
+            let key = MatchupKey::from_pair(
+                &attempt.key.player1_id,
+                &attempt.key.player2_id,
+                &attempt.key.game_config_id,
+                attempt.key.repetition_index,
+            );
+            by_slot
+                .entry(key)
+                .or_default()
+                .push((attempt.key.attempt_index, attempt.id));
         }
     }
-    failures >= max_failures
+    let max_failures = usize::try_from(max_failures)
+        .map_err(|_| "failure budget exceeds platform usize".to_string())?;
+    Ok(by_slot
+        .into_values()
+        .filter_map(|mut attempts| {
+            attempts.sort_by_key(|(attempt_index, _)| *attempt_index);
+            attempts
+                .get(max_failures.saturating_sub(1))
+                .map(|(_, id)| *id)
+        })
+        .collect())
 }
 
-fn expected_pairs(format: &str, players: &[String]) -> Vec<(String, String)> {
+fn stored_slot_projection(
+    rec: &TournamentRecord,
+    players: &[String],
+    attempts: &[AttemptRecord],
+    target: u32,
+    max_failures: u32,
+    seat_policy: SeatPolicy,
+) -> Result<Vec<StoredTournamentSlot>, String> {
+    let capacity = usize::try_from(planned_slots(&rec.format, players.len(), target)?)
+        .map_err(|_| "planned slots exceed platform usize".to_string())?;
+    let mut slots = Vec::with_capacity(capacity);
+    for (a, b) in expected_pairs(&rec.format, players)? {
+        for repetition_index in 0..target {
+            let key = MatchupKey::from_pair(&a, &b, &rec.game_config_id, repetition_index);
+            let mut slot_attempts: Vec<&AttemptRecord> = attempts
+                .iter()
+                .filter(|attempt| {
+                    MatchupKey::from_pair(
+                        &attempt.key.player1_id,
+                        &attempt.key.player2_id,
+                        &attempt.key.game_config_id,
+                        attempt.key.repetition_index,
+                    ) == key
+                })
+                .collect();
+            slot_attempts.sort_by_key(|attempt| attempt.key.attempt_index);
+            let state = if let Some(success) = slot_attempts
+                .iter()
+                .find(|attempt| matches!(attempt.outcome, AttemptOutcome::Success { .. }))
+            {
+                StoredSlotState::Successful {
+                    attempt_id: success.id,
+                    match_id: success.key.match_id,
+                }
+            } else {
+                let failures: Vec<_> = slot_attempts
+                    .iter()
+                    .filter(|attempt| matches!(attempt.outcome, AttemptOutcome::Failure { .. }))
+                    .collect();
+                let failure_count = u32::try_from(failures.len())
+                    .map_err(|_| "slot failure count exceeds u32".to_string())?;
+                if max_failures > 0 && failure_count >= max_failures {
+                    let exhaustion_index = usize::try_from(max_failures - 1)
+                        .map_err(|_| "failure budget exceeds platform usize".to_string())?;
+                    StoredSlotState::Exhausted {
+                        last_failure_attempt_id: failures[exhaustion_index].id,
+                        failed_attempts: failure_count,
+                    }
+                } else if rec.lifecycle == TournamentLifecycle::LegacyUnknown {
+                    StoredSlotState::LegacyUnknown
+                } else {
+                    StoredSlotState::Pending
+                }
+            };
+            let orientation = match seat_policy {
+                SeatPolicy::Paired if !repetition_index.is_multiple_of(2) => {
+                    SeatOrientation::Flipped
+                },
+                SeatPolicy::Legacy | SeatPolicy::Paired => SeatOrientation::Canonical,
+            };
+            slots.push(StoredTournamentSlot {
+                player1_id: a.clone(),
+                player2_id: b.clone(),
+                repetition_index,
+                rat_id: stored_rat_id(orientation, &a, &b),
+                state,
+            });
+        }
+    }
+    Ok(slots)
+}
+
+fn expected_pairs(format: &str, players: &[String]) -> Result<Vec<(String, String)>, String> {
     match format {
         "gauntlet" => {
             // Slot 0 is the challenger; it plays each opponent.
-            let challenger = &players[0];
-            players[1..]
+            let Some((challenger, opponents)) = players.split_first() else {
+                return Err("stored gauntlet has no challenger".to_string());
+            };
+            Ok(opponents
                 .iter()
                 .map(|opp| (challenger.clone(), opp.clone()))
-                .collect()
+                .collect())
         },
         _ => {
             let mut pairs = Vec::new();
@@ -1791,7 +1998,7 @@ fn expected_pairs(format: &str, players: &[String]) -> Vec<(String, String)> {
                     pairs.push((players[i].clone(), players[j].clone()));
                 }
             }
-            pairs
+            Ok(pairs)
         },
     }
 }
@@ -2171,47 +2378,158 @@ mod tests {
 
     #[test]
     fn stored_completion_uses_slot_semantics_not_success_count() {
-        let players = vec!["alice".to_string(), "bob".to_string()];
         let config_id = "cfg";
         let mut state = TournamentState::empty(TournamentId(1));
+        for repetition_index in 0..15 {
+            state.history.insert(
+                MatchupKey::from_pair("alice", "bob", config_id, repetition_index),
+                vec![pyrat_eval::MatchupAttempt {
+                    attempt_index: 0,
+                    outcome: pyrat_eval::MatchupOutcome::Success {
+                        player1_score: 5.0,
+                        player2_score: 3.0,
+                    },
+                }],
+            );
+        }
         state.history.insert(
-            MatchupKey::from_pair("alice", "bob", config_id, 0),
-            vec![pyrat_eval::MatchupAttempt {
-                attempt_index: 0,
-                outcome: pyrat_eval::MatchupOutcome::Success {
-                    player1_score: 5.0,
-                    player2_score: 3.0,
-                },
-            }],
-        );
-        state.history.insert(
-            MatchupKey::from_pair("alice", "bob", config_id, 1),
+            MatchupKey::from_pair("alice", "bob", config_id, 15),
             vec![pyrat_eval::MatchupAttempt {
                 attempt_index: 0,
                 outcome: pyrat_eval::MatchupOutcome::Failure,
             }],
         );
 
-        // The historical snapshot reports one scored game, but the paired
-        // two-slot schedule is terminal because the other slot exhausted its
-        // failure allowance. It must not remain "running" forever merely
-        // because success_count is below the planned slot count.
-        assert_eq!(success_count(&state), 1);
-        assert!(tournament_finished(
-            &state,
-            "round_robin",
-            &players,
-            config_id,
+        // Fifteen scored games plus one exhausted slot is a completed
+        // sixteen-slot schedule, not a permanently "15/16 running" run.
+        let completed = state.execution_summary(16, 1).unwrap();
+        assert_eq!(completed.successful_games, 15);
+        assert_eq!(completed.terminal_slots, 16);
+        assert_eq!(completed.exhausted_slots, 1);
+
+        let retryable = state.execution_summary(16, 2).unwrap();
+        assert_eq!(retryable.successful_games, 15);
+        assert_eq!(retryable.terminal_slots, 15);
+        assert_eq!(retryable.exhausted_slots, 0);
+    }
+
+    #[test]
+    fn stored_paired_slots_keep_success_and_exhaustion_distinct() {
+        use pyrat_eval_store::{
+            AttemptFailureKind, AttemptKey, TournamentRatingStatus, TournamentTerminal,
+            TournamentTerminalKind,
+        };
+
+        let record = TournamentRecord {
+            id: TournamentId(1),
+            name: Some("paired truth".into()),
+            format: "round_robin".into(),
+            target_games_per_matchup: Some(2),
+            params_json: "{}".into(),
+            game_config_id: "cfg".into(),
+            tournament_seed: 42,
+            methodology: None,
+            lifecycle: TournamentLifecycle::Completed,
+            started_at: Some("2026-08-12 10:00:00".into()),
+            terminal_at: Some("2026-08-12 10:01:00".into()),
+            terminal: Some(TournamentTerminal {
+                kind: TournamentTerminalKind::CompletedWithFailures,
+                reason: Some("one schedule slot exhausted its retry budget".into()),
+            }),
+            rating_status: TournamentRatingStatus::InsufficientGames,
+            rating_reason: Some("each player needs four successful games".into()),
+            created_at: "2026-08-12 09:59:00".into(),
+        };
+        let key = |repetition_index, orientation| AttemptKey {
+            tournament_id: TournamentId(1),
+            game_config_id: "cfg".into(),
+            player1_id: "alice".into(),
+            player2_id: "bob".into(),
+            match_id: Some(u64::from(repetition_index) + 10),
+            seed: 7,
+            repetition_index,
+            attempt_index: 0,
+            orientation,
+        };
+        let attempts = vec![
+            AttemptRecord {
+                id: 1,
+                key: key(0, SeatOrientation::Canonical),
+                finished_at: "2026-08-12 10:00:30".into(),
+                outcome: AttemptOutcome::Success {
+                    player1_score: 5.0,
+                    player2_score: 3.0,
+                    turns: 20,
+                    started_at: "2026-08-12 10:00:01".into(),
+                },
+            },
+            AttemptRecord {
+                id: 2,
+                key: key(1, SeatOrientation::Flipped),
+                finished_at: "2026-08-12 10:01:00".into(),
+                outcome: AttemptOutcome::Failure {
+                    failure_reason: "timeout: move: Player1".into(),
+                    report: Some(AttemptFailureReport {
+                        kind: AttemptFailureKind::Timeout,
+                        phase: Some(pyrat_eval_store::AttemptFailurePhase::Move),
+                        failing_player_id: Some("bob".into()),
+                        message: "timeout: move: Player1".into(),
+                    }),
+                    started_at: Some("2026-08-12 10:00:31".into()),
+                },
+            },
+        ];
+
+        assert!(validate_projection_truth(
+            &record,
+            &TournamentProgress {
+                planned_slots: 2,
+                terminal_slots: 2,
+                successful_games: 1,
+                exhausted_slots: 1,
+                failed_attempts: 1,
+                running_matches: 0,
+            },
+        )
+        .is_ok());
+        assert!(validate_projection_truth(
+            &record,
+            &TournamentProgress {
+                planned_slots: 2,
+                terminal_slots: 1,
+                successful_games: 1,
+                exhausted_slots: 0,
+                failed_attempts: 0,
+                running_matches: 0,
+            },
+        )
+        .is_err());
+
+        let slots = stored_slot_projection(
+            &record,
+            &["alice".into(), "bob".into()],
+            &attempts,
             2,
             1,
+            SeatPolicy::Paired,
+        )
+        .unwrap();
+        assert_eq!(slots.len(), 2);
+        assert_eq!(slots[0].rat_id, "alice");
+        assert!(matches!(
+            slots[0].state,
+            StoredSlotState::Successful {
+                attempt_id: 1,
+                match_id: Some(10)
+            }
         ));
-        assert!(!tournament_finished(
-            &state,
-            "round_robin",
-            &players,
-            config_id,
-            2,
-            2,
+        assert_eq!(slots[1].rat_id, "bob");
+        assert!(matches!(
+            slots[1].state,
+            StoredSlotState::Exhausted {
+                last_failure_attempt_id: 2,
+                failed_attempts: 1
+            }
         ));
     }
 }

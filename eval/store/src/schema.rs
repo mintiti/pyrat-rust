@@ -232,6 +232,43 @@ ALTER TABLE tournaments ADD COLUMN max_parallel INTEGER
     );
 ";
 
+// Migration 8 gives tournament rows durable lifecycle/evidence truth and
+// gives new failure rows a typed projection. All tournament defaults are
+// deliberately `legacy_unknown`: upgrading an old row must not invent
+// whether it completed, was stopped, or crashed. Likewise, typed failure
+// columns stay NULL for old attempts; their exact `failure_reason` remains
+// available to compatibility readers.
+const MIGRATION_8: &str = "
+ALTER TABLE tournaments ADD COLUMN lifecycle_status TEXT NOT NULL DEFAULT 'legacy_unknown'
+    CHECK (lifecycle_status IN (
+        'legacy_unknown', 'preparing', 'running', 'completed', 'stopped', 'failed'
+    ));
+ALTER TABLE tournaments ADD COLUMN started_at TEXT;
+ALTER TABLE tournaments ADD COLUMN terminal_at TEXT;
+ALTER TABLE tournaments ADD COLUMN terminal_kind TEXT
+    CHECK (terminal_kind IS NULL OR terminal_kind IN (
+        'completed', 'completed_with_failures', 'user_stopped', 'infrastructure_failure'
+    ));
+ALTER TABLE tournaments ADD COLUMN terminal_reason TEXT;
+ALTER TABLE tournaments ADD COLUMN rating_status TEXT NOT NULL DEFAULT 'legacy_unknown'
+    CHECK (rating_status IN (
+        'legacy_unknown', 'provisional', 'rateable', 'insufficient_games',
+        'disconnected_graph', 'estimator_failed'
+    ));
+ALTER TABLE tournaments ADD COLUMN rating_reason TEXT;
+
+ALTER TABLE match_attempts ADD COLUMN failure_kind TEXT
+    CHECK (failure_kind IS NULL OR failure_kind IN (
+        'timeout', 'disconnected', 'spawn_failed', 'handshake_timeout',
+        'protocol_error', 'cancelled', 'infrastructure', 'other'
+    ));
+ALTER TABLE match_attempts ADD COLUMN failure_phase TEXT
+    CHECK (failure_phase IS NULL OR failure_phase IN (
+        'setup', 'preprocessing', 'sync', 'move'
+    ));
+ALTER TABLE match_attempts ADD COLUMN failing_player_id TEXT;
+";
+
 const MIGRATIONS: &[(u32, &str)] = &[
     (1, MIGRATION_1),
     (2, MIGRATION_2),
@@ -240,6 +277,7 @@ const MIGRATIONS: &[(u32, &str)] = &[
     (5, MIGRATION_5),
     (6, MIGRATION_6),
     (7, MIGRATION_7),
+    (8, MIGRATION_8),
 ];
 
 pub fn initialize(conn: &mut Connection) -> Result<(), EvalError> {
@@ -290,4 +328,64 @@ fn pre_migration_check(conn: &Connection, version: u32) -> Result<(), EvalError>
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn migration_8_preserves_v7_rows_as_explicitly_unknown() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+        for &(version, sql) in MIGRATIONS.iter().filter(|(version, _)| *version <= 7) {
+            pre_migration_check(&conn, version).unwrap();
+            conn.execute_batch(sql).unwrap();
+            conn.execute_batch(&format!("PRAGMA user_version = {version}"))
+                .unwrap();
+        }
+        conn.execute_batch(
+            "INSERT INTO game_configs (id, config_json) VALUES ('cfg', '{}');
+             INSERT INTO players (id, display_name) VALUES ('a', 'A'), ('b', 'B');
+             INSERT INTO tournaments
+                (format, target_games_per_matchup, params_json, game_config_id, tournament_seed)
+                VALUES ('round_robin', 2, '{}', 'cfg', 42);
+             INSERT INTO tournament_players (tournament_id, player_id, slot)
+                VALUES (1, 'a', 0), (1, 'b', 1);
+             INSERT INTO match_attempts
+                (tournament_id, game_config_id, player1_id, player2_id, seed,
+                 repetition_index, attempt_index, status, failure_reason, finished_at)
+                VALUES (1, 'cfg', 'a', 'b', 7, 0, 0, 'failure',
+                        'timeout: move: Player1', '2026-08-12 10:00:00');",
+        )
+        .unwrap();
+
+        initialize(&mut conn).unwrap();
+
+        let version: u32 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 8);
+        let tournament: (String, Option<String>, Option<String>, String) = conn
+            .query_row(
+                "SELECT lifecycle_status, terminal_kind, terminal_at, rating_status
+                   FROM tournaments WHERE id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            tournament,
+            ("legacy_unknown".into(), None, None, "legacy_unknown".into())
+        );
+        let failure: (String, Option<String>, Option<String>, Option<String>) = conn
+            .query_row(
+                "SELECT failure_reason, failure_kind, failure_phase, failing_player_id
+                   FROM match_attempts WHERE id = 1",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(failure, ("timeout: move: Player1".into(), None, None, None));
+    }
 }

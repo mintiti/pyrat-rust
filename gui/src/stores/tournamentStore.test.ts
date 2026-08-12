@@ -75,11 +75,13 @@ function matchFailed(
 		player1_id: "a",
 		player2_id: "b",
 		repetition_index: 0,
+		attempt_index: 0,
 		rat_id: "a",
 		failing_player_id: opts.failing ?? null,
 		kind: opts.kind ?? "timeout",
 		timeout_phase: opts.phase ?? "move",
 		reason: "timeout: move: Player1",
+		exhausted: true,
 	};
 }
 
@@ -93,20 +95,34 @@ function snapshot(
 		target: null,
 		anchor_id: "a",
 		running: false,
-		finished: true,
+		lifecycle: "completed",
+		terminal: {
+			outcome: "completed",
+			reason: null,
+			at: "2026-07-17 10:01:00",
+		},
+		rating_readiness: "rateable",
+		rating_reason: null,
 		paired: true,
 		created_at: "2026-07-17 10:00:00",
+		started_at: "2026-07-17 10:00:01",
+		terminal_at: "2026-07-17 10:01:00",
 		last_finished_at: "2026-07-17 10:01:00",
 		plan_summary: "all pairs of 2 · 7×7 · 2 games/matchup",
 		players: ["a", "b"],
 		games_per_matchup: 2,
-		done: 2,
-		total: 2,
-		success: 2,
-		failure: 0,
+		progress: {
+			planned_slots: 2,
+			terminal_slots: 2,
+			successful_games: 2,
+			exhausted_slots: 0,
+			failed_attempts: 0,
+			running_matches: 0,
+		},
 		standings: [],
 		games: [],
 		failures: [],
+		slots: [],
 		...overrides,
 	};
 }
@@ -177,7 +193,15 @@ describe("tournamentStore live-row guards", () => {
 
 	it("ignores MatchStarted / NowPlaying once the tournament is not running", () => {
 		const s = useTournamentStore.getState();
-		s.onFinished(1);
+		s.onFinished({
+			tournament_id: 1,
+			terminal: {
+				outcome: "completed",
+				reason: null,
+				at: "2026-07-17 10:01:00",
+			},
+			rating_readiness: "rateable",
+		});
 		expect(useTournamentStore.getState().live?.status).toBe("finished");
 
 		s.onMatchStarted(matchStarted(9));
@@ -226,10 +250,14 @@ describe("tournamentStore launch ↔ live navigation", () => {
 		s.onMatchFinished(matchFinished(7));
 		s.onStandings({
 			tournament_id: 1,
-			done: 1,
-			total: 4,
-			success: 1,
-			failure: 0,
+			progress: {
+				planned_slots: 4,
+				terminal_slots: 1,
+				successful_games: 1,
+				exhausted_slots: 0,
+				failed_attempts: 0,
+				running_matches: 0,
+			},
 			standings: [],
 		});
 
@@ -260,9 +288,18 @@ describe("tournamentStore launch ↔ live navigation", () => {
 	it("reopens legacy saved results even when no replay id was persisted", () => {
 		useTournamentStore.getState().openSnapshot(
 			snapshot({
-				done: 1,
-				total: 2,
-				finished: false,
+				lifecycle: "legacy_unknown",
+				terminal: null,
+				rating_readiness: "legacy_unknown",
+				rating_reason: null,
+				progress: {
+					planned_slots: 2,
+					terminal_slots: 1,
+					successful_games: 1,
+					exhausted_slots: 0,
+					failed_attempts: 0,
+					running_matches: 0,
+				},
 				games: [
 					{
 						attempt_id: 41,
@@ -322,11 +359,20 @@ describe("tournamentStore launch ↔ live navigation", () => {
 	it("scopes terminal events and makes their handoff one-shot", () => {
 		const s = useTournamentStore.getState();
 		s.onStarted(started(), 0);
+		const finished = {
+			tournament_id: 1,
+			terminal: {
+				outcome: "completed" as const,
+				reason: null,
+				at: "2026-07-17 10:01:00",
+			},
+			rating_readiness: "rateable" as const,
+		};
 
-		s.onFinished(99);
+		s.onFinished({ ...finished, tournament_id: 99 });
 		expect(useTournamentStore.getState().live?.status).toBe("running");
 
-		s.onFinished(1);
+		s.onFinished(finished);
 		expect(useTournamentStore.getState().live).toMatchObject({
 			status: "finished",
 			endedAt: expect.any(Number),
@@ -343,7 +389,17 @@ describe("tournamentStore launch ↔ live navigation", () => {
 	it("keeps the stop reason and marks its ladder as non-final", () => {
 		const s = useTournamentStore.getState();
 		s.onStarted(started(), 0);
-		s.onAborted(1, "bot process exited");
+		s.onAborted({
+			tournament_id: 1,
+			lifecycle: "stopped",
+			reason: "bot process exited",
+			terminal: {
+				outcome: "user_stopped",
+				reason: "bot process exited",
+				at: "2026-07-17 10:01:00",
+			},
+			rating_readiness: "provisional",
+		});
 
 		const state = useTournamentStore.getState();
 		expect(state.live).toMatchObject({

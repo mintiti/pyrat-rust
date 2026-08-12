@@ -20,6 +20,9 @@ export default function Hero({ live }: { live: TournamentLive }) {
 
 	if (!live.target) {
 		if (!terminal) return null;
+		const scheduleCompleted = live.lifecycle === "completed";
+		const scheduleInterrupted =
+			live.lifecycle === "stopped" || live.lifecycle === "failed";
 		return (
 			<Paper
 				withBorder
@@ -30,12 +33,22 @@ export default function Hero({ live }: { live: TournamentLive }) {
 			>
 				<Group gap="md" align="baseline">
 					<Text fw={700} size="lg">
-						{finalVerdict ? "Finished" : "Partial results"}
+						{scheduleCompleted
+							? live.terminalOutcome === "completed_with_failures"
+								? "Finished with failures"
+								: "Finished"
+							: scheduleInterrupted
+								? "Partial results"
+								: "Results · status unknown"}
 					</Text>
 					<Text size="sm" c="dimmed">
 						{finalVerdict
-							? `${live.done} games · final standings`
-							: `${live.done}/${live.total} games · not a final ranking`}
+							? `${live.success} successful games · final standings`
+							: scheduleCompleted
+								? `${live.done}/${live.total} schedule slots · no final rating`
+								: scheduleInterrupted
+									? `${live.done}/${live.total} schedule slots · not a final ranking`
+									: `${live.done}/${live.total} recorded terminal slots · completion unknown`}
 					</Text>
 				</Group>
 			</Paper>
@@ -45,6 +58,19 @@ export default function Hero({ live }: { live: TournamentLive }) {
 	const rows = sortedStandings(live.standings);
 	const mine = rows.find((r) => r.player_id === live.target);
 	const rank = mine ? rows.indexOf(mine) + 1 : 0;
+	const rating =
+		mine !== undefined &&
+		!mine.pending &&
+		mine.elo !== null &&
+		mine.elo_ci_low !== null &&
+		mine.elo_ci_high !== null
+			? {
+					elo: mine.elo,
+					low: mine.elo_ci_low,
+					high: mine.elo_ci_high,
+					games: mine.games,
+				}
+			: null;
 
 	return (
 		<Paper
@@ -58,7 +84,7 @@ export default function Hero({ live }: { live: TournamentLive }) {
 				<Text fw={700} c="yellow">
 					{shortId(live.target)}
 				</Text>
-				{!mine || mine.pending ? (
+				{rating === null ? (
 					<Text size="sm" c="dimmed">
 						{terminal
 							? `not rated — ${mine?.games ?? 0}/${MIN_GAMES_FOR_RATING} completed games; ${MIN_GAMES_FOR_RATING} required`
@@ -78,17 +104,19 @@ export default function Hero({ live }: { live: TournamentLive }) {
 							</Text>
 						</Text>
 						<Text fw={700} size="xl" ff="monospace">
-							{Math.round(mine.elo)}{" "}
+							{Math.round(rating.elo)}{" "}
 							<Text span size="sm" c="dimmed">
-								±{Math.round((mine.elo_ci_high - mine.elo_ci_low) / 2)}
+								±{Math.round((rating.high - rating.low) / 2)}
 							</Text>
 						</Text>
 						<Text size="xs" c="dimmed" ml="auto">
 							{terminal
 								? finalVerdict
-									? `final · ${live.done} games`
-									: `partial · ${live.done}/${live.total} games · not final`
-								: `${mine.games} of ${live.total} games in`}
+									? `final · ${live.success} successful games`
+									: live.lifecycle === "completed"
+										? `schedule complete · ${live.success} successful games · no final rating`
+										: `partial · ${live.done}/${live.total} schedule slots · not final`
+								: `${rating.games} of ${live.total} games in`}
 						</Text>
 					</>
 				)}

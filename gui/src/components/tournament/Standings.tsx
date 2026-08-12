@@ -15,6 +15,21 @@ import { T, pairKey, shortId } from "./theme";
 
 const ANCHOR_ELO = 1000;
 
+type RatedStanding = StandingRow & {
+	elo: number;
+	elo_ci_low: number;
+	elo_ci_high: number;
+};
+
+function hasRating(row: StandingRow): row is RatedStanding {
+	return (
+		!row.pending &&
+		row.elo !== null &&
+		row.elo_ci_low !== null &&
+		row.elo_ci_high !== null
+	);
+}
+
 /** Depth-1 evidence: Elo bars with uncertainty whiskers on a shared axis, a dashed
  * anchor tick, and pressable rows (the navigation into matchups). The gauntlet
  * target row is highlighted but not clickable — its breakdown is the rest of
@@ -24,7 +39,7 @@ export default function Standings({ live }: { live: TournamentLive }) {
 	const rows = sortedStandings(live.standings);
 
 	// Shared axis from the rated rows' CI range, always including the anchor.
-	const rated = rows.filter((r) => !r.pending);
+	const rated = rows.filter(hasRating);
 	let min = ANCHOR_ELO - 80;
 	let max = ANCHOR_ELO + 80;
 	for (const r of rated) {
@@ -53,10 +68,11 @@ export default function Standings({ live }: { live: TournamentLive }) {
 			</Text>
 			<div>
 				{rows.map((r, i) => {
+					const rated = hasRating(r);
 					const isTarget = r.player_id === live.target;
 					const clickable = !isTarget;
 					const health = healthSummary(live, r.player_id);
-					const standingEvidence = r.pending
+					const standingEvidence = !rated
 						? live.status === "running"
 							? `${r.games} of ${MIN_GAMES_FOR_RATING} games completed; rating appears at ${MIN_GAMES_FOR_RATING}`
 							: `not rated; ${r.games} of ${MIN_GAMES_FOR_RATING} games completed; ${MIN_GAMES_FOR_RATING} required`
@@ -70,7 +86,7 @@ export default function Standings({ live }: { live: TournamentLive }) {
 					const row = (
 						<Group wrap="nowrap" gap="sm" px="sm" py={7}>
 							<Text size="xs" c="dimmed" w={20} ta="right" ff="monospace">
-								{r.pending ? "·" : i + 1}
+								{rated ? i + 1 : "·"}
 							</Text>
 							<Text
 								size="sm"
@@ -99,7 +115,7 @@ export default function Standings({ live }: { live: TournamentLive }) {
 										borderLeft: "1px dashed #4a4e5c",
 									}}
 								/>
-								{!r.pending && (
+								{rated && (
 									<>
 										<Box
 											pos="absolute"
@@ -118,7 +134,7 @@ export default function Standings({ live }: { live: TournamentLive }) {
 							</Box>
 
 							<Text size="xs" ff="monospace" w={104} ta="right">
-								{r.pending
+								{!rated
 									? live.status === "running"
 										? `${r.games}/${MIN_GAMES_FOR_RATING} to rating`
 										: `${r.games}/${MIN_GAMES_FOR_RATING} · not rated`

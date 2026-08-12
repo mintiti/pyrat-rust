@@ -49,20 +49,34 @@ function savedSnapshot(
 		target: null,
 		anchor_id: "a",
 		running: false,
-		finished: false,
+		lifecycle: "stopped",
+		terminal: {
+			outcome: "user_stopped",
+			reason: "stopped before the schedule completed",
+			at: "2026-07-16 10:01:00",
+		},
+		rating_readiness: "insufficient_games",
+		rating_reason: "not enough successful games",
 		paired: true,
 		created_at: "2026-07-16 10:00:00",
+		started_at: "2026-07-16 10:00:01",
+		terminal_at: "2026-07-16 10:01:00",
 		last_finished_at: "2026-07-16 10:01:00",
 		plan_summary: "all pairs of 2 · 7×7 · 4 games/matchup",
 		players: ["a", "b"],
 		games_per_matchup: 4,
-		done: 1,
-		total: 4,
-		success: 1,
-		failure: 0,
+		progress: {
+			planned_slots: 4,
+			terminal_slots: 1,
+			successful_games: 1,
+			exhausted_slots: 0,
+			failed_attempts: 0,
+			running_matches: 0,
+		},
 		standings: [],
 		games: [],
 		failures: [],
+		slots: [],
 		...overrides,
 	};
 }
@@ -77,13 +91,27 @@ describe("tournament UI truth", () => {
 		store.onStarted(started(), Date.now() - 10_000);
 		store.onStandings({
 			tournament_id: 1,
-			done: 47,
-			total: 80,
-			success: 46,
-			failure: 1,
+			progress: {
+				planned_slots: 80,
+				terminal_slots: 47,
+				successful_games: 46,
+				exhausted_slots: 1,
+				failed_attempts: 1,
+				running_matches: 0,
+			},
 			standings: [],
 		});
-		store.onAborted(1, "bot process exited");
+		store.onAborted({
+			tournament_id: 1,
+			lifecycle: "stopped",
+			reason: "bot process exited",
+			terminal: {
+				outcome: "user_stopped",
+				reason: "bot process exited",
+				at: "2026-07-16 10:01:00",
+			},
+			rating_readiness: "provisional",
+		});
 
 		const live = useTournamentStore.getState().live;
 		expect(live).not.toBeNull();
@@ -92,7 +120,7 @@ describe("tournament UI truth", () => {
 
 		expect(html).toContain("Tournament stopped. Results below are partial.");
 		expect(html).toContain("Reason: bot process exited");
-		expect(html).toContain("partial, not a final ranking");
+		expect(html).toContain("partial schedule · not a final ranking");
 		expect(html).not.toContain("· done");
 	});
 
@@ -104,10 +132,88 @@ describe("tournament UI truth", () => {
 
 		const html = render(createElement(LiveView, { live: saved }));
 		expect(html).toContain('aria-label="back to tournament setup"');
-		expect(html).toContain("Saved partial results");
+		expect(html).toContain("Tournament stopped. Results below are partial.");
+		expect(html).toContain("Reason: stopped before the schedule completed");
 		expect(html).not.toContain(">Stop<");
 		expect(html).not.toContain("min left");
 		expect(html).not.toContain("Now playing");
+	});
+
+	it("reopens infrastructure failure with its exact disposition and reason", () => {
+		useTournamentStore.getState().openSnapshot(
+			savedSnapshot({
+				lifecycle: "failed",
+				terminal: {
+					outcome: "infrastructure_failure",
+					reason: "session event channel closed",
+					at: "2026-07-16 10:01:00",
+				},
+			}),
+		);
+		const saved = useTournamentStore.getState().viewing;
+		expect(saved).not.toBeNull();
+		if (!saved) return;
+
+		const html = render(createElement(LiveView, { live: saved }));
+		expect(html).toContain(">failed<");
+		expect(html).toContain("Tournament failed. Results below are partial.");
+		expect(html).toContain("Reason: session event channel closed");
+		expect(html).not.toContain("Tournament stopped.");
+	});
+
+	it("does not infer partial completion for a legacy-unknown row", () => {
+		useTournamentStore.getState().openSnapshot(
+			savedSnapshot({
+				lifecycle: "legacy_unknown",
+				terminal: null,
+				terminal_at: null,
+				rating_readiness: "legacy_unknown",
+				rating_reason: null,
+			}),
+		);
+		const saved = useTournamentStore.getState().viewing;
+		expect(saved).not.toBeNull();
+		if (!saved) return;
+
+		const html = render(createElement(LiveView, { live: saved }));
+		expect(html).toContain("Saved tournament status unknown");
+		expect(html).toContain("completion is not inferred");
+		expect(html).toContain("execution status unknown");
+		expect(html).not.toContain("Saved partial results");
+	});
+
+	it("keeps completed-with-failures separate from rating readiness", () => {
+		useTournamentStore.getState().openSnapshot(
+			savedSnapshot({
+				lifecycle: "completed",
+				terminal: {
+					outcome: "completed_with_failures",
+					reason: "one schedule slot exhausted its retry budget",
+					at: "2026-07-16 10:01:00",
+				},
+				rating_readiness: "insufficient_games",
+				rating_reason: "each player needs four successful games",
+				progress: {
+					planned_slots: 4,
+					terminal_slots: 4,
+					successful_games: 3,
+					exhausted_slots: 1,
+					failed_attempts: 1,
+					running_matches: 0,
+				},
+			}),
+		);
+		const saved = useTournamentStore.getState().viewing;
+		expect(saved).not.toBeNull();
+		if (!saved) return;
+
+		const html = render(createElement(LiveView, { live: saved }));
+		expect(html).toContain("finished with failures");
+		expect(html).toContain("schedule complete");
+		expect(html).toContain(
+			"not rated: each player needs four successful games",
+		);
+		expect(html).not.toContain("Saved partial results");
 	});
 
 	it("groups out-of-order seat-swapped legs into one maze", () => {
@@ -145,6 +251,7 @@ describe("tournament UI truth", () => {
 			createElement(PairedGames, {
 				tournamentId: 7,
 				games,
+				failures: [],
 				perspectiveId: "a",
 				paired: true,
 				onOpenGame: () => undefined,
@@ -154,6 +261,51 @@ describe("tournament UI truth", () => {
 		expect(html).toContain("a won pair 1½–½");
 		expect(html).toContain("a as Rat");
 		expect(html).toContain("b as Rat");
+	});
+
+	it("renders an exhausted paired leg as terminal rather than pending", () => {
+		const games = [
+			{
+				gameKey: "success",
+				matchId: 11,
+				player1Id: "a",
+				player2Id: "b",
+				repetitionIndex: 0,
+				ratId: "a",
+				player1Score: 5,
+				player2Score: 3,
+			},
+		];
+		const failures = [
+			{
+				failureKey: "attempt:12",
+				matchId: 12,
+				player1Id: "a",
+				player2Id: "b",
+				repetitionIndex: 1,
+				attemptIndex: 0,
+				ratId: "b",
+				failingPlayerId: "b",
+				kind: "timeout" as const,
+				timeoutPhase: "move" as const,
+				reason: "timeout: move: Player1",
+				exhausted: true,
+			},
+		];
+
+		const html = render(
+			createElement(PairedGames, {
+				tournamentId: 7,
+				games,
+				failures,
+				perspectiveId: "a",
+				paired: true,
+				onOpenGame: () => undefined,
+			}),
+		);
+		expect(html).toContain("1 scored · 1 exhausted");
+		expect(html).toContain("b as Rat · exhausted leg");
+		expect(html).not.toContain("1/2 legs terminal");
 	});
 
 	it("keeps legacy repetitions as independent games", () => {
@@ -301,13 +453,25 @@ describe("tournament UI truth", () => {
 		store.onStarted(started({ total_games: 8 }), Date.now());
 		store.onStandings({
 			tournament_id: 1,
-			done: 3,
-			total: 8,
-			success: 2,
-			failure: 1,
+			progress: {
+				planned_slots: 8,
+				terminal_slots: 3,
+				successful_games: 2,
+				exhausted_slots: 1,
+				failed_attempts: 1,
+				running_matches: 0,
+			},
 			standings: [],
 		});
-		store.onFinished(1);
+		store.onFinished({
+			tournament_id: 1,
+			terminal: {
+				outcome: "completed_with_failures",
+				reason: "one schedule slot exhausted its retry budget",
+				at: "2026-07-16 10:01:00",
+			},
+			rating_readiness: "insufficient_games",
+		});
 
 		const projection = tournamentChromeProjection(
 			useTournamentStore.getState(),
@@ -321,10 +485,14 @@ describe("tournament UI truth", () => {
 		store.onStarted(started({ target: "a", total_games: 2 }), Date.now());
 		store.onStandings({
 			tournament_id: 1,
-			done: 1,
-			total: 2,
-			success: 1,
-			failure: 0,
+			progress: {
+				planned_slots: 2,
+				terminal_slots: 1,
+				successful_games: 1,
+				exhausted_slots: 0,
+				failed_attempts: 0,
+				running_matches: 0,
+			},
 			standings: [
 				{
 					player_id: "a",
@@ -371,10 +539,14 @@ describe("tournament UI truth", () => {
 		);
 		store.onStandings({
 			tournament_id: 1,
-			done: 2,
-			total: 8,
-			success: 2,
-			failure: 0,
+			progress: {
+				planned_slots: 8,
+				terminal_slots: 2,
+				successful_games: 2,
+				exhausted_slots: 0,
+				failed_attempts: 0,
+				running_matches: 0,
+			},
 			standings: [
 				{
 					player_id: "a",

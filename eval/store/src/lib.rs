@@ -12,10 +12,11 @@ pub use store::{
     TxStore,
 };
 pub use types::{
-    AddTournamentPlayerError, AttemptKey, AttemptOutcome, AttemptRecord, AttemptStatus,
-    CreateTournamentError, DeletePlayerError, EvalError, GameConfigRecord, GameResultRecord,
-    NewAttempt, NewAttemptOutcome, NewGameResult, NewPlayer, NewTournament, PlayerRecord,
-    PlayerStartRecord, RecordAttemptError, RegisterPlayerError, ResultFilter, SeatOrientation,
-    TournamentId, TournamentMethodology, TournamentParticipant, TournamentRecord,
-    TournamentTimingMode,
+    AddTournamentPlayerError, AttemptFailureKind, AttemptFailurePhase, AttemptFailureReport,
+    AttemptKey, AttemptOutcome, AttemptRecord, AttemptStatus, CreateTournamentError,
+    DeletePlayerError, EvalError, GameConfigRecord, GameResultRecord, NewAttempt,
+    NewAttemptOutcome, NewGameResult, NewPlayer, NewTournament, PlayerRecord, PlayerStartRecord,
+    RecordAttemptError, RegisterPlayerError, ResultFilter, SeatOrientation, TournamentId,
+    TournamentLifecycle, TournamentMethodology, TournamentParticipant, TournamentRatingStatus,
+    TournamentRecord, TournamentTerminal, TournamentTerminalKind, TournamentTimingMode,
 };

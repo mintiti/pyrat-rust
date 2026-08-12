@@ -43,6 +43,17 @@ export default function MatchupView({ live, a, b, fromBot }: Props) {
 	);
 
 	const failures = live.failuresByPair[pairKey(a, b)] ?? [];
+	const exhaustedLegs = new Set(
+		failures
+			.filter((failure) => failure.exhausted)
+			.map((failure) => failure.repetitionIndex),
+	).size;
+	const terminalSlots = new Set([
+		...games.map((game) => game.repetitionIndex),
+		...failures
+			.filter((failure) => failure.exhausted)
+			.map((failure) => failure.repetitionIndex),
+	]).size;
 
 	return (
 		<Box>
@@ -54,7 +65,9 @@ export default function MatchupView({ live, a, b, fromBot }: Props) {
 					W–L–D {w}–{l}–{d}
 				</Text>
 				<Text size="sm" c="dimmed">
-					· {games.length}/{live.gamesPerMatchup} games
+					· {terminalSlots}/{live.gamesPerMatchup} schedule slots ·{" "}
+					{games.length} successful
+					{exhaustedLegs > 0 ? ` · ${exhaustedLegs} exhausted` : ""}
 				</Text>
 				<Group gap={3}>
 					{games.slice(-5).map((g) => {
@@ -99,14 +112,15 @@ export default function MatchupView({ live, a, b, fromBot }: Props) {
 				</Group>
 			))}
 
-			{games.length === 0 ? (
+			{games.length === 0 && exhaustedLegs === 0 ? (
 				<Text size="sm" c="dimmed">
-					no finished games yet
+					no terminal schedule legs yet
 				</Text>
 			) : (
 				<PairedGames
 					tournamentId={live.tournamentId}
 					games={games}
+					failures={failures}
 					perspectiveId={persp}
 					paired={live.paired}
 					onOpenGame={(matchId) =>

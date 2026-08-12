@@ -281,6 +281,7 @@ mod tests {
             AttemptOutcome::Failure {
                 failure_reason,
                 started_at,
+                ..
             } => {
                 assert_eq!(failure_reason, "spawn_failed");
                 assert!(started_at.is_none());

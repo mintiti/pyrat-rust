@@ -1,5 +1,8 @@
 import { Group, Paper, SimpleGrid, Stack, Text } from "@mantine/core";
-import type { FinishedGame } from "../../stores/tournamentStore";
+import type {
+	FinishedGame,
+	MatchFailureRecord,
+} from "../../stores/tournamentStore";
 import { resultFor } from "../../stores/tournamentStore";
 import GameCard from "./GameCard";
 import { T, shortId } from "./theme";
@@ -39,12 +42,23 @@ function pointsLabel(points: number): string {
 
 function pairVerdict(
 	pair: FinishedGamePair,
+	exhaustedFailures: MatchFailureRecord[],
 	perspectiveId: string,
 	paired: boolean,
 ): string {
 	const expectedLegs = paired ? 2 : 1;
-	if (pair.games.length < expectedLegs) {
-		return `${pair.games.length}/${expectedLegs} legs complete`;
+	const exhaustedLegs = new Set(
+		exhaustedFailures.map((failure) => failure.repetitionIndex),
+	).size;
+	const terminalLegs = new Set([
+		...pair.games.map((game) => game.repetitionIndex),
+		...exhaustedFailures.map((failure) => failure.repetitionIndex),
+	]).size;
+	if (terminalLegs < expectedLegs) {
+		return `${terminalLegs}/${expectedLegs} legs terminal`;
+	}
+	if (exhaustedLegs > 0) {
+		return `${pair.games.length} scored · ${exhaustedLegs} exhausted`;
 	}
 	let mine = 0;
 	for (const game of pair.games) {
@@ -65,57 +79,102 @@ function pairVerdict(
 export default function PairedGames({
 	tournamentId,
 	games,
+	failures,
 	perspectiveId,
 	paired,
 	onOpenGame,
 }: {
 	tournamentId: number;
 	games: FinishedGame[];
+	failures: MatchFailureRecord[];
 	perspectiveId: string;
 	paired: boolean;
 	onOpenGame: (matchId: number) => void;
 }) {
-	const pairs = groupFinishedGames(games, paired);
+	const pairsByIndex = new Map(
+		groupFinishedGames(games, paired).map((pair) => [pair.pairIndex, pair]),
+	);
+	const exhaustedByPair = new Map<number, MatchFailureRecord[]>();
+	for (const failure of failures.filter((item) => item.exhausted)) {
+		const pairIndex = paired
+			? Math.floor(failure.repetitionIndex / 2)
+			: failure.repetitionIndex;
+		exhaustedByPair.set(pairIndex, [
+			...(exhaustedByPair.get(pairIndex) ?? []),
+			failure,
+		]);
+		if (!pairsByIndex.has(pairIndex)) {
+			pairsByIndex.set(pairIndex, { pairIndex, games: [] });
+		}
+	}
+	const pairs = [...pairsByIndex.values()].sort(
+		(a, b) => b.pairIndex - a.pairIndex,
+	);
 	return (
 		<Stack gap="sm">
-			{pairs.map((pair) => (
-				<Paper key={pair.pairIndex} withBorder p="xs" radius="md" bg={T.panel2}>
-					<Group justify="space-between" gap="sm" mb="xs">
-						<Text size="xs" fw={700} tt="uppercase" c="dimmed">
-							{paired
-								? `Maze ${pair.pairIndex + 1}`
-								: `Game ${pair.pairIndex + 1}`}
-						</Text>
-						<Text size="xs" ff="monospace">
-							{pairVerdict(pair, perspectiveId, paired)}
-						</Text>
-					</Group>
-					<SimpleGrid cols={paired ? { base: 1, xs: 2 } : 1} spacing="xs">
-						{pair.games.map((game) => {
-							const matchId = game.matchId;
-							return (
-								<div key={game.gameKey}>
+			{pairs.map((pair) => {
+				const exhaustedFailures = exhaustedByPair.get(pair.pairIndex) ?? [];
+				return (
+					<Paper
+						key={pair.pairIndex}
+						withBorder
+						p="xs"
+						radius="md"
+						bg={T.panel2}
+					>
+						<Group justify="space-between" gap="sm" mb="xs">
+							<Text size="xs" fw={700} tt="uppercase" c="dimmed">
+								{paired
+									? `Maze ${pair.pairIndex + 1}`
+									: `Game ${pair.pairIndex + 1}`}
+							</Text>
+							<Text size="xs" ff="monospace">
+								{pairVerdict(pair, exhaustedFailures, perspectiveId, paired)}
+							</Text>
+						</Group>
+						<SimpleGrid cols={paired ? { base: 1, xs: 2 } : 1} spacing="xs">
+							{pair.games.map((game) => {
+								const matchId = game.matchId;
+								return (
+									<div key={game.gameKey}>
+										<Text size="xs" c="dimmed" mb={4}>
+											{shortId(game.ratId)} as Rat ·{" "}
+											{shortId(
+												game.ratId === game.player1Id
+													? game.player2Id
+													: game.player1Id,
+											)}{" "}
+											as Python
+										</Text>
+										<GameCard
+											tournamentId={tournamentId}
+											game={game}
+											perspectiveId={perspectiveId}
+											onOpen={
+												matchId === null ? null : () => onOpenGame(matchId)
+											}
+										/>
+									</div>
+								);
+							})}
+							{exhaustedFailures.map((failure) => (
+								<Paper
+									key={failure.failureKey}
+									withBorder
+									p="xs"
+									radius="sm"
+									style={{ borderColor: T.loss }}
+								>
 									<Text size="xs" c="dimmed" mb={4}>
-										{shortId(game.ratId)} as Rat ·{" "}
-										{shortId(
-											game.ratId === game.player1Id
-												? game.player2Id
-												: game.player1Id,
-										)}{" "}
-										as Python
+										{shortId(failure.ratId)} as Rat · exhausted leg
 									</Text>
-									<GameCard
-										tournamentId={tournamentId}
-										game={game}
-										perspectiveId={perspectiveId}
-										onOpen={matchId === null ? null : () => onOpenGame(matchId)}
-									/>
-								</div>
-							);
-						})}
-					</SimpleGrid>
-				</Paper>
-			))}
+									<Text size="xs">{failure.reason}</Text>
+								</Paper>
+							))}
+						</SimpleGrid>
+					</Paper>
+				);
+			})}
 		</Stack>
 	);
 }

@@ -6,11 +6,13 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::elo::HeadToHead;
 use crate::schema;
 use crate::types::{
-    AddTournamentPlayerError, AttemptKey, AttemptOutcome, AttemptRecord, AttemptStatus,
-    CreateTournamentError, DeletePlayerError, EvalError, GameConfigRecord, GameResultRecord,
-    NewAttempt, NewAttemptOutcome, NewGameResult, NewPlayer, NewTournament, PlayerRecord,
-    RecordAttemptError, RegisterPlayerError, ResultFilter, SeatOrientation, TournamentId,
-    TournamentMethodology, TournamentParticipant, TournamentRecord, TournamentTimingMode,
+    AddTournamentPlayerError, AttemptFailureKind, AttemptFailurePhase, AttemptFailureReport,
+    AttemptKey, AttemptOutcome, AttemptRecord, AttemptStatus, CreateTournamentError,
+    DeletePlayerError, EvalError, GameConfigRecord, GameResultRecord, NewAttempt,
+    NewAttemptOutcome, NewGameResult, NewPlayer, NewTournament, PlayerRecord, RecordAttemptError,
+    RegisterPlayerError, ResultFilter, SeatOrientation, TournamentId, TournamentLifecycle,
+    TournamentMethodology, TournamentParticipant, TournamentRatingStatus, TournamentRecord,
+    TournamentTerminal, TournamentTerminalKind, TournamentTimingMode,
 };
 
 /// SQLite-backed store for game results, players, tournaments, and match
@@ -251,7 +253,8 @@ impl EvalStore {
                         game_config_id, tournament_seed, created_at, name,
                         timing_mode, move_timeout_ms, preprocessing_timeout_ms,
                         startup_timeout_ms, configure_timeout_ms, network_grace_ms,
-                        max_parallel
+                        max_parallel, lifecycle_status, started_at, terminal_at,
+                        terminal_kind, terminal_reason, rating_status, rating_reason
                    FROM tournaments WHERE id = ?1",
                 params![id.0],
                 read_tournament_row,
@@ -266,7 +269,8 @@ impl EvalStore {
                     game_config_id, tournament_seed, created_at, name,
                     timing_mode, move_timeout_ms, preprocessing_timeout_ms,
                     startup_timeout_ms, configure_timeout_ms, network_grace_ms,
-                    max_parallel
+                    max_parallel, lifecycle_status, started_at, terminal_at,
+                    terminal_kind, terminal_reason, rating_status, rating_reason
                FROM tournaments ORDER BY id",
         )?;
         let rows = stmt.query_map([], read_tournament_row)?;
@@ -281,6 +285,91 @@ impl EvalStore {
             .conn
             .execute("DELETE FROM tournaments WHERE id = ?1", params![id.0])?;
         Ok(deleted > 0)
+    }
+
+    /// Mark a newly-created GUI tournament as preparing. Existing rows keep
+    /// `legacy_unknown` until a current owner explicitly adopts them.
+    pub fn mark_tournament_preparing(&self, id: TournamentId) -> Result<bool, EvalError> {
+        let changed = self.conn.execute(
+            "UPDATE tournaments
+                SET lifecycle_status = 'preparing', rating_status = 'provisional',
+                    rating_reason = NULL
+              WHERE id = ?1 AND lifecycle_status = 'legacy_unknown'",
+            params![id.0],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Record the point at which the session became live. The timestamp is
+    /// caller-supplied so tests and external owners can round-trip it exactly.
+    pub fn mark_tournament_running(
+        &self,
+        id: TournamentId,
+        started_at: &str,
+    ) -> Result<bool, EvalError> {
+        let changed = self.conn.execute(
+            "UPDATE tournaments
+                SET lifecycle_status = 'running', started_at = COALESCE(started_at, ?2),
+                    terminal_at = NULL, terminal_kind = NULL, terminal_reason = NULL,
+                    rating_status = 'provisional', rating_reason = NULL
+              WHERE id = ?1 AND lifecycle_status = 'preparing'",
+            params![id.0, started_at],
+        )?;
+        Ok(changed > 0)
+    }
+
+    /// Persist one terminal outcome. Lifecycle, terminal disposition, and
+    /// rating readiness are written together so readers cannot observe a
+    /// completed row with stale provisional evidence state.
+    pub fn mark_tournament_terminal(
+        &self,
+        id: TournamentId,
+        terminal_at: &str,
+        lifecycle: TournamentLifecycle,
+        terminal: &TournamentTerminal,
+        rating_status: TournamentRatingStatus,
+        rating_reason: Option<&str>,
+    ) -> Result<bool, EvalError> {
+        let disposition_matches_lifecycle = matches!(
+            (lifecycle, terminal.kind),
+            (
+                TournamentLifecycle::Completed,
+                TournamentTerminalKind::Completed | TournamentTerminalKind::CompletedWithFailures
+            ) | (
+                TournamentLifecycle::Stopped,
+                TournamentTerminalKind::UserStopped
+            ) | (
+                TournamentLifecycle::Failed,
+                TournamentTerminalKind::InfrastructureFailure
+            )
+        );
+        if !disposition_matches_lifecycle {
+            return Ok(false);
+        }
+        if !matches!(terminal.kind, TournamentTerminalKind::Completed)
+            && terminal
+                .reason
+                .as_deref()
+                .is_none_or(|reason| reason.trim().is_empty())
+        {
+            return Ok(false);
+        }
+        let changed = self.conn.execute(
+            "UPDATE tournaments
+                SET lifecycle_status = ?2, terminal_at = ?3, terminal_kind = ?4,
+                    terminal_reason = ?5, rating_status = ?6, rating_reason = ?7
+              WHERE id = ?1 AND lifecycle_status IN ('preparing', 'running')",
+            params![
+                id.0,
+                lifecycle.as_str(),
+                terminal_at,
+                terminal.kind.as_str(),
+                terminal.reason,
+                rating_status.as_str(),
+                rating_reason,
+            ],
+        )?;
+        Ok(changed > 0)
     }
 
     /// Insert a tournament participant. Distinguishes `(tournament_id,
@@ -336,7 +425,17 @@ impl EvalStore {
             ),
             None => None,
         };
-        let (status, score1, score2, turns, failure_reason, started_at) = match outcome {
+        let (
+            status,
+            score1,
+            score2,
+            turns,
+            failure_reason,
+            started_at,
+            failure_kind,
+            failure_phase,
+            failing_player_id,
+        ) = match outcome {
             NewAttemptOutcome::Success {
                 player1_score,
                 player2_score,
@@ -349,17 +448,20 @@ impl EvalStore {
                 Some(*turns),
                 None,
                 Some(started_at.as_str()),
+                None,
+                None,
+                None,
             ),
-            NewAttemptOutcome::Failure {
-                failure_reason,
-                started_at,
-            } => (
+            NewAttemptOutcome::Failure { report, started_at } => (
                 AttemptStatus::Failure.as_str(),
                 None,
                 None,
                 None,
-                Some(failure_reason.as_str()),
+                Some(report.message.as_str()),
                 started_at.as_deref(),
+                Some(report.kind.as_str()),
+                report.phase.map(AttemptFailurePhase::as_str),
+                report.failing_player_id.as_deref(),
             ),
         };
         let result = self.conn.execute(
@@ -367,8 +469,9 @@ impl EvalStore {
                (tournament_id, game_config_id, player1_id, player2_id, seed,
                 repetition_index, attempt_index, status,
                 player1_score, player2_score, turns,
-                failure_reason, started_at, finished_at, orientation, match_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+                failure_reason, started_at, finished_at, orientation, match_id,
+                failure_kind, failure_phase, failing_player_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
             params![
                 key.tournament_id.0,
                 key.game_config_id,
@@ -386,6 +489,9 @@ impl EvalStore {
                 finished_at,
                 key.orientation.to_db(),
                 match_id_i64,
+                failure_kind,
+                failure_phase,
+                failing_player_id,
             ],
         );
         match result {
@@ -411,7 +517,8 @@ impl EvalStore {
             "SELECT id, tournament_id, game_config_id, player1_id, player2_id, seed,
                     repetition_index, attempt_index, status,
                     player1_score, player2_score, turns,
-                    failure_reason, started_at, finished_at, orientation, match_id
+                    failure_reason, started_at, finished_at, orientation, match_id,
+                    failure_kind, failure_phase, failing_player_id
                FROM match_attempts WHERE tournament_id = ?1",
         );
         if status_filter.is_some() {
@@ -759,6 +866,87 @@ fn read_tournament_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TournamentRe
             ));
         },
     };
+    let lifecycle_raw: String = row.get(15)?;
+    let lifecycle = TournamentLifecycle::from_str(&lifecycle_raw).ok_or_else(|| {
+        rusqlite::Error::FromSqlConversionFailure(
+            15,
+            rusqlite::types::Type::Text,
+            format!("invalid tournament lifecycle: {lifecycle_raw}").into(),
+        )
+    })?;
+    let terminal_kind_raw: Option<String> = row.get(18)?;
+    let terminal_reason: Option<String> = row.get(19)?;
+    let terminal = terminal_kind_raw
+        .map(|raw| {
+            TournamentTerminalKind::from_str(&raw)
+                .map(|kind| TournamentTerminal {
+                    kind,
+                    reason: terminal_reason.clone(),
+                })
+                .ok_or_else(|| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        18,
+                        rusqlite::types::Type::Text,
+                        format!("invalid tournament terminal kind: {raw}").into(),
+                    )
+                })
+        })
+        .transpose()?;
+    let rating_raw: String = row.get(20)?;
+    let rating_status = TournamentRatingStatus::from_str(&rating_raw).ok_or_else(|| {
+        rusqlite::Error::FromSqlConversionFailure(
+            20,
+            rusqlite::types::Type::Text,
+            format!("invalid tournament rating status: {rating_raw}").into(),
+        )
+    })?;
+    let terminal_at: Option<String> = row.get(17)?;
+    let lifecycle_matches_terminal = match lifecycle {
+        TournamentLifecycle::LegacyUnknown
+        | TournamentLifecycle::Preparing
+        | TournamentLifecycle::Running => terminal.is_none() && terminal_at.is_none(),
+        TournamentLifecycle::Completed => {
+            matches!(
+                terminal.as_ref().map(|value| value.kind),
+                Some(
+                    TournamentTerminalKind::Completed
+                        | TournamentTerminalKind::CompletedWithFailures
+                )
+            ) && terminal_at.is_some()
+        },
+        TournamentLifecycle::Stopped => {
+            matches!(
+                terminal.as_ref().map(|value| value.kind),
+                Some(TournamentTerminalKind::UserStopped)
+            ) && terminal_at.is_some()
+        },
+        TournamentLifecycle::Failed => {
+            matches!(
+                terminal.as_ref().map(|value| value.kind),
+                Some(TournamentTerminalKind::InfrastructureFailure)
+            ) && terminal_at.is_some()
+        },
+    };
+    if !lifecycle_matches_terminal {
+        return Err(rusqlite::Error::FromSqlConversionFailure(
+            15,
+            rusqlite::types::Type::Text,
+            "inconsistent tournament lifecycle and terminal disposition".into(),
+        ));
+    }
+    if terminal.as_ref().is_some_and(|value| {
+        !matches!(value.kind, TournamentTerminalKind::Completed)
+            && value
+                .reason
+                .as_deref()
+                .is_none_or(|reason| reason.trim().is_empty())
+    }) {
+        return Err(rusqlite::Error::FromSqlConversionFailure(
+            18,
+            rusqlite::types::Type::Text,
+            "terminal disposition requires a reason".into(),
+        ));
+    }
     Ok(TournamentRecord {
         id: TournamentId(row.get(0)?),
         format: row.get(1)?,
@@ -767,6 +955,12 @@ fn read_tournament_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<TournamentRe
         game_config_id: row.get(4)?,
         tournament_seed: seed_i64 as u64,
         methodology,
+        lifecycle,
+        started_at: row.get(16)?,
+        terminal_at,
+        terminal,
+        rating_status,
+        rating_reason: row.get(21)?,
         created_at: row.get(6)?,
         name: row.get(7)?,
     })
@@ -819,6 +1013,46 @@ fn read_attempt_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AttemptRecord> 
     // The `match_attempts` CHECK guarantees these reads are non-NULL on
     // success rows; on a hand-edited DB a NULL would surface as
     // `InvalidColumnType` from `row.get`, not a panic.
+    let failure_report = match (
+        row.get::<_, Option<String>>(17)?,
+        row.get::<_, Option<String>>(18)?,
+        row.get::<_, Option<String>>(19)?,
+    ) {
+        (None, None, None) => None,
+        (Some(kind), phase, failing_player_id) => {
+            let kind = AttemptFailureKind::from_str(&kind).ok_or_else(|| {
+                rusqlite::Error::FromSqlConversionFailure(
+                    17,
+                    rusqlite::types::Type::Text,
+                    format!("invalid attempt failure kind: {kind}").into(),
+                )
+            })?;
+            let phase = phase
+                .map(|phase| {
+                    AttemptFailurePhase::from_str(&phase).ok_or_else(|| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            18,
+                            rusqlite::types::Type::Text,
+                            format!("invalid attempt failure phase: {phase}").into(),
+                        )
+                    })
+                })
+                .transpose()?;
+            Some(AttemptFailureReport {
+                kind,
+                phase,
+                failing_player_id,
+                message: row.get(12)?,
+            })
+        },
+        (None, Some(_), _) | (None, None, Some(_)) => {
+            return Err(rusqlite::Error::FromSqlConversionFailure(
+                17,
+                rusqlite::types::Type::Null,
+                "partial typed attempt failure".into(),
+            ));
+        },
+    };
     let outcome = match status {
         AttemptStatus::Success => AttemptOutcome::Success {
             player1_score: row.get(9)?,
@@ -829,6 +1063,7 @@ fn read_attempt_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<AttemptRecord> 
         AttemptStatus::Failure => AttemptOutcome::Failure {
             failure_reason: row.get(12)?,
             started_at: row.get(13)?,
+            report: failure_report,
         },
     };
     Ok(AttemptRecord {
@@ -1038,7 +1273,12 @@ mod tests {
             key: attempt_key(tid, cid, p1, p2, 5678, attempt_index),
             finished_at: "2026-05-06 10:10:00".into(),
             outcome: NewAttemptOutcome::Failure {
-                failure_reason: "bot crash".into(),
+                report: AttemptFailureReport {
+                    kind: AttemptFailureKind::Other,
+                    phase: None,
+                    failing_player_id: None,
+                    message: "bot crash".into(),
+                },
                 started_at: started_at.map(String::from),
             },
         }
@@ -1341,7 +1581,7 @@ mod tests {
     #[test]
     fn migration_fresh_db_ends_at_latest_user_version() {
         let store = EvalStore::open_in_memory().unwrap();
-        assert_eq!(user_version(&store), 7);
+        assert_eq!(user_version(&store), 8);
 
         let tables: Vec<String> = store
             .conn
@@ -1373,7 +1613,13 @@ mod tests {
             .unwrap()
             .map(|r| r.unwrap())
             .collect();
-        for expected in ["game_config_id", "tournament_seed"] {
+        for expected in [
+            "game_config_id",
+            "tournament_seed",
+            "lifecycle_status",
+            "terminal_kind",
+            "rating_status",
+        ] {
             assert!(
                 cols.contains(&expected.to_string()),
                 "migration 3 should have added {expected} to tournaments: have {cols:?}"
@@ -1409,7 +1655,7 @@ mod tests {
         assert_eq!(v, 0);
 
         let store = EvalStore::from_connection(conn).unwrap();
-        assert_eq!(user_version(&store), 7);
+        assert_eq!(user_version(&store), 8);
 
         // Migration 2 added these columns to players. Confirm they exist.
         let cols: Vec<String> = store
@@ -1435,14 +1681,14 @@ mod tests {
         let v: u32 = conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(v, 7);
+        assert_eq!(v, 8);
         // Second run on the same connection: each migration's `version > current`
         // guard makes the loop a no-op. Must not error.
         schema::initialize(&mut conn).unwrap();
         let v: u32 = conn
             .query_row("PRAGMA user_version", [], |row| row.get(0))
             .unwrap();
-        assert_eq!(v, 7);
+        assert_eq!(v, 8);
     }
 
     /// Migration 3 refuses to run if `tournaments` has pre-migration rows,
@@ -1513,7 +1759,7 @@ mod tests {
         }
     }
 
-    /// Migrations 4–7 are additive, but
+    /// Migrations 4–8 are additive, but
     /// migration 3 already proved row-loss is a real failure mode — so pin the
     /// production path: a populated v3 DB (existing CLI ladder shape) survives
     /// the upgrade with its rows intact, `name = NULL`, and legacy attempts
@@ -1583,7 +1829,7 @@ mod tests {
         .unwrap();
 
         let store = EvalStore::from_connection(conn).unwrap();
-        assert_eq!(user_version(&store), 7);
+        assert_eq!(user_version(&store), 8);
 
         // Tournament row survived with name defaulting to NULL (migration 4).
         let t = store
@@ -1592,6 +1838,10 @@ mod tests {
             .expect("tournament row survived migration");
         assert_eq!(t.name, None);
         assert_eq!(t.methodology, None);
+        assert_eq!(t.lifecycle, TournamentLifecycle::LegacyUnknown);
+        assert_eq!(t.terminal, None);
+        assert_eq!(t.rating_status, TournamentRatingStatus::LegacyUnknown);
+        assert_eq!(t.rating_reason, None);
 
         // Attempt row survived; legacy orientation reads back as Canonical
         // (migration 5 default 0).
@@ -1610,6 +1860,149 @@ mod tests {
             },
             AttemptOutcome::Failure { .. } => panic!("expected success row"),
         }
+    }
+
+    #[test]
+    fn tournament_lifecycle_roundtrips_each_terminal_disposition() {
+        let store = EvalStore::open_in_memory().unwrap();
+        let cases = [
+            (
+                TournamentLifecycle::Completed,
+                TournamentTerminalKind::Completed,
+                TournamentRatingStatus::Rateable,
+                None,
+            ),
+            (
+                TournamentLifecycle::Completed,
+                TournamentTerminalKind::CompletedWithFailures,
+                TournamentRatingStatus::InsufficientGames,
+                Some("one schedule slot exhausted its retry budget"),
+            ),
+            (
+                TournamentLifecycle::Stopped,
+                TournamentTerminalKind::UserStopped,
+                TournamentRatingStatus::Provisional,
+                Some("stopped by user"),
+            ),
+            (
+                TournamentLifecycle::Failed,
+                TournamentTerminalKind::InfrastructureFailure,
+                TournamentRatingStatus::EstimatorFailed,
+                Some("session event channel closed"),
+            ),
+        ];
+
+        for (index, (lifecycle, kind, rating_status, reason)) in cases.into_iter().enumerate() {
+            let (tid, _) = setup_tournament(&store);
+            assert!(store.mark_tournament_preparing(tid).unwrap());
+            let started_at = format!("2026-08-12 10:0{index}:00");
+            assert!(store.mark_tournament_running(tid, &started_at).unwrap());
+            let terminal_at = format!("2026-08-12 11:0{index}:00");
+            let terminal = TournamentTerminal {
+                kind,
+                reason: reason.map(str::to_string),
+            };
+            assert!(store
+                .mark_tournament_terminal(
+                    tid,
+                    &terminal_at,
+                    lifecycle,
+                    &terminal,
+                    rating_status,
+                    reason,
+                )
+                .unwrap());
+
+            let record = store.get_tournament(tid).unwrap().unwrap();
+            assert_eq!(record.lifecycle, lifecycle);
+            assert_eq!(record.started_at.as_deref(), Some(started_at.as_str()));
+            assert_eq!(record.terminal_at.as_deref(), Some(terminal_at.as_str()));
+            assert_eq!(record.terminal, Some(terminal));
+            assert_eq!(record.rating_status, rating_status);
+            assert_eq!(record.rating_reason.as_deref(), reason);
+
+            // Terminal rows are immutable through this lifecycle API.
+            assert!(!store
+                .mark_tournament_terminal(
+                    tid,
+                    "2026-08-12 12:00:00",
+                    TournamentLifecycle::Failed,
+                    &TournamentTerminal {
+                        kind: TournamentTerminalKind::InfrastructureFailure,
+                        reason: Some("late overwrite".into()),
+                    },
+                    TournamentRatingStatus::Provisional,
+                    None,
+                )
+                .unwrap());
+        }
+    }
+
+    #[test]
+    fn tournament_terminal_rejects_mismatched_lifecycle_and_disposition() {
+        let store = EvalStore::open_in_memory().unwrap();
+        let (tid, _) = setup_tournament(&store);
+        assert!(store.mark_tournament_preparing(tid).unwrap());
+        assert!(!store
+            .mark_tournament_terminal(
+                tid,
+                "2026-08-12 10:00:00",
+                TournamentLifecycle::Completed,
+                &TournamentTerminal {
+                    kind: TournamentTerminalKind::UserStopped,
+                    reason: Some("invalid pairing".into()),
+                },
+                TournamentRatingStatus::Provisional,
+                None,
+            )
+            .unwrap());
+        assert_eq!(
+            store.get_tournament(tid).unwrap().unwrap().lifecycle,
+            TournamentLifecycle::Preparing
+        );
+    }
+
+    #[test]
+    fn stopped_reason_survives_store_reopen() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tournament.db");
+        let tid;
+        {
+            let store = EvalStore::open(&path).unwrap();
+            (tid, _) = setup_tournament(&store);
+            assert!(store.mark_tournament_preparing(tid).unwrap());
+            assert!(store
+                .mark_tournament_running(tid, "2026-08-12 10:00:00")
+                .unwrap());
+            assert!(store
+                .mark_tournament_terminal(
+                    tid,
+                    "2026-08-12 10:01:00",
+                    TournamentLifecycle::Stopped,
+                    &TournamentTerminal {
+                        kind: TournamentTerminalKind::UserStopped,
+                        reason: Some("stopped by user".into()),
+                    },
+                    TournamentRatingStatus::Provisional,
+                    Some("schedule stopped before completion"),
+                )
+                .unwrap());
+        }
+
+        let reopened = EvalStore::open(&path).unwrap();
+        let record = reopened.get_tournament(tid).unwrap().unwrap();
+        assert_eq!(record.lifecycle, TournamentLifecycle::Stopped);
+        assert_eq!(
+            record.terminal,
+            Some(TournamentTerminal {
+                kind: TournamentTerminalKind::UserStopped,
+                reason: Some("stopped by user".into()),
+            })
+        );
+        assert_eq!(
+            record.rating_reason.as_deref(),
+            Some("schedule stopped before completion")
+        );
     }
 
     /// Store-boundary invariant (Design A): `orientation` is informational,
@@ -2094,10 +2487,20 @@ mod tests {
         match &attempts[0].outcome {
             AttemptOutcome::Failure {
                 failure_reason,
+                report,
                 started_at,
             } => {
                 assert!(started_at.is_none(), "spawn-failure has no started_at");
                 assert_eq!(failure_reason.as_str(), "bot crash");
+                assert_eq!(
+                    report.as_ref(),
+                    Some(&AttemptFailureReport {
+                        kind: AttemptFailureKind::Other,
+                        phase: None,
+                        failing_player_id: None,
+                        message: "bot crash".into(),
+                    })
+                );
             },
             other => panic!("expected Failure outcome, got {other:?}"),
         }

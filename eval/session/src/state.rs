@@ -126,6 +126,30 @@ impl MatchupOutcome {
 
 pub type MatchupHistory = Vec<MatchupAttempt>;
 
+/// One backend definition of schedule progress. Successes and failed attempts
+/// are attempt facts; terminal/exhausted are slot facts. Keeping them apart is
+/// what lets `15/16` successful games still be a completed 16-slot schedule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TournamentExecutionSummary {
+    pub planned_slots: u32,
+    pub terminal_slots: u32,
+    pub successful_games: u32,
+    pub exhausted_slots: u32,
+    pub failed_attempts: u32,
+    pub running_matches: u32,
+}
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum ExecutionSummaryError {
+    #[error("tournament execution counter overflow")]
+    CounterOverflow,
+    #[error("terminal slots {terminal_slots} exceed planned slots {planned_slots}")]
+    TerminalSlotsExceedPlan {
+        terminal_slots: u32,
+        planned_slots: u32,
+    },
+}
+
 #[derive(Debug, Clone)]
 pub struct TournamentState {
     pub tournament_id: TournamentId,
@@ -142,6 +166,70 @@ impl TournamentState {
             in_flight: HashSet::new(),
             standings: Vec::new(),
         }
+    }
+
+    /// Fold durable attempts plus transient in-flight ids into the shared
+    /// schedule progress vocabulary. A slot is terminal after its first
+    /// success or after the configured durable-failure budget is exhausted.
+    pub fn execution_summary(
+        &self,
+        planned_slots: u32,
+        max_failures_per_slot: u32,
+    ) -> Result<TournamentExecutionSummary, ExecutionSummaryError> {
+        let mut terminal_slots = 0u32;
+        let mut successful_games = 0u32;
+        let mut exhausted_slots = 0u32;
+        let mut failed_attempts = 0u32;
+        for attempts in self.history.values() {
+            let mut slot_has_success = false;
+            let mut slot_failures = 0u32;
+            for attempt in attempts {
+                match attempt.outcome {
+                    MatchupOutcome::Success { .. } => {
+                        slot_has_success = true;
+                        successful_games = successful_games
+                            .checked_add(1)
+                            .ok_or(ExecutionSummaryError::CounterOverflow)?;
+                    },
+                    MatchupOutcome::Failure => {
+                        slot_failures = slot_failures
+                            .checked_add(1)
+                            .ok_or(ExecutionSummaryError::CounterOverflow)?;
+                        failed_attempts = failed_attempts
+                            .checked_add(1)
+                            .ok_or(ExecutionSummaryError::CounterOverflow)?;
+                    },
+                }
+            }
+            if slot_has_success {
+                terminal_slots = terminal_slots
+                    .checked_add(1)
+                    .ok_or(ExecutionSummaryError::CounterOverflow)?;
+            } else if max_failures_per_slot > 0 && slot_failures >= max_failures_per_slot {
+                terminal_slots = terminal_slots
+                    .checked_add(1)
+                    .ok_or(ExecutionSummaryError::CounterOverflow)?;
+                exhausted_slots = exhausted_slots
+                    .checked_add(1)
+                    .ok_or(ExecutionSummaryError::CounterOverflow)?;
+            }
+        }
+        if terminal_slots > planned_slots {
+            return Err(ExecutionSummaryError::TerminalSlotsExceedPlan {
+                terminal_slots,
+                planned_slots,
+            });
+        }
+        let running_matches = u32::try_from(self.in_flight.len())
+            .map_err(|_| ExecutionSummaryError::CounterOverflow)?;
+        Ok(TournamentExecutionSummary {
+            planned_slots,
+            terminal_slots,
+            successful_games,
+            exhausted_slots,
+            failed_attempts,
+            running_matches,
+        })
     }
 
     /// Fold one durable row into history. Used by resume.

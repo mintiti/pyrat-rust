@@ -6,10 +6,11 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use pyrat::game::builder::{CheeseStrategy, GameConfig, MazeStrategy, PlayerStrategy};
 use pyrat_eval_store::{
-    AttemptKey, GameConfigRecord, NewAttempt, NewAttemptOutcome, PlayerStartRecord,
-    RecordAttemptError, SeatOrientation, TournamentId,
+    AttemptFailureKind, AttemptFailurePhase, AttemptFailureReport, AttemptKey, GameConfigRecord,
+    NewAttempt, NewAttemptOutcome, PlayerStartRecord, RecordAttemptError, SeatOrientation,
+    TournamentId,
 };
-use pyrat_orchestrator::{FailureReason, MatchFailure, MatchOutcome};
+use pyrat_orchestrator::{FailureReason, MatchFailure, MatchOutcome, TimeoutPhase};
 
 use crate::descriptor::EvalMatchDescriptor;
 
@@ -105,9 +106,54 @@ pub fn failure_to_new_attempt(failure: &MatchFailure<EvalMatchDescriptor>) -> Ne
         key: attempt_key(desc),
         finished_at: format_sqlite_datetime(failure.failed_at),
         outcome: NewAttemptOutcome::Failure {
-            failure_reason: failure_reason_string(&failure.reason),
+            report: failure_report(desc, &failure.reason),
             started_at: failure.started_at.map(format_sqlite_datetime),
         },
+    }
+}
+
+/// Project an orchestrator failure into the one canonical durable/UI report.
+/// Classification and seat attribution happen here once; store and GUI
+/// consumers do not independently parse prose for current rows.
+pub fn failure_report(
+    descriptor: &EvalMatchDescriptor,
+    reason: &FailureReason,
+) -> AttemptFailureReport {
+    let (kind, phase) = match reason {
+        FailureReason::Timeout { phase, .. } => (
+            AttemptFailureKind::Timeout,
+            Some(match phase {
+                TimeoutPhase::Setup => AttemptFailurePhase::Setup,
+                TimeoutPhase::Preprocessing => AttemptFailurePhase::Preprocessing,
+                TimeoutPhase::Sync => AttemptFailurePhase::Sync,
+                TimeoutPhase::Move => AttemptFailurePhase::Move,
+            }),
+        ),
+        FailureReason::Disconnected(_) => (AttemptFailureKind::Disconnected, None),
+        FailureReason::SpawnFailed => (AttemptFailureKind::SpawnFailed, None),
+        FailureReason::HandshakeTimeout => (AttemptFailureKind::HandshakeTimeout, None),
+        FailureReason::ProtocolError(_) => (AttemptFailureKind::ProtocolError, None),
+        FailureReason::Cancelled => (AttemptFailureKind::Cancelled, None),
+        FailureReason::Panic | FailureReason::SinkFlushError(_) | FailureReason::Internal(_) => {
+            (AttemptFailureKind::Infrastructure, None)
+        },
+        _ => (AttemptFailureKind::Other, None),
+    };
+    let failing_player_id = reason.implicated_slot().map(|slot| {
+        let (seat0_id, seat1_id) = descriptor
+            .orientation
+            .canonicalize(&descriptor.player1_id, &descriptor.player2_id);
+        if slot == pyrat_host::wire::Player::Player1 {
+            seat0_id.clone()
+        } else {
+            seat1_id.clone()
+        }
+    });
+    AttemptFailureReport {
+        kind,
+        phase,
+        failing_player_id,
+        message: failure_reason_string(reason),
     }
 }
 
@@ -351,11 +397,9 @@ mod tests {
         };
         let attempt = failure_to_new_attempt(&fail);
         match attempt.outcome {
-            NewAttemptOutcome::Failure {
-                failure_reason,
-                started_at,
-            } => {
-                assert_eq!(failure_reason, "spawn_failed");
+            NewAttemptOutcome::Failure { report, started_at } => {
+                assert_eq!(report.message, "spawn_failed");
+                assert_eq!(report.kind, AttemptFailureKind::SpawnFailed);
                 assert!(started_at.is_none());
             },
             NewAttemptOutcome::Success { .. } => panic!("expected Failure outcome"),

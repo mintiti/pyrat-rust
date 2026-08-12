@@ -50,6 +50,8 @@ export default function LiveView({ live }: { live: TournamentLive }) {
 		: null;
 	const terminal = live.status !== "running";
 	const finalVerdict = hasFinalTournamentVerdict(live);
+	const interrupted =
+		live.lifecycle === "stopped" || live.lifecycle === "failed";
 	const remaining = Math.max(0, live.total - live.done);
 	const etaMin =
 		live.maxParallel === null
@@ -69,21 +71,23 @@ export default function LiveView({ live }: { live: TournamentLive }) {
 			<Badge color="yellow" variant="outline" leftSection={<PulseDot />}>
 				running
 			</Badge>
-		) : finalVerdict ? (
+		) : live.lifecycle === "completed" ? (
 			<Badge color="green" variant="outline">
-				finished
+				{live.terminalOutcome === "completed_with_failures"
+					? "finished with failures"
+					: "finished"}
 			</Badge>
-		) : live.status === "finished" ? (
-			<Badge color="orange" variant="outline">
-				partial results
-			</Badge>
-		) : live.status === "aborted" ? (
+		) : live.lifecycle === "stopped" ? (
 			<Badge color="red" variant="outline">
 				stopped
 			</Badge>
+		) : live.lifecycle === "failed" ? (
+			<Badge color="red" variant="outline">
+				failed
+			</Badge>
 		) : (
 			<Badge color="orange" variant="outline">
-				partial results
+				status unknown
 			</Badge>
 		);
 
@@ -141,14 +145,21 @@ export default function LiveView({ live }: { live: TournamentLive }) {
 				<span style={{ fontFamily: "monospace" }}>
 					{live.done}/{live.total}
 				</span>{" "}
-				games · {live.planSummary}
+				schedule slots · {live.success} successful game
+				{live.success === 1 ? "" : "s"}
+				{live.exhausted > 0 ? ` · ${live.exhausted} exhausted` : ""} ·{" "}
+				{live.planSummary}
 				{!terminal
 					? etaMin === null
 						? " · running"
 						: ` · ~${etaMin} min left`
-					: finalVerdict
-						? " · complete"
-						: " · partial, not a final ranking"}
+					: live.lifecycle === "completed"
+						? finalVerdict
+							? " · complete · final ranking"
+							: ` · schedule complete · ${ratingReadinessLabel(live.ratingReadiness, live.ratingReason)}`
+						: interrupted
+							? " · partial schedule · not a final ranking"
+							: " · execution status unknown · not a final ranking"}
 			</Text>
 			{live.status === "aborted" && (
 				<Paper
@@ -160,7 +171,9 @@ export default function LiveView({ live }: { live: TournamentLive }) {
 					style={{ borderColor: T.loss }}
 				>
 					<Text size="sm" fw={700}>
-						Tournament stopped. Results below are partial.
+						{live.lifecycle === "failed"
+							? "Tournament failed. Results below are partial."
+							: "Tournament stopped. Results below are partial."}
 					</Text>
 					{live.abortReason && (
 						<Text size="xs" c="dimmed" mt={2}>
@@ -172,11 +185,11 @@ export default function LiveView({ live }: { live: TournamentLive }) {
 			{live.status === "partial" && (
 				<Paper withBorder p="sm" radius="md" mb="md" bg={T.panel2}>
 					<Text size="sm" fw={700}>
-						Saved partial results
+						Saved tournament status unknown
 					</Text>
 					<Text size="xs" c="dimmed" mt={2}>
-						This tournament is no longer running. Its completed games remain
-						inspectable.
+						This row does not carry a durable terminal disposition. Its recorded
+						games remain inspectable, but completion is not inferred.
 					</Text>
 				</Paper>
 			)}
@@ -204,6 +217,26 @@ export default function LiveView({ live }: { live: TournamentLive }) {
 			)}
 		</Box>
 	);
+}
+
+function ratingReadinessLabel(
+	readiness: TournamentLive["ratingReadiness"],
+	reason: string | null,
+): string {
+	switch (readiness) {
+		case "rateable":
+			return "rating available";
+		case "insufficient_games":
+			return `not rated: ${reason ?? "insufficient successful games"}`;
+		case "disconnected_graph":
+			return `not rated: ${reason ?? "disconnected matchup graph"}`;
+		case "estimator_failed":
+			return `not rated: ${reason ?? "estimator failed"}`;
+		case "provisional":
+			return "rating provisional";
+		case "legacy_unknown":
+			return "rating readiness unknown";
+	}
 }
 
 /** A small pulsing dot — the "something is happening" signal. Exported so the

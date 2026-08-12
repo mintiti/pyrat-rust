@@ -135,7 +135,8 @@ async tournamentStatus() : Promise<Result<number | null, string>> {
 }
 },
 /**
- * List tournaments in the store, newest first, with finished-inference.
+ * List tournaments in the store, newest first, projected from durable
+ * lifecycle plus the shared execution counters.
  */
 async listTournaments() : Promise<Result<TournamentSummary[], string>> {
     try {
@@ -295,6 +296,9 @@ export type FailureKind = "timeout" | "disconnected" | "spawn_failed" | "handsha
  * The game-instance distribution configured on the launch screen: board,
  * maze, start strategy, cheese. This is the *distribution*; the tournament
  * seed that selects which instances get drawn lives on `LaunchParams`.
+ * Integer-like wire fields intentionally arrive as `f64`: JavaScript has one
+ * numeric type, and accepting the raw value lets the command return a typed
+ * field error for `7.5` instead of failing in Tauri deserialization.
  */
 export type GameFactoryConfig = { width: number; height: number; max_turns: number; wall_density: number; mud_density: number; mud_range: number; connected: boolean; symmetric: boolean; player_start: PlayerStart; cheese_count: number; cheese_symmetric: boolean }
 /**
@@ -320,6 +324,8 @@ export type LaunchLimits = { min_dimension: number; max_dimension: number; max_t
 /**
  * Launch parameters. The factory + methodology knobs are configured on the
  * launch screen; the frontend pre-fills them from `get_tournament_launch_defaults`.
+ * Methodology numbers likewise stay raw until `validate_launch_params`
+ * proves they are finite whole values in range and narrows them to `u32`.
  */
 export type LaunchParams = { bots: BotPick[];
 /**
@@ -398,6 +404,7 @@ export type PlayerState = { position: Coord; score: number; mud_turns: number }
  * Emitted when all bots enter the preprocessing phase.
  */
 export type PreprocessingStartedEvent = { match_id: number }
+export type RatingReadiness = "legacy_unknown" | "provisional" | "rateable" | "insufficient_games" | "disconnected_graph" | "estimator_failed"
 /**
  * Emitted when setup is fully complete (bots connected, configured, preprocessed).
  */
@@ -408,7 +415,11 @@ export type SetupCompleteEvent = { match_id: number }
  * uncertainty information), so the frontend never reconstructs them or
  * promises a stronger statistical interpretation than the model supports.
  */
-export type StandingRow = { player_id: string; elo: number; elo_ci_low: number; elo_ci_high: number; games: number;
+export type StandingRow = { player_id: string;
+/**
+ * No numeric placeholder is emitted when the estimator has no result.
+ */
+elo: number | null; elo_ci_low: number | null; elo_ci_high: number | null; games: number;
 /**
  * True before the player has enough games for a stable estimate; the
  * frontend shows "warming up" instead of a bar.
@@ -417,13 +428,13 @@ pending: boolean }
 /**
  * Standings for a finished/partial tournament, reopened from the store.
  */
-export type StandingsSnapshot = { tournament_id: number; name: string | null; format: string; anchor_id: string; finished: boolean; done: number; total: number; standings: StandingRow[] }
+export type StandingsSnapshot = { tournament_id: number; name: string | null; format: string; anchor_id: string; lifecycle: TournamentLifecycleStatus; terminal: TournamentTerminalState | null; rating_readiness: RatingReadiness; rating_reason: string | null; progress: TournamentProgress; standings: StandingRow[] }
 /**
  * Emitted on every `MatchFinished`, carrying the freshly recomputed standings
  * plus progress. The hero, standings bars/whiskers, progress, ETA, and chip
  * all read this.
  */
-export type StandingsUpdatedEvent = { tournament_id: number; done: number; total: number; success: number; failure: number; standings: StandingRow[] }
+export type StandingsUpdatedEvent = { tournament_id: number; progress: TournamentProgress; standings: StandingRow[] }
 /**
  * Start errors keep form mistakes structured while preserving ordinary
  * runtime failures as a single message.
@@ -443,7 +454,19 @@ match_id: number | null; player1_id: string; player2_id: string; repetition_inde
 /**
  * One durable failed attempt, retained in historical tournament inspection.
  */
-export type StoredMatchFailure = { attempt_id: number; match_id: number | null; player1_id: string; player2_id: string; repetition_index: number; rat_id: string; failing_player_id: string | null; kind: FailureKind; timeout_phase: TimeoutPhase | null; reason: string }
+export type StoredMatchFailure = { attempt_id: number; match_id: number | null; player1_id: string; player2_id: string; repetition_index: number; attempt_index: number; rat_id: string; failing_player_id: string | null; kind: FailureKind; timeout_phase: TimeoutPhase | null; reason: string;
+/**
+ * This failure spent the slot's final retry budget. Earlier failures on
+ * the same slot remain inspectable but are not terminal legs.
+ */
+exhausted: boolean }
+/**
+ * Durable state of one expected schedule leg. `Running` is expressible for
+ * live projections; store-only snapshots normally return `Pending` until a
+ * terminal attempt lands. Old rows never have missing legs relabeled as
+ * pending because their lifecycle is unknowable.
+ */
+export type StoredSlotState = { state: "successful"; attempt_id: number; match_id: number | null } | { state: "exhausted"; last_failure_attempt_id: number; failed_attempts: number } | { state: "pending" } | { state: "running"; match_id: number } | { state: "legacy_unknown" }
 /**
  * Wire-safe projection of the store-native timing mode.
  */
@@ -454,6 +477,7 @@ export type StoredTimingMode = "wait" | "clock"
  * these values, rather than inheriting today's launch defaults.
  */
 export type StoredTournamentMethodology = { timing_mode: StoredTimingMode; move_timeout_ms: number; preprocessing_timeout_ms: number; startup_timeout_ms: number; configure_timeout_ms: number; network_grace_ms: number; max_parallel: number }
+export type StoredTournamentSlot = { player1_id: string; player2_id: string; repetition_index: number; rat_id: string; state: StoredSlotState }
 /**
  * Which phase a timeout fired in, for labeling bot health
  * ("move timeout" vs "preprocessing").
@@ -463,12 +487,17 @@ export type TimeoutPhase = "setup" | "preprocessing" | "sync" | "move"
  * Terminal: tournament aborted (e.g. persistent sink-flush failure, or
  * user-requested stop). Carries a reason for the UI.
  */
-export type TournamentAbortedEvent = { tournament_id: number; reason: string }
+export type TournamentAbortedEvent = { tournament_id: number; lifecycle: TournamentLifecycleStatus; reason: string; terminal: TournamentTerminalState; rating_readiness: RatingReadiness }
 /**
  * Terminal: tournament finished naturally. The hero swaps to the verdict and
  * the chip goes green.
  */
-export type TournamentFinishedEvent = { tournament_id: number }
+export type TournamentFinishedEvent = { tournament_id: number; terminal: TournamentTerminalState; rating_readiness: RatingReadiness }
+/**
+ * Durable lifecycle projected without inference. Old rows remain
+ * `legacy_unknown`; the app-owned `running` flag is a separate live fact.
+ */
+export type TournamentLifecycleStatus = "legacy_unknown" | "preparing" | "running" | "completed" | "stopped" | "failed"
 /**
  * Terminal, per-match: a match failed (timeout, disconnect, spawn failure).
  * Verdict-bearing data (the success/failure tally) still rides the lossless
@@ -482,7 +511,7 @@ export type TournamentMatchFailedEvent = { tournament_id: number; match_id: numb
  * Canonical pair (player1_id = lex-min), so the frontend can attribute the
  * failure to a matchup without a lookup.
  */
-player1_id: string; player2_id: string; repetition_index: number;
+player1_id: string; player2_id: string; repetition_index: number; attempt_index: number;
 /**
  * Canonical player id occupying the Rat seat in this failed leg.
  */
@@ -500,7 +529,11 @@ timeout_phase: TimeoutPhase | null;
 /**
  * Stable durable failure text retained for later inspection.
  */
-reason: string }
+reason: string;
+/**
+ * True only when this durable failure spent the slot's retry budget.
+ */
+exhausted: boolean }
 /**
  * Emitted on every `MatchFinished`. Scores are canonical (player1_id is the
  * lex-min of the pair); the frontend re-orients per target / per displayed
@@ -531,17 +564,21 @@ export type TournamentPreparingEvent = { done: number; total: number;
  */
 current: string | null }
 /**
+ * Attempt and slot counters shared by live events, snapshots, and history.
+ */
+export type TournamentProgress = { planned_slots: number; terminal_slots: number; successful_games: number; exhausted_slots: number; failed_attempts: number; running_matches: number }
+/**
  * Complete read model for one inspectable tournament. The same command
  * hydrates historical rows and reconciles an active event-fed view from
  * durable truth when lifecycle broadcasts lag.
  */
-export type TournamentSnapshot = { tournament_id: number; name: string | null; format: string; target: string | null; anchor_id: string; running: boolean; finished: boolean; paired: boolean;
+export type TournamentSnapshot = { tournament_id: number; name: string | null; format: string; target: string | null; anchor_id: string; running: boolean; lifecycle: TournamentLifecycleStatus; terminal: TournamentTerminalState | null; rating_readiness: RatingReadiness; rating_reason: string | null; paired: boolean;
 /**
  * Absent only when an older tournament row did not record its execution
  * conditions. Optional in TypeScript so existing fixture consumers remain
  * compatible; current rows always include it.
  */
-methodology?: StoredTournamentMethodology | null; created_at: string; last_finished_at: string | null; plan_summary: string; players: string[]; games_per_matchup: number; done: number; total: number; success: number; failure: number; standings: StandingRow[]; games: StoredFinishedGame[]; failures: StoredMatchFailure[] }
+methodology?: StoredTournamentMethodology | null; created_at: string; started_at: string | null; terminal_at: string | null; last_finished_at: string | null; plan_summary: string; players: string[]; games_per_matchup: number; progress: TournamentProgress; standings: StandingRow[]; games: StoredFinishedGame[]; failures: StoredMatchFailure[]; slots: StoredTournamentSlot[] }
 /**
  * Emitted once, right after the tournament row is created. Scaffolds the
  * header, hero, and axis before any game finishes.
@@ -581,14 +618,11 @@ plan_summary: string; players: PlayerLite[] }
 export type TournamentSummary = { id: number; name: string | null; format: string; created_at: string;
 /**
  * The app-owned runner is currently executing this tournament. Separate
- * from `finished`: navigation never owns runner lifetime.
+ * from durable lifecycle: navigation never owns runner lifetime.
  */
-running: boolean;
-/**
- * All expected (pair, repetition) slots are done (success or
- * failure-exhausted) — `slot_done` semantics, not raw count-vs-target.
- */
-finished: boolean; done: number; total: number }
+running: boolean; lifecycle: TournamentLifecycleStatus; terminal: TournamentTerminalState | null; rating_readiness: RatingReadiness; rating_reason: string | null; progress: TournamentProgress }
+export type TournamentTerminalOutcome = "completed" | "completed_with_failures" | "user_stopped" | "infrastructure_failure"
+export type TournamentTerminalState = { outcome: TournamentTerminalOutcome; reason: string | null; at: string }
 /**
  * Per-turn delta. Walls/mud never change, so we only send positions + cheese.
  */
