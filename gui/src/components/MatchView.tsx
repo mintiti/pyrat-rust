@@ -1,7 +1,7 @@
 import { Stack } from "@mantine/core";
 import { useAtomValue } from "jotai";
 import { useEffect, useMemo, useRef } from "react";
-import { events, commands } from "../bindings";
+import { commands } from "../bindings";
 import type { BotOptionValue } from "../bindings/generated";
 import {
 	RANDOM_BOT_ID,
@@ -27,7 +27,6 @@ type Props = {
 };
 
 export default function MatchView({ onNewMatch }: Props) {
-	const matchIdRef = useRef<number>(-1);
 	const hasAutoStarted = useRef(false);
 	const displayState = useDisplayState();
 	const bots = useAtomValue(botsAtom);
@@ -49,13 +48,6 @@ export default function MatchView({ onNewMatch }: Props) {
 	const cursorKey = useMemo(() => cursor.join(","), [cursor]);
 
 	const {
-		onMatchStarted,
-		onPreprocessingStarted,
-		onSetupComplete,
-		onTurnPlayed,
-		onMatchOver,
-		onBotInfo,
-		onError,
 		advanceCursor,
 		goToStart,
 		goToEnd,
@@ -66,47 +58,6 @@ export default function MatchView({ onNewMatch }: Props) {
 		goLive,
 		clearStagedMoves,
 	} = useMatchStore.getState();
-
-	// Event listeners — wire Tauri events to store actions
-	// biome-ignore lint/correctness/useExhaustiveDependencies: callbacks from getState() are stable refs
-	useEffect(() => {
-		const unlisteners = [
-			events.matchStartedEvent.listen((e) => {
-				matchIdRef.current = e.payload.match_id;
-				onMatchStarted(e.payload.maze, e.payload.match_id);
-			}),
-			events.preprocessingStartedEvent.listen((e) => {
-				if (e.payload.match_id !== matchIdRef.current) return;
-				onPreprocessingStarted(e.payload.match_id);
-			}),
-			events.setupCompleteEvent.listen((e) => {
-				if (e.payload.match_id !== matchIdRef.current) return;
-				onSetupComplete(e.payload.match_id);
-			}),
-			events.turnPlayedEvent.listen((e) => {
-				if (e.payload.match_id !== matchIdRef.current) return;
-				onTurnPlayed(e.payload);
-			}),
-			events.matchOverEvent.listen((e) => {
-				if (e.payload.match_id !== matchIdRef.current) return;
-				onMatchOver(e.payload);
-			}),
-			events.matchErrorEvent.listen((e) => {
-				if (e.payload.match_id !== matchIdRef.current) return;
-				onError(e.payload.message);
-			}),
-			events.botInfoEvent.listen((e) => {
-				if (e.payload.match_id !== matchIdRef.current) return;
-				onBotInfo(e.payload);
-			}),
-		];
-
-		return () => {
-			for (const p of unlisteners) {
-				p.then((unlisten) => unlisten());
-			}
-		};
-	}, []);
 
 	// Auto-advance cursor during playback (disabled in step mode)
 	// biome-ignore lint/correctness/useExhaustiveDependencies: advanceCursor is a stable ref from getState()

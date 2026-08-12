@@ -121,9 +121,14 @@ export default function LaunchView() {
 	const showLive = useTournamentStore((s) => s.showLive);
 	const openSnapshot = useTournamentStore((s) => s.openSnapshot);
 	const starting = useTournamentStore((s) => s.starting);
+	const stopping = useTournamentStore((s) => s.stopping);
+	const launchFailure = useTournamentStore((s) => s.launchFailure);
 	const preparing = useTournamentStore((s) => s.preparing);
 	const beginLaunch = useTournamentStore((s) => s.beginLaunch);
+	const setLaunchFailure = useTournamentStore((s) => s.setLaunchFailure);
 	const clearPreparing = useTournamentStore((s) => s.clearPreparing);
+	const onStarted = useTournamentStore((s) => s.onStarted);
+	const requestStop = useTournamentStore((s) => s.requestStop);
 
 	const [selected, setSelected] = useState<Set<string>>(new Set());
 	const [target, setTarget] = useState<string | null>(null);
@@ -137,7 +142,6 @@ export default function LaunchView() {
 	);
 	const [defaultsLoading, setDefaultsLoading] = useState(true);
 	const [defaultsError, setDefaultsError] = useState<string | null>(null);
-	const [error, setError] = useState<string | null>(null);
 	const [validationErrors, setValidationErrors] = useState<
 		Record<string, string>
 	>({});
@@ -153,8 +157,8 @@ export default function LaunchView() {
 	const [advanced, setAdvanced] = useState(false);
 	const clearLaunchErrors = useCallback(() => {
 		setValidationErrors({});
-		setError(null);
-	}, []);
+		setLaunchFailure(null);
+	}, [setLaunchFailure]);
 	const changeMethod = (patch: Partial<Methodology>) => {
 		clearLaunchErrors();
 		setMethod((current) => (current ? { ...current, ...patch } : current));
@@ -324,7 +328,7 @@ export default function LaunchView() {
 
 	const launch = async () => {
 		if (!factory || !method) return;
-		setError(null);
+		setLaunchFailure(null);
 		setValidationErrors({});
 		beginLaunch();
 		const picks = selectedBots.map((b) => ({
@@ -345,7 +349,10 @@ export default function LaunchView() {
 				max_parallel: method.max_parallel,
 				tournament_seed: trimmedSeed === "" ? null : Number(trimmedSeed),
 			});
-			if (res.status === "ok") return;
+			if (res.status === "ok") {
+				onStarted(res.data, Date.now());
+				return;
+			}
 
 			clearPreparing();
 			// A user-initiated Stop during preparing surfaces as this; it's not
@@ -356,16 +363,18 @@ export default function LaunchView() {
 						res.error.errors.map(({ field, message }) => [field, message]),
 					),
 				);
-				setError(res.error.errors.map(({ message }) => message).join(" · "));
+				setLaunchFailure(
+					res.error.errors.map(({ message }) => message).join(" · "),
+				);
 			} else if (res.error.message !== "tournament start was cancelled") {
-				setError(res.error.message);
+				setLaunchFailure(res.error.message);
 			}
 		} catch (cause) {
 			clearPreparing();
-			setError(String(cause));
+			setLaunchFailure(String(cause));
 		}
-		// On success the TournamentStartedEvent flips the store to the live view
-		// and clears `preparing`.
+		// On success the command response is authoritative; the matching event is
+		// an idempotent enrichment path for other windows/navigation.
 	};
 
 	const tournamentRunning = live?.status === "running";
@@ -595,7 +604,9 @@ export default function LaunchView() {
 								size="compact-sm"
 								variant="subtle"
 								color="red"
-								onClick={() => commands.stopTournament()}
+								onClick={() => void requestStop()}
+								disabled={stopping}
+								loading={stopping}
 							>
 								Stop
 							</Button>
@@ -789,7 +800,7 @@ export default function LaunchView() {
 								{plan || "Select at least two bots to build the plan."}
 							</Text>
 						</Paper>
-						{error && (
+						{launchFailure && (
 							<Box
 								mah={72}
 								tabIndex={0}
@@ -797,7 +808,7 @@ export default function LaunchView() {
 								aria-label="Tournament launch error"
 							>
 								<Text size="sm" c="red" role="alert">
-									{error}
+									{launchFailure}
 								</Text>
 							</Box>
 						)}
@@ -827,6 +838,7 @@ export default function LaunchView() {
 								disabled={
 									selectedBots.length < 2 ||
 									starting ||
+									stopping ||
 									tournamentRunning ||
 									!factory ||
 									!method ||
@@ -843,14 +855,16 @@ export default function LaunchView() {
 										: "Starting…"
 									: "Launch tournament"}
 							</Button>
-							{starting && (
+							{(starting || stopping) && (
 								<Button
 									variant="light"
 									color="red"
 									miw={70}
-									onClick={() => void commands.stopTournament()}
+									onClick={() => void requestStop()}
+									disabled={stopping}
+									loading={stopping}
 								>
-									Stop
+									{stopping ? "Stopping…" : "Stop"}
 								</Button>
 							)}
 						</Group>

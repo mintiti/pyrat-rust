@@ -345,6 +345,53 @@ describe("tournamentStore launch ↔ live navigation", () => {
 		});
 	});
 
+	it("keeps a failed warmup explanation until the user edits or retries", () => {
+		const s = useTournamentStore.getState();
+		s.setLaunchFailure("bot a failed its setup handshake");
+		s.openSnapshot(snapshot());
+		s.showLaunch();
+
+		expect(useTournamentStore.getState().launchFailure).toBe(
+			"bot a failed its setup handshake",
+		);
+
+		s.beginLaunch();
+		expect(useTournamentStore.getState().launchFailure).toBeNull();
+	});
+
+	it("scopes a retained terminal signal to the backend-owned tournament", () => {
+		const s = useTournamentStore.getState();
+		s.onRuntimeStatus({ phase: "running", tournament_id: 2 });
+
+		s.onFinished({
+			tournament_id: 1,
+			terminal: {
+				outcome: "completed",
+				reason: null,
+				at: "2026-07-17 10:01:00",
+			},
+			rating_readiness: "rateable",
+		});
+		expect(useTournamentStore.getState()).toMatchObject({
+			runtimePhase: "running",
+			runtimeTournamentId: 2,
+		});
+
+		s.onFinished({
+			tournament_id: 2,
+			terminal: {
+				outcome: "completed",
+				reason: null,
+				at: "2026-07-17 10:01:00",
+			},
+			rating_readiness: "rateable",
+		});
+		expect(useTournamentStore.getState()).toMatchObject({
+			runtimePhase: "idle",
+			runtimeTournamentId: null,
+		});
+	});
+
 	it("preserves the configured matchup count and executor concurrency", () => {
 		useTournamentStore
 			.getState()

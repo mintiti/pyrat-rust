@@ -10,12 +10,13 @@ export type TournamentChromeDestination = "launch" | "live";
 
 type TournamentChromeState = Pick<
 	ReturnType<typeof useTournamentStore.getState>,
-	"live" | "starting" | "preparing" | "terminalNotice"
+	"live" | "starting" | "stopping" | "preparing" | "terminalNotice"
 >;
 
 export function tournamentChromeProjection({
 	live,
 	starting,
+	stopping,
 	preparing,
 	terminalNotice,
 }: TournamentChromeState) {
@@ -49,6 +50,17 @@ export function tournamentChromeProjection({
 			pulse: false,
 			destination: "live" as const,
 			tooltip: terminalNotice.reason ?? undefined,
+		};
+	}
+	if (stopping) {
+		return {
+			name: live?.name ?? (live ? `#${live.tournamentId}` : "Tournament"),
+			status: "stopping",
+			progress: live ? `${live.done}/${live.total} preserved` : null,
+			color: T.cheese,
+			pulse: true,
+			destination: live ? ("live" as const) : ("launch" as const),
+			tooltip: "Waiting for the runner to finish cleanup",
 		};
 	}
 	if (starting || preparing) {
@@ -89,11 +101,13 @@ export default function LiveChip({
 }) {
 	const live = useTournamentStore((s) => s.live);
 	const starting = useTournamentStore((s) => s.starting);
+	const stopping = useTournamentStore((s) => s.stopping);
 	const preparing = useTournamentStore((s) => s.preparing);
 	const terminalNotice = useTournamentStore((s) => s.terminalNotice);
 	const projection = tournamentChromeProjection({
 		live,
 		starting,
+		stopping,
 		preparing,
 		terminalNotice,
 	});

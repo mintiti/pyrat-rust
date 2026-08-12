@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { commands } from "../bindings";
 import type {
 	FailureKind,
 	NowPlayingEvent,
@@ -13,8 +14,10 @@ import type {
 	TournamentMatchFinishedEvent,
 	TournamentMatchStartedEvent,
 	TournamentPreparingEvent,
+	TournamentRuntimeStatus,
 	TournamentSnapshot,
 	TournamentStartedEvent,
+	TournamentStoppingEvent,
 } from "../bindings/generated";
 import { pairKey } from "../components/tournament/theme";
 
@@ -144,6 +147,17 @@ interface TournamentStore {
 	/** The launch command is in its Starting/warmup phase. Kept at app scope so
 	 * leaving and returning to the tournament tab cannot make it look idle. */
 	starting: boolean;
+	/** Cancellation was accepted, but the owning generation is still draining
+	 * and therefore still blocks another launch. */
+	stopping: boolean;
+	/** Backend-owned phase, retained even before a running snapshot has been
+	 * reattached after reload. This is the close-safety authority. */
+	runtimePhase: TournamentRuntimeStatus["phase"];
+	runtimeTournamentId: number | null;
+	/** The last launch failure belongs to the app, not the currently mounted
+	 * launch view. It therefore survives navigation until the user edits or
+	 * retries the launch. */
+	launchFailure: string | null;
 	/** Transient pre-tournament warmup progress (no tournament id yet). Set by
 	 * `onPreparing`, cleared when the tournament starts. Drives the launch
 	 * screen's "Preparing bots…" line. `current` is the bot being warmed. */
@@ -157,13 +171,17 @@ interface TournamentStore {
 	showLive: () => void;
 	openSnapshot: (snapshot: TournamentSnapshot) => void;
 	restoreActive: (snapshot: TournamentSnapshot) => void;
+	onRuntimeStatus: (status: TournamentRuntimeStatus) => void;
 	reconcileSnapshot: (snapshot: TournamentSnapshot) => void;
 	navigate: (nav: TournamentNav) => void;
 	back: () => void;
 	beginLaunch: () => void;
+	setLaunchFailure: (failure: string | null) => void;
 	dismissTerminalNotice: () => void;
 	// event handlers
 	onPreparing: (e: TournamentPreparingEvent) => void;
+	onStopping: (e: TournamentStoppingEvent) => void;
+	requestStop: () => Promise<void>;
 	/** Drop the transient warmup progress (launch start / stop / failed launch),
 	 * so a failed or cancelled warmup leaves no stale "Preparing…" behind. */
 	clearPreparing: () => void;
@@ -182,6 +200,10 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 	viewing: null,
 	live: null,
 	starting: false,
+	stopping: false,
+	runtimePhase: "idle",
+	runtimeTournamentId: null,
+	launchFailure: null,
 	preparing: null,
 	terminalNotice: null,
 	nav: { kind: "overview" },
@@ -222,8 +244,22 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 	// the page: the app-level chip is the handoff back to the still-running run.
 	restoreActive: (snapshot) => {
 		if (!snapshot.running) return;
-		set({ live: tournamentFromSnapshot(snapshot, "active") });
+		set((state) => ({
+			live:
+				state.live?.tournamentId === snapshot.tournament_id
+					? mergeTournamentSnapshot(state.live, snapshot)
+					: tournamentFromSnapshot(snapshot, "active"),
+		}));
 	},
+
+	onRuntimeStatus: (status) =>
+		set({
+			runtimePhase: status.phase,
+			runtimeTournamentId: status.tournament_id,
+			starting: status.phase === "starting",
+			stopping: status.phase === "stopping",
+			preparing: status.phase === "starting" ? get().preparing : null,
+		}),
 
 	// Durable reconciliation repairs missed terminal lifecycle events without
 	// replacing in-flight liveness or navigation. It updates the active object
@@ -272,26 +308,82 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 			screen: "launch",
 			viewing: null,
 			starting: true,
+			stopping: false,
+			runtimePhase: "starting",
+			runtimeTournamentId: null,
+			launchFailure: null,
 			preparing: null,
 			terminalNotice: null,
 		}),
+
+	setLaunchFailure: (launchFailure) => set({ launchFailure }),
 
 	dismissTerminalNotice: () => set({ terminalNotice: null }),
 
 	onPreparing: (e) =>
 		set({
 			starting: true,
+			stopping: false,
+			runtimePhase: "starting",
 			preparing: { done: e.done, total: e.total, current: e.current },
 		}),
 
-	clearPreparing: () => set({ starting: false, preparing: null }),
+	clearPreparing: () =>
+		set((state) => ({
+			starting: false,
+			runtimePhase: state.stopping ? "stopping" : "idle",
+			runtimeTournamentId: state.stopping ? state.runtimeTournamentId : null,
+			preparing: null,
+		})),
 
-	onStarted: (e, startedAt) =>
+	onStopping: (event) =>
+		set((state) => ({
+			starting: false,
+			stopping: true,
+			runtimePhase: "stopping",
+			runtimeTournamentId: event.tournament_id ?? state.runtimeTournamentId,
+			preparing: null,
+		})),
+
+	requestStop: async () => {
+		if (get().stopping) return;
+		get().onStopping({ tournament_id: get().live?.tournamentId ?? null });
+		const result = await commands.stopTournament();
+		if (result.status === "ok") {
+			get().onRuntimeStatus(result.data);
+		} else {
+			const status = await commands.tournamentStatus();
+			if (status.status === "ok") get().onRuntimeStatus(status.data);
+			else set({ stopping: false });
+		}
+	},
+
+	onStarted: (e, startedAt) => {
+		const existing = get().live;
+		if (existing?.tournamentId === e.tournament_id) {
+			set({
+				screen: "live",
+				viewing: null,
+				nav: { kind: "overview" },
+				starting: false,
+				stopping: false,
+				runtimePhase: "running",
+				runtimeTournamentId: e.tournament_id,
+				launchFailure: null,
+				preparing: null,
+				terminalNotice: null,
+			});
+			return;
+		}
 		set({
 			screen: "live",
 			viewing: null,
 			nav: { kind: "overview" },
 			starting: false,
+			stopping: false,
+			runtimePhase: "running",
+			runtimeTournamentId: e.tournament_id,
+			launchFailure: null,
 			preparing: null,
 			terminalNotice: null,
 			live: {
@@ -327,7 +419,8 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 				endedAt: null,
 				createdAt: null,
 			},
-		}),
+		});
+	},
 
 	// Standings is the lossless verdict path and sub-ms to render (per the
 	// brief). It is NOT wrapped in startTransition: doing so priority-inverts
@@ -504,12 +597,21 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 
 	onFinished: (event) => {
 		const tournamentId = event.tournament_id;
-		const live = get().live;
+		const current = get();
+		const live = current.live;
 		if (
 			!live ||
 			live.tournamentId !== tournamentId ||
 			live.status !== "running"
 		) {
+			if (current.runtimeTournamentId === tournamentId) {
+				set({
+					starting: false,
+					stopping: false,
+					runtimePhase: "idle",
+					runtimeTournamentId: null,
+				});
+			}
 			return;
 		}
 		const endedAt = Date.now();
@@ -531,6 +633,10 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 							status: "finished",
 							reason: null,
 						},
+						starting: false,
+						stopping: false,
+						runtimePhase: "idle",
+						runtimeTournamentId: null,
 					}
 				: {},
 		);
@@ -539,12 +645,21 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 	onAborted: (event) => {
 		const tournamentId = event.tournament_id;
 		const reason = event.reason;
-		const live = get().live;
+		const current = get();
+		const live = current.live;
 		if (
 			!live ||
 			live.tournamentId !== tournamentId ||
 			live.status !== "running"
 		) {
+			if (current.runtimeTournamentId === tournamentId) {
+				set({
+					starting: false,
+					stopping: false,
+					runtimePhase: "idle",
+					runtimeTournamentId: null,
+				});
+			}
 			return;
 		}
 		const endedAt = Date.now();
@@ -567,6 +682,10 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
 							status: "aborted",
 							reason,
 						},
+						starting: false,
+						stopping: false,
+						runtimePhase: "idle",
+						runtimeTournamentId: null,
 					}
 				: {},
 		);

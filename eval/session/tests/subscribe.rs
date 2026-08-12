@@ -9,7 +9,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use pyrat_eval::{EvalSession, SessionConfig, SessionEvent, SessionMode};
+use pyrat_eval::{EvalSession, SessionCompletion, SessionConfig, SessionEvent, SessionMode};
 use pyrat_eval_store::{EloOptions, EvalStore};
 
 use crate::common::{
@@ -137,4 +137,57 @@ async fn two_subscribers_see_same_tail() {
     drop(rx_b);
 
     session.shutdown().await.expect("shutdown");
+}
+
+/// Completion is retained state, not another broadcast item. A lifecycle
+/// owner can deliberately have no event receiver at all and still learn the
+/// exact terminal disposition after the run loop exits.
+#[tokio::test]
+async fn completion_is_retained_without_a_broadcast_receiver() {
+    let store = Arc::new(Mutex::new(EvalStore::open_in_memory().unwrap()));
+    let players = vec![embedded_player("a"), embedded_player("b")];
+
+    let created =
+        EvalSession::create_tournament(store.clone(), round_robin_spec(), players.clone())
+            .await
+            .expect("create_tournament");
+    let planner = round_robin(
+        players,
+        small_game_config(),
+        created.game_config_id,
+        created.tournament_id,
+        1,
+    );
+    let session = EvalSession::start(
+        store,
+        SessionMode {
+            tournament_id: created.tournament_id,
+        },
+        planner,
+        fast_orch_config(),
+        EloOptions::new("a"),
+        SessionConfig::default(),
+    )
+    .await
+    .expect("session start");
+
+    // Intentionally never call `events` or `subscribe`: terminal authority
+    // must not depend on a live broadcast receiver or its buffer position.
+    let mut completion = session.completion();
+    let disposition = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Some(disposition) = completion.borrow().clone() {
+                break disposition;
+            }
+            completion
+                .changed()
+                .await
+                .expect("completion sender closed before publishing");
+        }
+    })
+    .await
+    .expect("timed out waiting for retained completion");
+
+    assert_eq!(disposition, SessionCompletion::Completed);
+    session.join().await.expect("join completed session");
 }

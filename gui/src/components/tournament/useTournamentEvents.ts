@@ -14,6 +14,7 @@ export function useTournamentEvents() {
 	useEffect(() => {
 		const {
 			onPreparing,
+			onStopping,
 			onStarted,
 			onStandings,
 			onMatchFinished,
@@ -58,6 +59,7 @@ export function useTournamentEvents() {
 			events.tournamentStartedEvent.listen((e) =>
 				onStarted(e.payload, Date.now()),
 			),
+			events.tournamentStoppingEvent.listen((e) => onStopping(e.payload)),
 			events.standingsUpdatedEvent.listen((e) => {
 				onStandings(e.payload);
 				if (

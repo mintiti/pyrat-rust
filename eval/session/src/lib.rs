@@ -44,8 +44,8 @@ pub use plan::{
 // type at the session boundary.
 pub use pyrat_eval_store::{SeatOrientation, TournamentMethodology, TournamentTimingMode};
 pub use session::{
-    CreatedTournament, EvalSession, SessionConfig, SessionError, SessionEvent, SessionMode,
-    TournamentMismatch, TournamentSpec,
+    CreatedTournament, EvalSession, SessionCompletion, SessionConfig, SessionError, SessionEvent,
+    SessionMode, TournamentMismatch, TournamentSpec,
 };
 pub use state::{
     ExecutionSummaryError, GameConfigId, MatchupAttempt, MatchupHistory, MatchupKey,

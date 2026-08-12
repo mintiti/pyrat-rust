@@ -8,7 +8,9 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::time::Duration;
 
 use parking_lot::Mutex;
 use pyrat::game::builder::{CheeseStrategy, GameConfig, MazeParams, MazeStrategy, PlayerStrategy};
@@ -26,18 +28,23 @@ use pyrat_orchestrator::{PlayerSpec, ReplayEvent, ReplayFile};
 use serde::{Deserialize, Serialize};
 use specta::Type;
 use tauri_specta::Event;
-use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use crate::commands::{MazeState, MudEntry, PlayerState, WallEntry};
-use crate::state::{AppState, TournamentPhase};
+use crate::state::{
+    AppState, TournamentControl, TournamentLease, TournamentPhase, TournamentStopCause,
+    TournamentSupervisorCompletion,
+};
 use crate::tournament_config;
 use crate::tournament_events::{
-    FailureKind, RatingReadiness, StandingRow, TimeoutPhase, TournamentLifecycleStatus,
-    TournamentPreparingEvent, TournamentProgress, TournamentTerminalState,
+    FailureKind, RatingReadiness, StandingRow, TimeoutPhase, TournamentAbortedEvent,
+    TournamentFinishedEvent, TournamentLifecycleStatus, TournamentPreparingEvent,
+    TournamentProgress, TournamentRuntimePhase, TournamentRuntimeStatus, TournamentStartedEvent,
+    TournamentStoppingEvent, TournamentTerminalState,
 };
 use crate::tournament_runner::{
-    build_standings, ordered_player_ids, run_tournament, RunnerFormat, TournamentRun,
+    build_standings, cancellation_outcome, failed_outcome, ordered_player_ids,
+    persist_outcome_once, run_tournament, RunnerFormat, TournamentRun, TournamentRunOutcome,
 };
 
 // ---------------------------------------------------------------------------
@@ -772,119 +779,216 @@ pub enum GameReplayState {
 // Commands
 // ---------------------------------------------------------------------------
 
-/// Whether a new tournament may claim the slot.
-///
-/// `Idle` is free. A `Running` slot whose runner task has already **finished**
-/// is reclaimable: the runner doesn't reset the phase on natural finish (it
-/// never touches `AppState`), so the slot would otherwise stay `Running`
-/// forever and refuse every future launch — the "can't launch after a
-/// tournament finishes" bug. A still-running `Running` or an in-flight
-/// `Starting` is refused, with distinct messages.
 fn reservation_check(phase: &TournamentPhase) -> Result<(), String> {
     match phase {
         TournamentPhase::Idle => Ok(()),
-        TournamentPhase::Running { handle, .. } if handle.is_finished() => Ok(()),
-        TournamentPhase::Starting { .. } => Err("a tournament is already starting".into()),
-        TournamentPhase::Running { .. } => Err("a tournament is already running".into()),
+        TournamentPhase::Starting(_) => Err("a tournament is already starting".into()),
+        TournamentPhase::Running(_) => Err("a tournament is already running".into()),
+        TournamentPhase::Stopping(_) => Err("the previous tournament is still stopping".into()),
     }
 }
 
-async fn current_running_tournament(state: &AppState) -> Option<i64> {
+fn runtime_status(phase: &TournamentPhase) -> TournamentRuntimeStatus {
+    match phase {
+        TournamentPhase::Idle => TournamentRuntimeStatus {
+            phase: TournamentRuntimePhase::Idle,
+            tournament_id: None,
+        },
+        TournamentPhase::Starting(lease) => TournamentRuntimeStatus {
+            phase: TournamentRuntimePhase::Starting,
+            tournament_id: lease.tournament_id,
+        },
+        TournamentPhase::Running(lease) => TournamentRuntimeStatus {
+            phase: TournamentRuntimePhase::Running,
+            tournament_id: lease.tournament_id,
+        },
+        TournamentPhase::Stopping(lease) => TournamentRuntimeStatus {
+            phase: TournamentRuntimePhase::Stopping,
+            tournament_id: lease.tournament_id,
+        },
+    }
+}
+
+async fn current_tournament_runtime(state: &AppState) -> TournamentRuntimeStatus {
     let phase = state.tournament_phase.lock().await;
-    match &*phase {
-        TournamentPhase::Running {
-            tournament_id,
-            handle,
-            ..
-        } if !handle.is_finished() => Some(*tournament_id),
-        _ => None,
-    }
+    runtime_status(&phase)
 }
 
-/// Create a tournament and start running it in the background. Returns the
-/// new tournament id only after the runner acknowledges that its session is
-/// live. Rejects if one is already running.
+/// Reserve one generation and return only after its session is genuinely
+/// live. The returned snapshot is authoritative; the matching event is
+/// enrichment for other windows and background navigation.
 #[tauri::command]
 #[specta::specta]
 pub async fn start_tournament(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
     params: LaunchParams,
-) -> Result<i64, StartTournamentError> {
+) -> Result<TournamentStartedEvent, StartTournamentError> {
     let validated = validate_launch_params(&params).map_err(StartTournamentError::validation)?;
+    let generation = state
+        .next_tournament_generation
+        .fetch_add(1, Ordering::Relaxed);
+    let control = TournamentControl::new();
+    let (completion_tx, completion_rx) = tokio::sync::watch::channel(None);
+    let (startup_tx, startup_rx) = tokio::sync::oneshot::channel();
 
-    // Reserve the slot up front, under the lock, *before* the async
-    // create/open-store/spawn work. Without this, two concurrent starts both
-    // pass an `Idle` check while the lock is released across the awaits and
-    // the second orphans the first's runner. Every path below must release
-    // the reservation (rollback to Idle) on error or honor a stop that lands
-    // mid-launch.
-    // The cancel token is born here, with the reservation, and stored in
-    // `Starting` so a `stop_tournament` during the (possibly slow) warmup can
-    // fire it immediately. The same token is reused as the runner's token on
-    // promotion, so cancellation spans the whole start lifetime.
-    let cancel = {
+    {
         let mut phase = state.tournament_phase.lock().await;
         reservation_check(&phase)?;
-        let cancel = CancellationToken::new();
-        *phase = TournamentPhase::Starting {
-            cancel: cancel.clone(),
+        *phase = TournamentPhase::Starting(TournamentLease {
+            generation,
+            tournament_id: None,
+            control: control.clone(),
+            completion: completion_rx,
+        });
+    }
+
+    let phase = state.tournament_phase.clone();
+    tokio::spawn(supervise_tournament(
+        app,
+        phase,
+        generation,
+        params,
+        validated,
+        control,
+        completion_tx,
+        startup_tx,
+    ));
+
+    match startup_rx.await {
+        Ok(Ok(started)) => Ok(started),
+        Ok(Err(error)) => Err(StartTournamentError::runtime(error)),
+        Err(_) => Err(StartTournamentError::runtime(
+            "tournament supervisor exited before startup completed",
+        )),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn supervise_tournament(
+    app: tauri::AppHandle,
+    phase: Arc<tokio::sync::Mutex<TournamentPhase>>,
+    generation: u64,
+    params: LaunchParams,
+    validated: ValidatedLaunch,
+    control: TournamentControl,
+    completion: tokio::sync::watch::Sender<Option<TournamentSupervisorCompletion>>,
+    startup: tokio::sync::oneshot::Sender<Result<TournamentStartedEvent, String>>,
+) {
+    let worker_app = app.clone();
+    let worker_phase = phase.clone();
+    let worker_control = control.clone();
+    let worker = tokio::spawn(async move {
+        let (store, run) = match prepare_tournament(
+            &worker_app,
+            params,
+            validated,
+            worker_phase.clone(),
+            generation,
+            worker_control.clone(),
+        )
+        .await
+        {
+            Ok(prepared) => prepared,
+            Err(reason) => {
+                let _ = startup.send(Err(reason.clone()));
+                return Err(reason);
+            },
         };
-        cancel
+        run_tournament(
+            worker_app,
+            store,
+            run,
+            worker_phase,
+            generation,
+            worker_control,
+            startup,
+        )
+        .await
+    });
+
+    let worker_result = match worker.await {
+        Ok(result) => result,
+        Err(error) => Err(format!("tournament worker panicked: {error}")),
+    };
+    let tournament_id = {
+        let phase = phase.lock().await;
+        phase
+            .lease()
+            .filter(|lease| lease.generation == generation)
+            .and_then(|lease| lease.tournament_id)
     };
 
-    match build_and_spawn(&app, params, validated, cancel.clone()).await {
-        Ok((tournament_id, handle, startup)) => match startup.await {
-            Ok(Ok(())) => {
-                let mut phase = state.tournament_phase.lock().await;
-                if matches!(*phase, TournamentPhase::Starting { .. }) {
-                    *phase = TournamentPhase::Running {
-                        tournament_id,
-                        cancel,
-                        handle,
-                    };
-                    Ok(tournament_id)
-                } else {
-                    // A `stop_tournament` landed during the launch window (it reset
-                    // the slot to Idle and already fired the token). Honor it:
-                    // cancel (idempotent) and drain the runner we just spawned,
-                    // rather than promoting a tournament the user asked to stop.
-                    cancel.cancel();
-                    let _ = handle.await;
-                    Err(StartTournamentError::runtime(
-                        "tournament start was cancelled",
-                    ))
-                }
-            },
-            Ok(Err(error)) => {
-                let _ = handle.await;
-                let mut phase = state.tournament_phase.lock().await;
-                if matches!(*phase, TournamentPhase::Starting { .. }) {
-                    *phase = TournamentPhase::Idle;
-                }
-                Err(StartTournamentError::runtime(error))
-            },
-            Err(_) => {
-                let _ = handle.await;
-                let mut phase = state.tournament_phase.lock().await;
-                if matches!(*phase, TournamentPhase::Starting { .. }) {
-                    *phase = TournamentPhase::Idle;
-                }
-                Err(StartTournamentError::runtime(
-                    "tournament runner exited before startup completed",
-                ))
-            },
+    let outcome = match worker_result {
+        Ok(outcome) => Ok(outcome),
+        Err(reason) => match control.stop_cause() {
+            Some(cause) => Ok(cancellation_outcome(cause)),
+            None => Err(reason),
         },
-        Err(e) => {
-            // Roll back the reservation so a failed launch can't wedge the slot.
-            // (If a stop already reset it to Idle, leave it.)
-            let mut phase = state.tournament_phase.lock().await;
-            if matches!(*phase, TournamentPhase::Starting { .. }) {
-                *phase = TournamentPhase::Idle;
+    };
+    let final_result = match (tournament_id, outcome) {
+        (Some(tournament_id), Ok(outcome)) => {
+            finalize_tournament(&app, TournamentId(tournament_id), &outcome)
+        },
+        (Some(tournament_id), Err(reason)) => {
+            finalize_tournament(&app, TournamentId(tournament_id), &failed_outcome(reason))
+        },
+        (None, Ok(_)) => Ok(()),
+        (None, Err(reason)) => Err(reason),
+    };
+
+    {
+        let mut phase = phase.lock().await;
+        phase.clear_if_generation(generation);
+    }
+    completion.send_replace(Some(TournamentSupervisorCompletion {
+        generation,
+        tournament_id,
+        result: final_result.clone(),
+    }));
+    if let Err(error) = final_result {
+        warn!(generation, error = %error, "tournament supervisor exited with error");
+    }
+}
+
+fn finalize_tournament(
+    app: &tauri::AppHandle,
+    tournament_id: TournamentId,
+    outcome: &TournamentRunOutcome,
+) -> Result<(), String> {
+    let store = open_store(app)?;
+    let Some(terminal) = persist_outcome_once(&store, tournament_id, outcome)? else {
+        return Ok(());
+    };
+    match outcome.lifecycle {
+        TournamentLifecycle::Completed => {
+            let _ = TournamentFinishedEvent {
+                tournament_id: tournament_id.0,
+                terminal,
+                rating_readiness: outcome.rating_status.into(),
             }
-            Err(StartTournamentError::runtime(e))
+            .emit(app);
+        },
+        TournamentLifecycle::Stopped | TournamentLifecycle::Failed => {
+            let _ = TournamentAbortedEvent {
+                tournament_id: tournament_id.0,
+                lifecycle: outcome.lifecycle.into(),
+                reason: outcome
+                    .reason
+                    .clone()
+                    .unwrap_or_else(|| "tournament ended without a reason".into()),
+                terminal,
+                rating_readiness: outcome.rating_status.into(),
+            }
+            .emit(app);
+        },
+        TournamentLifecycle::LegacyUnknown
+        | TournamentLifecycle::Preparing
+        | TournamentLifecycle::Running => {
+            return Err("supervisor attempted to finalize a non-terminal lifecycle".into());
         },
     }
+    Ok(())
 }
 
 /// Launch-form defaults the frontend pre-fills from: the ladder recipe as a
@@ -904,26 +1008,17 @@ pub async fn get_tournament_launch_defaults() -> Result<LaunchDefaults, String> 
     })
 }
 
-/// Create the tournament row and spawn its runner. Returns the new id plus the
-/// runner handle and startup acknowledgement; the caller installs the live
-/// runner (with the `cancel` it owns) into `TournamentPhase::Running`. Phase
-/// management lives entirely in
-/// `start_tournament`; this is the fallible build body it wraps so every error
-/// path releases the `Starting` slot. `cancel` is the start-lifetime token: it
-/// gates warmup and is reused as the runner's token.
-async fn build_and_spawn(
+/// Warm participants, create the durable row, and resolve one runner input.
+/// The generation is recorded on the phase as soon as the row exists so a
+/// supervisor can finalize it even if later preparation panics or fails.
+async fn prepare_tournament(
     app: &tauri::AppHandle,
     params: LaunchParams,
     validated: ValidatedLaunch,
-    cancel: CancellationToken,
-) -> Result<
-    (
-        i64,
-        tokio::task::JoinHandle<()>,
-        tokio::sync::oneshot::Receiver<Result<(), String>>,
-    ),
-    String,
-> {
+    phase: Arc<tokio::sync::Mutex<TournamentPhase>>,
+    generation: u64,
+    control: TournamentControl,
+) -> Result<(Arc<Mutex<EvalStore>>, TournamentRun), String> {
     let store = open_store(app)?;
     let players = resolve_players(&params.bots);
 
@@ -1029,13 +1124,27 @@ async fn build_and_spawn(
         orchestrator_config.handshake_timeout,
         orchestrator_config.setup_timing.configure_timeout,
     );
+    let cancel = control.token();
     warmup_bots(app, &params.bots, &cancel, preflight).await?;
+    if cancel.is_cancelled() {
+        return Err("tournament start was cancelled".into());
+    }
 
     let created =
         EvalSession::create_tournament(store.clone(), spec.clone(), canonical_players.clone())
             .await
             .map_err(|e| format!("create tournament: {e}"))?;
     let tournament_id = created.tournament_id;
+    if !phase
+        .lock()
+        .await
+        .record_tournament_id(generation, tournament_id.0)
+    {
+        return Err(format!(
+            "tournament generation {generation} lost ownership before row {} was adopted",
+            tournament_id.0
+        ));
+    }
     let adopted = store
         .lock()
         .mark_tournament_preparing(tournament_id)
@@ -1047,13 +1156,7 @@ async fn build_and_spawn(
         ));
     }
 
-    let replay_dir = match crate::tournament_paths::tournament_replay_dir(app, tournament_id.0) {
-        Ok(path) => path,
-        Err(reason) => {
-            let _ = crate::tournament_runner::persist_failed(&store, tournament_id, &reason);
-            return Err(reason);
-        },
-    };
+    let replay_dir = crate::tournament_paths::tournament_replay_dir(app, tournament_id.0)?;
     let run = TournamentRun {
         tournament_id,
         game_config_id: created.game_config_id,
@@ -1075,15 +1178,7 @@ async fn build_and_spawn(
         orchestrator_config,
     };
 
-    let app_for_task = app.clone();
-    let (startup_tx, startup_rx) = tokio::sync::oneshot::channel();
-    let handle = tokio::spawn(async move {
-        if let Err(e) = run_tournament(app_for_task, store, run, cancel, startup_tx).await {
-            warn!(error = %e, "tournament runner exited with error");
-        }
-    });
-
-    Ok((tournament_id.0, handle, startup_rx))
+    Ok((store, run))
 }
 
 /// Smoke-build each distinct bot in both seat assignments before the
@@ -1111,7 +1206,7 @@ fn distinct_by_agent(bots: &[BotPick]) -> Vec<&BotPick> {
 async fn warmup_bots(
     app: &tauri::AppHandle,
     bots: &[BotPick],
-    cancel: &CancellationToken,
+    cancel: &tokio_util::sync::CancellationToken,
     preflight: PreflightConfig,
 ) -> Result<(), String> {
     let distinct = distinct_by_agent(bots);
@@ -1157,39 +1252,96 @@ async fn warmup_bots(
     Ok(())
 }
 
-/// Request the running tournament to stop and wait for it to drain. The runner
-/// shuts the session down gracefully and emits `TournamentAbortedEvent`. No-op
-/// if nothing is running.
+/// Request the owning generation to stop and wait until its finalizer has
+/// persisted the terminal outcome and released the slot.
 #[tauri::command]
 #[specta::specta]
-pub async fn stop_tournament(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    let prev = {
-        let mut phase = state.tournament_phase.lock().await;
-        std::mem::replace(&mut *phase, TournamentPhase::Idle)
-    };
-    match prev {
-        TournamentPhase::Running { cancel, handle, .. } => {
-            cancel.cancel();
-            let _ = handle.await;
-        },
-        // A start is mid-flight (likely warming up bots). Fire its token so the
-        // in-flight `build_and_spawn` aborts promptly; resetting the slot to
-        // Idle (above) makes `start_tournament` return the cancelled error
-        // instead of promoting to Running.
-        TournamentPhase::Starting { cancel } => cancel.cancel(),
-        TournamentPhase::Idle => {},
-    }
-    Ok(())
+pub async fn stop_tournament(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<TournamentRuntimeStatus, String> {
+    request_stop_and_wait(&app, &state, TournamentStopCause::User, None).await?;
+    Ok(current_tournament_runtime(&state).await)
 }
 
-/// The currently-running tournament id, if any. The frontend reads this on
-/// load / tab switch to restore the live chip after a navigation.
+/// Frontend-confirmed native close. Uses a distinct durable reason and a
+/// bounded drain so unfinished work is never presented as resumable.
 #[tauri::command]
 #[specta::specta]
-pub async fn tournament_status(state: tauri::State<'_, AppState>) -> Result<Option<i64>, String> {
-    // Only a *live* runner counts. Starting has no row/id yet, and a finished
-    // handle may still occupy the phase slot until the next reservation.
-    Ok(current_running_tournament(&state).await)
+pub async fn shutdown_tournament(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<TournamentRuntimeStatus, String> {
+    shutdown_tournament_for_app(&app, &state).await?;
+    Ok(current_tournament_runtime(&state).await)
+}
+
+pub(crate) async fn shutdown_tournament_for_app(
+    app: &tauri::AppHandle,
+    state: &AppState,
+) -> Result<(), String> {
+    request_stop_and_wait(
+        app,
+        state,
+        TournamentStopCause::AppShutdown,
+        Some(Duration::from_secs(7)),
+    )
+    .await
+}
+
+async fn request_stop_and_wait(
+    app: &tauri::AppHandle,
+    state: &AppState,
+    cause: TournamentStopCause,
+    timeout: Option<Duration>,
+) -> Result<(), String> {
+    let (lease, newly_stopping) = {
+        let mut phase = state.tournament_phase.lock().await;
+        let newly_stopping = !matches!(*phase, TournamentPhase::Stopping(_));
+        (phase.request_stop(cause), newly_stopping)
+    };
+    let Some(mut lease) = lease else {
+        return Ok(());
+    };
+
+    if newly_stopping {
+        let _ = TournamentStoppingEvent {
+            tournament_id: lease.tournament_id,
+        }
+        .emit(app);
+    }
+
+    let wait = async {
+        loop {
+            if let Some(done) = lease.completion.borrow().clone() {
+                return done.result;
+            }
+            lease
+                .completion
+                .changed()
+                .await
+                .map_err(|_| "tournament supervisor closed without completion".to_string())?;
+        }
+    };
+    match timeout {
+        Some(limit) => tokio::time::timeout(limit, wait).await.map_err(|_| {
+            format!(
+                "tournament did not stop within the {} second shutdown limit",
+                limit.as_secs()
+            )
+        })?,
+        None => wait.await,
+    }
+}
+
+/// Current app-owned runner phase. Durable lifecycle remains on tournament
+/// snapshots; this survives navigation/reload and exposes Starting/Stopping.
+#[tauri::command]
+#[specta::specta]
+pub async fn tournament_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<TournamentRuntimeStatus, String> {
+    Ok(current_tournament_runtime(&state).await)
 }
 
 /// List tournaments in the store, newest first, projected from durable
@@ -1200,7 +1352,7 @@ pub async fn list_tournaments(
     app: tauri::AppHandle,
     state: tauri::State<'_, AppState>,
 ) -> Result<Vec<TournamentSummary>, String> {
-    let running_id = current_running_tournament(&state).await;
+    let running_id = current_tournament_runtime(&state).await.tournament_id;
     let store = open_store(&app)?;
     let g = store.lock();
     let records = g
@@ -1328,7 +1480,7 @@ pub async fn get_tournament_snapshot(
     state: tauri::State<'_, AppState>,
     tournament_id: i64,
 ) -> Result<TournamentSnapshot, String> {
-    let running = current_running_tournament(&state).await == Some(tournament_id);
+    let running = current_tournament_runtime(&state).await.tournament_id == Some(tournament_id);
     let store = open_store(&app)?;
     let g = store.lock();
     let tid = TournamentId(tournament_id);
@@ -2039,38 +2191,87 @@ mod tests {
         assert_eq!(distinct[1].agent_id, "b");
     }
 
-    /// The launch-blocker: a tournament that *finished* leaves its slot
-    /// `Running` (the runner never resets the phase), and the next launch must
-    /// still be allowed. Idle is free, in-flight Starting/Running are refused.
-    #[tokio::test]
-    async fn finished_running_slot_is_reclaimable() {
+    fn test_lease(
+        generation: u64,
+        tournament_id: Option<i64>,
+    ) -> (
+        TournamentLease,
+        tokio::sync::watch::Sender<Option<TournamentSupervisorCompletion>>,
+    ) {
+        let (completion_tx, completion) = tokio::sync::watch::channel(None);
+        (
+            TournamentLease {
+                generation,
+                tournament_id,
+                control: TournamentControl::new(),
+                completion,
+            },
+            completion_tx,
+        )
+    }
+
+    #[test]
+    fn owned_slot_is_blocked_until_its_generation_clears() {
         assert!(reservation_check(&TournamentPhase::Idle).is_ok());
-        assert!(reservation_check(&TournamentPhase::Starting {
-            cancel: CancellationToken::new(),
-        })
-        .is_err());
+        let (lease, _completion) = test_lease(7, None);
+        assert!(reservation_check(&TournamentPhase::Starting(lease.clone())).is_err());
+        assert!(reservation_check(&TournamentPhase::Running(lease.with_tournament_id(1))).is_err());
 
-        // A still-running tournament: refused.
-        let live = tokio::spawn(std::future::pending::<()>());
-        let running_live = TournamentPhase::Running {
-            tournament_id: 1,
-            cancel: CancellationToken::new(),
-            handle: live,
-        };
-        assert!(reservation_check(&running_live).is_err());
+        let mut stopping = TournamentPhase::Stopping(lease.with_tournament_id(1));
+        assert!(reservation_check(&stopping).is_err());
+        assert!(!stopping.clear_if_generation(6));
+        assert!(reservation_check(&stopping).is_err());
+        assert!(stopping.clear_if_generation(7));
+        assert!(reservation_check(&stopping).is_ok());
+    }
 
-        // A finished tournament's slot: reclaimable (the bug — otherwise no
-        // further launch is ever possible).
-        let done = tokio::spawn(async {});
-        while !done.is_finished() {
-            tokio::task::yield_now().await;
-        }
-        let running_done = TournamentPhase::Running {
-            tournament_id: 1,
-            cancel: CancellationToken::new(),
-            handle: done,
-        };
-        assert!(reservation_check(&running_done).is_ok());
+    #[test]
+    fn stop_is_idempotent_and_preserves_generation_identity() {
+        let (lease, _completion) = test_lease(11, Some(42));
+        let mut phase = TournamentPhase::Running(lease);
+        let first = phase
+            .request_stop(TournamentStopCause::User)
+            .expect("running lease");
+        let second = phase
+            .request_stop(TournamentStopCause::AppShutdown)
+            .expect("stopping lease");
+        assert_eq!(first.generation, 11);
+        assert_eq!(second.generation, 11);
+        assert_eq!(second.tournament_id, Some(42));
+        assert_eq!(
+            second.control.stop_cause(),
+            Some(TournamentStopCause::AppShutdown)
+        );
+        assert!(matches!(phase, TournamentPhase::Stopping(_)));
+    }
+
+    #[test]
+    fn stop_a_must_finish_before_b_can_own_the_slot() {
+        let (lease_a, _completion_a) = test_lease(20, None);
+        let mut phase = TournamentPhase::Starting(lease_a);
+
+        let stopped_a = phase
+            .request_stop(TournamentStopCause::User)
+            .expect("starting generation A");
+        assert_eq!(stopped_a.generation, 20);
+        assert!(reservation_check(&phase).is_err());
+
+        // A may still create/adopt its row while the stop request races with
+        // warmup completion. It stays Stopping and cannot be promoted back to
+        // Running after cancellation has won.
+        assert!(phase.record_tournament_id(20, 100));
+        assert!(!phase.promote_running(20));
+        assert!(matches!(phase, TournamentPhase::Stopping(_)));
+
+        assert!(phase.clear_if_generation(20));
+        let (lease_b, _completion_b) = test_lease(21, None);
+        phase = TournamentPhase::Starting(lease_b);
+
+        // A's late supervisor cleanup cannot clear or promote B's generation.
+        assert!(!phase.clear_if_generation(20));
+        assert!(!phase.promote_running(20));
+        assert_eq!(phase.lease().map(|lease| lease.generation), Some(21));
+        assert!(reservation_check(&phase).is_err());
     }
 
     /// 7×7, no walls/mud, random symmetric — the interesting validation case.

@@ -11,7 +11,6 @@ import {
 } from "@mantine/core";
 import { IconArrowLeft } from "@tabler/icons-react";
 import { useEffect, useState } from "react";
-import { commands } from "../../bindings";
 import type { LiveMatch, TournamentLive } from "../../stores/tournamentStore";
 import {
 	hasFinalTournamentVerdict,
@@ -30,6 +29,8 @@ export default function LiveView({ live }: { live: TournamentLive }) {
 	const nav = useTournamentStore((s) => s.nav);
 	const back = useTournamentStore((s) => s.back);
 	const showLaunch = useTournamentStore((s) => s.showLaunch);
+	const stopping = useTournamentStore((s) => s.stopping);
+	const requestStop = useTournamentStore((s) => s.requestStop);
 	const active = live.origin === "active";
 
 	// Ticking elapsed clock.
@@ -67,7 +68,11 @@ export default function LiveView({ live }: { live: TournamentLive }) {
 
 	const inFlight = Object.values(live.liveByMatch);
 	const statusBadge =
-		live.status === "running" ? (
+		stopping && active ? (
+			<Badge color="orange" variant="outline">
+				stopping
+			</Badge>
+		) : live.status === "running" ? (
 			<Badge color="yellow" variant="outline" leftSection={<PulseDot />}>
 				running
 			</Badge>
@@ -125,9 +130,11 @@ export default function LiveView({ live }: { live: TournamentLive }) {
 							size="compact-xs"
 							variant="subtle"
 							color="red"
-							onClick={() => commands.stopTournament()}
+							onClick={() => void requestStop()}
+							disabled={stopping}
+							loading={stopping}
 						>
-							Stop
+							{stopping ? "Stopping…" : "Stop"}
 						</Button>
 					)}
 				</Group>

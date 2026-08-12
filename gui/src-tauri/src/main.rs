@@ -16,6 +16,9 @@ mod tournament_events;
 mod tournament_paths;
 mod tournament_runner;
 
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::Arc;
+
 use bot_discovery::{discover_bots, load_scan_paths, save_scan_paths};
 use bot_probe::probe_bot;
 use commands::{
@@ -28,16 +31,17 @@ use events::{
 };
 use match_config::{load_match_config, save_match_config};
 use specta_typescript::{BigIntExportBehavior, Typescript};
+use tauri::Manager;
 use tauri_specta::{collect_commands, collect_events, Builder};
 use tournament_commands::{
     get_game_replay, get_tournament_launch_defaults, get_tournament_snapshot,
-    get_tournament_standings, list_tournaments, start_tournament, stop_tournament,
-    tournament_status,
+    get_tournament_standings, list_tournaments, shutdown_tournament, shutdown_tournament_for_app,
+    start_tournament, stop_tournament, tournament_status,
 };
 use tournament_events::{
     NowPlayingEvent, StandingsUpdatedEvent, TournamentAbortedEvent, TournamentFinishedEvent,
     TournamentMatchFailedEvent, TournamentMatchFinishedEvent, TournamentMatchStartedEvent,
-    TournamentPreparingEvent, TournamentStartedEvent,
+    TournamentPreparingEvent, TournamentStartedEvent, TournamentStoppingEvent,
 };
 
 fn bindings_builder() -> Builder<tauri::Wry> {
@@ -57,6 +61,7 @@ fn bindings_builder() -> Builder<tauri::Wry> {
             probe_bot,
             start_tournament,
             stop_tournament,
+            shutdown_tournament,
             tournament_status,
             list_tournaments,
             get_tournament_standings,
@@ -74,6 +79,7 @@ fn bindings_builder() -> Builder<tauri::Wry> {
             BotInfoEvent,
             TournamentPreparingEvent,
             TournamentStartedEvent,
+            TournamentStoppingEvent,
             StandingsUpdatedEvent,
             TournamentMatchFinishedEvent,
             TournamentMatchStartedEvent,
@@ -128,7 +134,7 @@ fn main() {
     )
     .expect("failed to export typescript bindings");
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(state::AppState::default())
         .invoke_handler(builder.invoke_handler())
@@ -136,8 +142,50 @@ fn main() {
             builder.mount_events(app);
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    // 0 = normal, 1 = draining an owned tournament, 2 = programmatic exit
+    // after the bounded drain. Repeated native exit requests during state 1
+    // must remain prevented; state 2 lets `AppHandle::exit` pass through.
+    let exit_phase = Arc::new(AtomicU8::new(0));
+    app.run(move |app_handle, event| {
+        let tauri::RunEvent::ExitRequested { api, .. } = event else {
+            return;
+        };
+        match exit_phase.load(Ordering::Acquire) {
+            2 => return,
+            1 => {
+                api.prevent_exit();
+                return;
+            },
+            _ => {},
+        }
+        let state = app_handle.state::<state::AppState>();
+        let has_owned_tournament = state
+            .tournament_phase
+            .try_lock()
+            .map(|phase| !matches!(*phase, state::TournamentPhase::Idle))
+            .unwrap_or(true);
+        if !has_owned_tournament {
+            return;
+        }
+
+        api.prevent_exit();
+        if exit_phase.swap(1, Ordering::AcqRel) != 0 {
+            return;
+        }
+        let app_handle = app_handle.clone();
+        let exit_phase = exit_phase.clone();
+        tauri::async_runtime::spawn(async move {
+            let state = app_handle.state::<state::AppState>();
+            if let Err(error) = shutdown_tournament_for_app(&app_handle, &state).await {
+                tracing::error!(error = %error, "could not finalize tournament before exit");
+            }
+            exit_phase.store(2, Ordering::Release);
+            app_handle.exit(0);
+        });
+    });
 }
 
 #[cfg(test)]

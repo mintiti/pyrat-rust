@@ -327,6 +327,30 @@ pub struct NowPlayingEvent {
     pub player2_score: f32,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Type)]
+#[serde(rename_all = "snake_case")]
+pub enum TournamentRuntimePhase {
+    Idle,
+    Starting,
+    Running,
+    Stopping,
+}
+
+/// App-owned runner state. Durable tournament lifecycle is projected
+/// separately; this says which asynchronous generation still owns the slot.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, Type)]
+pub struct TournamentRuntimeStatus {
+    pub phase: TournamentRuntimePhase,
+    pub tournament_id: Option<i64>,
+}
+
+/// Immediate acknowledgement that cancellation was accepted. Terminal events
+/// still arrive only after the owning supervisor drains and finalizes.
+#[derive(Serialize, Deserialize, Debug, Clone, Type, Event)]
+pub struct TournamentStoppingEvent {
+    pub tournament_id: Option<i64>,
+}
+
 /// Terminal: tournament finished naturally. The hero swaps to the verdict and
 /// the chip goes green.
 #[derive(Serialize, Deserialize, Debug, Clone, Type, Event)]

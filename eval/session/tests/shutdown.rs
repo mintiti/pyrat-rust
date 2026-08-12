@@ -9,7 +9,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::Mutex;
-use pyrat_eval::{EvalSession, SessionConfig, SessionMode, TournamentParams, TournamentSpec};
+use pyrat_eval::{
+    EvalSession, SessionCompletion, SessionConfig, SessionMode, TournamentParams, TournamentSpec,
+};
 use pyrat_eval_store::{EloOptions, EvalStore};
 
 use crate::common::{embedded_player, fast_orch_config, round_robin, small_game_config};
@@ -71,6 +73,8 @@ async fn shutdown_returns_promptly_with_pending_matchups() {
     .await
     .expect("session start");
 
+    let completion = session.completion();
+
     // Before the fix this would deadlock: the run loop blocks on
     // `driver_rx.recv().await`, `orch.abort()` only cancels the root token,
     // `driver_tx` stays alive via `self.orch: Arc<Orchestrator>`, and
@@ -79,4 +83,9 @@ async fn shutdown_returns_promptly_with_pending_matchups() {
         .await
         .expect("shutdown should not hang")
         .expect("shutdown result");
+    assert_eq!(
+        completion.borrow().as_ref(),
+        Some(&SessionCompletion::Cancelled),
+        "shutdown must retain an explicit cancellation disposition",
+    );
 }

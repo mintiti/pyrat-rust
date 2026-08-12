@@ -160,6 +160,16 @@ pub enum SessionEvent {
     },
 }
 
+/// Guaranteed run-loop completion, independent of the lossy lifecycle
+/// broadcast. Consumers that own terminal state should watch this channel and
+/// treat [`SessionEvent`] as enrichment only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SessionCompletion {
+    Completed,
+    Cancelled,
+    Failed { reason: String },
+}
+
 impl SessionEvent {
     fn from_driver(event: &DriverEvent<EvalMatchDescriptor>) -> Option<Self> {
         match event {
@@ -204,6 +214,9 @@ pub enum SessionError {
 
     #[error("orchestrator error: {0}")]
     Orchestrator(#[from] OrchestratorError),
+
+    #[error("tournament execution stopped before completion: {0}")]
+    ExecutionStopped(String),
 
     /// The session run loop panicked. The string is the panic message
     /// stringified — `tokio::task::JoinError` itself is not part of the
@@ -402,6 +415,9 @@ pub struct EvalSession {
     cancel: CancellationToken,
     /// Run-loop join handle. `None` after `shutdown`/`join` consume it.
     run_loop_handle: Option<JoinHandle<Result<(), SessionError>>>,
+    /// Guaranteed terminal signal. Unlike `session_events`, this is a watch
+    /// channel with one retained value, so lagging consumers cannot miss it.
+    completion: watch::Receiver<Option<SessionCompletion>>,
 }
 
 impl EvalSession {
@@ -511,6 +527,13 @@ impl EvalSession {
     /// Watch over `TournamentState`. Useful for one-shot snapshots.
     pub fn state(&self) -> watch::Receiver<TournamentState> {
         self.state_watch.subscribe()
+    }
+
+    /// One retained completion result for the owning consumer. The sender
+    /// lives only in the run-loop task: channel closure without a value means
+    /// that task panicked before it could classify its exit.
+    pub fn completion(&self) -> watch::Receiver<Option<SessionCompletion>> {
+        self.completion.clone()
     }
 
     /// Lossy session-lifecycle event stream. Use [`Self::subscribe`] for
@@ -628,6 +651,7 @@ impl EvalSession {
 
         let (state_watch, _state_rx) = watch::channel(initial_state.clone());
         let (session_events, _events_rx) = broadcast::channel(256);
+        let (completion_tx, completion) = watch::channel(None);
         let publish_mutex = Arc::new(Mutex::new(()));
         let cancel = CancellationToken::new();
 
@@ -642,6 +666,7 @@ impl EvalSession {
             elo_options,
             session_config,
             cancel.clone(),
+            completion_tx,
         ));
 
         Ok(Self {
@@ -651,6 +676,7 @@ impl EvalSession {
             orch: Some(orch),
             cancel,
             run_loop_handle: Some(run_loop_handle),
+            completion,
         })
     }
 
@@ -919,6 +945,43 @@ fn player_agent_id(spec: &pyrat_orchestrator::PlayerSpec) -> Option<&str> {
 
 #[allow(clippy::too_many_arguments)]
 async fn run_loop<P: Planner>(
+    planner: P,
+    state: TournamentState,
+    state_watch: watch::Sender<TournamentState>,
+    session_events: broadcast::Sender<SessionEvent>,
+    publish_mutex: Arc<Mutex<()>>,
+    orch: Arc<Orchestrator<EvalMatchDescriptor>>,
+    driver_rx: mpsc::Receiver<DriverEvent<EvalMatchDescriptor>>,
+    elo_options: EloOptions,
+    session_config: SessionConfig,
+    cancel: CancellationToken,
+    completion: watch::Sender<Option<SessionCompletion>>,
+) -> Result<(), SessionError> {
+    let result = run_loop_inner(
+        planner,
+        state,
+        state_watch,
+        session_events,
+        publish_mutex,
+        orch,
+        driver_rx,
+        elo_options,
+        session_config,
+        cancel,
+    )
+    .await;
+    let terminal = match &result {
+        Ok(completion) => completion.clone(),
+        Err(error) => SessionCompletion::Failed {
+            reason: error.to_string(),
+        },
+    };
+    completion.send_replace(Some(terminal));
+    result.map(|_| ())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_loop_inner<P: Planner>(
     mut planner: P,
     mut state: TournamentState,
     state_watch: watch::Sender<TournamentState>,
@@ -929,7 +992,7 @@ async fn run_loop<P: Planner>(
     elo_options: EloOptions,
     session_config: SessionConfig,
     cancel: CancellationToken,
-) -> Result<(), SessionError> {
+) -> Result<SessionCompletion, SessionError> {
     // Initial Elo was recomputed in `launch_with_sinks` before this task
     // was spawned, so a subscriber that lands during start sees standings
     // immediately. The watch was already populated with that state.
@@ -949,11 +1012,13 @@ async fn run_loop<P: Planner>(
             for matchup in batch {
                 tokio::select! {
                     biased;
-                    _ = cancel.cancelled() => return Ok(()),
+                    _ = cancel.cancelled() => return Ok(SessionCompletion::Cancelled),
                     res = orch.submit(matchup) => {
                         if res.is_err() {
                             // Orchestrator shut down underneath us.
-                            return Ok(());
+                            return Err(SessionError::ExecutionStopped(
+                                "orchestrator stopped accepting matches".into(),
+                            ));
                         }
                     }
                 }
@@ -962,17 +1027,19 @@ async fn run_loop<P: Planner>(
 
         if planner.is_done(&state) && orch.idle() {
             let _ = session_events.send(SessionEvent::TournamentFinished);
-            return Ok(());
+            return Ok(SessionCompletion::Completed);
         }
 
         let event = tokio::select! {
             biased;
-            _ = cancel.cancelled() => return Ok(()),
+            _ = cancel.cancelled() => return Ok(SessionCompletion::Cancelled),
             maybe = driver_rx.recv() => match maybe {
                 Some(e) => e,
                 // Driver channel closed (orchestrator dropped). Tournament
                 // can't progress further.
-                None => return Ok(()),
+                None => return Err(SessionError::ExecutionStopped(
+                    "orchestrator lifecycle channel closed".into(),
+                )),
             }
         };
         state.apply(&event);

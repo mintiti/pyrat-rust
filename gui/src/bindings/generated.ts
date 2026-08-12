@@ -97,11 +97,11 @@ async probeBot(runCommand: string, workingDir: string, agentId: string) : Promis
 }
 },
 /**
- * Create a tournament and start running it in the background. Returns the
- * new tournament id only after the runner acknowledges that its session is
- * live. Rejects if one is already running.
+ * Reserve one generation and return only after its session is genuinely
+ * live. The returned snapshot is authoritative; the matching event is
+ * enrichment for other windows and background navigation.
  */
-async startTournament(params: LaunchParams) : Promise<Result<number, StartTournamentError>> {
+async startTournament(params: LaunchParams) : Promise<Result<TournamentStartedEvent, StartTournamentError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("start_tournament", { params }) };
 } catch (e) {
@@ -110,11 +110,10 @@ async startTournament(params: LaunchParams) : Promise<Result<number, StartTourna
 }
 },
 /**
- * Request the running tournament to stop and wait for it to drain. The runner
- * shuts the session down gracefully and emits `TournamentAbortedEvent`. No-op
- * if nothing is running.
+ * Request the owning generation to stop and wait until its finalizer has
+ * persisted the terminal outcome and released the slot.
  */
-async stopTournament() : Promise<Result<null, string>> {
+async stopTournament() : Promise<Result<TournamentRuntimeStatus, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("stop_tournament") };
 } catch (e) {
@@ -123,10 +122,22 @@ async stopTournament() : Promise<Result<null, string>> {
 }
 },
 /**
- * The currently-running tournament id, if any. The frontend reads this on
- * load / tab switch to restore the live chip after a navigation.
+ * Frontend-confirmed native close. Uses a distinct durable reason and a
+ * bounded drain so unfinished work is never presented as resumable.
  */
-async tournamentStatus() : Promise<Result<number | null, string>> {
+async shutdownTournament() : Promise<Result<TournamentRuntimeStatus, string>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("shutdown_tournament") };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+/**
+ * Current app-owned runner phase. Durable lifecycle remains on tournament
+ * snapshots; this survives navigation/reload and exposes Starting/Stopping.
+ */
+async tournamentStatus() : Promise<Result<TournamentRuntimeStatus, string>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("tournament_status") };
 } catch (e) {
@@ -219,6 +230,7 @@ tournamentMatchFinishedEvent: TournamentMatchFinishedEvent,
 tournamentMatchStartedEvent: TournamentMatchStartedEvent,
 tournamentPreparingEvent: TournamentPreparingEvent,
 tournamentStartedEvent: TournamentStartedEvent,
+tournamentStoppingEvent: TournamentStoppingEvent,
 turnPlayedEvent: TurnPlayedEvent
 }>({
 botInfoEvent: "bot-info-event",
@@ -236,6 +248,7 @@ tournamentMatchFinishedEvent: "tournament-match-finished-event",
 tournamentMatchStartedEvent: "tournament-match-started-event",
 tournamentPreparingEvent: "tournament-preparing-event",
 tournamentStartedEvent: "tournament-started-event",
+tournamentStoppingEvent: "tournament-stopping-event",
 turnPlayedEvent: "turn-played-event"
 })
 
@@ -567,6 +580,12 @@ current: string | null }
  * Attempt and slot counters shared by live events, snapshots, and history.
  */
 export type TournamentProgress = { planned_slots: number; terminal_slots: number; successful_games: number; exhausted_slots: number; failed_attempts: number; running_matches: number }
+export type TournamentRuntimePhase = "idle" | "starting" | "running" | "stopping"
+/**
+ * App-owned runner state. Durable tournament lifecycle is projected
+ * separately; this says which asynchronous generation still owns the slot.
+ */
+export type TournamentRuntimeStatus = { phase: TournamentRuntimePhase; tournament_id: number | null }
 /**
  * Complete read model for one inspectable tournament. The same command
  * hydrates historical rows and reconciles an active event-fed view from
@@ -612,6 +631,11 @@ max_parallel: number; anchor_id: string;
  * live header: e.g. "my-bot vs 6 (gauntlet) · tiny preset · 200 ms/move".
  */
 plan_summary: string; players: PlayerLite[] }
+/**
+ * Immediate acknowledgement that cancellation was accepted. Terminal events
+ * still arrive only after the owning supervisor drains and finalizes.
+ */
+export type TournamentStoppingEvent = { tournament_id: number | null }
 /**
  * Row in the "in this store" panel.
  */
