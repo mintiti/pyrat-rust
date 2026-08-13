@@ -10,6 +10,7 @@ import type {
 	TournamentStartedEvent,
 } from "../bindings/generated";
 import {
+	type TournamentLive,
 	botFailures,
 	estimateTournamentEta,
 	failureBreakdown,
@@ -473,6 +474,113 @@ describe("tournamentStore launch ↔ live navigation", () => {
 				startedAt: 123,
 			},
 		});
+	});
+
+	it("keeps live, restored, and historical projections semantically identical", () => {
+		const durable = snapshot({
+			tournament_id: 1,
+			running: true,
+			lifecycle: "running",
+			terminal: null,
+			terminal_at: null,
+			rating_readiness: "insufficient_games",
+			rating_reason: "each player needs four successful games",
+			provenance: provenance(),
+			progress: {
+				planned_slots: 4,
+				terminal_slots: 2,
+				successful_games: 1,
+				exhausted_slots: 1,
+				failed_attempts: 1,
+				running_matches: 0,
+			},
+			games: [
+				{
+					attempt_id: 41,
+					match_id: 7,
+					player1_id: "a",
+					player2_id: "b",
+					repetition_index: 0,
+					rat_id: "a",
+					player1_score: 5,
+					player2_score: 3,
+				},
+			],
+			failures: [
+				{
+					attempt_id: 42,
+					match_id: 8,
+					player1_id: "a",
+					player2_id: "b",
+					repetition_index: 1,
+					attempt_index: 0,
+					rat_id: "b",
+					failing_player_id: "a",
+					kind: "timeout",
+					timeout_phase: "move",
+					reason: "timeout: move: Player2",
+					exhausted: true,
+				},
+			],
+		});
+
+		const project = (): TournamentLive => {
+			const live = useTournamentStore.getState().live;
+			expect(live).not.toBeNull();
+			if (!live) throw new Error("expected active tournament");
+			return live;
+		};
+		const durableProjection = (live: TournamentLive) => ({
+			ratingReadiness: live.ratingReadiness,
+			ratingReason: live.ratingReason,
+			done: live.done,
+			total: live.total,
+			success: live.success,
+			exhausted: live.exhausted,
+			failure: live.failure,
+			anchorId: live.anchorId,
+			provenance: live.provenance,
+			gamesByPair: live.gamesByPair,
+			failuresByPair: live.failuresByPair,
+		});
+
+		const store = useTournamentStore.getState();
+		store.onStarted(started(), 0);
+		store.onMatchFinished(matchFinished(7));
+		store.onMatchFailed({
+			...matchFailed(8, { failing: "a", kind: "timeout", phase: "move" }),
+			repetition_index: 1,
+			rat_id: "b",
+			reason: "timeout: move: Player2",
+		});
+		store.reconcileSnapshot(durable);
+		const liveProjection = project();
+
+		useTournamentStore.setState(useTournamentStore.getInitialState(), true);
+		useTournamentStore.getState().restoreActive(durable);
+		const restoredProjection = project();
+
+		useTournamentStore.setState(useTournamentStore.getInitialState(), true);
+		useTournamentStore.getState().openSnapshot({
+			...durable,
+			running: false,
+			lifecycle: "stopped",
+			terminal: {
+				outcome: "user_stopped",
+				reason: "release-proof comparison",
+				at: "2026-07-17 10:01:00",
+			},
+			terminal_at: "2026-07-17 10:01:00",
+		});
+		const historical = useTournamentStore.getState().viewing;
+		expect(historical).not.toBeNull();
+		if (!historical) return;
+		const historicalProjection = durableProjection(historical);
+
+		expect(durableProjection(restoredProjection)).toEqual(
+			durableProjection(liveProjection),
+		);
+		expect(historicalProjection).toEqual(durableProjection(liveProjection));
 	});
 
 	it("reopens legacy saved results even when no replay id was persisted", () => {

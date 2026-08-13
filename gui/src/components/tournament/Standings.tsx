@@ -89,7 +89,7 @@ export default function Standings({ live }: { live: TournamentLive }) {
 					const row = (
 						<Group wrap="nowrap" gap="sm" px="sm" py={7}>
 							<Text size="xs" c="dimmed" w={20} ta="right" ff="monospace">
-								{rated ? i + 1 : "·"}
+								{rated ? `#${i + 1}` : "·"}
 							</Text>
 							<Text
 								size="sm"
@@ -143,7 +143,7 @@ export default function Standings({ live }: { live: TournamentLive }) {
 									? minimumGames === null
 										? "not rated"
 										: live.status === "running"
-											? `${r.games}/${minimumGames} to rating`
+											? `${r.games}/${minimumGames} games`
 											: `${r.games}/${minimumGames} · not rated`
 									: `${Math.round(r.elo)} ±${Math.round((r.elo_ci_high - r.elo_ci_low) / 2)}`}
 							</Text>

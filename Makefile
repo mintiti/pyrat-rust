@@ -111,8 +111,10 @@ check: check-gui
 	cargo fmt --all -- --check
 	cargo clippy -p pyrat-rust --all-targets --no-default-features -- -D warnings
 	cargo clippy --all-targets --all-features -- -D warnings -A non-local-definitions
-	uv run ruff check engine/python sdk/python/pyrat_sdk
-	uv run mypy engine/python/pyrat_engine sdk/python/pyrat_sdk --ignore-missing-imports
+	uv run --directory engine ruff check python
+	uv run --directory sdk/python ruff check pyrat_sdk
+	uv run --directory engine mypy python/pyrat_engine --ignore-missing-imports
+	uv run --directory sdk/python mypy pyrat_sdk --ignore-missing-imports
 
 check-gui:
 	@echo "Checking GUI frontend..."

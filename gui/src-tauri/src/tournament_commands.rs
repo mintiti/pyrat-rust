@@ -1672,10 +1672,6 @@ pub async fn get_tournament_snapshot(
     let stored_participants = g
         .get_tournament_players(tid)
         .map_err(|e| format!("tournament players: {e}"))?;
-    let players: Vec<String> = stored_participants
-        .iter()
-        .map(|participant| participant.player_id.clone())
-        .collect();
     let attempts = g
         .get_attempts(tid, None)
         .map_err(|e| format!("attempts: {e}"))?;
@@ -1689,6 +1685,30 @@ pub async fn get_tournament_snapshot(
             )
         })?;
     drop(g);
+
+    let mut snapshot =
+        project_tournament_snapshot(running, rec, stored_participants, attempts, game_config)?;
+    snapshot.inspection_warning = replay_inspection_warning(&app, tournament_id, &snapshot.games);
+    Ok(snapshot)
+}
+
+/// Build the durable GUI read model without requiring a live webview. The
+/// command above owns I/O and replay-file inspection; this projection is the
+/// shared seam used by history/reconciliation and the process-level release
+/// proof.
+fn project_tournament_snapshot(
+    running: bool,
+    rec: TournamentRecord,
+    stored_participants: Vec<pyrat_eval_store::TournamentParticipant>,
+    attempts: Vec<AttemptRecord>,
+    game_config: pyrat_eval_store::GameConfigRecord,
+) -> Result<TournamentSnapshot, String> {
+    let tournament_id = rec.id.0;
+    let tid = rec.id;
+    let players: Vec<String> = stored_participants
+        .iter()
+        .map(|participant| participant.player_id.clone())
+        .collect();
 
     let mut tournament_state = TournamentState::empty(tid);
     for attempt in &attempts {
@@ -1806,8 +1826,6 @@ pub async fn get_tournament_snapshot(
     );
     let methodology = rec.methodology.map(StoredTournamentMethodology::from);
     let provenance = stored_provenance(&rec, &stored_participants, &game_config, &params)?;
-    let inspection_warning = replay_inspection_warning(&app, tournament_id, &games);
-
     Ok(TournamentSnapshot {
         tournament_id,
         name: rec.name,
@@ -1834,7 +1852,7 @@ pub async fn get_tournament_snapshot(
         games,
         failures,
         slots,
-        inspection_warning,
+        inspection_warning: None,
     })
 }
 
@@ -2567,6 +2585,47 @@ fn expected_pairs(format: &str, players: &[String]) -> Result<Vec<(String, Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use pyrat::{Direction, GameBuilder};
+    use pyrat_host::player::{EmbeddedBot, EmbeddedCtx, Options};
+    use pyrat_orchestrator::EmbeddedBotFactory;
+    use pyrat_protocol::HashedTurnState;
+    use tokio::sync::{oneshot, watch, Mutex as AsyncMutex};
+
+    struct StayBot;
+
+    impl Options for StayBot {}
+
+    impl EmbeddedBot for StayBot {
+        fn think(&mut self, _: &HashedTurnState, _: &EmbeddedCtx) -> Direction {
+            Direction::Stay
+        }
+    }
+
+    struct SlowBot;
+
+    impl Options for SlowBot {}
+
+    impl EmbeddedBot for SlowBot {
+        fn think(&mut self, _: &HashedTurnState, _: &EmbeddedCtx) -> Direction {
+            Direction::Stay
+        }
+
+        fn preprocess(&mut self, _: &HashedTurnState, _: &EmbeddedCtx) {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+
+    fn embedded_player(id: &str, factory: EmbeddedBotFactory) -> ResolvedPlayer {
+        ResolvedPlayer {
+            id: id.into(),
+            spec: PlayerSpec::Embedded {
+                agent_id: id.into(),
+                name: id.into(),
+                author: "release-proof".into(),
+                factory,
+            },
+        }
+    }
 
     fn recorded_methodology() -> TournamentMethodology {
         TournamentMethodology {
@@ -2628,6 +2687,229 @@ mod tests {
         assert_eq!(distinct[0].agent_id, "a");
         assert_eq!(distinct[0].working_dir, "/a"); // first-seen wins
         assert_eq!(distinct[1].agent_id, "b");
+    }
+
+    #[tokio::test]
+    async fn paired_runner_persists_success_and_attributed_exhaustion_into_gui_snapshot() {
+        let move_timeout_ms = 10;
+        let preprocessing_timeout_ms = 10;
+        let max_parallel = 2;
+        let target_games_per_matchup = 2;
+        let tournament_seed = 0xA11CE;
+        let game_config = GameBuilder::new(3, 3)
+            .with_max_turns(2)
+            .with_open_maze()
+            .with_corner_positions()
+            .with_random_cheese(1, false)
+            .build();
+        let stay_factory: EmbeddedBotFactory = Arc::new(|| Box::new(StayBot));
+        let slow_factory: EmbeddedBotFactory = Arc::new(|| Box::new(SlowBot));
+        let players = vec![
+            embedded_player("a", stay_factory.clone()),
+            embedded_player("b", stay_factory),
+            embedded_player("slow", slow_factory),
+        ];
+        let methodology = TournamentMethodology {
+            timing_mode: TournamentTimingMode::Wait,
+            move_timeout_ms,
+            preprocessing_timeout_ms,
+            startup_timeout_ms: tournament_config::STARTUP_TIMEOUT_MS,
+            configure_timeout_ms: tournament_config::CONFIGURE_TIMEOUT_MS,
+            network_grace_ms: tournament_config::NETWORK_GRACE_MS,
+            max_parallel,
+        };
+        let interpretation = tournament_config::elo_options("a").tournament_interpretation(
+            crate::tournament_runner::MIN_GAMES_FOR_ESTIMATE,
+            TournamentInstancePolicy::SharedMazePerSeatPair,
+        );
+        let store = Arc::new(Mutex::new(EvalStore::open_in_memory().expect("store")));
+        let created = EvalSession::create_tournament(
+            store.clone(),
+            TournamentSpec {
+                name: Some("release-proof".into()),
+                format: "round_robin".into(),
+                target_games_per_matchup: Some(target_games_per_matchup),
+                params_json: TournamentParams {
+                    max_failures_per_pair: tournament_config::MAX_FAILURES_PER_PAIR,
+                    seat_policy: SeatPolicy::Paired,
+                }
+                .to_json(),
+                methodology: Some(methodology),
+                interpretation: Some(interpretation),
+                participant_launch_specs: Vec::new(),
+                game_config: game_config.clone(),
+                tournament_seed,
+            },
+            players.clone(),
+        )
+        .await
+        .expect("create tournament");
+        assert!(store
+            .lock()
+            .mark_tournament_preparing(created.tournament_id)
+            .expect("mark preparing"));
+
+        let generation = 1;
+        let control = TournamentControl::new();
+        let (_completion_tx, completion_rx) = watch::channel(None);
+        let phase = Arc::new(AsyncMutex::new(TournamentPhase::Starting(
+            TournamentLease {
+                generation,
+                tournament_id: Some(created.tournament_id.0),
+                control: control.clone(),
+                completion: completion_rx,
+            },
+        )));
+        let replay_root = tempfile::tempdir().expect("replay tempdir");
+        let event_builder = crate::event_builder::<tauri::test::MockRuntime>();
+        let app = tauri::test::mock_builder()
+            .build(tauri::test::mock_context(tauri::test::noop_assets()))
+            .expect("mock Tauri app");
+        event_builder.mount_events(&app);
+        let (startup_tx, startup_rx) = oneshot::channel();
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(15),
+            run_tournament(
+                app.handle().clone(),
+                store.clone(),
+                TournamentRun {
+                    tournament_id: created.tournament_id,
+                    game_config_id: created.game_config_id.clone(),
+                    tournament_seed,
+                    name: Some("release-proof".into()),
+                    format_str: "round_robin".into(),
+                    players: players.clone(),
+                    format: RunnerFormat::RoundRobin,
+                    target: None,
+                    anchor_id: "a".into(),
+                    plan_summary: "all pairs of 3 · release proof".into(),
+                    total_games: 6,
+                    player_ids: players.iter().map(|player| player.id.clone()).collect(),
+                    game_config,
+                    target_games_per_matchup,
+                    seat_policy: SeatPolicy::Paired,
+                    timing: tournament_config::per_match_timing(
+                        move_timeout_ms,
+                        preprocessing_timeout_ms,
+                    ),
+                    orchestrator_config: tournament_config::orchestrator_config(
+                        move_timeout_ms,
+                        preprocessing_timeout_ms,
+                        max_parallel,
+                    ),
+                    replay_dir: replay_root.path().join("tournament"),
+                },
+                phase,
+                generation,
+                control,
+                startup_tx,
+            ),
+        )
+        .await
+        .expect("runner timed out")
+        .expect("runner failed");
+        startup_rx
+            .await
+            .expect("startup signal closed")
+            .expect("startup failed");
+        assert_eq!(outcome.lifecycle, TournamentLifecycle::Completed);
+        assert_eq!(
+            outcome.terminal_kind,
+            TournamentTerminalKind::CompletedWithFailures
+        );
+        assert!(
+            persist_outcome_once(&store, created.tournament_id, &outcome)
+                .expect("persist terminal outcome")
+                .is_some()
+        );
+
+        let (record, participants, attempts, game_config) = {
+            let store = store.lock();
+            (
+                store
+                    .get_tournament(created.tournament_id)
+                    .expect("read tournament")
+                    .expect("tournament exists"),
+                store
+                    .get_tournament_players(created.tournament_id)
+                    .expect("read participants"),
+                store
+                    .get_attempts(created.tournament_id, None)
+                    .expect("read attempts"),
+                store
+                    .get_game_config(&created.game_config_id)
+                    .expect("read game config")
+                    .expect("game config exists"),
+            )
+        };
+        let snapshot =
+            project_tournament_snapshot(false, record, participants, attempts, game_config)
+                .expect("project GUI snapshot");
+
+        assert_eq!(snapshot.progress.planned_slots, 6);
+        assert_eq!(snapshot.progress.terminal_slots, 6);
+        assert_eq!(snapshot.progress.successful_games, 2);
+        assert_eq!(snapshot.progress.exhausted_slots, 4);
+        assert_eq!(snapshot.progress.failed_attempts, 4);
+        assert_eq!(
+            snapshot.progress.successful_games + snapshot.progress.exhausted_slots,
+            snapshot.progress.planned_slots
+        );
+        assert_eq!(
+            snapshot.games.len(),
+            snapshot.progress.successful_games as usize
+        );
+        assert_eq!(
+            snapshot.failures.len(),
+            snapshot.progress.failed_attempts as usize
+        );
+        assert_eq!(
+            snapshot.progress.failed_attempts,
+            snapshot.progress.exhausted_slots
+        );
+        assert!(
+            snapshot.failures.iter().all(|failure| {
+                failure.exhausted
+                    && failure.failing_player_id.as_deref() == Some("slow")
+                    && matches!(failure.kind, FailureKind::Timeout)
+                    && matches!(failure.timeout_phase, Some(TimeoutPhase::Preprocessing))
+            }),
+            "unexpected projected failures: {:#?}",
+            snapshot.failures
+        );
+        let healthy_slots: Vec<_> = snapshot
+            .slots
+            .iter()
+            .filter(|slot| {
+                slot.player1_id == "a"
+                    && slot.player2_id == "b"
+                    && matches!(slot.state, StoredSlotState::Successful { .. })
+            })
+            .collect();
+        assert_eq!(healthy_slots.len(), 2);
+        assert!(healthy_slots.iter().any(|slot| slot.rat_id == "a"));
+        assert!(healthy_slots.iter().any(|slot| slot.rat_id == "b"));
+        let exhausted_slow_slots: Vec<_> = snapshot
+            .slots
+            .iter()
+            .filter(|slot| {
+                (slot.player1_id == "slow" || slot.player2_id == "slow")
+                    && matches!(slot.state, StoredSlotState::Exhausted { .. })
+            })
+            .collect();
+        assert_eq!(exhausted_slow_slots.len(), 4);
+        assert!(exhausted_slow_slots
+            .iter()
+            .any(|slot| slot.rat_id == "slow"));
+        assert!(exhausted_slow_slots
+            .iter()
+            .any(|slot| slot.rat_id != "slow"));
+        assert_eq!(snapshot.lifecycle, TournamentLifecycleStatus::Completed);
+        assert_eq!(
+            snapshot.terminal.as_ref().map(|terminal| terminal.outcome),
+            Some(crate::tournament_events::TournamentTerminalOutcome::CompletedWithFailures)
+        );
+        assert!(snapshot.provenance.is_some());
     }
 
     fn test_lease(

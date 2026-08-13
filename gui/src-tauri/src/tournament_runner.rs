@@ -31,7 +31,7 @@ use pyrat_host::match_host::MatchEvent;
 use pyrat_orchestrator::{
     DirectoryWriter, MatchSink, OrchestratorConfig, OrchestratorEvent, ReplaySink, SinkRole, Timing,
 };
-use tauri::AppHandle;
+use tauri::{AppHandle, Runtime};
 use tauri_specta::Event;
 use tokio::sync::{oneshot, Mutex as AsyncMutex};
 use tracing::warn;
@@ -113,8 +113,8 @@ const NOW_PLAYING_FLUSH: Duration = Duration::from_millis(250);
 /// way. Spawned on a tokio task by `start_tournament`; `startup` resolves once
 /// the session is live (or carries its startup failure), and `cancel` is fired
 /// by `stop_tournament` or on app shutdown.
-pub async fn run_tournament(
-    app: AppHandle,
+pub async fn run_tournament<R: Runtime>(
+    app: AppHandle<R>,
     store: Arc<Mutex<EvalStore>>,
     run: TournamentRun,
     phase: Arc<AsyncMutex<TournamentPhase>>,
@@ -612,8 +612,8 @@ pub(crate) fn failed_outcome(reason: impl Into<String>) -> TournamentRunOutcome 
 
 /// Emit the successful scored attempt from canonical state. Failure
 /// classification and seat attribution are handled by `failure_report`.
-fn emit_match_finished(
-    app: &AppHandle,
+fn emit_match_finished<R: Runtime>(
+    app: &AppHandle<R>,
     tid: i64,
     descriptor: &EvalMatchDescriptor,
     state: &TournamentState,
@@ -667,8 +667,8 @@ fn canonical_finished_scores(
     })
 }
 
-fn emit_standings(
-    app: &AppHandle,
+fn emit_standings<R: Runtime>(
+    app: &AppHandle<R>,
     tid: i64,
     state: &TournamentState,
     elo_options: &EloOptions,

@@ -648,7 +648,7 @@ describe("tournament UI truth", () => {
 	it("states the four-game rating threshold and current count", () => {
 		const store = useTournamentStore.getState();
 		store.onStarted(
-			started({ target: "a", total_games: 8, games_per_matchup: 8 }),
+			started({ target: "b", total_games: 8, games_per_matchup: 8 }),
 			Date.now(),
 		);
 		store.onStandings({
@@ -670,7 +670,7 @@ describe("tournament UI truth", () => {
 					elo_ci_low: 1000,
 					elo_ci_high: 1000,
 					games: 2,
-					pending: true,
+					pending: false,
 				},
 				{
 					player_id: "b",
@@ -685,7 +685,21 @@ describe("tournament UI truth", () => {
 		const afterStandings = useTournamentStore.getState().live;
 		if (!afterStandings) return;
 		useTournamentStore.setState({
-			live: { ...afterStandings, provenance: provenance() },
+			live: {
+				...afterStandings,
+				provenance: provenance(),
+				standings: afterStandings.standings.map((row) =>
+					row.player_id === "a"
+						? {
+								...row,
+								elo: 1000,
+								elo_ci_low: 1000,
+								elo_ci_high: 1000,
+								pending: false,
+							}
+						: row,
+				),
+			},
 		});
 		const live = useTournamentStore.getState().live;
 		expect(live).not.toBeNull();
@@ -693,7 +707,8 @@ describe("tournament UI truth", () => {
 
 		const html = render(createElement(LiveView, { live }));
 		expect(html).toContain("2/4 games — rating appears at 4");
-		expect(html).toContain("2/4 to rating");
+		expect(html).toContain("2/4 games");
+		expect(html).toContain("#1");
 		expect(html).not.toContain("warming up");
 	});
 

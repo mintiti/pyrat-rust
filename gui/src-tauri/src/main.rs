@@ -32,7 +32,7 @@ use events::{
 use match_config::{load_match_config, save_match_config};
 use specta_typescript::{BigIntExportBehavior, Typescript};
 use tauri::Manager;
-use tauri_specta::{collect_commands, collect_events, Builder};
+use tauri_specta::{collect_commands, collect_events, Builder, Events};
 use tournament_commands::{
     get_game_replay, get_tournament_launch_defaults, get_tournament_snapshot,
     get_tournament_standings, list_tournaments, shutdown_tournament, shutdown_tournament_for_app,
@@ -43,6 +43,33 @@ use tournament_events::{
     TournamentMatchFailedEvent, TournamentMatchFinishedEvent, TournamentMatchStartedEvent,
     TournamentPreparingEvent, TournamentStartedEvent, TournamentStoppingEvent,
 };
+
+fn collected_events() -> Events {
+    collect_events![
+        MatchStartedEvent,
+        PreprocessingStartedEvent,
+        SetupCompleteEvent,
+        TurnPlayedEvent,
+        MatchOverEvent,
+        MatchErrorEvent,
+        BotInfoEvent,
+        TournamentPreparingEvent,
+        TournamentStartedEvent,
+        TournamentStoppingEvent,
+        StandingsUpdatedEvent,
+        TournamentMatchFinishedEvent,
+        TournamentMatchStartedEvent,
+        TournamentMatchFailedEvent,
+        NowPlayingEvent,
+        TournamentFinishedEvent,
+        TournamentAbortedEvent
+    ]
+}
+
+#[cfg(test)]
+fn event_builder<R: tauri::Runtime>() -> Builder<R> {
+    Builder::<R>::new().events(collected_events())
+}
 
 fn bindings_builder() -> Builder<tauri::Wry> {
     Builder::<tauri::Wry>::new()
@@ -69,25 +96,7 @@ fn bindings_builder() -> Builder<tauri::Wry> {
             get_game_replay,
             get_tournament_launch_defaults
         ])
-        .events(collect_events![
-            MatchStartedEvent,
-            PreprocessingStartedEvent,
-            SetupCompleteEvent,
-            TurnPlayedEvent,
-            MatchOverEvent,
-            MatchErrorEvent,
-            BotInfoEvent,
-            TournamentPreparingEvent,
-            TournamentStartedEvent,
-            TournamentStoppingEvent,
-            StandingsUpdatedEvent,
-            TournamentMatchFinishedEvent,
-            TournamentMatchStartedEvent,
-            TournamentMatchFailedEvent,
-            NowPlayingEvent,
-            TournamentFinishedEvent,
-            TournamentAbortedEvent
-        ])
+        .events(collected_events())
 }
 
 fn typescript_bindings() -> Typescript {

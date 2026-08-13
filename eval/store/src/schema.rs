@@ -347,7 +347,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn migrations_preserve_v7_rows_as_explicitly_unknown_without_provenance() {
+    fn migrations_preserve_populated_v7_rows_as_explicitly_unknown_without_provenance() {
         let mut conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
         for &(version, sql) in MIGRATIONS.iter().filter(|(version, _)| *version <= 7) {
@@ -357,18 +357,23 @@ mod tests {
                 .unwrap();
         }
         conn.execute_batch(
-            "INSERT INTO game_configs (id, config_json) VALUES ('cfg', '{}');
+            r#"INSERT INTO game_configs (id, config_json) VALUES ('cfg', '{}');
              INSERT INTO players (id, display_name) VALUES ('a', 'A'), ('b', 'B');
              INSERT INTO tournaments
-                (format, target_games_per_matchup, params_json, game_config_id, tournament_seed)
-                VALUES ('round_robin', 2, '{}', 'cfg', 42);
+                (format, target_games_per_matchup, params_json, game_config_id, tournament_seed,
+                 timing_mode, move_timeout_ms, preprocessing_timeout_ms, startup_timeout_ms,
+                 configure_timeout_ms, network_grace_ms, max_parallel)
+                VALUES ('round_robin', 2,
+                        '{"max_failures_per_pair":1,"seat_policy":"paired"}', 'cfg', 42,
+                        0, 200, 2000, 120000, 5000, 50, 4);
              INSERT INTO tournament_players (tournament_id, player_id, slot)
                 VALUES (1, 'a', 0), (1, 'b', 1);
              INSERT INTO match_attempts
                 (tournament_id, game_config_id, player1_id, player2_id, seed,
-                 repetition_index, attempt_index, status, failure_reason, finished_at)
-                VALUES (1, 'cfg', 'a', 'b', 7, 0, 0, 'failure',
-                        'timeout: move: Player1', '2026-08-12 10:00:00');",
+                 repetition_index, attempt_index, status, failure_reason, finished_at,
+                 orientation, match_id)
+                VALUES (1, 'cfg', 'a', 'b', 7, 1, 0, 'failure',
+                        'timeout: move: Player1', '2026-08-12 10:00:00', 1, 77);"#,
         )
         .unwrap();
 
@@ -411,22 +416,106 @@ mod tests {
                 None
             )
         );
-        let launch_specs: Vec<Option<String>> = conn
-            .prepare("SELECT launch_spec_json FROM tournament_players ORDER BY slot")
+        let preserved_tournament: (
+            String,
+            u32,
+            String,
+            String,
+            u64,
+            u32,
+            u32,
+            u32,
+            u32,
+            u32,
+            u32,
+            u32,
+        ) = conn
+            .query_row(
+                "SELECT format, target_games_per_matchup, params_json, game_config_id,
+                        tournament_seed, timing_mode, move_timeout_ms,
+                        preprocessing_timeout_ms, startup_timeout_ms,
+                        configure_timeout_ms, network_grace_ms, max_parallel
+                   FROM tournaments WHERE id = 1",
+                [],
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                        row.get(7)?,
+                        row.get(8)?,
+                        row.get(9)?,
+                        row.get(10)?,
+                        row.get(11)?,
+                    ))
+                },
+            )
+            .unwrap();
+        assert_eq!(
+            preserved_tournament,
+            (
+                "round_robin".into(),
+                2,
+                "{\"max_failures_per_pair\":1,\"seat_policy\":\"paired\"}".into(),
+                "cfg".into(),
+                42,
+                0,
+                200,
+                2_000,
+                120_000,
+                5_000,
+                50,
+                4,
+            )
+        );
+        let participants: Vec<(String, u32, Option<String>)> = conn
+            .prepare(
+                "SELECT player_id, slot, launch_spec_json
+                   FROM tournament_players ORDER BY slot",
+            )
             .unwrap()
-            .query_map([], |row| row.get(0))
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
             .unwrap()
             .collect::<Result<_, _>>()
             .unwrap();
-        assert_eq!(launch_specs, vec![None, None]);
-        let failure: (String, Option<String>, Option<String>, Option<String>) = conn
+        assert_eq!(
+            participants,
+            vec![("a".into(), 0, None), ("b".into(), 1, None)]
+        );
+        let failure: (
+            String,
+            u32,
+            u64,
+            u32,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        ) = conn
             .query_row(
-                "SELECT failure_reason, failure_kind, failure_phase, failing_player_id
+                "SELECT failure_reason, orientation, match_id, repetition_index,
+                        failure_kind, failure_phase, failing_player_id
                    FROM match_attempts WHERE id = 1",
                 [],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                        row.get(5)?,
+                        row.get(6)?,
+                    ))
+                },
             )
             .unwrap();
-        assert_eq!(failure, ("timeout: move: Player1".into(), None, None, None));
+        assert_eq!(
+            failure,
+            ("timeout: move: Player1".into(), 1, 77, 1, None, None, None,)
+        );
     }
 }
