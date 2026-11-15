@@ -36,8 +36,9 @@ use pyrat_host::match_host::MatchEvent;
 use pyrat_host::player::{EmbeddedBot, EmbeddedCtx, PlayerIdentity};
 use pyrat_host::wire::TimingMode;
 use pyrat_orchestrator::{
-    EmbeddedBotFactory, MatchFailure, MatchId, MatchOutcome, MatchSink, MemoryWriter,
-    OrchestratorConfig, OrchestratorEvent, PlayerSpec, ReplaySink, SinkError, SinkRole, Timing,
+    AttemptTerminal, EmbeddedBotFactory, ExecutionPhase, MatchFailure, MatchId, MatchOutcome,
+    MatchSink, MemoryWriter, OrchestratorConfig, OrchestratorEvent, PlayerSpec, ReplaySink,
+    SinkError, SinkRole, Timing,
 };
 use pyrat_protocol::HashedTurnState;
 
@@ -140,6 +141,7 @@ async fn end_to_end_round_robin_with_replay_sink() {
         params_json: TournamentParams {
             max_failures_per_pair: 1,
             seat_policy: pyrat_eval::SeatPolicy::Legacy,
+            dispatch_policy: pyrat_eval::DispatchPolicy::PairMajorV1,
         }
         .to_json(),
         methodology: None,
@@ -165,6 +167,7 @@ async fn end_to_end_round_robin_with_replay_sink() {
         target_per_pair,
         max_failures_per_pair: 1,
         seat_policy: pyrat_eval::SeatPolicy::Legacy,
+        dispatch_policy: pyrat_eval::DispatchPolicy::PairMajorV1,
         tournament_seed,
     })
     .expect("valid round-robin fixture");
@@ -205,6 +208,7 @@ async fn end_to_end_round_robin_with_replay_sink() {
     // observe every per-turn event. Drain into a Vec on a background
     // task so we can assert post-join.
     let mut live = session.live_events();
+    let timing_reader = session.timing_reader();
     let observed = Arc::new(Mutex::new(
         Vec::<OrchestratorEvent<EvalMatchDescriptor>>::new(),
     ));
@@ -234,6 +238,7 @@ async fn end_to_end_round_robin_with_replay_sink() {
     let _ = tokio::time::timeout(std::time::Duration::from_secs(1), drain).await;
 
     let final_state = state_rx.borrow().clone();
+    let timing_trace = timing_reader.snapshot();
 
     // 1. Tournament completed: 3 successful attempts in history.
     let total_success_attempts: usize = final_state
@@ -283,5 +288,89 @@ async fn end_to_end_round_robin_with_replay_sink() {
     assert_eq!(
         match_over_count, 0,
         "MatchEvent::MatchOver leaked to the broadcast"
+    );
+
+    // 5. The production session captured a replayable schedule plus the
+    // host/orchestrator boundaries needed by later ETA candidates.  This is
+    // stronger than a synthetic DTO test: it proves real embedded matches
+    // cross the instrumentation seam without changing execution.
+    assert_eq!(timing_trace.slots.len(), expected_attempts);
+    assert_eq!(timing_trace.max_parallel, 2);
+    assert_eq!(timing_trace.max_failures_per_slot, 1);
+    assert!(
+        timing_trace
+            .events
+            .windows(2)
+            .all(|window| window[0].observed_at <= window[1].observed_at),
+        "trace must be normalized by host-monotonic time"
+    );
+    assert!(
+        timing_trace
+            .events
+            .iter()
+            .all(|event| event.active_concurrency <= timing_trace.max_parallel),
+        "observed concurrency must respect the executor cap"
+    );
+    for match_id in 0..expected_attempts as u64 {
+        let phases: Vec<_> = timing_trace
+            .events
+            .iter()
+            .filter(|event| event.descriptor.match_id == MatchId(match_id))
+            .map(|event| &event.phase)
+            .collect();
+        assert!(phases.iter().any(|phase| matches!(phase, ExecutionPhase::Queued { players } if players == &["alpha".to_string(), "beta".to_string()])));
+        assert!(phases
+            .iter()
+            .any(|phase| matches!(phase, ExecutionPhase::PermitAcquired)));
+        assert!(phases
+            .iter()
+            .any(|phase| matches!(phase, ExecutionPhase::LaunchStarted)));
+        assert!(phases
+            .iter()
+            .any(|phase| matches!(phase, ExecutionPhase::HandshakeCompleted { .. })));
+        assert!(phases
+            .iter()
+            .any(|phase| matches!(phase, ExecutionPhase::ConfigureStarted)));
+        assert!(phases
+            .iter()
+            .any(|phase| matches!(phase, ExecutionPhase::PreprocessingStarted)));
+        assert!(phases
+            .iter()
+            .any(|phase| matches!(phase, ExecutionPhase::SetupCompleted)));
+        assert!(phases
+            .iter()
+            .any(|phase| matches!(phase, ExecutionPhase::PlayingStarted)));
+        assert!(phases
+            .iter()
+            .any(|phase| matches!(phase, ExecutionPhase::ActionCollectionStarted { .. })));
+        assert!(phases
+            .iter()
+            .any(|phase| matches!(phase, ExecutionPhase::ActionsCollected { .. })));
+        assert!(phases
+            .iter()
+            .any(|phase| matches!(phase, ExecutionPhase::TurnCompleted { .. })));
+        assert!(phases.iter().any(|phase| matches!(
+            phase,
+            ExecutionPhase::TerminalProduced {
+                outcome: AttemptTerminal::Finished
+            }
+        )));
+        assert!(phases.iter().any(|phase| matches!(
+            phase,
+            ExecutionPhase::TerminalPersisted {
+                outcome: AttemptTerminal::Finished
+            }
+        )));
+        assert!(phases
+            .iter()
+            .any(|phase| matches!(phase, ExecutionPhase::PermitReleased)));
+    }
+    assert_eq!(
+        timing_trace
+            .events
+            .last()
+            .map(|event| event.active_concurrency),
+        Some(0),
+        "join must retain the final permit release"
     );
 }

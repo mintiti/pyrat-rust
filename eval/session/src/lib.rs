@@ -20,6 +20,7 @@
 pub use pyrat_orchestrator as orchestrator;
 
 pub mod descriptor;
+pub mod eta;
 pub mod legacy_record;
 pub mod mapping;
 pub mod observation;
@@ -29,6 +30,13 @@ pub mod state;
 pub mod store_sink;
 
 pub use descriptor::EvalMatchDescriptor;
+pub use eta::{
+    compare_eta_models_walk_forward, replay_eta, replay_m0, replay_m1, replay_m1p,
+    schedule_snapshot, ActiveScheduleAttempt, EtaEstimate, EtaModel, EtaModelComparisonPoint,
+    EtaReplayPoint, EtaScoredEstimate, EtaState, EtaTraceError, TournamentScheduleSnapshot,
+    TournamentTimingReader, TournamentTimingTrace, M0_MODEL_ID, M1P_MODEL_ID, M1_MODEL_ID,
+    TIMING_TRACE_SCHEMA_VERSION,
+};
 pub use legacy_record::{GameRecord, LegacyRecordSink};
 pub use mapping::{
     failure_reason_string, failure_report, failure_to_new_attempt, format_sqlite_datetime,
@@ -36,9 +44,10 @@ pub use mapping::{
 };
 pub use observation::Observation;
 pub use plan::{
-    gauntlet_slot_order, matchup_seed, split_gauntlet_players, GauntletPlanner,
-    GauntletPlannerConfig, Planner, PlannerConfigError, PlayerNotInList, ResolvedPlayer,
-    RoundRobinPlanner, RoundRobinPlannerConfig, SeatPolicy, TournamentParams,
+    gauntlet_slot_order, matchup_seed, split_gauntlet_players, DispatchPolicy,
+    DispatchPolicyParseError, GauntletPlanner, GauntletPlannerConfig, PlannedSlot, Planner,
+    PlannerConfigError, PlayerNotInList, ResolvedPlayer, RoundRobinPlanner,
+    RoundRobinPlannerConfig, SeatPolicy, TournamentParams,
 };
 // Re-export store-native tournament records so consumers (CLI, GUI) name one
 // type at the session boundary.

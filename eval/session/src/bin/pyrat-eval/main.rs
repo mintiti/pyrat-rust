@@ -107,6 +107,12 @@ pub(crate) struct RunArgs {
     #[arg(long)]
     pub(crate) max_parallel: Option<u32>,
 
+    /// Experimental schedule ordering: `pair-major` (default) or
+    /// `bot-balanced`. This changes issue order only; schedule slots, seeds,
+    /// seats, retries, and scoring stay fixed.
+    #[arg(long)]
+    pub(crate) dispatch_policy: Option<String>,
+
     /// Deterministic tournament seed. Implicit (random) by default.
     #[arg(long)]
     pub(crate) seed: Option<u64>,
@@ -138,6 +144,11 @@ pub(crate) struct RunArgs {
     /// Directory to write per-match replay JSON. Default: no replay sink.
     #[arg(long)]
     pub(crate) replay_dir: Option<PathBuf>,
+
+    /// Write the completed tournament's replayable monotonic timing trace as JSON.
+    /// A `.gz` suffix writes gzip-compressed JSON.
+    #[arg(long)]
+    pub(crate) timing_trace: Option<PathBuf>,
 
     // ── Game config (mutually exclusive: preset OR width+height+cheese) ──
     /// Named preset: tiny, small, medium, large, huge, open, asymmetric.
@@ -205,6 +216,7 @@ pub(crate) fn empty_run_args() -> RunArgs {
         mazes: None,
         max_failures: None,
         max_parallel: None,
+        dispatch_policy: None,
         seed: None,
         config: None,
         save_as: None,
@@ -212,6 +224,7 @@ pub(crate) fn empty_run_args() -> RunArgs {
         results_json: None,
         store_path: None,
         replay_dir: None,
+        timing_trace: None,
         preset: None,
         width: None,
         height: None,
@@ -457,9 +470,10 @@ async fn run_one(args: RunOneArgs) -> Result<(), Box<dyn std::error::Error>> {
 /// rendering happens inside `run_tournament_main`; the exit code is
 /// derived from the attempt counts it returns.
 async fn run_tournament(args: RunArgs) -> Result<ExitCode, Box<dyn std::error::Error>> {
+    let timing_trace = args.timing_trace.clone();
     let mut seed_gen = masked_random_seed;
     let resolved = tournament_resolve::resolve(args, &mut seed_gen)?;
-    let counts = tournament_run::run_tournament_main(resolved).await?;
+    let counts = tournament_run::run_tournament_main(resolved, timing_trace.as_deref()).await?;
     // A tournament that "finished" with zero successful games (every
     // matchup exhausted its retry budget — typically bots that fail to
     // start) must not look like success to scripts: `pyrat-eval ... &&

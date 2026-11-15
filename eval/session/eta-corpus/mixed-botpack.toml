@@ -1,0 +1,39 @@
+format = "round_robin"
+mazes_per_matchup = 1
+max_failures_per_pair = 1
+seed = 20260813
+
+[game]
+preset = "tiny"
+max_turns = 20
+
+[timing]
+move_timeout_ms = 40
+preprocessing_timeout_ms = 80
+startup_timeout_ms = 120000
+configure_timeout_ms = 5000
+network_grace_ms = 10
+
+[elo]
+anchor = "pyrat/greedy"
+anchor_elo = 1000.0
+
+[[players]]
+id = "pyrat/greedy"
+command = "cargo run --release"
+working_dir = "../../../botpack/greedy"
+
+[[players]]
+id = "pyrat/smart-random"
+command = "cargo run --release"
+working_dir = "../../../botpack/smart-random"
+
+[[players]]
+id = "pyrat/search"
+command = "cargo run --release"
+working_dir = "../../../botpack/search"
+
+[[players]]
+id = "pyrat/greedy-py"
+command = "uv run python bot.py"
+working_dir = "../../../botpack/greedy-py"

@@ -14,6 +14,7 @@ mod run_match;
 pub mod sink;
 pub mod sinks;
 pub mod state;
+pub mod timing;
 
 pub use descriptor::{AdHocDescriptor, Descriptor};
 pub use error::{OrchestratorError, OrchestratorInternalError};
@@ -27,3 +28,8 @@ pub use sink::{MatchSink, NoOpSink, SinkError, SinkRole};
 pub use sinks::composite::CompositeSink;
 pub use sinks::replay::{DirectoryWriter, MemoryWriter, ReplayFile, ReplaySink, ReplayWriter};
 pub use state::ExecutorState;
+pub use timing::{
+    AttemptDetail, AttemptTerminal, ExecutionPhase, ExecutionTimingEvent, MonotonicTime,
+    NoOpTimingObserver, TimingFailureReason, TimingGameResult, TimingObserver, TimingPlayer,
+    TimingTimeoutPhase,
+};

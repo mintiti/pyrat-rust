@@ -1,0 +1,223 @@
+{
+  "schema_version": 3,
+  "title": "Tournament ETA × dispatch evidence",
+  "cases": [
+    {
+      "id": "final-partial-batch",
+      "label": "Final partial batch",
+      "provenance": "Synthetic ETA edge trace",
+      "description": "Two workers finish together, then one final slot occupies only one worker.",
+      "trace": "synthetic-final-partial-batch.json"
+    },
+    {
+      "id": "active-straggler",
+      "label": "Active straggler",
+      "provenance": "Synthetic ETA edge trace",
+      "description": "A match stalls after an observed turn boundary while fresh work briefly hides its tail from the age-only residual.",
+      "trace": "synthetic-active-straggler.json"
+    },
+    {
+      "id": "durable-retry",
+      "label": "Durable failure and retry",
+      "provenance": "Synthetic ETA edge trace",
+      "description": "A failed attempt is durably recorded before the same logical slot retries and finishes.",
+      "trace": "synthetic-durable-retry.json"
+    },
+    {
+      "id": "controlled-pair-major-c1",
+      "label": "Controlled mixed durations · pair-major · c1",
+      "provenance": "Deterministic four-bot simulation · paired seats · one worker",
+      "description": "Fixed heterogeneous matchup service times under the historical pair-major issue order.",
+      "trace": "synthetic-mixed-pair-major-c1.json",
+      "family": "Controlled heterogeneous fixture",
+      "run_order": 2
+    },
+    {
+      "id": "controlled-balanced-c1",
+      "label": "Controlled mixed durations · bot-balanced · c1",
+      "provenance": "Deterministic four-bot simulation · paired seats · one worker",
+      "description": "The same slots and outcomes ordered through deterministic circle rounds.",
+      "trace": "synthetic-mixed-bot-balanced-c1.json",
+      "family": "Controlled heterogeneous fixture",
+      "run_order": 1
+    },
+    {
+      "id": "controlled-pair-major-c2",
+      "label": "Controlled mixed durations · pair-major · c2",
+      "provenance": "Deterministic four-bot simulation · paired seats · two workers",
+      "description": "Pair-major dispatch co-schedules repeated same-pair work and incurs the fixture's explicit overlap penalty.",
+      "trace": "synthetic-mixed-pair-major-c2.json",
+      "family": "Controlled heterogeneous fixture",
+      "run_order": 1
+    },
+    {
+      "id": "controlled-balanced-c2",
+      "label": "Controlled mixed durations · bot-balanced · c2",
+      "provenance": "Deterministic four-bot simulation · paired seats · two workers",
+      "description": "Circle rounds fill the first two workers with bot-disjoint matchups before moving to the next round.",
+      "trace": "synthetic-mixed-bot-balanced-c2.json",
+      "family": "Controlled heterogeneous fixture",
+      "run_order": 2
+    },
+    {
+      "id": "controlled-pair-major-c4",
+      "label": "Controlled mixed durations · pair-major · c4",
+      "provenance": "Deterministic four-bot simulation · paired seats · four workers",
+      "description": "Four workers exceed the field's two bot-disjoint edges, making the fallback overlap visible.",
+      "trace": "synthetic-mixed-pair-major-c4.json",
+      "family": "Controlled heterogeneous fixture",
+      "run_order": 2
+    },
+    {
+      "id": "controlled-balanced-c4",
+      "label": "Controlled mixed durations · bot-balanced · c4",
+      "provenance": "Deterministic four-bot simulation · paired seats · four workers",
+      "description": "Circle ordering preserves the first disjoint wave, then uses deterministic overlap once capacity exceeds the matching size.",
+      "trace": "synthetic-mixed-bot-balanced-c4.json",
+      "family": "Controlled heterogeneous fixture",
+      "run_order": 1
+    },
+    {
+      "id": "live-pair-major-c1",
+      "label": "Live mixed botpack · pair-major · c1",
+      "provenance": "Four local bots · seed 20260813 · 12 paired-seat games · 20-turn cap · 40 ms move budget · one worker",
+      "description": "The historical issue order running the exact same planned slots and bot commands as the balanced comparator.",
+      "trace": "live-mixed-pair-major-c1.json",
+      "family": "Live mixed botpack seed 20260813",
+      "run_order": 2
+    },
+    {
+      "id": "live-balanced-c1",
+      "label": "Live mixed botpack · bot-balanced · c1",
+      "provenance": "Four local bots · seed 20260813 · 12 paired-seat games · 20-turn cap · 40 ms move budget · one worker",
+      "description": "The deterministic circle issue order at concurrency one, where ordering should not create bot overlap.",
+      "trace": "live-mixed-bot-balanced-c1.json",
+      "family": "Live mixed botpack seed 20260813",
+      "run_order": 1
+    },
+    {
+      "id": "live-pair-major-c2",
+      "label": "Live mixed botpack · pair-major · c2",
+      "provenance": "Four local bots · seed 20260813 · 12 paired-seat games · 20-turn cap · 40 ms move budget · two workers",
+      "description": "Pair-major ordering at the field's maximum bot-disjoint concurrency.",
+      "trace": "live-mixed-pair-major-c2.json",
+      "family": "Live mixed botpack seed 20260813",
+      "run_order": 1
+    },
+    {
+      "id": "live-balanced-c2",
+      "label": "Live mixed botpack · bot-balanced · c2",
+      "provenance": "Four local bots · seed 20260813 · 12 paired-seat games · 20-turn cap · 40 ms move budget · two workers",
+      "description": "Circle ordering first fills both workers with bot-disjoint matchups.",
+      "trace": "live-mixed-bot-balanced-c2.json",
+      "family": "Live mixed botpack seed 20260813",
+      "run_order": 2
+    },
+    {
+      "id": "live-pair-major-c4",
+      "label": "Live mixed botpack · pair-major · c4",
+      "provenance": "Four local bots · seed 20260813 · 12 paired-seat games · 20-turn cap · 40 ms move budget · four workers",
+      "description": "Pair-major ordering with more worker slots than the field can fill without bot overlap.",
+      "trace": "live-mixed-pair-major-c4.json",
+      "family": "Live mixed botpack seed 20260813",
+      "run_order": 2
+    },
+    {
+      "id": "live-balanced-c4",
+      "label": "Live mixed botpack · bot-balanced · c4",
+      "provenance": "Four local bots · seed 20260813 · 12 paired-seat games · 20-turn cap · 40 ms move budget · four workers",
+      "description": "Circle ordering preserves a bot-disjoint first wave before deterministic overlap becomes unavoidable.",
+      "trace": "live-mixed-bot-balanced-c4.json",
+      "family": "Live mixed botpack seed 20260813",
+      "run_order": 1
+    },
+    {
+      "id": "gui-default-balanced-seed-20260813-c4",
+      "label": "GUI defaults · six bots · seed 20260813 · bot-balanced · c4",
+      "provenance": "Six local bots · GUI defaults · seed 20260813 · 240 paired-seat games · 150-turn cap · 200 ms move budget · 2,000 ms preprocessing · four workers",
+      "description": "Production-shaped block using the complete botpack and deterministic circle issue order; captured first in its matched seed block.",
+      "trace": "gui-seed-20260813-bot-balanced-c4.json.gz",
+      "family": "GUI-default six-bot seed 20260813",
+      "run_order": 1,
+      "replicate_group": "GUI-default six-bot matched seeds",
+      "results": "gui-seed-20260813-balanced-c4-results.json"
+    },
+    {
+      "id": "gui-default-pair-major-seed-20260813-c4",
+      "label": "GUI defaults · six bots · seed 20260813 · pair-major · c4",
+      "provenance": "Six local bots · GUI defaults · seed 20260813 · 240 paired-seat games · 150-turn cap · 200 ms move budget · 2,000 ms preprocessing · four workers",
+      "description": "Production-shaped block using the historical pair-major issue order; captured second in its matched seed block.",
+      "trace": "gui-seed-20260813-pair-major-c4.json.gz",
+      "family": "GUI-default six-bot seed 20260813",
+      "run_order": 2,
+      "replicate_group": "GUI-default six-bot matched seeds",
+      "results": "gui-seed-20260813-pair-major-c4-results.json"
+    },
+    {
+      "id": "gui-default-pair-major-seed-20260814-c4",
+      "label": "GUI defaults · six bots · seed 20260814 · pair-major · c4",
+      "provenance": "Six local bots · GUI defaults · seed 20260814 · 240 paired-seat games · 150-turn cap · 200 ms move budget · 2,000 ms preprocessing · four workers",
+      "description": "Production-shaped block using the historical pair-major issue order; captured first in its matched seed block.",
+      "trace": "gui-seed-20260814-pair-major-c4.json.gz",
+      "family": "GUI-default six-bot seed 20260814",
+      "run_order": 1,
+      "replicate_group": "GUI-default six-bot matched seeds",
+      "results": "gui-seed-20260814-pair-major-c4-results.json"
+    },
+    {
+      "id": "gui-default-balanced-seed-20260814-c4",
+      "label": "GUI defaults · six bots · seed 20260814 · bot-balanced · c4",
+      "provenance": "Six local bots · GUI defaults · seed 20260814 · 240 paired-seat games · 150-turn cap · 200 ms move budget · 2,000 ms preprocessing · four workers",
+      "description": "Production-shaped block using deterministic circle issue order; captured second in its matched seed block.",
+      "trace": "gui-seed-20260814-bot-balanced-c4.json.gz",
+      "family": "GUI-default six-bot seed 20260814",
+      "run_order": 2,
+      "replicate_group": "GUI-default six-bot matched seeds",
+      "results": "gui-seed-20260814-balanced-c4-results.json"
+    },
+    {
+      "id": "gui-default-balanced-seed-20260815-c4",
+      "label": "GUI defaults · six bots · seed 20260815 · bot-balanced · c4",
+      "provenance": "Six local bots · GUI defaults · seed 20260815 · 240 paired-seat games · 150-turn cap · 200 ms move budget · 2,000 ms preprocessing · four workers",
+      "description": "Production-shaped block using deterministic circle issue order; captured first in its matched seed block.",
+      "trace": "gui-seed-20260815-bot-balanced-c4.json.gz",
+      "family": "GUI-default six-bot seed 20260815",
+      "run_order": 1,
+      "replicate_group": "GUI-default six-bot matched seeds",
+      "results": "gui-seed-20260815-balanced-c4-results.json"
+    },
+    {
+      "id": "gui-default-pair-major-seed-20260815-c4",
+      "label": "GUI defaults · six bots · seed 20260815 · pair-major · c4",
+      "provenance": "Six local bots · GUI defaults · seed 20260815 · 240 paired-seat games · 150-turn cap · 200 ms move budget · 2,000 ms preprocessing · four workers",
+      "description": "Production-shaped block using the historical pair-major issue order; captured second in its matched seed block.",
+      "trace": "gui-seed-20260815-pair-major-c4.json.gz",
+      "family": "GUI-default six-bot seed 20260815",
+      "run_order": 2,
+      "replicate_group": "GUI-default six-bot matched seeds",
+      "results": "gui-seed-20260815-pair-major-c4-results.json"
+    },
+    {
+      "id": "gui-mazes16-pair-major-seed-20260816-c4",
+      "label": "GUI defaults · 16 mazes/pair · seed 20260816 · pair-major · c4",
+      "provenance": "Six local bots · GUI timing defaults · seed 20260816 · 480 paired-seat games · 16 mazes/pair · 150-turn cap · four workers",
+      "description": "Larger diagnostic block using the historical pair-major issue order; captured first under an otherwise idle local workload.",
+      "trace": "gui-mazes16-seed-20260816-pair-major-c4.json.gz",
+      "family": "GUI-default six-bot 16-maze seed 20260816",
+      "run_order": 1,
+      "replicate_group": "GUI-default six-bot 16-maze diagnostic",
+      "results": "gui-mazes16-seed-20260816-pair-major-c4-results.json"
+    },
+    {
+      "id": "gui-mazes16-balanced-seed-20260816-c4",
+      "label": "GUI defaults · 16 mazes/pair · seed 20260816 · bot-balanced · c4",
+      "provenance": "Six local bots · GUI timing defaults · seed 20260816 · 480 paired-seat games · 16 mazes/pair · 150-turn cap · four workers",
+      "description": "Matched larger diagnostic block using deterministic circle issue order; captured second without intervening build or analysis work.",
+      "trace": "gui-mazes16-seed-20260816-bot-balanced-c4.json.gz",
+      "family": "GUI-default six-bot 16-maze seed 20260816",
+      "run_order": 2,
+      "replicate_group": "GUI-default six-bot 16-maze diagnostic",
+      "results": "gui-mazes16-seed-20260816-bot-balanced-c4-results.json"
+    }
+  ]
+}

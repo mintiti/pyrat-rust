@@ -137,7 +137,7 @@ pub struct TournamentId(pub i64);
 /// replay-correct rendering. Not part of the matchup UNIQUE constraint — two
 /// seatings of the same maze are distinguished by their `repetition_index`
 /// (the chess-paired `2k` / `2k+1` slots), not by this column.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum SeatOrientation {
     /// Lex-min player was Rat (slot 0). The historical default: every
     /// pre-`MIGRATION_5` row was played this way, so it maps to DB value 0.

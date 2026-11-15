@@ -46,6 +46,20 @@ impl Descriptor for EvalMatchDescriptor {
     }
 }
 
+impl EvalMatchDescriptor {
+    /// Immutable schedule-slot identity; retries share this key while their
+    /// `attempt_index` and runtime `match_id` differ.
+    pub fn slot_key(&self) -> crate::plan::PlannedSlot {
+        crate::plan::PlannedSlot {
+            player1_id: self.player1_id.clone(),
+            player2_id: self.player2_id.clone(),
+            game_config_id: self.game_config_id.clone(),
+            repetition_index: self.repetition_index,
+            orientation: self.orientation,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

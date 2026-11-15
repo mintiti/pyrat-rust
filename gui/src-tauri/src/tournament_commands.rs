@@ -15,8 +15,8 @@ use std::time::Duration;
 use parking_lot::Mutex;
 use pyrat::game::builder::{CheeseStrategy, GameConfig, MazeParams, MazeStrategy, PlayerStrategy};
 use pyrat_eval::{
-    EvalSession, MatchupKey, ResolvedPlayer, SeatPolicy, TournamentMethodology, TournamentParams,
-    TournamentSpec, TournamentState, TournamentTimingMode,
+    DispatchPolicy, EvalSession, MatchupKey, ResolvedPlayer, SeatPolicy, TournamentMethodology,
+    TournamentParams, TournamentSpec, TournamentState, TournamentTimingMode,
 };
 use pyrat_eval_store::{
     AttemptFailureReport, AttemptOutcome, AttemptRecord, EvalStore, SeatOrientation, TournamentId,
@@ -1281,6 +1281,7 @@ async fn prepare_tournament(
         params_json: TournamentParams {
             max_failures_per_pair: tournament_config::MAX_FAILURES_PER_PAIR,
             seat_policy,
+            dispatch_policy: DispatchPolicy::PairMajorV1,
         }
         .to_json(),
         methodology: Some(TournamentMethodology {
@@ -2402,6 +2403,7 @@ fn stored_tournament_params(rec: &TournamentRecord) -> Result<TournamentParams, 
         Err(_) if rec.lifecycle == TournamentLifecycle::LegacyUnknown => Ok(TournamentParams {
             max_failures_per_pair: 0,
             seat_policy: SeatPolicy::Legacy,
+            dispatch_policy: DispatchPolicy::PairMajorV1,
         }),
         Err(error) => Err(format!(
             "tournament {} has invalid durable planner parameters: {error}",
@@ -2650,6 +2652,7 @@ mod tests {
             params_json: TournamentParams {
                 max_failures_per_pair: 3,
                 seat_policy: SeatPolicy::Paired,
+                dispatch_policy: DispatchPolicy::PairMajorV1,
             }
             .to_json(),
             game_config_id: "cfg-saved".into(),
@@ -2732,6 +2735,7 @@ mod tests {
                 params_json: TournamentParams {
                     max_failures_per_pair: tournament_config::MAX_FAILURES_PER_PAIR,
                     seat_policy: SeatPolicy::Paired,
+                    dispatch_policy: DispatchPolicy::PairMajorV1,
                 }
                 .to_json(),
                 methodology: Some(methodology),

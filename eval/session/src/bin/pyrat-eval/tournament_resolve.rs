@@ -11,7 +11,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use pyrat_eval::{ResolvedPlayer, SeatPolicy};
+use pyrat_eval::{DispatchPolicy, ResolvedPlayer, SeatPolicy};
 use pyrat_eval_store::TournamentId;
 use pyrat_orchestrator::PlayerSpec;
 
@@ -125,6 +125,10 @@ pub struct ResolvedRun {
     pub requested_size: Option<SizeChoice>,
     pub max_failures_per_pair: u32,
     pub max_parallel: u32,
+    /// Dispatch policy used for new runs. On resume, the stored policy wins
+    /// unless the user explicitly supplied an assertion.
+    pub dispatch_policy: DispatchPolicy,
+    pub requested_dispatch_policy: Option<DispatchPolicy>,
     pub mode: LaunchMode,
     pub store_path: PathBuf,
     pub replay_dir: Option<PathBuf>,
@@ -218,6 +222,21 @@ pub fn resolve_loaded(
     let players = resolve_players(&args.bots, &cfg.players, config_dir.as_deref(), &cwd)?;
     validate_players(&players)?;
     let format = resolve_format_choice(&args, &cfg, &players)?;
+    let requested_dispatch_policy = args
+        .dispatch_policy
+        .as_deref()
+        .or(cfg.dispatch_policy.as_deref())
+        .map(str::parse::<DispatchPolicy>)
+        .transpose()
+        .map_err(|error| ResolveError::v(error.to_string()))?;
+    let dispatch_policy = requested_dispatch_policy.unwrap_or_default();
+    if dispatch_policy != DispatchPolicy::PairMajorV1
+        && !matches!(&format, FormatChoice::RoundRobin)
+    {
+        return Err(ResolveError::v(
+            "bot-balanced dispatch is currently defined only for round-robin tournaments",
+        ));
+    }
 
     // Matchup size: `--mazes` (paired) XOR `--games` (legacy), else the
     // paired default. `requested_size` keeps the user's choice (or None) so
@@ -305,6 +324,8 @@ pub fn resolve_loaded(
         requested_size,
         max_failures_per_pair,
         max_parallel,
+        dispatch_policy,
+        requested_dispatch_policy,
         mode,
         store_path,
         replay_dir,
@@ -1015,6 +1036,8 @@ mod tests {
         assert_eq!(resolved.requested_size, None);
         assert_eq!(resolved.max_failures_per_pair, DEFAULT_MAX_FAILURES);
         assert_eq!(resolved.max_parallel, DEFAULT_MAX_PARALLEL);
+        assert_eq!(resolved.dispatch_policy, DispatchPolicy::PairMajorV1);
+        assert_eq!(resolved.requested_dispatch_policy, None);
         assert_eq!(resolved.timing.move_timeout_ms, DEFAULT_MOVE_TIMEOUT_MS);
         assert_eq!(
             resolved.timing.preprocessing_timeout_ms,
@@ -1078,6 +1101,57 @@ mod tests {
         let mut gen = fixed_seed_gen(0);
         let resolved = resolve_loaded(args, loaded, &mut gen).expect("resolve");
         assert_eq!(resolved.target_games_per_matchup, 99);
+    }
+
+    #[test]
+    fn dispatch_policy_uses_config_and_cli_precedence() {
+        let cfg = TournamentConfig {
+            dispatch_policy: Some("bot-balanced".into()),
+            ..Default::default()
+        };
+        let loaded = || {
+            Some(LoadedConfig {
+                config: cfg.clone(),
+                dir: PathBuf::from("/tmp"),
+                stem: Some("ladder".into()),
+            })
+        };
+
+        let mut gen = fixed_seed_gen(0);
+        let resolved = resolve_loaded(args_with_two_bots(), loaded(), &mut gen).expect("resolve");
+        assert_eq!(
+            resolved.dispatch_policy,
+            DispatchPolicy::BotBalancedCircleV1
+        );
+        assert_eq!(
+            resolved.requested_dispatch_policy,
+            Some(DispatchPolicy::BotBalancedCircleV1)
+        );
+
+        let mut args = args_with_two_bots();
+        args.dispatch_policy = Some("pair-major".into());
+        let mut gen = fixed_seed_gen(0);
+        let resolved = resolve_loaded(args, loaded(), &mut gen).expect("resolve");
+        assert_eq!(resolved.dispatch_policy, DispatchPolicy::PairMajorV1);
+        assert_eq!(
+            resolved.requested_dispatch_policy,
+            Some(DispatchPolicy::PairMajorV1)
+        );
+    }
+
+    #[test]
+    fn bot_balanced_dispatch_rejects_gauntlet_format() {
+        let mut args = args_with_two_bots();
+        args.format = Some("gauntlet".into());
+        args.challenger = Some("alpha".into());
+        args.opponents = vec!["beta".into()];
+        args.dispatch_policy = Some("bot-balanced".into());
+
+        let mut gen = fixed_seed_gen(0);
+        let error = expect_err(resolve_loaded(args, None, &mut gen));
+        assert!(error
+            .to_string()
+            .contains("only for round-robin tournaments"));
     }
 
     #[test]

@@ -12,8 +12,8 @@ use pyrat::game::builder::GameConfig;
 use pyrat::{Direction, GameBuilder};
 use pyrat_bot_api::Options;
 use pyrat_eval::{
-    GameConfigId, ResolvedPlayer, RoundRobinPlanner, RoundRobinPlannerConfig, TournamentParams,
-    TournamentSpec,
+    DispatchPolicy, GameConfigId, ResolvedPlayer, RoundRobinPlanner, RoundRobinPlannerConfig,
+    TournamentParams, TournamentSpec,
 };
 use pyrat_eval_store::{EvalStore, GameConfigRecord};
 use pyrat_host::player::{EmbeddedBot, EmbeddedCtx};
@@ -114,6 +114,7 @@ pub fn round_robin(
         target_per_pair,
         max_failures_per_pair: 3,
         seat_policy: pyrat_eval::SeatPolicy::Legacy,
+        dispatch_policy: DispatchPolicy::PairMajorV1,
         tournament_seed: 0xC0FFEE,
     })
     .expect("valid round-robin fixture")
@@ -129,6 +130,7 @@ pub fn round_robin_spec() -> TournamentSpec {
         params_json: TournamentParams {
             max_failures_per_pair: 3,
             seat_policy: pyrat_eval::SeatPolicy::Legacy,
+            dispatch_policy: DispatchPolicy::PairMajorV1,
         }
         .to_json(),
         methodology: None,

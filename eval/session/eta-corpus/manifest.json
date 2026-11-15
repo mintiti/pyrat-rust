@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "title": "Tournament ETA evidence: M0 vs M1 vs M1P",
+  "cases": [
+    {
+      "id": "final-partial-batch",
+      "label": "Final partial batch",
+      "provenance": "Synthetic edge trace",
+      "description": "Two workers finish together, then one final slot occupies only one worker.",
+      "trace": "synthetic-final-partial-batch.json"
+    },
+    {
+      "id": "active-straggler",
+      "label": "Active straggler",
+      "provenance": "Synthetic edge trace",
+      "description": "A match stalls after an observed turn boundary while fresh work briefly hides its tail from the age-only residual.",
+      "trace": "synthetic-active-straggler.json"
+    },
+    {
+      "id": "durable-retry",
+      "label": "Durable failure and retry",
+      "provenance": "Synthetic edge trace",
+      "description": "A failed attempt is durably recorded before the same logical slot retries and finishes.",
+      "trace": "synthetic-durable-retry.json"
+    },
+    {
+      "id": "botpack-greedy-smart-random",
+      "label": "Greedy vs Smart Random — paired production run",
+      "provenance": "Production subprocess trace · tiny · 12 mazes / 24 games · concurrency 2 · seed 20260813",
+      "description": "A real CLI tournament exercises bot startup, host phases, concurrent scheduling, persistence, and paired seat orientation.",
+      "trace": "botpack-greedy-smart-random-paired-c2.json"
+    }
+  ]
+}

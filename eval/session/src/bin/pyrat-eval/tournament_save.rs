@@ -113,6 +113,7 @@ fn to_saveable_config(resolved: &ResolvedRun, save_dir: &Path) -> Result<Tournam
         mazes_per_matchup,
         max_failures_per_pair: Some(resolved.max_failures_per_pair),
         max_parallel: Some(resolved.max_parallel),
+        dispatch_policy: Some(resolved.dispatch_policy.to_string()),
         game,
         timing,
         elo,
@@ -258,6 +259,8 @@ mod tests {
             requested_size: None,
             max_failures_per_pair: 1,
             max_parallel: 2,
+            dispatch_policy: pyrat_eval::DispatchPolicy::PairMajorV1,
+            requested_dispatch_policy: None,
             mode: LaunchMode::New {
                 seed: NewSeed::Generated(123),
             },
@@ -485,6 +488,8 @@ mod tests {
             }),
             max_failures_per_pair: 4,
             max_parallel: 3,
+            dispatch_policy: pyrat_eval::DispatchPolicy::PairMajorV1,
+            requested_dispatch_policy: Some(pyrat_eval::DispatchPolicy::PairMajorV1),
             mode: LaunchMode::New {
                 seed: NewSeed::Explicit(99),
             },
@@ -516,6 +521,7 @@ mod tests {
         assert_eq!(back.seat_policy, SeatPolicy::Legacy);
         assert_eq!(back.max_failures_per_pair, 4);
         assert_eq!(back.max_parallel, 3);
+        assert_eq!(back.dispatch_policy, resolved.dispatch_policy);
         assert_eq!(
             back.mode,
             LaunchMode::New {

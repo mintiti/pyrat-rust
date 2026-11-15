@@ -17,6 +17,7 @@ mod events;
 mod phases;
 mod policy;
 mod result;
+mod timing;
 
 pub use config::{PlayingConfig, SetupTiming};
 pub use error::MatchError;
@@ -24,3 +25,4 @@ pub use events::MatchEvent;
 pub use phases::{Collected, Created, Finished, Match, Playing, Ready, StepResult, Thinking};
 pub use policy::{ActionOutcome, DefaultFaultPolicy, FaultPolicy, StrictFaultPolicy};
 pub use result::MatchResult;
+pub use timing::{MatchTimingEvent, MatchTimingPhase};

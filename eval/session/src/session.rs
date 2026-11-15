@@ -34,6 +34,7 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use crate::descriptor::EvalMatchDescriptor;
+use crate::eta::{TournamentTimingReader, TournamentTimingRecorder, TournamentTimingTrace};
 use crate::mapping::MappingError;
 use crate::observation::Observation;
 use crate::plan::{Planner, ResolvedPlayer, TournamentParams};
@@ -426,6 +427,7 @@ pub struct EvalSession {
     /// Guaranteed terminal signal. Unlike `session_events`, this is a watch
     /// channel with one retained value, so lagging consumers cannot miss it.
     completion: watch::Receiver<Option<SessionCompletion>>,
+    timing_recorder: Arc<TournamentTimingRecorder>,
 }
 
 impl EvalSession {
@@ -544,6 +546,18 @@ impl EvalSession {
         self.completion.clone()
     }
 
+    /// Replayable monotonic timing and static schedule evidence captured so
+    /// far.  Taking a snapshot never changes planner or dispatch state.
+    pub fn timing_trace(&self) -> TournamentTimingTrace {
+        self.timing_recorder.snapshot()
+    }
+
+    /// Cloneable reader for collecting the final trace after `join` consumes
+    /// this session.
+    pub fn timing_reader(&self) -> TournamentTimingReader {
+        TournamentTimingReader::new(self.timing_recorder.clone())
+    }
+
     /// Lossy session-lifecycle event stream. Use [`Self::subscribe`] for
     /// snapshot+tail consistency.
     pub fn events(&self) -> broadcast::Receiver<SessionEvent> {
@@ -570,6 +584,16 @@ impl EvalSession {
     pub async fn join(mut self) -> Result<(), SessionError> {
         if let Some(h) = self.run_loop_handle.take() {
             await_run_loop(h).await?;
+        }
+        // The session loop can observe the terminal lifecycle just before the
+        // per-match task drops its semaphore permit.  Drain the now-idle
+        // orchestrator so `join` is also a timing/lifecycle completion barrier
+        // instead of aborting that final cleanup through `Drop`.
+        if let Some(orch) = self.orch.take() {
+            match Arc::try_unwrap(orch) {
+                Ok(orchestrator) => orchestrator.shutdown().await,
+                Err(shared) => shared.abort(),
+            }
         }
         Ok(())
     }
@@ -648,7 +672,19 @@ impl EvalSession {
         sinks: Vec<(SinkRole, Arc<dyn MatchSink<EvalMatchDescriptor>>)>,
     ) -> Result<Self, SessionError> {
         let composite = Arc::new(CompositeSink::new(sinks));
-        let (orch, driver_rx) = Orchestrator::<EvalMatchDescriptor>::new(orch_config, composite);
+        let max_parallel = orch_config.max_parallel;
+        let params = planner.expected_params();
+        let timing_recorder = Arc::new(TournamentTimingRecorder::new(
+            planner.dispatch_policy(),
+            max_parallel,
+            params.max_failures_per_pair,
+            planner.planned_slots(),
+        ));
+        let (orch, driver_rx) = Orchestrator::<EvalMatchDescriptor>::new_with_timing_observer(
+            orch_config,
+            composite,
+            timing_recorder.clone(),
+        );
         let orch = Arc::new(orch);
 
         // Recompute Elo on the initial state *before* publishing to the
@@ -685,6 +721,7 @@ impl EvalSession {
             cancel,
             run_loop_handle: Some(run_loop_handle),
             completion,
+            timing_recorder,
         })
     }
 
@@ -1466,6 +1503,7 @@ mod tests {
             // High enough that the counter trips first, not max_failures.
             max_failures_per_pair: 999,
             seat_policy: crate::plan::SeatPolicy::Legacy,
+            dispatch_policy: crate::plan::DispatchPolicy::PairMajorV1,
             tournament_seed: 0xC0FFEE,
         })
         .expect("valid planner fixture");
@@ -1584,6 +1622,7 @@ mod tests {
             target_per_pair: 100,
             max_failures_per_pair: 999,
             seat_policy: crate::plan::SeatPolicy::Legacy,
+            dispatch_policy: crate::plan::DispatchPolicy::PairMajorV1,
             tournament_seed: 0xC0FFEE,
         })
         .expect("valid planner fixture");

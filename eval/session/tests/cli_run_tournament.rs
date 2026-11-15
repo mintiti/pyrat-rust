@@ -15,6 +15,7 @@
 use std::path::Path;
 use std::process::Command;
 
+use pyrat_eval::{compare_eta_models_walk_forward, EtaState, TournamentTimingTrace};
 use pyrat_eval_store::{EvalStore, TournamentMethodology, TournamentTimingMode};
 
 fn eval_bin() -> &'static str {
@@ -142,6 +143,43 @@ fn minimal_toml_round_robin_runs_through() {
             network_grace_ms: 50,
             max_parallel: 1,
         })
+    );
+}
+
+#[test]
+fn timing_trace_flag_writes_a_complete_replayable_trace() {
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg_path = tmp.path().join("ladder.toml");
+    let store_path = tmp.path().join("ratings.db");
+    let trace_path = tmp.path().join("evidence/timing.json");
+    let toml = minimal_toml(&format!(
+        "store_path = {:?}\nseed = 19",
+        store_path.to_string_lossy()
+    ));
+    write_toml(&cfg_path, &toml);
+
+    let args = [
+        "--config",
+        cfg_path.to_str().unwrap(),
+        "--timing-trace",
+        trace_path.to_str().unwrap(),
+    ];
+    let out = run_tournament(&args);
+    assert_success(&out, &args);
+
+    let trace: TournamentTimingTrace =
+        serde_json::from_slice(&std::fs::read(&trace_path).expect("read timing trace"))
+            .expect("decode timing trace");
+    assert_eq!(trace.slots.len(), 1);
+    assert_eq!(
+        trace.events.last().map(|event| event.active_concurrency),
+        Some(0),
+        "CLI output must include the final permit release"
+    );
+    let comparison = compare_eta_models_walk_forward(&trace, 0).expect("replay CLI trace");
+    assert_eq!(
+        comparison.last().map(|point| point.m1p.estimate.state),
+        Some(EtaState::Complete)
     );
 }
 

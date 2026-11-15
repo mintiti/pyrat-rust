@@ -37,12 +37,13 @@
 //! terminal so the lifecycle mpsc and `state.running` stay consistent.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use parking_lot::Mutex;
 use pyrat_host::match_host::{PlayingConfig, SetupTiming};
-use tokio::sync::{broadcast, mpsc, watch, Semaphore};
+use tokio::sync::{broadcast, mpsc, watch, OwnedSemaphorePermit, Semaphore};
 use tokio::task::{JoinError, JoinHandle, JoinSet};
 use tokio_util::sync::CancellationToken;
 use tracing::{error, warn};
@@ -56,6 +57,10 @@ use crate::outcome::{FailureReason, MatchFailure};
 use crate::run_match;
 use crate::sink::MatchSink;
 use crate::state::ExecutorState;
+use crate::timing::{
+    AttemptDetail, AttemptTerminal, ExecutionPhase, ExecutionTimingEvent, MonotonicTime,
+    NoOpTimingObserver, TimingObserver,
+};
 
 // Re-export the lifecycle DTO so callers see one path: `Orchestrator` ⇒
 // `DriverEvent`.
@@ -131,6 +136,10 @@ pub(crate) struct ExecutorInner<D: Descriptor> {
     /// `handle_joined` to synthesise a terminal when a task panics or is
     /// force-aborted.
     pub(crate) in_flight: Mutex<HashMap<tokio::task::Id, D>>,
+    timing_origin: Instant,
+    timing_sequence: AtomicU64,
+    concurrency: Mutex<ConcurrencyTimeline>,
+    timing_observer: Arc<dyn TimingObserver<D>>,
 }
 
 impl<D: Descriptor> ExecutorInner<D> {
@@ -173,6 +182,58 @@ impl<D: Descriptor> ExecutorInner<D> {
         let _ = self.broadcast.send(event);
     }
 
+    pub(crate) fn publish_timing(&self, descriptor: &D, phase: ExecutionPhase) {
+        self.publish_timing_at(descriptor, Instant::now(), phase);
+    }
+
+    pub(crate) fn publish_timing_at(
+        &self,
+        descriptor: &D,
+        observed_at: Instant,
+        phase: ExecutionPhase,
+    ) {
+        let elapsed = observed_at
+            .checked_duration_since(self.timing_origin)
+            .unwrap_or_default();
+        let micros = u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX);
+        let active_concurrency = {
+            let concurrency = self.concurrency.lock();
+            let next = concurrency
+                .changes
+                .partition_point(|(changed_at, _)| *changed_at <= observed_at);
+            next.checked_sub(1)
+                .map_or(0, |index| concurrency.changes[index].1)
+        };
+        self.timing_observer.observe(ExecutionTimingEvent {
+            sequence: self.timing_sequence.fetch_add(1, Ordering::Relaxed),
+            observed_at: MonotonicTime::from_micros(micros),
+            active_concurrency,
+            descriptor: descriptor.clone(),
+            phase,
+        });
+    }
+
+    pub(crate) fn observe_permit(
+        self: &Arc<Self>,
+        descriptor: D,
+        permit: OwnedSemaphorePermit,
+    ) -> ObservedPermit<D> {
+        let observed_at = {
+            let mut concurrency = self.concurrency.lock();
+            concurrency.active = concurrency.active.saturating_add(1);
+            let observed_at = Instant::now();
+            let active = concurrency.active;
+            concurrency.changes.push((observed_at, active));
+            observed_at
+        };
+        self.publish_timing_at(&descriptor, observed_at, ExecutionPhase::PermitAcquired);
+        ObservedPermit {
+            permit: Some(permit),
+            inner: self.clone(),
+            descriptor,
+        }
+    }
+
     /// Take an atomic snapshot of state alongside a fresh broadcast
     /// receiver. The mutex is held only across `.lock()` + clone +
     /// `subscribe()`; no awaits, so events published between the snapshot
@@ -185,6 +246,40 @@ impl<D: Descriptor> ExecutorInner<D> {
         let rx = self.broadcast.subscribe();
         drop(state);
         (snapshot, rx)
+    }
+}
+
+/// Owns one semaphore permit and makes release an explicit timing boundary on
+/// every return path, including setup failures and cancellation.
+pub(crate) struct ObservedPermit<D: Descriptor> {
+    permit: Option<OwnedSemaphorePermit>,
+    inner: Arc<ExecutorInner<D>>,
+    descriptor: D,
+}
+
+struct ConcurrencyTimeline {
+    active: usize,
+    changes: Vec<(Instant, usize)>,
+}
+
+impl<D: Descriptor> Drop for ObservedPermit<D> {
+    fn drop(&mut self) {
+        let observed_at = {
+            let mut concurrency = self.inner.concurrency.lock();
+            // Keep this lock across semaphore release so a newly awakened
+            // acquirer cannot record itself before this release boundary.
+            drop(self.permit.take());
+            concurrency.active = concurrency.active.saturating_sub(1);
+            let observed_at = Instant::now();
+            let active = concurrency.active;
+            concurrency.changes.push((observed_at, active));
+            observed_at
+        };
+        self.inner.publish_timing_at(
+            &self.descriptor,
+            observed_at,
+            ExecutionPhase::PermitReleased,
+        );
     }
 }
 
@@ -243,6 +338,16 @@ impl<D: Descriptor> Orchestrator<D> {
         config: OrchestratorConfig,
         sink: Arc<dyn MatchSink<D>>,
     ) -> (Self, mpsc::Receiver<DriverEvent<D>>) {
+        Self::new_with_timing_observer(config, sink, Arc::new(NoOpTimingObserver))
+    }
+
+    /// Construct an orchestrator with an optional lossless timing observer.
+    /// Lifecycle and scheduling behavior are identical to [`Self::new`].
+    pub fn new_with_timing_observer(
+        config: OrchestratorConfig,
+        sink: Arc<dyn MatchSink<D>>,
+        timing_observer: Arc<dyn TimingObserver<D>>,
+    ) -> (Self, mpsc::Receiver<DriverEvent<D>>) {
         let (submit_tx, submit_rx) = mpsc::channel::<Matchup<D>>(config.submit_capacity);
         let (driver_tx, driver_rx) = mpsc::channel::<DriverEvent<D>>(config.driver_events_capacity);
         let (broadcast_tx, _broadcast_rx) =
@@ -251,6 +356,7 @@ impl<D: Descriptor> Orchestrator<D> {
         let (state_tx, _state_rx) = watch::channel(initial_state.clone());
 
         let root_cancel = CancellationToken::new();
+        let timing_origin = Instant::now();
         let inner = Arc::new(ExecutorInner {
             state: Mutex::new(initial_state),
             state_tx,
@@ -259,6 +365,13 @@ impl<D: Descriptor> Orchestrator<D> {
             sink,
             root_cancel: root_cancel.clone(),
             in_flight: Mutex::new(HashMap::new()),
+            timing_origin,
+            timing_sequence: AtomicU64::new(0),
+            concurrency: Mutex::new(ConcurrencyTimeline {
+                active: 0,
+                changes: vec![(timing_origin, 0)],
+            }),
+            timing_observer,
         });
 
         let semaphore = Arc::new(Semaphore::new(config.max_parallel));
@@ -303,9 +416,24 @@ impl<D: Descriptor> Orchestrator<D> {
     /// already exited (or `shutdown` consumed the sender).
     pub async fn submit(&self, matchup: Matchup<D>) -> Result<(), OrchestratorError> {
         let tx = self.submit_tx.as_ref().ok_or(OrchestratorError::ShutDown)?;
-        tx.send(matchup)
+        let queued_at = Instant::now();
+        let descriptor = matchup.descriptor.clone();
+        let players = matchup
+            .players
+            .each_ref()
+            .map(|player| player.agent_id().to_owned());
+        let permit = tx
+            .reserve()
             .await
-            .map_err(|_| OrchestratorError::ShutDown)
+            .map_err(|_| OrchestratorError::ShutDown)?;
+        self.inner
+            .publish_timing_at(&descriptor, queued_at, ExecutionPhase::Queued { players });
+        // Publishing before the reserved send keeps every live snapshot
+        // replayable: the executor cannot observe this matchup before its
+        // queue observation exists.  `queued_at` still includes submit-side
+        // channel backpressure in the eventual queue duration.
+        permit.send(matchup);
+        Ok(())
     }
 
     /// Atomic `(state_snapshot, broadcast_receiver)`. Lifecycle effects
@@ -472,6 +600,7 @@ async fn handle_joined<D: Descriptor>(
             } else {
                 FailureReason::Internal(format!("join error: {je}"))
             };
+            let timing_detail = AttemptDetail::from_failure(&reason);
             let failure = MatchFailure {
                 descriptor,
                 started_at: None,
@@ -480,6 +609,20 @@ async fn handle_joined<D: Descriptor>(
                 players: None,
                 durable_record: false,
             };
+            inner.publish_timing(
+                &failure.descriptor,
+                ExecutionPhase::TerminalProduced {
+                    outcome: AttemptTerminal::Failed {
+                        durable_record: false,
+                    },
+                },
+            );
+            inner.publish_timing(
+                &failure.descriptor,
+                ExecutionPhase::TerminalDetail {
+                    detail: timing_detail,
+                },
+            );
             // Best-effort cleanup of any stateful sink buffers populated
             // by the dead task before it went down. Run before publishing
             // so consumers observing `MatchFailed` see a fully-settled

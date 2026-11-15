@@ -30,6 +30,9 @@ pub struct TournamentConfig {
     pub mazes_per_matchup: Option<u32>,
     pub max_failures_per_pair: Option<u32>,
     pub max_parallel: Option<u32>,
+    /// Versioned or friendly dispatch-policy name. The resolver accepts
+    /// `pair-major` and `bot-balanced` plus their stored version tags.
+    pub dispatch_policy: Option<String>,
 
     #[serde(default)]
     pub game: Option<GameSection>,

@@ -3015,6 +3015,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "clap",
+ "flate2",
  "parking_lot",
  "pyrat-bot-api",
  "pyrat-eval-store",

@@ -118,6 +118,7 @@ async fn rejects_planner_with_different_tournament_seed() {
         target_per_pair: 1,
         max_failures_per_pair: 3,
         seat_policy: pyrat_eval::SeatPolicy::Legacy,
+        dispatch_policy: pyrat_eval::DispatchPolicy::PairMajorV1,
         tournament_seed: 0xDEAD, // diverges from spec's 0xC0FFEE
     })
     .expect("valid planner fixture");
@@ -306,6 +307,7 @@ async fn rejects_planner_with_drifted_runtime_game_config() {
         target_per_pair: 1,
         max_failures_per_pair: 3,
         seat_policy: pyrat_eval::SeatPolicy::Legacy,
+        dispatch_policy: pyrat_eval::DispatchPolicy::PairMajorV1,
         tournament_seed: 0xC0FFEE,
     })
     .expect("valid planner fixture");
@@ -361,6 +363,7 @@ async fn drifted_game_config_message_shows_geometry_expected_vs_got() {
         target_per_pair: 1,
         max_failures_per_pair: 3,
         seat_policy: pyrat_eval::SeatPolicy::Legacy,
+        dispatch_policy: pyrat_eval::DispatchPolicy::PairMajorV1,
         tournament_seed: 0xC0FFEE,
     })
     .expect("valid planner fixture");
@@ -415,6 +418,7 @@ async fn rejects_planner_with_different_params() {
         target_per_pair: 1,
         max_failures_per_pair: 99, // diverges from spec's 3
         seat_policy: pyrat_eval::SeatPolicy::Legacy,
+        dispatch_policy: pyrat_eval::DispatchPolicy::PairMajorV1,
         tournament_seed: 0xC0FFEE,
     })
     .expect("valid planner fixture");

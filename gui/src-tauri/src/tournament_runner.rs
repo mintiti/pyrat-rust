@@ -19,9 +19,10 @@ use parking_lot::Mutex;
 use pyrat::game::builder::GameConfig;
 use pyrat_eval::{
     failure_report, format_sqlite_datetime, gauntlet_slot_order, split_gauntlet_players,
-    EvalMatchDescriptor, EvalSession, GauntletPlanner, GauntletPlannerConfig, MatchupKey,
-    MatchupOutcome, Planner, ResolvedPlayer, RoundRobinPlanner, RoundRobinPlannerConfig,
-    SeatPolicy, SessionCompletion, SessionConfig, SessionEvent, SessionMode, TournamentState,
+    DispatchPolicy, EvalMatchDescriptor, EvalSession, GauntletPlanner, GauntletPlannerConfig,
+    MatchupKey, MatchupOutcome, Planner, ResolvedPlayer, RoundRobinPlanner,
+    RoundRobinPlannerConfig, SeatPolicy, SessionCompletion, SessionConfig, SessionEvent,
+    SessionMode, TournamentState,
 };
 use pyrat_eval_store::{
     compute_elo_with_uncertainty, EloError, EloOptions, EvalStore, TournamentId,
@@ -157,6 +158,7 @@ pub async fn run_tournament<R: Runtime>(
             target_per_pair: target_games_per_matchup,
             max_failures_per_pair: tournament_config::MAX_FAILURES_PER_PAIR,
             seat_policy,
+            dispatch_policy: DispatchPolicy::PairMajorV1,
             tournament_seed,
         })
         .map(|planner| Box::new(planner) as Box<dyn Planner>)

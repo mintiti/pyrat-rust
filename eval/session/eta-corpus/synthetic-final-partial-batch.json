@@ -1,0 +1,700 @@
+{
+  "schema_version": 2,
+  "dispatch_policy": "pair_major_v1",
+  "max_parallel": 2,
+  "max_failures_per_slot": 1,
+  "slots": [
+    {
+      "player1_id": "a",
+      "player2_id": "b",
+      "game_config_id": "synthetic",
+      "repetition_index": 0,
+      "orientation": "Canonical"
+    },
+    {
+      "player1_id": "a",
+      "player2_id": "b",
+      "game_config_id": "synthetic",
+      "repetition_index": 1,
+      "orientation": "Canonical"
+    },
+    {
+      "player1_id": "a",
+      "player2_id": "b",
+      "game_config_id": "synthetic",
+      "repetition_index": 2,
+      "orientation": "Canonical"
+    }
+  ],
+  "events": [
+    {
+      "sequence": 0,
+      "observed_at": {
+        "micros": 0
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 0,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 0,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "queued",
+        "players": [
+          "a",
+          "b"
+        ]
+      }
+    },
+    {
+      "sequence": 1,
+      "observed_at": {
+        "micros": 0
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 1,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 1,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "queued",
+        "players": [
+          "a",
+          "b"
+        ]
+      }
+    },
+    {
+      "sequence": 2,
+      "observed_at": {
+        "micros": 0
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 0,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 0,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_acquired"
+      }
+    },
+    {
+      "sequence": 3,
+      "observed_at": {
+        "micros": 0
+      },
+      "active_concurrency": 2,
+      "descriptor": {
+        "match_id": 1,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 1,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_acquired"
+      }
+    },
+    {
+      "sequence": 4,
+      "observed_at": {
+        "micros": 1000000
+      },
+      "active_concurrency": 2,
+      "descriptor": {
+        "match_id": 0,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 0,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "playing_started"
+      }
+    },
+    {
+      "sequence": 5,
+      "observed_at": {
+        "micros": 1000000
+      },
+      "active_concurrency": 2,
+      "descriptor": {
+        "match_id": 1,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 1,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "playing_started"
+      }
+    },
+    {
+      "sequence": 6,
+      "observed_at": {
+        "micros": 2000000
+      },
+      "active_concurrency": 2,
+      "descriptor": {
+        "match_id": 0,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 0,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "action_collection_started",
+        "turn": 0
+      }
+    },
+    {
+      "sequence": 7,
+      "observed_at": {
+        "micros": 2000000
+      },
+      "active_concurrency": 2,
+      "descriptor": {
+        "match_id": 1,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 1,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "action_collection_started",
+        "turn": 0
+      }
+    },
+    {
+      "sequence": 8,
+      "observed_at": {
+        "micros": 3000000
+      },
+      "active_concurrency": 2,
+      "descriptor": {
+        "match_id": 0,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 0,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "turn_completed",
+        "turn": 0
+      }
+    },
+    {
+      "sequence": 9,
+      "observed_at": {
+        "micros": 3000000
+      },
+      "active_concurrency": 2,
+      "descriptor": {
+        "match_id": 1,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 1,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "turn_completed",
+        "turn": 0
+      }
+    },
+    {
+      "sequence": 10,
+      "observed_at": {
+        "micros": 4000000
+      },
+      "active_concurrency": 2,
+      "descriptor": {
+        "match_id": 1,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 1,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "action_collection_started",
+        "turn": 1
+      }
+    },
+    {
+      "sequence": 11,
+      "observed_at": {
+        "micros": 10000000
+      },
+      "active_concurrency": 2,
+      "descriptor": {
+        "match_id": 0,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 0,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_produced",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 12,
+      "observed_at": {
+        "micros": 10000000
+      },
+      "active_concurrency": 2,
+      "descriptor": {
+        "match_id": 0,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 0,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_detail",
+        "detail": {
+          "kind": "finished",
+          "result": "draw",
+          "player1_half_points": 2,
+          "player2_half_points": 2,
+          "turns_played": 20
+        }
+      }
+    },
+    {
+      "sequence": 13,
+      "observed_at": {
+        "micros": 10000000
+      },
+      "active_concurrency": 2,
+      "descriptor": {
+        "match_id": 0,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 0,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_persisted",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 14,
+      "observed_at": {
+        "micros": 10000000
+      },
+      "active_concurrency": 2,
+      "descriptor": {
+        "match_id": 1,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 1,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_produced",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 15,
+      "observed_at": {
+        "micros": 10000000
+      },
+      "active_concurrency": 2,
+      "descriptor": {
+        "match_id": 1,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 1,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_detail",
+        "detail": {
+          "kind": "finished",
+          "result": "draw",
+          "player1_half_points": 2,
+          "player2_half_points": 2,
+          "turns_played": 20
+        }
+      }
+    },
+    {
+      "sequence": 16,
+      "observed_at": {
+        "micros": 10000000
+      },
+      "active_concurrency": 2,
+      "descriptor": {
+        "match_id": 1,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 1,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_persisted",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 17,
+      "observed_at": {
+        "micros": 10000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 0,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 0,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_released"
+      }
+    },
+    {
+      "sequence": 18,
+      "observed_at": {
+        "micros": 10000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 1,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 1,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_released"
+      }
+    },
+    {
+      "sequence": 19,
+      "observed_at": {
+        "micros": 10000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 2,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 2,
+        "repetition_index": 2,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "queued",
+        "players": [
+          "a",
+          "b"
+        ]
+      }
+    },
+    {
+      "sequence": 20,
+      "observed_at": {
+        "micros": 10000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 2,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 2,
+        "repetition_index": 2,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_acquired"
+      }
+    },
+    {
+      "sequence": 21,
+      "observed_at": {
+        "micros": 20000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 2,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 2,
+        "repetition_index": 2,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_produced",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 22,
+      "observed_at": {
+        "micros": 20000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 2,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 2,
+        "repetition_index": 2,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_detail",
+        "detail": {
+          "kind": "finished",
+          "result": "draw",
+          "player1_half_points": 2,
+          "player2_half_points": 2,
+          "turns_played": 20
+        }
+      }
+    },
+    {
+      "sequence": 23,
+      "observed_at": {
+        "micros": 20000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 2,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 2,
+        "repetition_index": 2,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_persisted",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 24,
+      "observed_at": {
+        "micros": 20000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 2,
+        "tournament_id": 1,
+        "game_config_id": "synthetic",
+        "player1_id": "a",
+        "player2_id": "b",
+        "seed": 2,
+        "repetition_index": 2,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_released"
+      }
+    }
+  ]
+}

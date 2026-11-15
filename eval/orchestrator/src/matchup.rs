@@ -97,6 +97,15 @@ impl std::fmt::Debug for PlayerSpec {
     }
 }
 
+impl PlayerSpec {
+    /// Stable runtime identity used by scheduling/timing observations.
+    pub fn agent_id(&self) -> &str {
+        match self {
+            Self::Subprocess { agent_id, .. } | Self::Embedded { agent_id, .. } => agent_id,
+        }
+    }
+}
+
 /// One match unit: identity plus everything `Match::new` needs.
 ///
 /// The seed is read via `descriptor.seed()`. There is no separate

@@ -23,6 +23,18 @@ use crate::descriptor::EvalMatchDescriptor;
 use crate::observation::Observation;
 use crate::state::{MatchupKey, MatchupOutcome, PlayerId, TournamentState};
 
+/// Immutable identity of one schedule slot.  It contains no dispatch cursor
+/// and no `MatchId`: consumers may inspect the full schedule without asking
+/// the planner to issue work or changing `next_batch` order.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct PlannedSlot {
+    pub player1_id: PlayerId,
+    pub player2_id: PlayerId,
+    pub game_config_id: String,
+    pub repetition_index: u32,
+    pub orientation: SeatOrientation,
+}
+
 /// Stateless seed for one matchup slot.
 ///
 /// Same `MatchupKey` always yields the same seed, regardless of scheduling
@@ -56,8 +68,7 @@ pub fn matchup_seed(
 /// Tournament-level parameters that planners care about and that need to
 /// survive into `tournaments.params_json` for resume validation.
 ///
-/// Today this is just `max_failures_per_pair` (the retry budget per
-/// matchup). Stored as JSON so future additions are additive: an older
+/// Stored as JSON so additions remain backwards-compatible: an older
 /// row with `{}` deserializes to defaults via `#[serde(default)]`, and a
 /// newer planner's expected params can grow new fields without breaking
 /// older stored rows.
@@ -74,6 +85,11 @@ pub struct TournamentParams {
     /// never silently double their game count on resume.
     #[serde(default)]
     pub seat_policy: SeatPolicy,
+    /// Versioned policy that orders otherwise immutable schedule slots for
+    /// issue. Older tournament rows predate this field and therefore decode
+    /// to the historical pair-major order.
+    #[serde(default)]
+    pub dispatch_policy: DispatchPolicy,
 }
 
 /// How seats (the engine's Rat = slot 0) are assigned across the games of
@@ -91,6 +107,52 @@ pub enum SeatPolicy {
     /// it; both share one generated `MazeLayout` for maze `k`. De-biases seat
     /// per maze and cuts maze-luck variance (the SPRT reversed-colors move).
     Paired,
+}
+
+/// How an immutable round-robin schedule is ordered for execution.
+///
+/// This is methodology, not schedule identity: both policies contain the
+/// same seeded slots, seat orientations, retry budgets, and durable keys.
+/// Versioned variant names make captured timing traces self-describing if a
+/// comparator is refined later.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DispatchPolicy {
+    /// Historical nested-loop order: every repetition of one pair before
+    /// moving to the next pair.
+    #[default]
+    PairMajorV1,
+    /// Deterministic circle-method rounds. Each repetition visits every
+    /// matchup through bot-disjoint rounds before the next repetition.
+    BotBalancedCircleV1,
+}
+
+impl std::fmt::Display for DispatchPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::PairMajorV1 => "pair_major_v1",
+            Self::BotBalancedCircleV1 => "bot_balanced_circle_v1",
+        })
+    }
+}
+
+/// Unknown dispatch-policy name supplied by a config or CLI consumer.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+#[error("unknown dispatch policy `{0}`; expected `pair-major` or `bot-balanced`")]
+pub struct DispatchPolicyParseError(pub String);
+
+impl std::str::FromStr for DispatchPolicy {
+    type Err = DispatchPolicyParseError;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value.trim().replace('-', "_").as_str() {
+            "pair_major" | "pair_major_v1" => Ok(Self::PairMajorV1),
+            "bot_balanced" | "bot_balanced_circle" | "bot_balanced_circle_v1" => {
+                Ok(Self::BotBalancedCircleV1)
+            },
+            _ => Err(DispatchPolicyParseError(value.to_owned())),
+        }
+    }
 }
 
 impl TournamentParams {
@@ -195,6 +257,16 @@ pub trait Planner: Send {
     /// compile error, not a runtime mismatch. (Stored `"{}"` rows still
     /// decode to defaults via `serde(default)` on `TournamentParams`.)
     fn expected_params(&self) -> TournamentParams;
+
+    /// Versioned issue-order policy used by this planner. Timing traces
+    /// retain it next to the immutable slot inventory.
+    fn dispatch_policy(&self) -> DispatchPolicy;
+
+    /// Static, read-only schedule inventory in canonical pair-major order.
+    /// Runtime attempts, retries, and the selected dispatch order are
+    /// deliberately separate; timing traces correlate realized issue order
+    /// through their `Queued` observations.
+    fn planned_slots(&self) -> Vec<PlannedSlot>;
 }
 
 /// Forwarding impl so callers can pick a planner at runtime (e.g. the
@@ -249,6 +321,14 @@ impl Planner for Box<dyn Planner> {
     fn expected_params(&self) -> TournamentParams {
         (**self).expected_params()
     }
+
+    fn dispatch_policy(&self) -> DispatchPolicy {
+        (**self).dispatch_policy()
+    }
+
+    fn planned_slots(&self) -> Vec<PlannedSlot> {
+        (**self).planned_slots()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +352,7 @@ pub struct RoundRobinPlannerConfig {
     pub target_per_pair: u32,
     pub max_failures_per_pair: u32,
     pub seat_policy: SeatPolicy,
+    pub dispatch_policy: DispatchPolicy,
     pub tournament_seed: u64,
 }
 
@@ -335,6 +416,9 @@ pub struct RoundRobinPlanner {
     /// Computed once at construction. `n*(n-1)/2` entries, immutable for
     /// the life of the planner — no reason to rebuild per `next_batch`.
     pair_indices: Vec<(usize, usize)>,
+    /// Immutable slot indices in issue-preference order. The canonical slot
+    /// inventory remains pair-major; only this view varies by policy.
+    dispatch_slots: Vec<RoundRobinSlotIndex>,
     /// `(matchup_key, attempt_index)` of every matchup we've submitted but
     /// haven't seen a terminal observation for yet.
     pending: HashMap<MatchupKey, HashSet<u32>>,
@@ -342,6 +426,13 @@ pub struct RoundRobinPlanner {
     /// lifetime so opposite seatings and retries reuse the same layout even
     /// when scheduler capacity makes them run in separate batches.
     maze_layouts: HashMap<u64, Arc<MazeLayout>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RoundRobinSlotIndex {
+    player1: usize,
+    player2: usize,
+    repetition_index: u32,
 }
 
 impl RoundRobinPlanner {
@@ -360,9 +451,16 @@ impl RoundRobinPlanner {
                 pair_indices.push((i, j));
             }
         }
+        let dispatch_slots = round_robin_dispatch_slots(
+            n,
+            config.target_per_pair,
+            config.dispatch_policy,
+            &pair_indices,
+        );
         Ok(Self {
             config,
             pair_indices,
+            dispatch_slots,
             pending: HashMap::new(),
             maze_layouts: HashMap::new(),
         })
@@ -381,27 +479,25 @@ impl Planner for RoundRobinPlanner {
         }
         let mut out = Vec::with_capacity(capacity);
         let ctx = SlotContext::for_round_robin(&self.config);
-        for &(i, j) in &self.pair_indices {
-            for rep in 0..self.config.target_per_pair {
-                if out.len() == capacity {
-                    return out;
-                }
-                let a = &self.config.players[i];
-                let b = &self.config.players[j];
-                if let Some(matchup) = build_slot(
-                    a,
-                    b,
-                    rep,
-                    &ctx,
-                    state,
-                    SlotRuntime {
-                        pending: &mut self.pending,
-                        maze_layouts: &mut self.maze_layouts,
-                    },
-                    allocate_match_id,
-                ) {
-                    out.push(matchup);
-                }
+        for slot in &self.dispatch_slots {
+            if out.len() == capacity {
+                return out;
+            }
+            let a = &self.config.players[slot.player1];
+            let b = &self.config.players[slot.player2];
+            if let Some(matchup) = build_slot(
+                a,
+                b,
+                slot.repetition_index,
+                &ctx,
+                state,
+                SlotRuntime {
+                    pending: &mut self.pending,
+                    maze_layouts: &mut self.maze_layouts,
+                },
+                allocate_match_id,
+            ) {
+                out.push(matchup);
             }
         }
         out
@@ -459,8 +555,114 @@ impl Planner for RoundRobinPlanner {
         TournamentParams {
             max_failures_per_pair: self.config.max_failures_per_pair,
             seat_policy: self.config.seat_policy,
+            dispatch_policy: self.config.dispatch_policy,
         }
     }
+
+    fn dispatch_policy(&self) -> DispatchPolicy {
+        self.config.dispatch_policy
+    }
+
+    fn planned_slots(&self) -> Vec<PlannedSlot> {
+        let mut slots = Vec::with_capacity(
+            self.pair_indices.len() * usize::try_from(self.config.target_per_pair).unwrap_or(0),
+        );
+        for &(i, j) in &self.pair_indices {
+            let a = &self.config.players[i].id;
+            let b = &self.config.players[j].id;
+            let (player1_id, player2_id) = if a <= b {
+                (a.clone(), b.clone())
+            } else {
+                (b.clone(), a.clone())
+            };
+            for repetition_index in 0..self.config.target_per_pair {
+                let (_, orientation) =
+                    slot_maze_and_orientation(self.config.seat_policy, repetition_index);
+                slots.push(PlannedSlot {
+                    player1_id: player1_id.clone(),
+                    player2_id: player2_id.clone(),
+                    game_config_id: self.config.game_config_id.clone(),
+                    repetition_index,
+                    orientation,
+                });
+            }
+        }
+        slots
+    }
+}
+
+fn round_robin_dispatch_slots(
+    player_count: usize,
+    target_per_pair: u32,
+    policy: DispatchPolicy,
+    pair_indices: &[(usize, usize)],
+) -> Vec<RoundRobinSlotIndex> {
+    let slot_count = pair_indices.len() * usize::try_from(target_per_pair).unwrap_or(0);
+    let mut slots = Vec::with_capacity(slot_count);
+    match policy {
+        DispatchPolicy::PairMajorV1 => {
+            for &(player1, player2) in pair_indices {
+                for repetition_index in 0..target_per_pair {
+                    slots.push(RoundRobinSlotIndex {
+                        player1,
+                        player2,
+                        repetition_index,
+                    });
+                }
+            }
+        },
+        DispatchPolicy::BotBalancedCircleV1 => {
+            let rounds = circle_pair_rounds(player_count);
+            for repetition_index in 0..target_per_pair {
+                for round in &rounds {
+                    for &(player1, player2) in round {
+                        slots.push(RoundRobinSlotIndex {
+                            player1,
+                            player2,
+                            repetition_index,
+                        });
+                    }
+                }
+            }
+        },
+    }
+    debug_assert_eq!(slots.len(), slot_count);
+    slots
+}
+
+/// Deterministic round-robin edge coloring using the circle method. Each
+/// returned round is bot-disjoint; odd fields receive one implicit bye.
+fn circle_pair_rounds(player_count: usize) -> Vec<Vec<(usize, usize)>> {
+    if player_count < 2 {
+        return Vec::new();
+    }
+    let ring_len = if player_count.is_multiple_of(2) {
+        player_count
+    } else {
+        player_count + 1
+    };
+    let bye = player_count;
+    let mut ring: Vec<_> = (0..ring_len).collect();
+    let mut rounds = Vec::with_capacity(ring_len - 1);
+
+    for _ in 0..(ring_len - 1) {
+        let mut round = Vec::with_capacity(ring_len / 2);
+        for index in 0..(ring_len / 2) {
+            let a = ring[index];
+            let b = ring[ring_len - 1 - index];
+            if a == bye || b == bye {
+                continue;
+            }
+            round.push(if a < b { (a, b) } else { (b, a) });
+        }
+        rounds.push(round);
+
+        // Keep participant zero fixed and rotate every other participant
+        // one step clockwise. The operation is total for `ring_len >= 2`.
+        ring[1..].rotate_right(1);
+    }
+
+    rounds
 }
 
 // ---------------------------------------------------------------------------
@@ -648,7 +850,39 @@ impl Planner for GauntletPlanner {
         TournamentParams {
             max_failures_per_pair: self.config.max_failures_per_pair,
             seat_policy: self.config.seat_policy,
+            dispatch_policy: DispatchPolicy::PairMajorV1,
         }
+    }
+
+    fn dispatch_policy(&self) -> DispatchPolicy {
+        DispatchPolicy::PairMajorV1
+    }
+
+    fn planned_slots(&self) -> Vec<PlannedSlot> {
+        let mut slots = Vec::with_capacity(
+            self.config.opponents.len() * usize::try_from(self.config.target_each).unwrap_or(0),
+        );
+        for opponent in &self.config.opponents {
+            let a = &self.config.challenger.id;
+            let b = &opponent.id;
+            let (player1_id, player2_id) = if a <= b {
+                (a.clone(), b.clone())
+            } else {
+                (b.clone(), a.clone())
+            };
+            for repetition_index in 0..self.config.target_each {
+                let (_, orientation) =
+                    slot_maze_and_orientation(self.config.seat_policy, repetition_index);
+                slots.push(PlannedSlot {
+                    player1_id: player1_id.clone(),
+                    player2_id: player2_id.clone(),
+                    game_config_id: self.config.game_config_id.clone(),
+                    repetition_index,
+                    orientation,
+                });
+            }
+        }
+        slots
     }
 }
 
@@ -886,6 +1120,7 @@ mod tests {
             target_per_pair: target,
             max_failures_per_pair: max_failures,
             seat_policy: SeatPolicy::Legacy,
+            dispatch_policy: DispatchPolicy::PairMajorV1,
             tournament_seed: 0xC0FFEE,
         })
         .expect("valid round-robin fixture")
@@ -992,6 +1227,135 @@ mod tests {
         assert_eq!(batch.len(), 2);
     }
 
+    #[test]
+    fn planned_slots_is_read_only_and_matches_pair_major_dispatch_order() {
+        let mut planner = tiny_round_robin(2, 3);
+        let inventory = planner.planned_slots();
+        assert_eq!(inventory.len(), 6);
+        let identities: Vec<_> = inventory
+            .iter()
+            .map(|slot| {
+                (
+                    slot.player1_id.as_str(),
+                    slot.player2_id.as_str(),
+                    slot.repetition_index,
+                )
+            })
+            .collect();
+        assert_eq!(
+            identities,
+            vec![
+                ("a", "b", 0),
+                ("a", "b", 1),
+                ("a", "c", 0),
+                ("a", "c", 1),
+                ("b", "c", 0),
+                ("b", "c", 1),
+            ]
+        );
+
+        let allocator = MatchIdAllocator::new();
+        let state = TournamentState::empty(TournamentId(1));
+        let dispatched = planner.next_batch(&state, 6, &mut || allocator.allocate());
+        let dispatched_identities: Vec<_> = dispatched
+            .iter()
+            .map(|matchup| {
+                (
+                    matchup.descriptor.player1_id.as_str(),
+                    matchup.descriptor.player2_id.as_str(),
+                    matchup.descriptor.repetition_index,
+                )
+            })
+            .collect();
+        assert_eq!(dispatched_identities, identities);
+    }
+
+    #[test]
+    fn bot_balanced_dispatch_spreads_each_repetition_through_disjoint_rounds() {
+        let mut planner = RoundRobinPlanner::new(RoundRobinPlannerConfig {
+            players: vec![embedded("a"), embedded("b"), embedded("c"), embedded("d")],
+            game_config: GameConfig::classic(7, 5, 3),
+            game_config_id: "gc".into(),
+            timing: timing(),
+            tournament_id: TournamentId(1),
+            target_per_pair: 2,
+            max_failures_per_pair: 1,
+            seat_policy: SeatPolicy::Paired,
+            dispatch_policy: DispatchPolicy::BotBalancedCircleV1,
+            tournament_seed: 7,
+        })
+        .expect("valid bot-balanced fixture");
+
+        // Schedule identity stays canonical and pair-major even though issue
+        // preference changes. This is the plan/dispatch separation.
+        let inventory_pairs: Vec<_> = planner
+            .planned_slots()
+            .into_iter()
+            .map(|slot| (slot.player1_id, slot.player2_id, slot.repetition_index))
+            .collect();
+        assert_eq!(
+            &inventory_pairs[..4],
+            &[
+                ("a".into(), "b".into(), 0),
+                ("a".into(), "b".into(), 1),
+                ("a".into(), "c".into(), 0),
+                ("a".into(), "c".into(), 1),
+            ]
+        );
+
+        let allocator = MatchIdAllocator::new();
+        let state = TournamentState::empty(TournamentId(1));
+        let issued = planner.next_batch(&state, 12, &mut || allocator.allocate());
+        let issue_order: Vec<_> = issued
+            .iter()
+            .map(|matchup| {
+                (
+                    matchup.descriptor.player1_id.as_str(),
+                    matchup.descriptor.player2_id.as_str(),
+                    matchup.descriptor.repetition_index,
+                )
+            })
+            .collect();
+        assert_eq!(
+            issue_order,
+            vec![
+                ("a", "d", 0),
+                ("b", "c", 0),
+                ("a", "c", 0),
+                ("b", "d", 0),
+                ("a", "b", 0),
+                ("c", "d", 0),
+                ("a", "d", 1),
+                ("b", "c", 1),
+                ("a", "c", 1),
+                ("b", "d", 1),
+                ("a", "b", 1),
+                ("c", "d", 1),
+            ]
+        );
+        assert_eq!(
+            planner.dispatch_policy(),
+            DispatchPolicy::BotBalancedCircleV1
+        );
+    }
+
+    #[test]
+    fn circle_rounds_cover_every_odd_field_pair_once_with_one_bye() {
+        let rounds = circle_pair_rounds(5);
+        assert_eq!(rounds.len(), 5);
+        let mut seen = HashSet::new();
+        for round in &rounds {
+            assert_eq!(round.len(), 2);
+            let mut players = HashSet::new();
+            for &(a, b) in round {
+                assert!(players.insert(a));
+                assert!(players.insert(b));
+                assert!(seen.insert((a, b)));
+            }
+        }
+        assert_eq!(seen.len(), 10);
+    }
+
     /// Pending set prevents double-issuing: after issuing slot (a,b,rep=0),
     /// the next call (with state still showing zero history for that slot)
     /// must skip it until on_observation clears the pending entry.
@@ -1081,6 +1445,7 @@ mod tests {
             target_per_pair: 1,
             max_failures_per_pair: 2,
             seat_policy: SeatPolicy::Legacy,
+            dispatch_policy: DispatchPolicy::PairMajorV1,
             tournament_seed: 1,
         })
         .expect("valid round-robin fixture");
@@ -1114,6 +1479,7 @@ mod tests {
             target_per_pair: 4,
             max_failures_per_pair: 2,
             seat_policy: SeatPolicy::Paired,
+            dispatch_policy: DispatchPolicy::PairMajorV1,
             tournament_seed: 0xABCD,
         })
         .expect("valid paired fixture");
@@ -1203,6 +1569,7 @@ mod tests {
         let p = TournamentParams {
             max_failures_per_pair: 7,
             seat_policy: SeatPolicy::Paired,
+            dispatch_policy: DispatchPolicy::BotBalancedCircleV1,
         };
         let s = p.to_json();
         let back = TournamentParams::from_json(&s).expect("decode");
@@ -1212,14 +1579,15 @@ mod tests {
     #[test]
     fn tournament_params_deserializes_empty_object_with_serde_default() {
         // Back-compat: any externally-stored row with `"{}"` decodes
-        // to defaults (max_failures_per_pair = 0, seat_policy = Legacy) —
-        // pre-fix tournaments keep single-seat semantics on resume.
+        // to defaults (zero failure budget, legacy seats, pair-major
+        // dispatch) — pre-fix tournaments keep their original semantics.
         let p = TournamentParams::from_json("{}").expect("decode");
         assert_eq!(
             p,
             TournamentParams {
                 max_failures_per_pair: 0,
                 seat_policy: SeatPolicy::Legacy,
+                dispatch_policy: DispatchPolicy::PairMajorV1,
             }
         );
     }
@@ -1232,6 +1600,7 @@ mod tests {
             TournamentParams {
                 max_failures_per_pair: 3,
                 seat_policy: SeatPolicy::Legacy,
+                dispatch_policy: DispatchPolicy::PairMajorV1,
             }
         );
     }
@@ -1310,6 +1679,7 @@ mod tests {
             TournamentParams {
                 max_failures_per_pair: 4,
                 seat_policy: SeatPolicy::Legacy,
+                dispatch_policy: DispatchPolicy::PairMajorV1,
             }
         );
     }
@@ -1325,6 +1695,7 @@ mod tests {
             target_per_pair: 3,
             max_failures_per_pair: 1,
             seat_policy: SeatPolicy::Paired,
+            dispatch_policy: DispatchPolicy::PairMajorV1,
             tournament_seed: 1,
         });
         assert!(matches!(

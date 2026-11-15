@@ -12,17 +12,21 @@
 //!   store (the store carries results and identity, not bot commands).
 
 use std::collections::HashMap;
-use std::fs;
+use std::fs::{self, File};
+use std::io::{BufWriter, Write};
 use std::path::Path;
 use std::sync::Arc;
 
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use parking_lot::Mutex;
 use pyrat_eval::MatchupOutcome;
 use pyrat_eval::{
-    gauntlet_slot_order, split_gauntlet_players, EvalMatchDescriptor, EvalSession, GauntletPlanner,
-    GauntletPlannerConfig, Planner, ResolvedPlayer, RoundRobinPlanner, RoundRobinPlannerConfig,
-    SessionConfig, SessionError, SessionMode, TournamentMethodology, TournamentMismatch,
-    TournamentParams, TournamentSpec, TournamentState, TournamentTimingMode,
+    gauntlet_slot_order, split_gauntlet_players, DispatchPolicy, EvalMatchDescriptor, EvalSession,
+    GauntletPlanner, GauntletPlannerConfig, Planner, ResolvedPlayer, RoundRobinPlanner,
+    RoundRobinPlannerConfig, SessionConfig, SessionError, SessionMode, TournamentMethodology,
+    TournamentMismatch, TournamentParams, TournamentSpec, TournamentState, TournamentTimingMode,
+    TournamentTimingTrace,
 };
 use pyrat_eval_store::{
     compute_elo_with_uncertainty, EloOptions, EvalStore, TournamentId, TournamentInstancePolicy,
@@ -46,6 +50,7 @@ use crate::tournament_save::write_save_as;
 /// if the run aborts.
 pub async fn run_tournament_main(
     resolved: ResolvedRun,
+    timing_trace_path: Option<&Path>,
 ) -> Result<AttemptsCount, Box<dyn std::error::Error>> {
     if let Some(save_path) = resolved.save_as.as_ref() {
         write_save_as(&resolved, save_path)?;
@@ -71,39 +76,47 @@ pub async fn run_tournament_main(
     // planner is built from it, not from the resolved defaults, so a no-flag
     // resume just works even under the new Paired default. On a new run the
     // resolved size is what bootstrap creates with.
-    let (tournament_id, game_config_id, tournament_seed, planner_target, planner_seat_policy) =
-        match resolved.mode {
-            LaunchMode::Resume { id, seed_assert } => {
-                let r = realize_resume(
-                    &store,
-                    id,
-                    seed_assert,
-                    resolved.requested_size,
-                    &resolved.store_path,
-                )?;
-                validate_game_config_with_seed(&game_config, r.seed)?;
-                (
-                    r.id,
-                    r.game_config_id,
-                    r.seed,
-                    r.target_games_per_matchup,
-                    r.seat_policy,
-                )
-            },
-            LaunchMode::New { seed } => {
-                let seed = seed.value();
-                validate_game_config_with_seed(&game_config, seed)?;
-                let (id, gc_id, seed) =
-                    bootstrap_new(&store, &resolved, &game_config, seed).await?;
-                (
-                    id,
-                    gc_id,
-                    seed,
-                    resolved.target_games_per_matchup,
-                    resolved.seat_policy,
-                )
-            },
-        };
+    let (
+        tournament_id,
+        game_config_id,
+        tournament_seed,
+        planner_target,
+        planner_seat_policy,
+        planner_dispatch_policy,
+    ) = match resolved.mode {
+        LaunchMode::Resume { id, seed_assert } => {
+            let r = realize_resume(
+                &store,
+                id,
+                seed_assert,
+                resolved.requested_size,
+                resolved.requested_dispatch_policy,
+                &resolved.store_path,
+            )?;
+            validate_game_config_with_seed(&game_config, r.seed)?;
+            (
+                r.id,
+                r.game_config_id,
+                r.seed,
+                r.target_games_per_matchup,
+                r.seat_policy,
+                r.dispatch_policy,
+            )
+        },
+        LaunchMode::New { seed } => {
+            let seed = seed.value();
+            validate_game_config_with_seed(&game_config, seed)?;
+            let (id, gc_id, seed) = bootstrap_new(&store, &resolved, &game_config, seed).await?;
+            (
+                id,
+                gc_id,
+                seed,
+                resolved.target_games_per_matchup,
+                resolved.seat_policy,
+                resolved.dispatch_policy,
+            )
+        },
+    };
 
     // Operational guidance, not tracing: the id is what --resume needs
     // after an abort, so it must survive RUST_LOG filtering. stderr
@@ -147,6 +160,7 @@ pub async fn run_tournament_main(
             target_per_pair: planner_target,
             max_failures_per_pair: resolved.max_failures_per_pair,
             seat_policy: planner_seat_policy,
+            dispatch_policy: planner_dispatch_policy,
             tournament_seed,
         })?),
         FormatChoice::Gauntlet {
@@ -196,9 +210,12 @@ pub async fn run_tournament_main(
         },
         Ok(session) => session,
     };
-    let final_state = await_session(session)
+    let (final_state, timing_trace) = await_session(session)
         .await
         .map_err(|e| with_resume_hint(&e.to_string(), &resolved.store_path, tournament_id))?;
+    if let Some(path) = timing_trace_path {
+        write_timing_trace(path, &timing_trace)?;
+    }
 
     render_standings(
         &final_state,
@@ -243,11 +260,39 @@ fn validate_game_config_with_seed(
 /// `join` would race with the session's drop chain.
 async fn await_session(
     session: EvalSession,
-) -> Result<TournamentState, Box<dyn std::error::Error>> {
+) -> Result<(TournamentState, TournamentTimingTrace), Box<dyn std::error::Error>> {
     let state_rx = session.state();
+    let timing_reader = session.timing_reader();
     session.join().await?;
     let final_state = state_rx.borrow().clone();
-    Ok(final_state)
+    Ok((final_state, timing_reader.snapshot()))
+}
+
+fn write_timing_trace(
+    path: &Path,
+    trace: &TournamentTimingTrace,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("--timing-trace: failed to create {}: {e}", parent.display()))?;
+    }
+    let file = File::create(path)
+        .map_err(|e| format!("--timing-trace: failed to create {}: {e}", path.display()))?;
+    let writer = BufWriter::new(file);
+    if path.extension().is_some_and(|extension| extension == "gz") {
+        let mut encoder = GzEncoder::new(writer, Compression::default());
+        serde_json::to_writer(&mut encoder, trace)?;
+        let mut writer = encoder.finish()?;
+        writer.flush()?;
+    } else {
+        let mut writer = writer;
+        serde_json::to_writer_pretty(&mut writer, trace)?;
+        writer.flush()?;
+    }
+    Ok(())
 }
 
 /// Bootstrap a fresh tournament and return its identity. Gauntlet slot
@@ -274,6 +319,7 @@ async fn bootstrap_new(
     let params = TournamentParams {
         max_failures_per_pair: resolved.max_failures_per_pair,
         seat_policy: resolved.seat_policy,
+        dispatch_policy: resolved.dispatch_policy,
     };
     let instance_policy = match resolved.seat_policy {
         pyrat_eval::SeatPolicy::Paired => TournamentInstancePolicy::SharedMazePerSeatPair,
@@ -346,6 +392,7 @@ struct ResumeInfo {
     seed: u64,
     target_games_per_matchup: u32,
     seat_policy: pyrat_eval::SeatPolicy,
+    dispatch_policy: DispatchPolicy,
 }
 
 /// On resume, the store carries the seed, game_config_id, and schedule. An
@@ -358,6 +405,7 @@ fn realize_resume(
     id: TournamentId,
     seed_assert: Option<u64>,
     requested_size: Option<crate::tournament_resolve::SizeChoice>,
+    requested_dispatch_policy: Option<DispatchPolicy>,
     store_path: &Path,
 ) -> Result<ResumeInfo, Box<dyn std::error::Error>> {
     let stored = {
@@ -395,6 +443,7 @@ fn realize_resume(
         )
     })?;
     let stored_policy = stored_params.seat_policy;
+    let stored_dispatch_policy = stored_params.dispatch_policy;
     // A size flag on resume is an assertion, not a re-spec: reject a
     // conflicting one rather than silently honoring the stored schedule.
     if let Some(req) = requested_size {
@@ -408,12 +457,22 @@ fn realize_resume(
             .into());
         }
     }
+    if let Some(requested) = requested_dispatch_policy {
+        if requested != stored_dispatch_policy {
+            return Err(format!(
+                "resume rejected: tournament {} uses dispatch policy {}; the explicit policy {} does not match. Omit --dispatch-policy to use the stored policy.",
+                id.0, stored_dispatch_policy, requested,
+            )
+            .into());
+        }
+    }
     Ok(ResumeInfo {
         id,
         game_config_id: stored.game_config_id,
         seed,
         target_games_per_matchup: stored_target,
         seat_policy: stored_policy,
+        dispatch_policy: stored_dispatch_policy,
     })
 }
 
@@ -601,6 +660,14 @@ fn translate_mismatch(m: &TournamentMismatch) -> String {
         TournamentMismatch::TargetPerPair { planner, stored } => format!(
             "--games {planner} does not match the stored target {stored}; rerun with --games {stored}"
         ),
+        TournamentMismatch::Params { planner, stored }
+            if planner.dispatch_policy != stored.dispatch_policy =>
+        {
+            format!(
+                "--dispatch-policy {} does not match the stored policy {}; rerun with --dispatch-policy {}",
+                planner.dispatch_policy, stored.dispatch_policy, stored.dispatch_policy
+            )
+        },
         TournamentMismatch::Params { planner, stored } => format!(
             "--max-failures {} does not match the stored value {}; rerun with --max-failures {}",
             planner.max_failures_per_pair,
@@ -663,15 +730,36 @@ mod tests {
             planner: TournamentParams {
                 max_failures_per_pair: 3,
                 seat_policy: pyrat_eval::SeatPolicy::Legacy,
+                dispatch_policy: DispatchPolicy::PairMajorV1,
             },
             stored: TournamentParams {
                 max_failures_per_pair: 1,
                 seat_policy: pyrat_eval::SeatPolicy::Legacy,
+                dispatch_policy: DispatchPolicy::PairMajorV1,
             },
         };
         let s = translate_mismatch(&params);
         assert!(s.contains("--max-failures 3"), "got: {s}");
         assert!(s.contains("rerun with --max-failures 1"), "got: {s}");
+
+        let dispatch = TournamentMismatch::Params {
+            planner: TournamentParams {
+                max_failures_per_pair: 1,
+                seat_policy: pyrat_eval::SeatPolicy::Paired,
+                dispatch_policy: DispatchPolicy::PairMajorV1,
+            },
+            stored: TournamentParams {
+                max_failures_per_pair: 1,
+                seat_policy: pyrat_eval::SeatPolicy::Paired,
+                dispatch_policy: DispatchPolicy::BotBalancedCircleV1,
+            },
+        };
+        let s = translate_mismatch(&dispatch);
+        assert!(s.contains("--dispatch-policy pair_major_v1"), "got: {s}");
+        assert!(
+            s.contains("stored policy bot_balanced_circle_v1"),
+            "got: {s}"
+        );
     }
 
     #[test]
@@ -785,5 +873,27 @@ mod tests {
         assert_eq!(parsed["standings"].as_array().unwrap().len(), 0);
         // Zero successes must be distinguishable from a real result set.
         assert_eq!(parsed["status"], "finished_no_results");
+    }
+
+    #[test]
+    fn timing_trace_gzip_suffix_writes_a_lossless_trace() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path = tmp.path().join("timing.json.gz");
+        let trace = TournamentTimingTrace {
+            schema_version: 2,
+            dispatch_policy: DispatchPolicy::BotBalancedCircleV1,
+            max_parallel: 4,
+            max_failures_per_slot: 1,
+            slots: Vec::new(),
+            events: Vec::new(),
+        };
+
+        write_timing_trace(&path, &trace).expect("write compressed timing trace");
+        let bytes = std::fs::read(&path).expect("read compressed timing trace");
+        assert_eq!(&bytes[..2], &[0x1f, 0x8b]);
+
+        let reader = flate2::read::GzDecoder::new(std::fs::File::open(path).unwrap());
+        let decoded: TournamentTimingTrace = serde_json::from_reader(reader).unwrap();
+        assert_eq!(decoded, trace);
     }
 }

@@ -31,7 +31,9 @@ use pyrat::Direction;
 use pyrat_bot_api::Options;
 use pyrat_host::launch::{launch_bots, BotConfig, BotProcesses, LaunchError};
 use pyrat_host::match_config::build_match_config;
-use pyrat_host::match_host::{Match, MatchError, MatchEvent, MatchResult};
+use pyrat_host::match_host::{
+    Match, MatchError, MatchEvent, MatchResult, MatchTimingEvent, MatchTimingPhase,
+};
 use pyrat_host::player::{
     accept_players, AcceptError, EmbeddedBot, EmbeddedCtx, EmbeddedPlayer, EventSink, Player,
     PlayerError, PlayerIdentity, TcpPlayer,
@@ -49,6 +51,7 @@ use crate::id::MatchId;
 use crate::matchup::{Matchup, PlayerSpec};
 use crate::outcome::{FailureReason, MatchFailure, MatchOutcome, TimeoutPhase};
 use crate::sink::SinkError;
+use crate::timing::{AttemptDetail, AttemptTerminal, ExecutionPhase};
 
 /// Adapter so a `Box<dyn EmbeddedBot>` (what factories produce) can be
 /// handed to `EmbeddedPlayer::accept<B: EmbeddedBot>`.
@@ -103,7 +106,7 @@ pub(crate) async fn run_match<D: Descriptor>(
     }
 
     // ── 2. Wait for a parallelism slot.
-    let _permit: OwnedSemaphorePermit = match acquire_permit(&semaphore, &cancel).await {
+    let permit: OwnedSemaphorePermit = match acquire_permit(&semaphore, &cancel).await {
         Some(p) => p,
         None => {
             // Cancelled before slot. No on_match_started fired, so don't
@@ -121,12 +124,15 @@ pub(crate) async fn run_match<D: Descriptor>(
             return;
         },
     };
+    let _permit = inner.observe_permit(matchup.descriptor.clone(), permit);
+    inner.publish_timing(&matchup.descriptor, ExecutionPhase::LaunchStarted);
 
     // ── 3. Build the per-match event channel up front. The same `event_tx`
     // is wrapped as an `EventSink` for the player handshake (where pre-Match
     // sideband would land if it ever fired) and handed to `Match::new`.
     // One channel, one drain loop.
     let (event_tx, mut event_rx) = mpsc::unbounded_channel::<MatchEvent>();
+    let (timing_tx, mut timing_rx) = mpsc::unbounded_channel::<MatchTimingEvent>();
     let handshake_sink = EventSink::new(event_tx.clone());
 
     // ── 4. Player setup.
@@ -149,6 +155,14 @@ pub(crate) async fn run_match<D: Descriptor>(
         identities,
         bot_procs,
     } = setup;
+    inner.publish_timing(
+        &matchup.descriptor,
+        ExecutionPhase::HandshakeCompleted {
+            players: identities
+                .each_ref()
+                .map(|identity| identity.agent_id.clone()),
+        },
+    );
 
     // ── 5. Pre-Match sink callback. Required failure here demotes to
     // `SinkFlushError, durable_record: false, started_at: None` per the
@@ -163,14 +177,33 @@ pub(crate) async fn run_match<D: Descriptor>(
         let [p1, p2] = players;
         let _ = p1.close().await;
         let _ = p2.close().await;
+        let reason = FailureReason::SinkFlushError(e.to_string());
         let failure = MatchFailure {
             descriptor: matchup.descriptor.clone(),
             started_at: None,
             failed_at: SystemTime::now(),
-            reason: FailureReason::SinkFlushError(e.to_string()),
+            reason: reason.clone(),
             players: Some(identities),
             durable_record: false,
         };
+        inner.publish_timing(
+            &matchup.descriptor,
+            ExecutionPhase::TerminalProduced {
+                outcome: AttemptTerminal::Failed {
+                    durable_record: false,
+                },
+            },
+        );
+        inner.publish_timing(
+            &matchup.descriptor,
+            ExecutionPhase::TerminalDetail {
+                detail: AttemptDetail::from_failure(&reason),
+            },
+        );
+        inner.publish_timing(
+            &matchup.descriptor,
+            ExecutionPhase::TerminalPersistenceFailed,
+        );
         let _ = inner
             .publish_lifecycle(OrchestratorEvent::MatchFailed { failure })
             .await;
@@ -224,11 +257,13 @@ pub(crate) async fn run_match<D: Descriptor>(
         cfg.setup_timing.clone(),
         cfg.playing_config.clone(),
         Some(event_tx),
-    );
+    )
+    .with_timing_events(timing_tx);
 
     let mut run_fut = std::pin::pin!(game_match.run());
     let mut sink_event_error: Option<SinkError> = None;
     let mut rx_open = true;
+    let mut timing_rx_open = true;
 
     let run_result: Option<Result<MatchResult, MatchError>> = loop {
         tokio::select! {
@@ -239,19 +274,37 @@ pub(crate) async fn run_match<D: Descriptor>(
                 // `try_recv` keeps draining cheap; per-event errors are
                 // recorded into `sink_event_error` and decided after.
                 while let Ok(evt) = event_rx.try_recv() {
-                    handle_event(&inner, id, evt, &mut sink_event_error).await;
+                    handle_event(
+                        &inner,
+                        id,
+                        evt,
+                        &mut sink_event_error,
+                    )
+                    .await;
+                }
+                while let Ok(evt) = timing_rx.try_recv() {
+                    handle_timing_event(&inner, &matchup.descriptor, evt);
                 }
                 break Some(res);
-            }
+            },
             evt = event_rx.recv(), if rx_open => match evt {
-                Some(e) => handle_event(&inner, id, e, &mut sink_event_error).await,
+                Some(e) => handle_event(
+                    &inner,
+                    id,
+                    e,
+                    &mut sink_event_error,
+                ).await,
                 // Defensive: in normal operation `Match::run` holds the
                 // sender via `MatchCtx` until `finalize` consumes it, so
                 // `recv` cannot return None before `run_fut` resolves.
                 // The guard makes the loop non-spinning if that invariant
                 // ever breaks.
                 None => { rx_open = false; }
-            }
+            },
+            timing = timing_rx.recv(), if timing_rx_open => match timing {
+                Some(event) => handle_timing_event(&inner, &matchup.descriptor, event),
+                None => { timing_rx_open = false; }
+            },
         }
     };
 
@@ -299,6 +352,26 @@ async fn handle_event<D: Descriptor>(
     inner.publish_per_turn(OrchestratorEvent::MatchEvent { id, event });
 }
 
+fn handle_timing_event<D: Descriptor>(
+    inner: &Arc<ExecutorInner<D>>,
+    descriptor: &D,
+    event: MatchTimingEvent,
+) {
+    let phase = match event.phase {
+        MatchTimingPhase::ConfigureStarted => ExecutionPhase::ConfigureStarted,
+        MatchTimingPhase::PreprocessingStarted => ExecutionPhase::PreprocessingStarted,
+        MatchTimingPhase::SetupCompleted => ExecutionPhase::SetupCompleted,
+        MatchTimingPhase::PlayingStarted => ExecutionPhase::PlayingStarted,
+        MatchTimingPhase::ActionCollectionStarted { turn } => {
+            ExecutionPhase::ActionCollectionStarted { turn }
+        },
+        MatchTimingPhase::ActionsCollected { turn } => ExecutionPhase::ActionsCollected { turn },
+        MatchTimingPhase::TurnCompleted { turn } => ExecutionPhase::TurnCompleted { turn },
+        _ => return,
+    };
+    inner.publish_timing_at(descriptor, event.observed_at, phase);
+}
+
 async fn build_terminal<D: Descriptor>(
     inner: &Arc<ExecutorInner<D>>,
     matchup: &Matchup<D>,
@@ -326,10 +399,29 @@ async fn build_terminal<D: Descriptor>(
     match (run_result, sink_event_error) {
         // Cancelled while Match::run was alive.
         (None, _) => {
-            let failure = make_failure(FailureReason::Cancelled, false);
+            let reason = FailureReason::Cancelled;
+            let failure = make_failure(reason.clone(), false);
+            inner.publish_timing(
+                &matchup.descriptor,
+                ExecutionPhase::TerminalProduced {
+                    outcome: AttemptTerminal::Failed {
+                        durable_record: false,
+                    },
+                },
+            );
+            inner.publish_timing(
+                &matchup.descriptor,
+                ExecutionPhase::TerminalDetail {
+                    detail: AttemptDetail::from_failure(&reason),
+                },
+            );
             // Best-effort sink terminal. Required errors here demote to
             // SinkFlushError (durable_record was already false).
             if let Err(e) = inner.sink.on_match_failed(&failure).await {
+                inner.publish_timing(
+                    &matchup.descriptor,
+                    ExecutionPhase::TerminalPersistenceFailed,
+                );
                 return demote_to_sink_flush(e);
             }
             OrchestratorEvent::MatchFailed { failure }
@@ -337,10 +429,45 @@ async fn build_terminal<D: Descriptor>(
 
         // Sink errored mid-event. Don't talk to the sink again (it's the
         // broken one). Just publish.
-        (Some(_), Some(sink_err)) => demote_to_sink_flush(sink_err),
+        (Some(_), Some(sink_err)) => {
+            let reason = FailureReason::SinkFlushError(format!("{:#}", sink_err.source));
+            inner.publish_timing(
+                &matchup.descriptor,
+                ExecutionPhase::TerminalProduced {
+                    outcome: AttemptTerminal::Failed {
+                        durable_record: false,
+                    },
+                },
+            );
+            inner.publish_timing(
+                &matchup.descriptor,
+                ExecutionPhase::TerminalDetail {
+                    detail: AttemptDetail::from_failure(&reason),
+                },
+            );
+            inner.publish_timing(
+                &matchup.descriptor,
+                ExecutionPhase::TerminalPersistenceFailed,
+            );
+            demote_to_sink_flush(sink_err)
+        },
 
         // Match::run returned a result.
         (Some(Ok(result)), None) => {
+            let timing_outcome = AttemptTerminal::Finished;
+            let timing_detail = AttemptDetail::from_result(&result);
+            inner.publish_timing(
+                &matchup.descriptor,
+                ExecutionPhase::TerminalProduced {
+                    outcome: timing_outcome,
+                },
+            );
+            inner.publish_timing(
+                &matchup.descriptor,
+                ExecutionPhase::TerminalDetail {
+                    detail: timing_detail,
+                },
+            );
             let outcome = MatchOutcome {
                 descriptor: matchup.descriptor.clone(),
                 started_at,
@@ -349,17 +476,61 @@ async fn build_terminal<D: Descriptor>(
                 players: identities.clone(),
             };
             match inner.sink.on_match_finished(&outcome).await {
-                Ok(()) => OrchestratorEvent::MatchFinished { outcome },
-                Err(e) => demote_to_sink_flush(e),
+                Ok(()) => {
+                    inner.publish_timing(
+                        &matchup.descriptor,
+                        ExecutionPhase::TerminalPersisted {
+                            outcome: timing_outcome,
+                        },
+                    );
+                    OrchestratorEvent::MatchFinished { outcome }
+                },
+                Err(e) => {
+                    inner.publish_timing(
+                        &matchup.descriptor,
+                        ExecutionPhase::TerminalPersistenceFailed,
+                    );
+                    demote_to_sink_flush(e)
+                },
             }
         },
 
         // Match::run returned a host-level error.
         (Some(Err(match_err)), None) => {
-            let failure = make_failure(failure_reason_from_match_error(&match_err), true);
+            let timing_outcome = AttemptTerminal::Failed {
+                durable_record: true,
+            };
+            let reason = failure_reason_from_match_error(&match_err);
+            inner.publish_timing(
+                &matchup.descriptor,
+                ExecutionPhase::TerminalProduced {
+                    outcome: timing_outcome,
+                },
+            );
+            inner.publish_timing(
+                &matchup.descriptor,
+                ExecutionPhase::TerminalDetail {
+                    detail: AttemptDetail::from_failure(&reason),
+                },
+            );
+            let failure = make_failure(reason, true);
             match inner.sink.on_match_failed(&failure).await {
-                Ok(()) => OrchestratorEvent::MatchFailed { failure },
-                Err(e) => demote_to_sink_flush(e),
+                Ok(()) => {
+                    inner.publish_timing(
+                        &matchup.descriptor,
+                        ExecutionPhase::TerminalPersisted {
+                            outcome: timing_outcome,
+                        },
+                    );
+                    OrchestratorEvent::MatchFailed { failure }
+                },
+                Err(e) => {
+                    inner.publish_timing(
+                        &matchup.descriptor,
+                        ExecutionPhase::TerminalPersistenceFailed,
+                    );
+                    demote_to_sink_flush(e)
+                },
             }
         },
     }
@@ -381,6 +552,7 @@ async fn record_pre_started_failure<D: Descriptor>(
     players: Option<[PlayerIdentity; 2]>,
 ) {
     let durable = !matches!(reason, FailureReason::Cancelled);
+    let timing_detail = AttemptDetail::from_failure(&reason);
     let failure = MatchFailure {
         descriptor: matchup.descriptor.clone(),
         started_at: None,
@@ -389,6 +561,21 @@ async fn record_pre_started_failure<D: Descriptor>(
         players,
         durable_record: durable,
     };
+    let timing_outcome = AttemptTerminal::Failed {
+        durable_record: durable,
+    };
+    inner.publish_timing(
+        &matchup.descriptor,
+        ExecutionPhase::TerminalProduced {
+            outcome: timing_outcome,
+        },
+    );
+    inner.publish_timing(
+        &matchup.descriptor,
+        ExecutionPhase::TerminalDetail {
+            detail: timing_detail,
+        },
+    );
     if !durable {
         let _ = inner
             .publish_lifecycle(OrchestratorEvent::MatchFailed { failure })
@@ -396,11 +583,25 @@ async fn record_pre_started_failure<D: Descriptor>(
         return;
     }
     let final_failure = match inner.sink.on_match_failed(&failure).await {
-        Ok(()) => failure,
-        Err(e) => MatchFailure {
-            reason: FailureReason::SinkFlushError(format!("{:#}", e.source)),
-            durable_record: false,
-            ..failure
+        Ok(()) => {
+            inner.publish_timing(
+                &matchup.descriptor,
+                ExecutionPhase::TerminalPersisted {
+                    outcome: timing_outcome,
+                },
+            );
+            failure
+        },
+        Err(e) => {
+            inner.publish_timing(
+                &matchup.descriptor,
+                ExecutionPhase::TerminalPersistenceFailed,
+            );
+            MatchFailure {
+                reason: FailureReason::SinkFlushError(format!("{:#}", e.source)),
+                durable_record: false,
+                ..failure
+            }
         },
     };
     let _ = inner
@@ -422,6 +623,7 @@ async fn publish_failure<D: Descriptor>(
     players: Option<[PlayerIdentity; 2]>,
     durable_record: bool,
 ) {
+    let timing_detail = AttemptDetail::from_failure(&reason);
     let failure = MatchFailure {
         descriptor: matchup.descriptor.clone(),
         started_at,
@@ -430,6 +632,18 @@ async fn publish_failure<D: Descriptor>(
         players,
         durable_record,
     };
+    inner.publish_timing(
+        &matchup.descriptor,
+        ExecutionPhase::TerminalProduced {
+            outcome: AttemptTerminal::Failed { durable_record },
+        },
+    );
+    inner.publish_timing(
+        &matchup.descriptor,
+        ExecutionPhase::TerminalDetail {
+            detail: timing_detail,
+        },
+    );
     let _ = inner
         .publish_lifecycle(OrchestratorEvent::MatchFailed { failure })
         .await;

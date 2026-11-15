@@ -1,0 +1,46 @@
+{
+  "tournament_id": 1,
+  "status": "finished",
+  "attempts": {
+    "success": 480,
+    "failure": 0
+  },
+  "standings": [
+    {
+      "player_id": "pyrat/greedy-py",
+      "elo": 1010.5524237843218,
+      "elo_stderr": 49.709457304823154,
+      "games": 160
+    },
+    {
+      "player_id": "pyrat/greedy",
+      "elo": 1000.0,
+      "elo_stderr": 0.0,
+      "games": 160
+    },
+    {
+      "player_id": "pyrat/search",
+      "elo": 710.1968767496826,
+      "elo_stderr": 54.542364355893454,
+      "games": 160
+    },
+    {
+      "player_id": "pyrat/search-py",
+      "elo": 593.3060913032593,
+      "elo_stderr": 59.21610501028612,
+      "games": 160
+    },
+    {
+      "player_id": "pyrat/smart-random-py",
+      "elo": 206.9374611938481,
+      "elo_stderr": 78.62155423564467,
+      "games": 160
+    },
+    {
+      "player_id": "pyrat/smart-random",
+      "elo": 151.25886752678696,
+      "elo_stderr": 81.28689829178263,
+      "games": 160
+    }
+  ]
+}

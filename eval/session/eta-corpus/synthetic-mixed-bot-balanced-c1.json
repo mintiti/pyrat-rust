@@ -1,0 +1,2662 @@
+{
+  "schema_version": 2,
+  "dispatch_policy": "bot_balanced_circle_v1",
+  "max_parallel": 1,
+  "max_failures_per_slot": 2,
+  "slots": [
+    {
+      "player1_id": "alpha",
+      "player2_id": "beta",
+      "game_config_id": "synthetic-mixed",
+      "repetition_index": 0,
+      "orientation": "Canonical"
+    },
+    {
+      "player1_id": "alpha",
+      "player2_id": "beta",
+      "game_config_id": "synthetic-mixed",
+      "repetition_index": 1,
+      "orientation": "Flipped"
+    },
+    {
+      "player1_id": "alpha",
+      "player2_id": "gamma",
+      "game_config_id": "synthetic-mixed",
+      "repetition_index": 0,
+      "orientation": "Canonical"
+    },
+    {
+      "player1_id": "alpha",
+      "player2_id": "gamma",
+      "game_config_id": "synthetic-mixed",
+      "repetition_index": 1,
+      "orientation": "Flipped"
+    },
+    {
+      "player1_id": "alpha",
+      "player2_id": "delta",
+      "game_config_id": "synthetic-mixed",
+      "repetition_index": 0,
+      "orientation": "Canonical"
+    },
+    {
+      "player1_id": "alpha",
+      "player2_id": "delta",
+      "game_config_id": "synthetic-mixed",
+      "repetition_index": 1,
+      "orientation": "Flipped"
+    },
+    {
+      "player1_id": "beta",
+      "player2_id": "gamma",
+      "game_config_id": "synthetic-mixed",
+      "repetition_index": 0,
+      "orientation": "Canonical"
+    },
+    {
+      "player1_id": "beta",
+      "player2_id": "gamma",
+      "game_config_id": "synthetic-mixed",
+      "repetition_index": 1,
+      "orientation": "Flipped"
+    },
+    {
+      "player1_id": "beta",
+      "player2_id": "delta",
+      "game_config_id": "synthetic-mixed",
+      "repetition_index": 0,
+      "orientation": "Canonical"
+    },
+    {
+      "player1_id": "beta",
+      "player2_id": "delta",
+      "game_config_id": "synthetic-mixed",
+      "repetition_index": 1,
+      "orientation": "Flipped"
+    },
+    {
+      "player1_id": "delta",
+      "player2_id": "gamma",
+      "game_config_id": "synthetic-mixed",
+      "repetition_index": 0,
+      "orientation": "Canonical"
+    },
+    {
+      "player1_id": "delta",
+      "player2_id": "gamma",
+      "game_config_id": "synthetic-mixed",
+      "repetition_index": 1,
+      "orientation": "Flipped"
+    }
+  ],
+  "events": [
+    {
+      "sequence": 0,
+      "observed_at": {
+        "micros": 0
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 10000,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "delta",
+        "seed": 12996542665979492,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "queued",
+        "players": [
+          "alpha",
+          "delta"
+        ]
+      }
+    },
+    {
+      "sequence": 1,
+      "observed_at": {
+        "micros": 0
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10000,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "delta",
+        "seed": 12996542665979492,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_acquired"
+      }
+    },
+    {
+      "sequence": 2,
+      "observed_at": {
+        "micros": 1600000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10000,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "delta",
+        "seed": 12996542665979492,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "playing_started"
+      }
+    },
+    {
+      "sequence": 3,
+      "observed_at": {
+        "micros": 4000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10000,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "delta",
+        "seed": 12996542665979492,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "turn_completed",
+        "turn": 4
+      }
+    },
+    {
+      "sequence": 4,
+      "observed_at": {
+        "micros": 8000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10000,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "delta",
+        "seed": 12996542665979492,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_produced",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 5,
+      "observed_at": {
+        "micros": 8000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10000,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "delta",
+        "seed": 12996542665979492,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_detail",
+        "detail": {
+          "kind": "finished",
+          "result": "player1",
+          "player1_half_points": 8,
+          "player2_half_points": 4,
+          "turns_played": 20
+        }
+      }
+    },
+    {
+      "sequence": 6,
+      "observed_at": {
+        "micros": 8000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10000,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "delta",
+        "seed": 12996542665979492,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_persisted",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 7,
+      "observed_at": {
+        "micros": 8000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 10000,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "delta",
+        "seed": 12996542665979492,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_released"
+      }
+    },
+    {
+      "sequence": 8,
+      "observed_at": {
+        "micros": 8000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 10001,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "gamma",
+        "seed": 354115654807239,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "queued",
+        "players": [
+          "beta",
+          "gamma"
+        ]
+      }
+    },
+    {
+      "sequence": 9,
+      "observed_at": {
+        "micros": 8000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10001,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "gamma",
+        "seed": 354115654807239,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_acquired"
+      }
+    },
+    {
+      "sequence": 10,
+      "observed_at": {
+        "micros": 9000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10001,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "gamma",
+        "seed": 354115654807239,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "playing_started"
+      }
+    },
+    {
+      "sequence": 11,
+      "observed_at": {
+        "micros": 10500000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10001,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "gamma",
+        "seed": 354115654807239,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "turn_completed",
+        "turn": 4
+      }
+    },
+    {
+      "sequence": 12,
+      "observed_at": {
+        "micros": 13000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10001,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "gamma",
+        "seed": 354115654807239,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_produced",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 13,
+      "observed_at": {
+        "micros": 13000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10001,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "gamma",
+        "seed": 354115654807239,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_detail",
+        "detail": {
+          "kind": "finished",
+          "result": "player2",
+          "player1_half_points": 4,
+          "player2_half_points": 8,
+          "turns_played": 20
+        }
+      }
+    },
+    {
+      "sequence": 14,
+      "observed_at": {
+        "micros": 13000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10001,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "gamma",
+        "seed": 354115654807239,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_persisted",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 15,
+      "observed_at": {
+        "micros": 13000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 10001,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "gamma",
+        "seed": 354115654807239,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_released"
+      }
+    },
+    {
+      "sequence": 16,
+      "observed_at": {
+        "micros": 13000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 10002,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "gamma",
+        "seed": 12996542671400473,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "queued",
+        "players": [
+          "alpha",
+          "gamma"
+        ]
+      }
+    },
+    {
+      "sequence": 17,
+      "observed_at": {
+        "micros": 13000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10002,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "gamma",
+        "seed": 12996542671400473,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_acquired"
+      }
+    },
+    {
+      "sequence": 18,
+      "observed_at": {
+        "micros": 13800000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10002,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "gamma",
+        "seed": 12996542671400473,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "playing_started"
+      }
+    },
+    {
+      "sequence": 19,
+      "observed_at": {
+        "micros": 15000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10002,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "gamma",
+        "seed": 12996542671400473,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "turn_completed",
+        "turn": 4
+      }
+    },
+    {
+      "sequence": 20,
+      "observed_at": {
+        "micros": 17000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10002,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "gamma",
+        "seed": 12996542671400473,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_produced",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 21,
+      "observed_at": {
+        "micros": 17000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10002,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "gamma",
+        "seed": 12996542671400473,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_detail",
+        "detail": {
+          "kind": "finished",
+          "result": "player2",
+          "player1_half_points": 4,
+          "player2_half_points": 8,
+          "turns_played": 20
+        }
+      }
+    },
+    {
+      "sequence": 22,
+      "observed_at": {
+        "micros": 17000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10002,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "gamma",
+        "seed": 12996542671400473,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_persisted",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 23,
+      "observed_at": {
+        "micros": 17000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 10002,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "gamma",
+        "seed": 12996542671400473,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_released"
+      }
+    },
+    {
+      "sequence": 24,
+      "observed_at": {
+        "micros": 17000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 10003,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "delta",
+        "seed": 354115649386258,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "queued",
+        "players": [
+          "beta",
+          "delta"
+        ]
+      }
+    },
+    {
+      "sequence": 25,
+      "observed_at": {
+        "micros": 17000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10003,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "delta",
+        "seed": 354115649386258,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_acquired"
+      }
+    },
+    {
+      "sequence": 26,
+      "observed_at": {
+        "micros": 19000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10003,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "delta",
+        "seed": 354115649386258,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "playing_started"
+      }
+    },
+    {
+      "sequence": 27,
+      "observed_at": {
+        "micros": 22000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10003,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "delta",
+        "seed": 354115649386258,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "turn_completed",
+        "turn": 4
+      }
+    },
+    {
+      "sequence": 28,
+      "observed_at": {
+        "micros": 27000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10003,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "delta",
+        "seed": 354115649386258,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_produced",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 29,
+      "observed_at": {
+        "micros": 27000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10003,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "delta",
+        "seed": 354115649386258,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_detail",
+        "detail": {
+          "kind": "finished",
+          "result": "player1",
+          "player1_half_points": 8,
+          "player2_half_points": 4,
+          "turns_played": 20
+        }
+      }
+    },
+    {
+      "sequence": 30,
+      "observed_at": {
+        "micros": 27000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10003,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "delta",
+        "seed": 354115649386258,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_persisted",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 31,
+      "observed_at": {
+        "micros": 27000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 10003,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "delta",
+        "seed": 354115649386258,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_released"
+      }
+    },
+    {
+      "sequence": 32,
+      "observed_at": {
+        "micros": 27000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 10004,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "beta",
+        "seed": 351257909790306,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "queued",
+        "players": [
+          "alpha",
+          "beta"
+        ]
+      }
+    },
+    {
+      "sequence": 33,
+      "observed_at": {
+        "micros": 27000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10004,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "beta",
+        "seed": 351257909790306,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_acquired"
+      }
+    },
+    {
+      "sequence": 34,
+      "observed_at": {
+        "micros": 29400000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10004,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "beta",
+        "seed": 351257909790306,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "playing_started"
+      }
+    },
+    {
+      "sequence": 35,
+      "observed_at": {
+        "micros": 33000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10004,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "beta",
+        "seed": 351257909790306,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "turn_completed",
+        "turn": 4
+      }
+    },
+    {
+      "sequence": 36,
+      "observed_at": {
+        "micros": 39000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10004,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "beta",
+        "seed": 351257909790306,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_produced",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 37,
+      "observed_at": {
+        "micros": 39000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10004,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "beta",
+        "seed": 351257909790306,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_detail",
+        "detail": {
+          "kind": "finished",
+          "result": "player1",
+          "player1_half_points": 8,
+          "player2_half_points": 4,
+          "turns_played": 20
+        }
+      }
+    },
+    {
+      "sequence": 38,
+      "observed_at": {
+        "micros": 39000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10004,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "beta",
+        "seed": 351257909790306,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_persisted",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 39,
+      "observed_at": {
+        "micros": 39000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 10004,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "beta",
+        "seed": 351257909790306,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_released"
+      }
+    },
+    {
+      "sequence": 40,
+      "observed_at": {
+        "micros": 39000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 10005,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "delta",
+        "player2_id": "gamma",
+        "seed": 13361491595816633,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "queued",
+        "players": [
+          "delta",
+          "gamma"
+        ]
+      }
+    },
+    {
+      "sequence": 41,
+      "observed_at": {
+        "micros": 39000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10005,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "delta",
+        "player2_id": "gamma",
+        "seed": 13361491595816633,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_acquired"
+      }
+    },
+    {
+      "sequence": 42,
+      "observed_at": {
+        "micros": 39600000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10005,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "delta",
+        "player2_id": "gamma",
+        "seed": 13361491595816633,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "playing_started"
+      }
+    },
+    {
+      "sequence": 43,
+      "observed_at": {
+        "micros": 40500000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10005,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "delta",
+        "player2_id": "gamma",
+        "seed": 13361491595816633,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "turn_completed",
+        "turn": 4
+      }
+    },
+    {
+      "sequence": 44,
+      "observed_at": {
+        "micros": 42000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10005,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "delta",
+        "player2_id": "gamma",
+        "seed": 13361491595816633,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_produced",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 45,
+      "observed_at": {
+        "micros": 42000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10005,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "delta",
+        "player2_id": "gamma",
+        "seed": 13361491595816633,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_detail",
+        "detail": {
+          "kind": "finished",
+          "result": "player2",
+          "player1_half_points": 4,
+          "player2_half_points": 8,
+          "turns_played": 20
+        }
+      }
+    },
+    {
+      "sequence": 46,
+      "observed_at": {
+        "micros": 42000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10005,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "delta",
+        "player2_id": "gamma",
+        "seed": 13361491595816633,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_persisted",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 47,
+      "observed_at": {
+        "micros": 42000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 10005,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "delta",
+        "player2_id": "gamma",
+        "seed": 13361491595816633,
+        "repetition_index": 0,
+        "attempt_index": 0,
+        "orientation": "Canonical",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_released"
+      }
+    },
+    {
+      "sequence": 48,
+      "observed_at": {
+        "micros": 42000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 10006,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "delta",
+        "seed": 17805127038397341,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "queued",
+        "players": [
+          "delta",
+          "alpha"
+        ]
+      }
+    },
+    {
+      "sequence": 49,
+      "observed_at": {
+        "micros": 42000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10006,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "delta",
+        "seed": 17805127038397341,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_acquired"
+      }
+    },
+    {
+      "sequence": 50,
+      "observed_at": {
+        "micros": 43800000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10006,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "delta",
+        "seed": 17805127038397341,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "playing_started"
+      }
+    },
+    {
+      "sequence": 51,
+      "observed_at": {
+        "micros": 46500000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10006,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "delta",
+        "seed": 17805127038397341,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "turn_completed",
+        "turn": 4
+      }
+    },
+    {
+      "sequence": 52,
+      "observed_at": {
+        "micros": 51000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10006,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "delta",
+        "seed": 17805127038397341,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_produced",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 53,
+      "observed_at": {
+        "micros": 51000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10006,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "delta",
+        "seed": 17805127038397341,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_detail",
+        "detail": {
+          "kind": "finished",
+          "result": "player1",
+          "player1_half_points": 8,
+          "player2_half_points": 4,
+          "turns_played": 21
+        }
+      }
+    },
+    {
+      "sequence": 54,
+      "observed_at": {
+        "micros": 51000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10006,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "delta",
+        "seed": 17805127038397341,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_persisted",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 55,
+      "observed_at": {
+        "micros": 51000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 10006,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "delta",
+        "seed": 17805127038397341,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_released"
+      }
+    },
+    {
+      "sequence": 56,
+      "observed_at": {
+        "micros": 51000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 10007,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "gamma",
+        "seed": 484077394602316,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "queued",
+        "players": [
+          "gamma",
+          "beta"
+        ]
+      }
+    },
+    {
+      "sequence": 57,
+      "observed_at": {
+        "micros": 51000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10007,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "gamma",
+        "seed": 484077394602316,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_acquired"
+      }
+    },
+    {
+      "sequence": 58,
+      "observed_at": {
+        "micros": 52200000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10007,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "gamma",
+        "seed": 484077394602316,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "playing_started"
+      }
+    },
+    {
+      "sequence": 59,
+      "observed_at": {
+        "micros": 54000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10007,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "gamma",
+        "seed": 484077394602316,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "turn_completed",
+        "turn": 4
+      }
+    },
+    {
+      "sequence": 60,
+      "observed_at": {
+        "micros": 57000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10007,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "gamma",
+        "seed": 484077394602316,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_produced",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 61,
+      "observed_at": {
+        "micros": 57000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10007,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "gamma",
+        "seed": 484077394602316,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_detail",
+        "detail": {
+          "kind": "finished",
+          "result": "player2",
+          "player1_half_points": 4,
+          "player2_half_points": 8,
+          "turns_played": 21
+        }
+      }
+    },
+    {
+      "sequence": 62,
+      "observed_at": {
+        "micros": 57000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10007,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "gamma",
+        "seed": 484077394602316,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_persisted",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 63,
+      "observed_at": {
+        "micros": 57000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 10007,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "gamma",
+        "seed": 484077394602316,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_released"
+      }
+    },
+    {
+      "sequence": 64,
+      "observed_at": {
+        "micros": 57000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 10008,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "gamma",
+        "seed": 17805127043818322,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "queued",
+        "players": [
+          "gamma",
+          "alpha"
+        ]
+      }
+    },
+    {
+      "sequence": 65,
+      "observed_at": {
+        "micros": 57000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10008,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "gamma",
+        "seed": 17805127043818322,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_acquired"
+      }
+    },
+    {
+      "sequence": 66,
+      "observed_at": {
+        "micros": 58000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10008,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "gamma",
+        "seed": 17805127043818322,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "playing_started"
+      }
+    },
+    {
+      "sequence": 67,
+      "observed_at": {
+        "micros": 59500000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10008,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "gamma",
+        "seed": 17805127043818322,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "turn_completed",
+        "turn": 4
+      }
+    },
+    {
+      "sequence": 68,
+      "observed_at": {
+        "micros": 62000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10008,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "gamma",
+        "seed": 17805127043818322,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_produced",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 69,
+      "observed_at": {
+        "micros": 62000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10008,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "gamma",
+        "seed": 17805127043818322,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_detail",
+        "detail": {
+          "kind": "finished",
+          "result": "player2",
+          "player1_half_points": 4,
+          "player2_half_points": 8,
+          "turns_played": 21
+        }
+      }
+    },
+    {
+      "sequence": 70,
+      "observed_at": {
+        "micros": 62000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10008,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "gamma",
+        "seed": 17805127043818322,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_persisted",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 71,
+      "observed_at": {
+        "micros": 62000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 10008,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "gamma",
+        "seed": 17805127043818322,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_released"
+      }
+    },
+    {
+      "sequence": 72,
+      "observed_at": {
+        "micros": 62000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 10009,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "delta",
+        "seed": 484077389181335,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "queued",
+        "players": [
+          "delta",
+          "beta"
+        ]
+      }
+    },
+    {
+      "sequence": 73,
+      "observed_at": {
+        "micros": 62000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10009,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "delta",
+        "seed": 484077389181335,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_acquired"
+      }
+    },
+    {
+      "sequence": 74,
+      "observed_at": {
+        "micros": 64200000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10009,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "delta",
+        "seed": 484077389181335,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "playing_started"
+      }
+    },
+    {
+      "sequence": 75,
+      "observed_at": {
+        "micros": 67500000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10009,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "delta",
+        "seed": 484077389181335,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "turn_completed",
+        "turn": 4
+      }
+    },
+    {
+      "sequence": 76,
+      "observed_at": {
+        "micros": 73000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10009,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "delta",
+        "seed": 484077389181335,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_produced",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 77,
+      "observed_at": {
+        "micros": 73000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10009,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "delta",
+        "seed": 484077389181335,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_detail",
+        "detail": {
+          "kind": "finished",
+          "result": "player1",
+          "player1_half_points": 8,
+          "player2_half_points": 4,
+          "turns_played": 21
+        }
+      }
+    },
+    {
+      "sequence": 78,
+      "observed_at": {
+        "micros": 73000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10009,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "delta",
+        "seed": 484077389181335,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_persisted",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 79,
+      "observed_at": {
+        "micros": 73000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 10009,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "beta",
+        "player2_id": "delta",
+        "seed": 484077389181335,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_released"
+      }
+    },
+    {
+      "sequence": 80,
+      "observed_at": {
+        "micros": 73000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 10010,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "beta",
+        "seed": 481219649585383,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "queued",
+        "players": [
+          "beta",
+          "alpha"
+        ]
+      }
+    },
+    {
+      "sequence": 81,
+      "observed_at": {
+        "micros": 73000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10010,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "beta",
+        "seed": 481219649585383,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_acquired"
+      }
+    },
+    {
+      "sequence": 82,
+      "observed_at": {
+        "micros": 75600000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10010,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "beta",
+        "seed": 481219649585383,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "playing_started"
+      }
+    },
+    {
+      "sequence": 83,
+      "observed_at": {
+        "micros": 79500000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10010,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "beta",
+        "seed": 481219649585383,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "turn_completed",
+        "turn": 4
+      }
+    },
+    {
+      "sequence": 84,
+      "observed_at": {
+        "micros": 86000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10010,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "beta",
+        "seed": 481219649585383,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_produced",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 85,
+      "observed_at": {
+        "micros": 86000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10010,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "beta",
+        "seed": 481219649585383,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_detail",
+        "detail": {
+          "kind": "finished",
+          "result": "player1",
+          "player1_half_points": 8,
+          "player2_half_points": 4,
+          "turns_played": 21
+        }
+      }
+    },
+    {
+      "sequence": 86,
+      "observed_at": {
+        "micros": 86000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10010,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "beta",
+        "seed": 481219649585383,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_persisted",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 87,
+      "observed_at": {
+        "micros": 86000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 10010,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "alpha",
+        "player2_id": "beta",
+        "seed": 481219649585383,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_released"
+      }
+    },
+    {
+      "sequence": 88,
+      "observed_at": {
+        "micros": 86000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 10011,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "delta",
+        "player2_id": "gamma",
+        "seed": 18170075968234482,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "queued",
+        "players": [
+          "gamma",
+          "delta"
+        ]
+      }
+    },
+    {
+      "sequence": 89,
+      "observed_at": {
+        "micros": 86000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10011,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "delta",
+        "player2_id": "gamma",
+        "seed": 18170075968234482,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_acquired"
+      }
+    },
+    {
+      "sequence": 90,
+      "observed_at": {
+        "micros": 86800000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10011,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "delta",
+        "player2_id": "gamma",
+        "seed": 18170075968234482,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "playing_started"
+      }
+    },
+    {
+      "sequence": 91,
+      "observed_at": {
+        "micros": 88000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10011,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "delta",
+        "player2_id": "gamma",
+        "seed": 18170075968234482,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "turn_completed",
+        "turn": 4
+      }
+    },
+    {
+      "sequence": 92,
+      "observed_at": {
+        "micros": 90000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10011,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "delta",
+        "player2_id": "gamma",
+        "seed": 18170075968234482,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_produced",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 93,
+      "observed_at": {
+        "micros": 90000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10011,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "delta",
+        "player2_id": "gamma",
+        "seed": 18170075968234482,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_detail",
+        "detail": {
+          "kind": "finished",
+          "result": "player2",
+          "player1_half_points": 4,
+          "player2_half_points": 8,
+          "turns_played": 21
+        }
+      }
+    },
+    {
+      "sequence": 94,
+      "observed_at": {
+        "micros": 90000000
+      },
+      "active_concurrency": 1,
+      "descriptor": {
+        "match_id": 10011,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "delta",
+        "player2_id": "gamma",
+        "seed": 18170075968234482,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "terminal_persisted",
+        "outcome": "finished"
+      }
+    },
+    {
+      "sequence": 95,
+      "observed_at": {
+        "micros": 90000000
+      },
+      "active_concurrency": 0,
+      "descriptor": {
+        "match_id": 10011,
+        "tournament_id": 2,
+        "game_config_id": "synthetic-mixed",
+        "player1_id": "delta",
+        "player2_id": "gamma",
+        "seed": 18170075968234482,
+        "repetition_index": 1,
+        "attempt_index": 0,
+        "orientation": "Flipped",
+        "planned_at": {
+          "secs_since_epoch": 0,
+          "nanos_since_epoch": 0
+        }
+      },
+      "phase": {
+        "phase": "permit_released"
+      }
+    }
+  ]
+}

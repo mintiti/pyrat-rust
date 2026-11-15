@@ -40,6 +40,7 @@ async fn shutdown_returns_promptly_with_pending_matchups() {
         params_json: TournamentParams {
             max_failures_per_pair: 3,
             seat_policy: pyrat_eval::SeatPolicy::Legacy,
+            dispatch_policy: pyrat_eval::DispatchPolicy::PairMajorV1,
         }
         .to_json(),
         methodology: None,

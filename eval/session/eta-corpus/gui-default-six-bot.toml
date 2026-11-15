@@ -1,0 +1,54 @@
+# Production-shaped ETA × dispatch evidence fixture.
+#
+# This mirrors the GUI defaults rather than the deliberately tiny mechanism
+# probe in mixed-botpack.toml. Capture seeds are supplied explicitly on the
+# command line so each matched policy block has a visible identity.
+
+format = "round_robin"
+mazes_per_matchup = 8
+max_failures_per_pair = 1
+max_parallel = 4
+
+[game]
+preset = "tiny"
+
+[timing]
+move_timeout_ms = 200
+preprocessing_timeout_ms = 2000
+startup_timeout_ms = 120000
+configure_timeout_ms = 5000
+network_grace_ms = 50
+
+[elo]
+anchor = "pyrat/greedy"
+anchor_elo = 1000.0
+
+[[players]]
+id = "pyrat/greedy"
+command = "cargo run --release"
+working_dir = "../../../botpack/greedy"
+
+[[players]]
+id = "pyrat/smart-random"
+command = "cargo run --release"
+working_dir = "../../../botpack/smart-random"
+
+[[players]]
+id = "pyrat/search"
+command = "cargo run --release"
+working_dir = "../../../botpack/search"
+
+[[players]]
+id = "pyrat/greedy-py"
+command = "uv run python bot.py"
+working_dir = "../../../botpack/greedy-py"
+
+[[players]]
+id = "pyrat/smart-random-py"
+command = "uv run python bot.py"
+working_dir = "../../../botpack/smart-random-py"
+
+[[players]]
+id = "pyrat/search-py"
+command = "uv run python bot.py"
+working_dir = "../../../botpack/search-py"

@@ -15,6 +15,7 @@ use super::error::MatchError;
 use super::events::{emit, MatchEvent};
 use super::policy::ActionOutcome;
 use super::result::MatchResult;
+use super::timing::{emit as emit_timing, MatchTimingEvent, MatchTimingPhase};
 
 // ── Phase markers ─────────────────────────────────────
 
@@ -117,6 +118,9 @@ pub(super) struct MatchCtx {
     /// `emit(Option<&Sender>, …)` helper directly without going through
     /// the public `EventSink::emit` (which exposes only the sink shape).
     event_tx: Option<tokio::sync::mpsc::UnboundedSender<MatchEvent>>,
+    /// Optional measurement-only stream.  Kept separate from `event_tx` so
+    /// replay/product consumers do not acquire instrumentation events.
+    timing_tx: Option<tokio::sync::mpsc::UnboundedSender<MatchTimingEvent>>,
 }
 
 /// Outcome of `Match<Playing>::step`.
@@ -157,6 +161,7 @@ impl Match<Created> {
                 playing_config,
                 event_sink,
                 event_tx,
+                timing_tx: None,
             },
             state: Created,
         }
@@ -167,6 +172,19 @@ impl Match<Created> {
     /// messages reach the same channel as the events Match emits internally.
     pub fn event_sink(&self) -> &EventSink {
         &self.ctx.event_sink
+    }
+
+    /// Attach a host-monotonic timing stream before the match starts.
+    ///
+    /// The ordinary [`Match::new`] path remains allocation-free for callers
+    /// that do not need measurement data.  Timing delivery is best-effort and
+    /// never changes match behavior.
+    pub fn with_timing_events(
+        mut self,
+        timing_tx: tokio::sync::mpsc::UnboundedSender<MatchTimingEvent>,
+    ) -> Self {
+        self.ctx.timing_tx = Some(timing_tx);
+        self
     }
 }
 
@@ -205,6 +223,10 @@ impl Match<Created> {
     /// hash verification), GoPreprocess, and PreprocessingDone. Returns
     /// `Match<Ready>` carrying the engine hash both bots agreed to.
     pub async fn setup(mut self) -> Result<Match<Ready>, MatchError> {
+        emit_timing(
+            self.ctx.timing_tx.as_ref(),
+            MatchTimingPhase::ConfigureStarted,
+        );
         let expected_hash = self.ctx.game.state_hash();
         let configure_timeout = self.ctx.setup_timing.configure_timeout;
         // Bots measure the preprocessing budget from when THEY receive
@@ -281,6 +303,10 @@ impl Match<Created> {
 
         // Send GoPreprocess to both, recv PreprocessingDone.
         tracing::info!("match: preprocessing started");
+        emit_timing(
+            self.ctx.timing_tx.as_ref(),
+            MatchTimingPhase::PreprocessingStarted,
+        );
         emit(self.ctx.event_tx.as_ref(), MatchEvent::PreprocessingStarted);
         for slot_idx in 0..2 {
             let slot = slot_for(slot_idx);
@@ -313,6 +339,10 @@ impl Match<Created> {
         }
 
         tracing::info!("match: setup complete");
+        emit_timing(
+            self.ctx.timing_tx.as_ref(),
+            MatchTimingPhase::SetupCompleted,
+        );
         emit(self.ctx.event_tx.as_ref(), MatchEvent::SetupComplete);
 
         Ok(Match {
@@ -345,6 +375,10 @@ impl Match<Ready> {
     /// Transition into the playing phase. No IO — just rewires the typestate.
     pub fn start(self) -> Match<Playing> {
         let bot_synced_hash = self.state.bot_synced_hash;
+        emit_timing(
+            self.ctx.timing_tx.as_ref(),
+            MatchTimingPhase::PlayingStarted,
+        );
         emit(
             self.ctx.event_tx.as_ref(),
             MatchEvent::MatchStarted {
@@ -432,6 +466,10 @@ impl Match<Playing> {
                 .await
                 .map_err(|e| MatchError::from_player(slot, e))?;
         }
+        emit_timing(
+            self.ctx.timing_tx.as_ref(),
+            MatchTimingPhase::ActionCollectionStarted { turn: new_turn },
+        );
 
         Ok(Match {
             ctx: self.ctx,
@@ -465,6 +503,12 @@ impl Match<Playing> {
                 .await
                 .map_err(|e| MatchError::from_player(slot, e))?;
         }
+        emit_timing(
+            self.ctx.timing_tx.as_ref(),
+            MatchTimingPhase::ActionCollectionStarted {
+                turn: self.state.turn,
+            },
+        );
         Ok(go_hash)
     }
 
@@ -631,6 +675,10 @@ impl<S> Match<S> {
             }
         }
 
+        emit_timing(
+            self.ctx.timing_tx.as_ref(),
+            MatchTimingPhase::ActionsCollected { turn },
+        );
         Ok(self.finalize_outcomes(outcomes, turn))
     }
 
@@ -674,6 +722,10 @@ impl<S> Match<S> {
             }
         }
 
+        emit_timing(
+            self.ctx.timing_tx.as_ref(),
+            MatchTimingPhase::ActionsCollected { turn },
+        );
         Ok(self.finalize_outcomes(outcomes, turn))
     }
 
@@ -788,6 +840,12 @@ impl<S> Match<S> {
                 p2_action: resolved.p2_action,
                 p1_think_ms: resolved.p1_think_ms,
                 p2_think_ms: resolved.p2_think_ms,
+            },
+        );
+        emit_timing(
+            self.ctx.timing_tx.as_ref(),
+            MatchTimingPhase::TurnCompleted {
+                turn: turn_just_played,
             },
         );
 
